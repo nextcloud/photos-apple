@@ -266,7 +266,7 @@ struct AppLockGate<Content: View>: View {
                 ZStack {
                     Rectangle().fill(.regularMaterial).ignoresSafeArea()
                     VStack(spacing: 16) {
-                        PhotosAppIcon().frame(width: 88, height: 88)
+                        NextcloudLogo().frame(width: 120, height: 60)
                         if locked {
                             Button(String(localized: "Unlock Nextcloud Photos", bundle: .module)) { Task { await unlock() } }
                                 .buttonStyle(.borderedProminent)

@@ -110,8 +110,8 @@ public struct LoginView: View {
 
     var header: some View {
         VStack(spacing: 12) {
-            PhotosAppIcon()
-                .frame(width: 96, height: 96)
+            NextcloudLogo()
+                .frame(width: 120, height: 60)
                 .accessibilityHidden(true)
             Text("Nextcloud Photos", bundle: .module)
                 .font(.largeTitle.bold())
