@@ -84,8 +84,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     /// Milestone that delivers the screen (placeholders until then).
     var milestone: String? {
         switch self {
-        case .library, .photos, .videos, .favorites, .settings: nil
-        case .albums, .sharedAlbums: "M2"
+        case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums: nil
         case .backup: "M3"
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: "M4"
         case .recentlyDeleted, .duplicates, .freeSpace: "M5"
@@ -96,7 +95,17 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
 /// Main navigation: tab bar on iPhone, sidebar on iPad, Mac and Vision Pro (`sidebarAdaptable`).
 struct MainView: View {
     @Environment(SessionModel.self) private var session
-    @State private var selection: AppDestination = .library
+    @State private var selection: AppDestination = MainView.initialDestination
+
+    /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
+    static var initialDestination: AppDestination {
+        #if DEBUG
+            if let raw = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_DESTINATION"], let destination = AppDestination(rawValue: raw) {
+                return destination
+            }
+        #endif
+        return .library
+    }
     @SceneStorage("tabCustomization") private var customization: TabViewCustomization
 
     func visible(_ destination: AppDestination) -> Bool {
@@ -188,6 +197,8 @@ struct DestinationView: View {
         case .videos: TimelineScreen(filter: .videos)
         case .favorites: TimelineScreen(filter: .favorites)
         case .settings: SettingsView()
+        case .albums: AlbumsScreen(kind: .own)
+        case .sharedAlbums: AlbumsScreen(kind: .shared)
         default: MilestonePlaceholder(destination: destination)
         }
     }

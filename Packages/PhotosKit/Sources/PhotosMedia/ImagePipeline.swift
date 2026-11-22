@@ -16,6 +16,12 @@ public actor ImagePipeline {
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "images")
     /// Public album token: previews go through `publicPreview`.
     private let publicToken: String?
+    /// Local originals of offline albums, used when the preview can't be loaded.
+    private var localOriginal: (@Sendable (FileID, String) -> URL?)?
+
+    public func setLocalOriginalProvider(_ provider: @escaping @Sendable (FileID, String) -> URL?) {
+        localOriginal = provider
+    }
 
     public init(api: PhotosAPI, cache: PreviewCache, originals: OriginalStore, publicToken: String? = nil) {
         self.api = api
@@ -50,9 +56,15 @@ public actor ImagePipeline {
         if let image = cache.memoryImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { return image }
         let key = PreviewCache.key(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
         if let task = inflight[key] { return await task.value }
-        let task = Task<CGImage?, Never> { [api, cache, originals, publicToken, logger] in
+        let task = Task<CGImage?, Never> { [api, cache, originals, publicToken, logger, localOriginal] in
             if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { return image }
             if Task.isCancelled { return nil }
+            // Offline albums: thumbnail the downloaded original instead of hitting the network.
+            if let file = localOriginal?(request.fileId, request.etag),
+                let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)
+            {
+                return cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket)
+            }
             do {
                 let data: Data
                 if let publicToken {

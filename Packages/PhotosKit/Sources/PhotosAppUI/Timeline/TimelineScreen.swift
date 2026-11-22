@@ -71,6 +71,8 @@ struct TimelineScreen: View {
             emptyMessage: emptyMessage,
             columns: $columns
         ) {
+            TransfersIndicator()
+            UploadMenu()
             if filter == .all {
                 Picker(selection: $mediaKind) {
                     Text("All", bundle: .module).tag(MediaFilter.all)
@@ -84,6 +86,10 @@ struct TimelineScreen: View {
             }
         }
         .task(id: mediaKind) { observe() }
+        .dropDestination(for: URL.self) { urls, _ in
+            session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
+            return !urls.isEmpty
+        }
         .refreshable { await session.syncNow() }
     }
 

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import PhotosAppUI
 import PhotosCore
-import PhotosUI
 import SwiftUI
 
 @main

@@ -29,9 +29,11 @@ targets:
       - path: App/Resources
     dependencies:
       - package: PhotosKit
-        product: PhotosUI
+        product: PhotosAppUI
       - package: PhotosKit
         product: PhotosCore
+      - target: ShareExtension
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos
@@ -73,6 +75,41 @@ targets:
           - CFBundleURLName: com.nextcloud.photos
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
+  ShareExtension:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Extensions/ShareExtension
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosAppUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.share
+        PRODUCT_NAME: ShareExtension
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Extensions/ShareExtension/ShareExtension-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Extensions/ShareExtension/ShareExtension.entitlements
+    info:
+      path: Extensions/ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsImageWithMaxCount: 100
+              NSExtensionActivationSupportsMovieWithMaxCount: 100
+              NSExtensionActivationSupportsFileWithMaxCount: 100
 schemes:
   NextcloudPhotos:
     build:
