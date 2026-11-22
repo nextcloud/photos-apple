@@ -84,17 +84,7 @@ struct UploadMenu: View {
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
-            var sources: [UploadSource] = []
-            for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                let copy = FileManager.default.temporaryDirectory.appending(path: "Uploads/\(UUID().uuidString)/\(url.lastPathComponent)")
-                try? FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if (try? FileManager.default.copyItem(at: url, to: copy)) != nil {
-                    sources.append(UploadSource(file: copy, capturedAt: CaptureDate.read(copy)))
-                }
-            }
-            session.transfers.upload(sources, album: album)
+            session.transfers.upload(UploadSources.copies(of: urls), album: album)
         }
     }
 }
@@ -152,5 +142,22 @@ struct TransfersList: View {
                 Button(String(localized: "Clear", bundle: .module)) { session.transfers.clearFinished() }
             }
         }
+    }
+}
+
+enum UploadSources {
+    /// Copies security-scoped files (file importer, Finder) to temporary files for upload.
+    static func copies(of urls: [URL]) -> [UploadSource] {
+        var sources: [UploadSource] = []
+        for url in urls {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            let copy = FileManager.default.temporaryDirectory.appending(path: "Uploads/\(UUID().uuidString)/\(url.lastPathComponent)")
+            try? FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? FileManager.default.copyItem(at: url, to: copy)) != nil {
+                sources.append(UploadSource(file: copy, capturedAt: CaptureDate.read(copy)))
+            }
+        }
+        return sources
     }
 }

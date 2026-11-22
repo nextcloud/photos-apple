@@ -12,7 +12,7 @@ struct MediaViewer: View {
     let ids: [FileID]
     @State private var current: FileID?
     @State private var chromeHidden = false
-    @State private var infoItem: MediaItem?
+    @State private var showingInfo = false
     @State private var confirmDelete = false
     @State private var editing: MediaItem?
     @State private var editingMetadata: MediaItem?
@@ -65,10 +65,13 @@ struct MediaViewer: View {
             dismiss()
             return .handled
         }
-        .sheet(item: $infoItem) { item in
-            NavigationStack { InfoPanel(item: item) }
-                .presentationDetents([.medium, .large])
+        .inspector(isPresented: $showingInfo) {
+            Group {
+                if let item = currentItem { InfoPanel(item: item, inInspector: true) }
+            }
+            .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
         }
+        .focusedSceneValue(\.gridActions, viewerActions)
         .sheet(item: $editing) { item in EditorView(item: item) }
         .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
         .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
@@ -82,6 +85,21 @@ struct MediaViewer: View {
                 }
             }
         }
+    }
+
+    /// Menu bar actions for the photo shown.
+    var viewerActions: GridActions {
+        let item = currentItem
+        return GridActions(
+            selectionCount: item == nil ? 0 : 1,
+            allFavorite: item?.isFavorite ?? false,
+            toggleFavorite: { if let item { Task { await session.setFavorite([item], !item.isFavorite) } } },
+            delete: { confirmDelete = true },
+            toggleInfo: { showingInfo.toggle() },
+            addToAlbum: {},
+            zoomIn: nil,
+            zoomOut: nil
+        )
     }
 
     func step(_ delta: Int) {
@@ -114,7 +132,7 @@ struct MediaViewer: View {
                     Label(String(localized: "Favorite", bundle: .module), systemImage: item.isFavorite ? "heart.fill" : "heart")
                 }
                 Button {
-                    infoItem = item
+                    showingInfo.toggle()
                 } label: {
                     Label(String(localized: "Info", bundle: .module), systemImage: "info.circle")
                 }

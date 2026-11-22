@@ -63,7 +63,7 @@ struct GridCallbacks {
 enum GridColumns {
     #if os(macOS)
         static let options = [3, 4, 5, 6, 8, 10, 12, 16]
-        static let `default` = 6
+        static let `default` = 8
     #elseif os(visionOS)
         static let options = [3, 4, 5, 6, 8, 10]
         static let `default` = 5

@@ -73,6 +73,23 @@ struct TimelineScreen: View {
         ) {
             TransfersIndicator()
             UploadMenu()
+            #if os(macOS)
+                // Mac: zoom slider and a segmented control, like Apple Photos.
+                Slider(
+                    value: Binding(
+                        get: { Double(GridColumns.options.count - 1 - (GridColumns.options.firstIndex(of: columns) ?? 0)) },
+                        set: { columns = GridColumns.options[GridColumns.options.count - 1 - Int($0.rounded())] }),
+                    in: 0...Double(GridColumns.options.count - 1)
+                ) {
+                    Text("Zoom", bundle: .module)
+                } minimumValueLabel: {
+                    Image(systemName: "square.grid.4x3.fill").imageScale(.small)
+                } maximumValueLabel: {
+                    Image(systemName: "square.grid.2x2.fill").imageScale(.small)
+                }
+                .frame(width: 140)
+                .help(String(localized: "Zoom", bundle: .module))
+            #endif
             if filter == .all {
                 Picker(selection: $mediaKind) {
                     Text("All", bundle: .module).tag(MediaFilter.all)
@@ -82,7 +99,12 @@ struct TimelineScreen: View {
                 } label: {
                     Label(String(localized: "Show", bundle: .module), systemImage: "line.3.horizontal.decrease.circle")
                 }
-                .pickerStyle(.menu)
+                #if os(macOS)
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                #else
+                    .pickerStyle(.menu)
+                #endif
             }
         }
         .task(id: mediaKind) { observe() }

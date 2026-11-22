@@ -24,6 +24,7 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var viewerStart: ViewerStart?
     @State private var confirmDelete: [MediaItem]?
     @State private var infoItem: MediaItem?
+    @State private var showingInfo = false
     @State private var actionError: String?
     @State private var albumPicker: PickedItems?
     @State private var sharedLink: SharedLink?
@@ -64,10 +65,20 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
-            .sheet(item: $infoItem) { item in
-                NavigationStack { InfoPanel(item: item) }
-                    .presentationDetents([.medium, .large])
+            .inspector(isPresented: $showingInfo) {
+                Group {
+                    if let item = infoItem ?? selectedItems.first {
+                        InfoPanel(item: item, inInspector: true)
+                    } else {
+                        ContentUnavailableView(String(localized: "No selection", bundle: .module), systemImage: "info.circle")
+                    }
+                }
+                .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
             }
+            .onChange(of: selection) { _, ids in
+                if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
+            }
+            .focusedSceneValue(\.gridActions, gridActions)
             #if os(iOS)
                 .fullScreenCover(item: $viewerStart) { start in
                     MediaViewer(ids: start.ids, startId: start.startId).environment(session)
@@ -191,6 +202,24 @@ struct MediaGridScreen<Accessory: View>: View {
         return selection.compactMap { map[$0] }
     }
 
+    /// Menu bar actions for this grid (SPEC §6.2, macOS menus).
+    var gridActions: GridActions {
+        let items = selectedItems
+        return GridActions(
+            selectionCount: items.count,
+            allFavorite: !items.isEmpty && items.allSatisfy(\.isFavorite),
+            toggleFavorite: { Task { await session.setFavorite(items, !items.allSatisfy(\.isFavorite)) } },
+            delete: { confirmDelete = items.filter(\.permissions.canDelete) },
+            toggleInfo: {
+                infoItem = items.first
+                showingInfo.toggle()
+            },
+            addToAlbum: { albumPicker = PickedItems(items: items) },
+            zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
+            zoomOut: { columns = GridColumns.step(columns, zoomIn: false) }
+        )
+    }
+
     func endSelection() {
         isSelecting = false
         selection = []
@@ -213,6 +242,7 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "info", title: String(localized: "Info", bundle: .module), systemImage: "info.circle") { _ in
                     infoItem = items.first
+                    showingInfo = true
                 })
         }
         actions.append(
