@@ -63,9 +63,34 @@ public struct NextcloudLogo: View {
     }
 
     public var body: some View {
-        NextcloudLogoShape()
+        SVGShape.nextcloudLogo
             .fill(color, style: FillStyle(eoFill: true))
             .aspectRatio(2, contentMode: .fit)
             .accessibilityLabel(Text(verbatim: "Nextcloud"))
+    }
+}
+
+/// The Nextcloud Photos app icon (the Photos server app's icon, white on Nextcloud blue).
+public struct PhotosAppIcon: View {
+    public init() {}
+
+    public var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.225, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Design.accent, Color(red: 28 / 255, green: 175 / 255, blue: 1)], startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                SVGShape.photosIcon
+                    .fill(.white)
+                    .padding(side * 0.12)
+            }
+            .frame(width: side, height: side)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityLabel(Text(verbatim: "Nextcloud Photos"))
     }
 }

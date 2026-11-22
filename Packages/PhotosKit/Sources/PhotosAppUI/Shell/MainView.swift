@@ -262,7 +262,7 @@ struct AccountHeader: View {
             Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
         } label: {
             HStack(spacing: 10) {
-                NextcloudLogo().frame(width: 36, height: 18)
+                PhotosAppIcon().frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(session.account.displayName).font(.headline)
                     Text(session.account.hostDisplayName).font(.caption).foregroundStyle(.secondary)
