@@ -129,3 +129,19 @@ struct IntegrationWriteTests {
         #expect(try await api.listAlbums(.own, extended: false).contains { $0.name == name } == false)
     }
 }
+
+/// Read-only checks of M4/M5 endpoints.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+struct IntegrationReadTests {
+    let base = IntegrationTests()
+
+    @Test func trashTagsAndFolders() async throws {
+        let api = base.api
+        _ = try await api.trash(mimeTypes: MimeTypes.defaultImages + MimeTypes.defaultVideos)
+        let tags = try await api.tagsInUse()
+        if let tag = tags.first { _ = try await api.tagContent(tag.id) }
+        let root = try await api.folder("/", mimeTypes: MimeTypes.defaultImages, nomedia: [])
+        #expect(root.folders.contains { $0.name == "Photos" })
+        _ = try await api.sharedWithYou()
+    }
+}

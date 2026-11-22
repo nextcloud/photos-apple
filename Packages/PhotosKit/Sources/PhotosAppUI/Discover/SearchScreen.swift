@@ -83,6 +83,8 @@ struct SearchScreen: View {
     @State private var saving = false
     @State private var smartName = ""
     @AppStorage("gridColumns") private var columns = GridColumns.default
+    @State private var asking = false
+    @State private var askError: String?
 
     var suggestions: [SearchFilter] {
         SearchSuggestions.suggestions(for: query, vocabulary: vocabulary).filter { !filters.contains($0) }
@@ -108,6 +110,19 @@ struct SearchScreen: View {
                 }
             }
             if !query.isEmpty {
+                if query.split(separator: " ").count >= 3 {
+                    Button {
+                        ask()
+                    } label: {
+                        Label(
+                            asking
+                                ? String(localized: "Thinking…", bundle: .module) : String(localized: "Ask: “\(query)”", bundle: .module),
+                            systemImage: "sparkles")
+                    }
+                    .disabled(asking)
+                    .padding(.top, 8)
+                }
+                if let askError { Text(askError).font(.footnote).foregroundStyle(.red) }
                 List(suggestions) { suggestion in
                     Button {
                         filters.append(suggestion)
@@ -155,6 +170,27 @@ struct SearchScreen: View {
                 Task { await session.saveSmartAlbum(SmartAlbum(name: smartName, filters: SearchEvaluator.albumFilters(filters))) }
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        }
+    }
+
+    /// Natural-language search (SPEC SR-4).
+    func ask() {
+        asking = true
+        askError = nil
+        let question = query
+        Task {
+            defer { asking = false }
+            do {
+                let result = try await AskPhotos.filters(for: question, session: session, places: vocabulary.places, tags: vocabulary.tags)
+                if result.isEmpty {
+                    askError = String(localized: "I couldn't turn that into a search.", bundle: .module)
+                } else {
+                    filters = result
+                    query = ""
+                }
+            } catch {
+                askError = error.localizedDescription
+            }
         }
     }
 

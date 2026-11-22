@@ -29,6 +29,7 @@ struct NextcloudPhotosApp: App {
                         NotificationRouter.shared.app = app
                     }
                 #endif
+                .onAppear { AppIntentRouter.app = app }
                 .onOpenURL { url in
                     // nextcloudphotos://<destination> from widgets and notifications.
                     if url.scheme == "nextcloudphotos", let host = url.host() { app.requestedDestination = host }

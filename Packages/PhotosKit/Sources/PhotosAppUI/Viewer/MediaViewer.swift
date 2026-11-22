@@ -14,6 +14,9 @@ struct MediaViewer: View {
     @State private var chromeHidden = false
     @State private var infoItem: MediaItem?
     @State private var confirmDelete = false
+    @State private var editing: MediaItem?
+    @State private var editingMetadata: MediaItem?
+    @State private var extractingText: MediaItem?
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
 
@@ -66,6 +69,9 @@ struct MediaViewer: View {
             NavigationStack { InfoPanel(item: item) }
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $editing) { item in EditorView(item: item) }
+        .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
+        .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
         .confirmationDialog(String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible)
         {
             Button(String(localized: "Delete", bundle: .module), role: .destructive) {
@@ -113,7 +119,28 @@ struct MediaViewer: View {
                     Label(String(localized: "Info", bundle: .module), systemImage: "info.circle")
                 }
                 .keyboardShortcut("i", modifiers: .command)
+                if item.kind == .image {
+                    Button {
+                        editing = item
+                    } label: {
+                        Label(String(localized: "Edit", bundle: .module), systemImage: "slider.horizontal.3")
+                    }
+                }
                 Menu {
+                    if item.kind == .image {
+                        Button {
+                            extractingText = item
+                        } label: {
+                            Label(String(localized: "Extract text", bundle: .module), systemImage: "text.viewfinder")
+                        }
+                    }
+                    if session.features.has(.metadataEdit) && item.permissions.canWrite {
+                        Button {
+                            editingMetadata = item
+                        } label: {
+                            Label(String(localized: "Edit date and location", bundle: .module), systemImage: "calendar.badge.clock")
+                        }
+                    }
                     Button {
                         Task { try? await MediaExport.saveToPhotoLibrary([item], services: session.services!) }
                     } label: {
@@ -302,8 +329,23 @@ struct VideoPage: View {
                 return
             }
             guard player == nil, let services = session.services else { return }
-            if MimeTypes.unplayableVideos.contains(item.mimeType) && !session.features.has(.videoRenditions) {
-                error = String(localized: "This video format can't be played on this device.", bundle: .module)
+            if MimeTypes.unplayableVideos.contains(item.mimeType) {
+                guard session.features.has(.videoRenditions) else {
+                    error = String(localized: "This video format can't be played on this device.", bundle: .module)
+                    return
+                }
+                // The server converts on first request (404 while converting); retry for up to 2 minutes.
+                for attempt in 0..<12 {
+                    if let file = try? await services.api.videoRendition(fileId: item.fileId, etag: item.etag) {
+                        player = AVPlayer(url: file)
+                        player?.play()
+                        return
+                    }
+                    error = attempt == 0 ? String(localized: "Preparing video…", bundle: .module) : error
+                    try? await Task.sleep(for: .seconds(10))
+                    if Task.isCancelled { return }
+                }
+                error = String(localized: "The server could not convert this video.", bundle: .module)
                 return
             }
             do {
