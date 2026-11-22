@@ -1,0 +1,114 @@
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: MIT
+
+import MapKit
+import PhotosCore
+import PhotosDomain
+import PhotosModel
+import SwiftUI
+
+/// Photo details (SPEC §7.4), laid out as an aligned two-column list.
+struct InfoPanel: View {
+    let item: MediaItem
+    @Environment(SessionModel.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    @State private var exif: [String: String] = [:]
+
+    var body: some View {
+        Form {
+            Section {
+                PreviewImage(item: item, bucket: 256)
+                    .frame(height: 160)
+                    .clipShape(.rect(cornerRadius: 8))
+                    .listRowInsets(EdgeInsets())
+                row(String(localized: "Name", bundle: .module), item.name)
+                row(String(localized: "Taken", bundle: .module), CaptureTime.format(item.timestamp, offset: captureOffset))
+                if let caption = item.caption { row(String(localized: "Description", bundle: .module), caption) }
+            }
+            if !camera.isEmpty {
+                Section(String(localized: "Camera", bundle: .module)) {
+                    ForEach(camera, id: \.0) { row($0.0, $0.1) }
+                }
+            }
+            Section(String(localized: "File", bundle: .module)) {
+                if let width = item.width, let height = item.height {
+                    row(
+                        String(localized: "Dimensions", bundle: .module),
+                        "\(width) × \(height) (\(String(format: "%.1f", Double(width * height) / 1_000_000)) MP)")
+                }
+                row(String(localized: "Size", bundle: .module), Formatters.bytes(item.size))
+                row(String(localized: "Type", bundle: .module), item.mimeType)
+                row(String(localized: "Folder", bundle: .module), item.directory)
+                if let owner = item.ownerDisplayName ?? item.ownerId, !item.isOwnStorage {
+                    row(String(localized: "Owner", bundle: .module), owner)
+                }
+                if let duration = item.duration { row(String(localized: "Duration", bundle: .module), Formatters.duration(duration)) }
+            }
+            if item.hasLocation, let latitude = item.latitude, let longitude = item.longitude {
+                Section(String(localized: "Location", bundle: .module)) {
+                    if let place = item.place {
+                        row(
+                            String(localized: "Place", bundle: .module),
+                            [place, item.placeCountry.flatMap { Locale.current.localizedString(forRegionCode: $0) }].compactMap { $0 }
+                                .joined(separator: ", "))
+                    }
+                    Map(
+                        initialPosition: .region(
+                            MKCoordinateRegion(
+                                center: .init(latitude: latitude, longitude: longitude), latitudinalMeters: 3000, longitudinalMeters: 3000))
+                    ) {
+                        Marker(item.place ?? "", coordinate: .init(latitude: latitude, longitude: longitude))
+                    }
+                    .frame(height: 180)
+                    .clipShape(.rect(cornerRadius: 8))
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(String(localized: "Info", bundle: .module))
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(String(localized: "Done", bundle: .module)) { dismiss() }
+            }
+        }
+        .task {
+            guard item.kind == .image, let services = session.services else { return }
+            exif = (try? await services.api.exif(userPath: item.path)) ?? [:]
+        }
+    }
+
+    var captureOffset: Int? {
+        item.captureOffset ?? exif["OffsetTimeOriginal"].flatMap(CaptureTime.parseOffset)
+    }
+
+    var camera: [(String, String)] {
+        var rows: [(String, String)] = []
+        let model = [exif["Make"], exif["Model"]].compactMap { $0 }.joined(separator: " ")
+        if !model.isEmpty { rows.append((String(localized: "Camera", bundle: .module), model)) }
+        if let lens = exif["LensModel"] { rows.append((String(localized: "Lens", bundle: .module), lens)) }
+        var exposure: [String] = []
+        if let focal = exif["FocalLength"].flatMap(Self.rational) { exposure.append("\(Int(focal.rounded())) mm") }
+        if let aperture = exif["FNumber"].flatMap(Self.rational) { exposure.append(String(format: "ƒ/%.1f", aperture)) }
+        if let time = exif["ExposureTime"].flatMap(Self.rational) {
+            exposure.append(time >= 1 ? String(format: "%.1f s", time) : "1/\(Int((1 / time).rounded())) s")
+        }
+        if let iso = exif["ISOSpeedRatings"] ?? exif["PhotographicSensitivity"] { exposure.append("ISO \(iso)") }
+        if !exposure.isEmpty { rows.append((String(localized: "Exposure", bundle: .module), exposure.joined(separator: " · "))) }
+        return rows
+    }
+
+    /// EXIF values come as `"28/10"` or plain numbers.
+    static func rational(_ value: String) -> Double? {
+        let parts = value.split(separator: "/")
+        if parts.count == 2, let numerator = Double(parts[0]), let denominator = Double(parts[1]), denominator != 0 {
+            return numerator / denominator
+        }
+        return Double(value)
+    }
+
+    func row(_ label: String, _ value: String) -> some View {
+        LabeledContent(label) {
+            Text(value).textSelection(.enabled).multilineTextAlignment(.trailing)
+        }
+    }
+}
