@@ -4,7 +4,7 @@ SPDX-PackageSupplier = "Nextcloud <info@nextcloud.com>"
 SPDX-PackageDownloadLocation = "https://github.com/nextcloud/photos-ios"
 
 [[annotations]]
-path = ["docs/**", "README.md", "project.yml", ".swift-format", "**/*.json", "**/*.plist", "**/*.xcstrings", "**/*.entitlements", "Packages/PhotosKit/Tests/**/Fixtures/**"]
+path = ["docs/**", "README.md", "project.yml", ".swift-format", "**/*.json", "**/*.plist", "**/*.xcstrings", "**/*.entitlements", "**/Package.resolved", "Packages/PhotosKit/Tests/**/Fixtures/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nextcloud GmbH and Nextcloud contributors"
 SPDX-License-Identifier = "MIT"
