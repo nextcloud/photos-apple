@@ -86,7 +86,7 @@ public struct OCSClient: Sendable {
         return response
     }
 
-    static func formEncode(_ form: [String: String]) -> String {
+    public static func formEncode(_ form: [String: String]) -> String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         return form.sorted { $0.key < $1.key }

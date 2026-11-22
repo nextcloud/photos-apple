@@ -34,6 +34,10 @@ targets:
         product: PhotosCore
       - target: ShareExtension
         embed: true
+      - target: NotificationService
+        embed: true
+      - target: Widgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos
@@ -112,6 +116,63 @@ targets:
               NSExtensionActivationSupportsImageWithMaxCount: 100
               NSExtensionActivationSupportsMovieWithMaxCount: 100
               NSExtensionActivationSupportsFileWithMaxCount: 100
+  NotificationService:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Extensions/NotificationService
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.notification-service
+        PRODUCT_NAME: NotificationService
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Extensions/NotificationService/NotificationService-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Extensions/NotificationService/NotificationService.entitlements
+    info:
+      path: Extensions/NotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+  Widgets:
+    type: app-extension
+    supportedDestinations: [iOS, macOS, visionOS]
+    sources:
+      - path: Extensions/Widgets
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.widgets
+        PRODUCT_NAME: Widgets
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Extensions/Widgets/Widgets-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Extensions/Widgets/Widgets.entitlements
+    info:
+      path: Extensions/Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 schemes:
   NextcloudPhotos:
     build:

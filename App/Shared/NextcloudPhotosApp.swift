@@ -10,6 +10,8 @@ struct NextcloudPhotosApp: App {
     @State private var app = AppModel()
     #if os(iOS)
         @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #elseif os(macOS)
+        @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     #endif
 
     var body: some Scene {
@@ -17,8 +19,20 @@ struct NextcloudPhotosApp: App {
             RootView()
                 .environment(app)
                 #if os(iOS)
-                    .onAppear { AppDelegate.app = app }
+                    .onAppear {
+                        AppDelegate.app = app
+                        NotificationRouter.shared.app = app
+                    }
+                #elseif os(macOS)
+                    .onAppear {
+                        MacAppDelegate.app = app
+                        NotificationRouter.shared.app = app
+                    }
                 #endif
+                .onOpenURL { url in
+                    // nextcloudphotos://<destination> from widgets and notifications.
+                    if url.scheme == "nextcloudphotos", let host = url.host() { app.requestedDestination = host }
+                }
         }
         #if os(iOS)
             // Short refresh window: sync and a bit of backup (SPEC §7.18.6).

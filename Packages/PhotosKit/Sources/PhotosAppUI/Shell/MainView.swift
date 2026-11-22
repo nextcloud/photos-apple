@@ -94,6 +94,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
 /// Main navigation: tab bar on iPhone, sidebar on iPad, Mac and Vision Pro (`sidebarAdaptable`).
 struct MainView: View {
     @Environment(SessionModel.self) private var session
+    @Environment(AppModel.self) private var app
     @State private var selection: AppDestination = MainView.initialDestination
 
     /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
@@ -169,6 +170,12 @@ struct MainView: View {
                     Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
                 }
             #endif
+        }
+        .onChange(of: app.requestedDestination, initial: true) { _, raw in
+            if let raw, let destination = AppDestination(rawValue: raw) {
+                selection = destination
+                app.requestedDestination = nil
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabViewCustomization($customization)

@@ -14,6 +14,9 @@ import Security
 public final class AppModel {
     public private(set) var registry: AccountRegistry
     public private(set) var session: SessionModel?
+    /// A destination requested from outside (notification tap, widget, deep link), consumed by the main view.
+    public var requestedDestination: String?
+    @ObservationIgnored private var deviceToken: Data?
     public let http: HTTPClient
     public let keychain: Keychain
     public let userAgent: String
@@ -83,6 +86,10 @@ public final class AppModel {
                 userAgent: userAgent)
             try? await AccountAPI(ocs: OCSClient(http: http, connection: connection)).revokeAppPassword()
         }
+        if let password = keychain.string(for: Keychain.passwordKey(id.rawValue)) {
+            await PushNotifications.unregister(
+                account: account, appPassword: password, http: http, userAgent: userAgent, keychain: keychain)
+        }
         if session?.account.id == id {
             session?.stop()
             session = nil
@@ -126,6 +133,29 @@ public final class AppModel {
         }
         session = SessionModel(app: self, account: account, password: password)
         session?.start()
+    }
+
+    /// Registers all accounts for push once APNs delivered a device token (SPEC §7.21).
+    public func didRegisterForPush(deviceToken: Data) {
+        self.deviceToken = deviceToken
+        guard UserDefaults.standard.object(forKey: "pushEnabled") as? Bool ?? true else { return }
+        for account in registry.accounts where !account.isSignedOut {
+            guard let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { continue }
+            Task {
+                do {
+                    try await PushNotifications.register(
+                        deviceToken: deviceToken, account: account, appPassword: password, http: http, userAgent: userAgent,
+                        keychain: keychain)
+                } catch {
+                    logger.error("push registration failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    /// Maps a delivered notification to a destination (On this day for the Photos "onthisday" notification).
+    public func handleNotification(userInfo: [AnyHashable: Any]) {
+        if let destination = userInfo["photosDestination"] as? String { requestedDestination = destination }
     }
 
     nonisolated static func clientCredential(host: String, keychain: Keychain) -> URLCredential? {
