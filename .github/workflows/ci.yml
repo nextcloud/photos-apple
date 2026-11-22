@@ -35,7 +35,20 @@ jobs:
       - name: Unit tests
         working-directory: Packages/PhotosKit
         # xcodebuild (not `swift test`) builds the resource bundles of dependencies such as NextcloudKit.
-        run: xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation
+        # The app targets OS 27; hosted runners run macOS 26, so tests run on an iOS 27 simulator when one exists.
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          ids = [d["udid"] for runtime, devices in data.items() if "iOS-27" in runtime for d in devices if d["name"].startswith("iPhone")]
+          print(ids[0] if ids else "")')
+          if [ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 ]; then
+            xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation
+          elif [ -n "$DEVICE" ]; then
+            xcodebuild test -scheme PhotosKit-Package -destination "id=$DEVICE" -skipPackagePluginValidation
+          else
+            echo "::warning::No macOS 27 runner or iOS 27 simulator available; unit tests skipped."
+          fi
 
   build:
     runs-on: macos-26
