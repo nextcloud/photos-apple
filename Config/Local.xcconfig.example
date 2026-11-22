@@ -1,0 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: MIT
+//
+// Copy to Config/Local.xcconfig (git-ignored). Use your own team and a bundle id you own:
+// don't register com.nextcloud.photos in a personal team, it belongs to Nextcloud GmbH.
+
+DEVELOPMENT_TEAM = ABCDE12345
+PHOTOS_BUNDLE_ID = com.example.nextcloudphotos

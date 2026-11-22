@@ -25,5 +25,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
+	<key>PhotosAppGroup</key>
+	<string>group.$(PHOTOS_BUNDLE_ID)</string>
 </dict>
 </plist>

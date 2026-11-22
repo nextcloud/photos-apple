@@ -22,8 +22,20 @@ xcodebuild -scheme NextcloudPhotos -destination 'generic/platform=iOS Simulator'
 xcodebuild -scheme NextcloudPhotos -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
 ```
 
-Debug builds use `App/NextcloudPhotos-Debug.entitlements` (no App Groups or keychain group, so they run without Nextcloud's provisioning
-profile). Release builds use `App/NextcloudPhotos.entitlements`.
+### Signing with your own Apple ID
+
+The project defaults to Nextcloud's team. To run on your Mac or devices, create `Config/Local.xcconfig` (git-ignored) from
+`Config/Local.xcconfig.example` with your team id and a bundle id you own (not `com.nextcloud.photos`):
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+PHOTOS_BUNDLE_ID = com.example.nextcloudphotos
+```
+
+Add your Apple ID in Xcode › Settings › Accounts, run `xcodegen generate`, and press Run. Debug builds have no App Group or keychain
+group entitlements, so any team can sign them (widgets and extensions then can't see the app's accounts). Release builds use
+`group.$(PHOTOS_BUNDLE_ID)` and the matching keychain group, which the signing team must have registered. The macOS App Sandbox
+comes from build settings (`ENABLE_APP_SANDBOX`), so the same entitlement files work for iOS.
 
 ## Code layout
 

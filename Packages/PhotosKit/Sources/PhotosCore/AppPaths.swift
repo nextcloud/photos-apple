@@ -6,7 +6,8 @@ import PhotosModel
 
 /// File locations. Uses the App Group container when available (shared with extensions), else Application Support.
 public enum AppPaths {
-    public static let appGroup = "group.com.nextcloud.photos"
+    /// From Info.plist (`group.$(PHOTOS_BUNDLE_ID)`), so local builds with their own bundle id use their own group.
+    public static let appGroup = Bundle.main.object(forInfoDictionaryKey: "PhotosAppGroup") as? String ?? "group.com.nextcloud.photos"
 
     public static let container: URL = {
         // macOS returns a group path even without the entitlement (unsigned development builds); only use it when writable.

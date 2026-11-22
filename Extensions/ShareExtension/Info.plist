@@ -39,5 +39,7 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 	</dict>
+	<key>PhotosAppGroup</key>
+	<string>group.$(PHOTOS_BUNDLE_ID)</string>
 </dict>
 </plist>

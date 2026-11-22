@@ -1,0 +1,10 @@
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: MIT
+//
+// Signing defaults of the official app. To build and run with your own Apple ID, copy
+// Config/Local.xcconfig.example to Config/Local.xcconfig (git-ignored) and set your team and a bundle id of your own there.
+
+DEVELOPMENT_TEAM = NKUJUXUJ3B
+PHOTOS_BUNDLE_ID = com.nextcloud.photos
+
+#include? "Local.xcconfig"
