@@ -283,20 +283,7 @@ struct MetadataEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "Save", bundle: .module)) {
-                        let shift = TimeInterval(shiftDays * 86_400 + shiftHours * 3600 + shiftMinutes * 60)
-                        let mode = self.mode
-                        let date = self.date
-                        Task {
-                            await session.setMetadata(
-                                items,
-                                capturedAt: { item in mode == 1 ? item.timestamp.addingTimeInterval(shift) : mode == 2 ? date : nil },
-                                latitude: changeLocation && !removeLocation ? coordinate?.latitude : nil,
-                                longitude: changeLocation && !removeLocation ? coordinate?.longitude : nil,
-                                removeLocation: changeLocation && removeLocation)
-                            dismiss()
-                        }
-                    }
+                    Button(String(localized: "Save", bundle: .module)) { save() }
                 }
             }
             .onAppear {
@@ -308,5 +295,30 @@ struct MetadataEditor: View {
             }
         }
         .frame(minWidth: 420, minHeight: 560)
+    }
+
+    /// Split out (with explicit types) so the compiler type-checks it quickly on every platform.
+    func save() {
+        let days: Int = shiftDays * 86_400
+        let hours: Int = shiftHours * 3600
+        let minutes: Int = shiftMinutes * 60
+        let shift = TimeInterval(days + hours + minutes)
+        let mode: Int = self.mode
+        let date: Date = self.date
+        let setsLocation: Bool = changeLocation && !removeLocation
+        let latitude: Double? = setsLocation ? coordinate?.latitude : nil
+        let longitude: Double? = setsLocation ? coordinate?.longitude : nil
+        let clearsLocation: Bool = changeLocation && removeLocation
+        let capturedAt: (MediaItem) -> Date? = { item in
+            switch mode {
+            case 1: return item.timestamp.addingTimeInterval(shift)
+            case 2: return date
+            default: return nil
+            }
+        }
+        Task {
+            await session.setMetadata(items, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: clearsLocation)
+            dismiss()
+        }
     }
 }
