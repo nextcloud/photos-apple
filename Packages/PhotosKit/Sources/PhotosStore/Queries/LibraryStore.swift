@@ -205,6 +205,15 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// Keeps items that are not in the timeline index (shared albums, other folders, people…) so viewers can show them.
+    public func storeCollectionMedia(_ items: [MediaItem]) throws {
+        try database.writer.write { db in
+            for item in items where try !MediaItem.exists(db, key: item.fileId) {
+                try CollectionMediaRecord(fileId: item.fileId, item: item).upsert(db)
+            }
+        }
+    }
+
     public func deleteAll() throws {
         try database.writer.write { db in
             try db.execute(

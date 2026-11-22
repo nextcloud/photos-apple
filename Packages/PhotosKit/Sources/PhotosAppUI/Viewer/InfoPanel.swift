@@ -13,6 +13,8 @@ struct InfoPanel: View {
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var exif: [String: String] = [:]
+    @State private var faces: [FaceDetection] = []
+    @State private var tags: [SystemTag] = []
 
     var body: some View {
         Form {
@@ -24,6 +26,25 @@ struct InfoPanel: View {
                 row(String(localized: "Name", bundle: .module), item.name)
                 row(String(localized: "Taken", bundle: .module), CaptureTime.format(item.timestamp, offset: captureOffset))
                 if let caption = item.caption { row(String(localized: "Description", bundle: .module), caption) }
+            }
+            if !faces.isEmpty {
+                Section(String(localized: "People", bundle: .module)) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(faces) { face in
+                                VStack {
+                                    FaceCroppedPreview(fileId: item.fileId, box: face.box).frame(width: 56, height: 56).clipShape(Circle())
+                                    Text(face.title ?? "").font(.caption).lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !tags.isEmpty {
+                Section(String(localized: "Tags", bundle: .module)) {
+                    Text(tags.map(\.name).joined(separator: ", "))
+                }
             }
             if !camera.isEmpty {
                 Section(String(localized: "Camera", bundle: .module)) {
@@ -74,6 +95,8 @@ struct InfoPanel: View {
         .task {
             guard item.kind == .image, let services = session.services else { return }
             exif = (try? await services.api.exif(userPath: item.path)) ?? [:]
+            if session.features.has(.recognize) { faces = (try? await services.api.faceDetections(userPath: item.path)) ?? [] }
+            if session.features.has(.systemtags) { tags = (try? await services.api.tags(of: item.fileId)) ?? [] }
         }
     }
 
