@@ -9,3 +9,4 @@ DerivedData/
 *.xcresult
 /NextcloudPhotos.xcodeproj/
 IntegrationTests.xcconfig
+Config/Local.xcconfig
