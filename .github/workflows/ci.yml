@@ -20,6 +20,11 @@ jobs:
         run: |
           FILES=$(git ls-files '*.swift')
           xcrun swift-format lint --strict --configuration .swift-format $FILES
+
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: REUSE
         uses: fsfe/reuse-action@v5
 
@@ -29,7 +34,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unit tests
         working-directory: Packages/PhotosKit
-        run: swift test
+        # xcodebuild (not `swift test`) builds the resource bundles of dependencies such as NextcloudKit.
+        run: xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation
 
   build:
     runs-on: macos-26
