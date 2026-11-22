@@ -317,7 +317,8 @@ struct MetadataEditor: View {
             }
         }
         Task {
-            await session.setMetadata(items, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: clearsLocation)
+            await session.setMetadata(
+                items, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: clearsLocation)
             dismiss()
         }
     }
