@@ -75,6 +75,8 @@ targets:
           - CFBundleURLName: com.nextcloud.photos
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
+        BGTaskSchedulerPermittedIdentifiers: [com.nextcloud.photos.refresh, com.nextcloud.photos.processing]
+        UIBackgroundModes: [fetch, processing]
   ShareExtension:
     type: app-extension
     supportedDestinations: [iOS, macOS]

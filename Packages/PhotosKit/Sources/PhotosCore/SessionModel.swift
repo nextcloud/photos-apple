@@ -19,6 +19,7 @@ public final class SessionModel {
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
     public let transfers = TransferQueue()
+    public let backup = BackupModel()
     public private(set) var offline: OfflineManager?
     @ObservationIgnored var albumsRefreshedAt: Date?
     @ObservationIgnored weak var app: AppModel?
@@ -41,6 +42,7 @@ public final class SessionModel {
             logger.error("could not open account database: \(error.localizedDescription, privacy: .public)")
         }
         transfers.session = self
+        backup.session = self
         if let services {
             let offline = OfflineManager(services: services)
             self.offline = offline
@@ -64,6 +66,7 @@ public final class SessionModel {
                 await self?.syncNow()
                 await services.outbox.kick()
                 await self?.offline?.syncPins()
+                if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
             })
     }
 
