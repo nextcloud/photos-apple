@@ -1,4 +1,0 @@
-// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-License-Identifier: MIT
-
-import Foundation

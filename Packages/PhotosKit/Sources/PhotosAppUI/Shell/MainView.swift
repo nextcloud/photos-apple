@@ -84,8 +84,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     /// Milestone that delivers the screen (placeholders until then).
     var milestone: String? {
         switch self {
-        case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums: nil
-        case .backup: "M3"
+        case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: "M4"
         case .recentlyDeleted, .duplicates, .freeSpace: "M5"
         }
@@ -157,7 +156,7 @@ struct MainView: View {
             .defaultVisibility(.hidden, for: .tabBar)
 
             Tab(value: AppDestination.backup) {
-                NavigationStack { DestinationView(destination: .backup) }
+                NavigationStack { BackupScreen() }
             } label: {
                 Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
             }
@@ -198,6 +197,7 @@ struct DestinationView: View {
         case .favorites: TimelineScreen(filter: .favorites)
         case .settings: SettingsView()
         case .albums: AlbumsScreen(kind: .own)
+        case .backup: BackupScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
         default: MilestonePlaceholder(destination: destination)
         }

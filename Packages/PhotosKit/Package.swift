@@ -53,7 +53,10 @@ let package = Package(
         // PhotoKit scanning, reconciliation against the server, upload engine.
         .target(
             name: "PhotosBackup",
-            dependencies: ["PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia"],
+            dependencies: [
+                "PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             swiftSettings: swiftSettings
         ),
         // Composition root: accounts, keychain, per-account services, settings.
@@ -82,5 +85,7 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .testTarget(name: "PhotosStoreTests", dependencies: ["PhotosStore"], swiftSettings: swiftSettings),
+        .testTarget(
+            name: "PhotosBackupTests", dependencies: ["PhotosBackup", "PhotosStore", "PhotosNetworking"], swiftSettings: swiftSettings),
     ]
 )
