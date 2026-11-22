@@ -38,7 +38,7 @@ All code lives in the local Swift package `Packages/PhotosKit`; the app target o
 | `PhotosMedia` | Preview cache, image pipeline, originals, BlurHash. |
 | `PhotosBackup` | Camera-roll backup (milestone M3). |
 | `PhotosCore` | Accounts, keychain, per-account services, app and session models. |
-| `PhotosUI` | SwiftUI screens and the photo grid (UIKit/AppKit collection views). |
+| `PhotosAppUI` | SwiftUI screens and the photo grid (UIKit/AppKit collection views). |
 
 ## Tests
 

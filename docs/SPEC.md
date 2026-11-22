@@ -104,12 +104,12 @@ photos-ios/
     PhotosMedia/            # preview cache, image pipeline, video/live-photo loading, editing pipeline
     PhotosBackup/           # PhotoKit scanning, reconciliation, upload engine
     PhotosCore/             # composition root: accounts, keychain, per-account services, app/session models
-    PhotosUI/               # shared SwiftUI components, grid, viewer, design tokens
+    PhotosAppUI/            # shared SwiftUI components (not "PhotosUI": that name is Apple's framework), grid, viewer, design tokens
   Tests/ (per package) + UITests/
   LICENSE (MIT, exists)  LICENSES/  REUSE.toml  .swift-format  .github/workflows/
 ```
 
-In the implementation these are targets of one local package, `Packages/PhotosKit`, and the Xcode project is generated from `project.yml` with XcodeGen. Packages depend downwards only: `PhotosUI → PhotosCore → PhotosBackup/PhotosMedia/PhotosStore → PhotosNetworking → PhotosModel`; `PhotosDomain` depends only on `PhotosModel` and is fully unit-testable on macOS without a server.
+In the implementation these are targets of one local package, `Packages/PhotosKit`, and the Xcode project is generated from `project.yml` with XcodeGen. Packages depend downwards only: `PhotosAppUI → PhotosCore → PhotosBackup/PhotosMedia/PhotosStore → PhotosNetworking → PhotosModel`; `PhotosDomain` depends only on `PhotosModel` and is fully unit-testable on macOS without a server.
 
 ### 4.2 Targets and identifiers
 
@@ -132,7 +132,7 @@ The bundle id is confirmed. The derived group names still need to be provisioned
 1. **Networking** (`PhotosNetworking`)
    - `NextcloudSession` per account wraps a NextcloudKit session (`appendSession`), the user agent, credentials and the trust/client-certificate delegate.
    - `DAVClient` / `PhotosAPI`: typed requests for everything under `/remote.php/dav` (SEARCH bodies, `files/`, `photos/`, `photospublic/`, `recognize/`, `systemtags*`, `comments/photos_album`, `trashbin`, PROPPATCH of metadata, REPORT), parsed with an own `XMLParser`-based multistatus parser that keeps **all** properties (NextcloudKit drops unknown ones). Handle 401 yourself (§5.1.6).
-   - *Implementation decision (M0):* WebDAV, OCS and Login Flow v2 run on the app's own `HTTPClient` (one `URLSession` with the app's certificate trust and client-certificate handling), because NextcloudKit has no generic REPORT/PROPPATCH helpers, drops unknown DAV properties and keeps per-account "unauthorized" state in a shared App Group. NextcloudKit remains a dependency for chunked upload (M2/M3) and push registration (M4).
+   - *Implementation decision (M0):* WebDAV, OCS and Login Flow v2 run on the app's own `HTTPClient` (one `URLSession` with the app's certificate trust and client-certificate handling), because NextcloudKit has no generic REPORT/PROPPATCH helpers, drops unknown DAV properties and keeps per-account "unauthorized" state in a shared App Group. Chunked upload (v2) is also implemented on `HTTPClient` (`Uploader`, M2) so uploads share the same trust handling and can set `OC-Checksum`. NextcloudKit remains a dependency for push registration (M4).
    - `OCSClient`: OCS calls (capabilities, sharees, notifications, push, task processing, Photos OCS routes). Always send `OCS-APIRequest: true` — this is also what makes the classic Photos routes pass the CSRF check (they return 412 without it).
    - XML request bodies are built by small, tested builder functions; every value is XML-escaped (the web app doesn't escape — don't copy that).
 2. **Store** (`PhotosStore`): one SQLite database per account (`<AppGroup>/Accounts/<accountId>/library.sqlite`) plus a small global database for accounts and settings. Schema in §5.4.2. All UI reads come from the store; the network only writes to the store (single source of truth, offline for free).

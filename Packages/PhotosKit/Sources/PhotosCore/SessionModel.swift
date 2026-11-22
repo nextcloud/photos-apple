@@ -18,6 +18,9 @@ public final class SessionModel {
     public private(set) var syncStatus: SyncStatus = .idle(lastSync: nil)
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
+    public let transfers = TransferQueue()
+    public private(set) var offline: OfflineManager?
+    @ObservationIgnored var albumsRefreshedAt: Date?
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var unauthorizedCheckRunning = false
@@ -37,6 +40,12 @@ public final class SessionModel {
         } catch {
             logger.error("could not open account database: \(error.localizedDescription, privacy: .public)")
         }
+        transfers.session = self
+        if let services {
+            let offline = OfflineManager(services: services)
+            self.offline = offline
+            Task { await services.images.setLocalOriginalProvider { fileId, etag in offline.localFile(fileId: fileId, etag: etag) } }
+        }
     }
 
     public var isSignedOut: Bool { account.isSignedOut || services == nil }
@@ -54,6 +63,7 @@ public final class SessionModel {
                 await self?.refreshFeatures()
                 await self?.syncNow()
                 await services.outbox.kick()
+                await self?.offline?.syncPins()
             })
     }
 

@@ -15,6 +15,7 @@ public struct SettingsView: View {
     @State private var newFolder = ""
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
+    @State private var pins: [OfflineManager.Pin] = []
 
     public init() {}
 
@@ -95,6 +96,23 @@ public struct SettingsView: View {
                 }
             }
 
+            Section(String(localized: "Available offline", bundle: .module)) {
+                if pins.isEmpty {
+                    Text("Albums you make available offline appear here.", bundle: .module).foregroundStyle(.secondary)
+                }
+                ForEach(pins) { pin in
+                    LabeledContent(pin.title, value: "\(pin.fileCount) · \(Formatters.bytes(pin.bytes))")
+                }
+                if !pins.isEmpty {
+                    Button(String(localized: "Remove all offline files", bundle: .module), role: .destructive) {
+                        Task {
+                            try? await session.offline?.removeAll()
+                            pins = []
+                        }
+                    }
+                }
+            }
+
             Section(String(localized: "Server", bundle: .module)) {
                 LabeledContent(String(localized: "Nextcloud", bundle: .module), value: session.features.serverVersion.string)
                 if let photos = session.features.photosAppVersion {
@@ -121,7 +139,10 @@ public struct SettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(String(localized: "Settings", bundle: .module))
-        .task { cacheSize = session.services?.images.cache.totalSize() ?? 0 }
+        .task {
+            cacheSize = session.services?.images.cache.totalSize() ?? 0
+            pins = (try? await session.offline?.pins()) ?? []
+        }
         .sheet(isPresented: $addingAccount) {
             NavigationStack { LoginView(isAddingAccount: true) }
                 .frame(minWidth: 420, minHeight: 560)

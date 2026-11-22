@@ -25,6 +25,18 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var confirmDelete: [MediaItem]?
     @State private var infoItem: MediaItem?
     @State private var actionError: String?
+    @State private var albumPicker: PickedItems?
+    @State private var sharedLink: SharedLink?
+
+    struct PickedItems: Identifiable {
+        let id = UUID()
+        var items: [MediaItem]
+    }
+
+    struct SharedLink: Identifiable {
+        var id: URL { url }
+        var url: URL
+    }
 
     var body: some View {
         content
@@ -48,6 +60,8 @@ struct MediaGridScreen<Accessory: View>: View {
                         ? String(localized: "The items are moved to the trash bin of your Nextcloud.", bundle: .module)
                         : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module))
             }
+            .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
+            .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $infoItem) { item in
                 NavigationStack { InfoPanel(item: item) }
                     .presentationDetents([.medium, .large])
@@ -265,6 +279,36 @@ struct MediaGridScreen<Accessory: View>: View {
                 .background(.regularMaterial, in: .capsule)
                 .padding(.bottom, 12)
         }
+    }
+}
+
+/// Shows a freshly created public link.
+struct LinkShareSheet: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Anyone with this link can see the selected photos.", bundle: .module).multilineTextAlignment(.center)
+                Text(url.absoluteString).font(.footnote).textSelection(.enabled)
+                if let qr = QRCode.image(for: url.absoluteString) {
+                    Image(decorative: qr, scale: 1).interpolation(.none).resizable().frame(width: 180, height: 180)
+                }
+                HStack {
+                    Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copy(url.absoluteString) }
+                    ShareLink(item: url)
+                }
+            }
+            .padding()
+            .navigationTitle(String(localized: "Link created", bundle: .module))
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Done", bundle: .module)) { dismiss() }
+                }
+            }
+        }
+        .frame(minWidth: 380, minHeight: 420)
     }
 }
 

@@ -34,6 +34,12 @@ public struct Keychain: Sendable {
     }
 
     public func set(_ data: Data, for key: String) throws {
+        #if DEBUG && os(macOS)
+            if Self.useDevelopmentStore {
+                try DevelopmentSecretStore.set(data, for: "\(service).\(key)")
+                return
+            }
+        #endif
         for dataProtection in [true, false] {
             let query = baseQuery(key, dataProtection: dataProtection)
             SecItemDelete(query as CFDictionary)
@@ -47,6 +53,9 @@ public struct Keychain: Sendable {
     }
 
     public func data(for key: String) -> Data? {
+        #if DEBUG && os(macOS)
+            if Self.useDevelopmentStore { return DevelopmentSecretStore.data(for: "\(service).\(key)") }
+        #endif
         for dataProtection in [true, false] {
             var query = baseQuery(key, dataProtection: dataProtection)
             query[kSecReturnData] = true
@@ -63,6 +72,12 @@ public struct Keychain: Sendable {
     }
 
     public func delete(_ key: String) {
+        #if DEBUG && os(macOS)
+            if Self.useDevelopmentStore {
+                DevelopmentSecretStore.delete("\(service).\(key)")
+                return
+            }
+        #endif
         for dataProtection in [true, false] {
             SecItemDelete(baseQuery(key, dataProtection: dataProtection) as CFDictionary)
         }
@@ -74,3 +89,42 @@ public struct Keychain: Sendable {
     public static func clientCertificateKey(_ account: String) -> String { "client-certificate:\(account)" }
     public static func clientCertificatePasswordKey(_ account: String) -> String { "client-certificate-password:\(account)" }
 }
+
+#if DEBUG && os(macOS)
+    extension Keychain {
+        /// Unsigned Debug builds on macOS can't use the data-protection keychain (no entitlement), and every rebuild changes the
+        /// ad-hoc signature, so the login keychain would prompt on each launch. They keep secrets in the sandbox container instead.
+        static let useDevelopmentStore: Bool = {
+            let probe: [CFString: Any] = [
+                kSecClass: kSecClassGenericPassword, kSecAttrService: "com.nextcloud.photos.probe", kSecAttrAccount: "probe",
+                kSecUseDataProtectionKeychain: true, kSecValueData: Data(),
+            ]
+            let status = SecItemAdd(probe as CFDictionary, nil)
+            if status == errSecSuccess || status == errSecDuplicateItem {
+                SecItemDelete(probe as CFDictionary)
+                return false
+            }
+            return status == errSecMissingEntitlement
+        }()
+    }
+
+    /// Development-only secret store (one file per key in the app's sandbox container).
+    enum DevelopmentSecretStore {
+        static var directory: URL {
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "DevelopmentSecrets")
+        }
+
+        static func file(_ key: String) -> URL {
+            directory.appending(path: Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_"))
+        }
+
+        static func set(_ data: Data, for key: String) throws {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: file(key), options: .atomic)
+        }
+
+        static func data(for key: String) -> Data? { try? Data(contentsOf: file(key)) }
+
+        static func delete(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
+    }
+#endif

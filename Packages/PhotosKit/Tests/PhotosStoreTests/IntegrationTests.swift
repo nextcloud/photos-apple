@@ -70,3 +70,62 @@ struct IntegrationTests {
         }
     }
 }
+
+/// Album, link and upload round trip. Creates and deletes its own test album and file.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+struct IntegrationWriteTests {
+    let base = IntegrationTests()
+
+    @Test func albumLinkAndUploadRoundTrip() async throws {
+        let api = base.api
+        let name = "Photos iOS test \(Int(Date().timeIntervalSince1970))"
+        try await api.createAlbum(name: name, location: "Testville")
+        var album = Album(kind: .own, name: name)
+        do {
+            // Add the newest own photo.
+            let features = try await FeatureDetector(dav: api.dav, ocs: api.ocs).detect()
+            let page = try await api.indexPage(
+                sourceFolders: features.userConfig.photosSourceFolders, mimeTypes: MimeTypes.defaultImages, properties: DAVProp.mediaIndex,
+                before: nil, limit: 5)
+            let photo = try #require(page.items.first { $0.isOwnStorage && $0.blurhash != nil })
+            try await api.addToAlbum(album, userPath: photo.path)
+            try await api.addToAlbum(album, userPath: photo.path)  // 409 counts as success
+            let children = try await api.albumContent(album)
+            #expect(children.map(\.item.fileId) == [photo.fileId])
+
+            // Public link and anonymous access.
+            album = try #require(
+                try await api.setCollaborators([Collaborator(id: "", label: "Public link", type: .publicLink)], of: album, extended: false))
+            let token = try #require(album.publicLink?.id)
+            #expect(token.count == 32)
+            let link = api.publicAlbumLink(token: token)
+            let parsed = try #require(PublicAlbumAPI.parse(link: link.absoluteString))
+            let publicAPI = PublicAlbumAPI(http: base.http, serverURL: parsed.serverURL, token: parsed.token, userAgent: "tests")
+            #expect(try await publicAPI.album().title == name)
+            #expect(try await publicAPI.content().count == 1)
+            #expect(try await publicAPI.preview(fileId: photo.fileId, size: 256).count > 100)
+
+            // Upload (chunked, with a tiny chunk size) into a test folder, then delete it.
+            let file = FileManager.default.temporaryDirectory.appending(path: "photos-ios-test.jpg")
+            let (original, _) = try await api.dav.download(api.connection.filesURL(photo.path))
+            try? FileManager.default.removeItem(at: file)
+            try FileManager.default.moveItem(at: original, to: file)
+            var uploader = Uploader(dav: api.dav)
+            uploader.chunkThreshold = 100_000
+            uploader.chunkSize = 100_000
+            let uploaded = try await uploader.upload(
+                file: file, fileName: "photos-ios-test.jpg", folder: "/Photos iOS test upload",
+                capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+            #expect(uploaded.fileId > 0)
+            let second = try await uploader.upload(
+                file: file, fileName: "photos-ios-test.jpg", folder: "/Photos iOS test upload", capturedAt: nil)
+            #expect(second.path.hasSuffix("photos-ios-test (2).jpg"))
+            try await api.dav.delete(api.connection.filesURL("/Photos iOS test upload"))
+        } catch {
+            try? await api.deleteAlbum(album)
+            throw error
+        }
+        try await api.deleteAlbum(album)
+        #expect(try await api.listAlbums(.own, extended: false).contains { $0.name == name } == false)
+    }
+}

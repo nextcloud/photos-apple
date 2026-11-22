@@ -20,7 +20,7 @@ let package = Package(
         .library(name: "PhotosMedia", targets: ["PhotosMedia"]),
         .library(name: "PhotosBackup", targets: ["PhotosBackup"]),
         .library(name: "PhotosCore", targets: ["PhotosCore"]),
-        .library(name: "PhotosUI", targets: ["PhotosUI"]),
+        .library(name: "PhotosAppUI", targets: ["PhotosAppUI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/nextcloud/NextcloudKit.git", from: "7.6.5"),
@@ -59,12 +59,15 @@ let package = Package(
         // Composition root: accounts, keychain, per-account services, settings.
         .target(
             name: "PhotosCore",
-            dependencies: ["PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia", "PhotosBackup"],
+            dependencies: [
+                "PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia", "PhotosBackup",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             swiftSettings: swiftSettings
         ),
         // Shared SwiftUI components, grid, viewer, screens.
         .target(
-            name: "PhotosUI",
+            name: "PhotosAppUI",
             dependencies: ["PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia", "PhotosBackup", "PhotosCore"],
             resources: [.process("Resources")],
             swiftSettings: swiftSettings
