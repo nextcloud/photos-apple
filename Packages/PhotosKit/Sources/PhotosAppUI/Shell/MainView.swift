@@ -86,7 +86,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         switch self {
         case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
-        case .recentlyDeleted, .duplicates, .freeSpace: "M5"
+        case .recentlyDeleted, .duplicates, .freeSpace: nil
         }
     }
 }
@@ -216,6 +216,9 @@ struct DestinationView: View {
         case .smartAlbums: SmartAlbumsScreen()
         case .archive: ArchiveScreen()
         case .search: SearchScreen()
+        case .recentlyDeleted: RecentlyDeletedScreen()
+        case .duplicates: DuplicatesScreen()
+        case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
         default: MilestonePlaceholder(destination: destination)
         }

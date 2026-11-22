@@ -27,6 +27,7 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var actionError: String?
     @State private var albumPicker: PickedItems?
     @State private var sharedLink: SharedLink?
+    @State private var metadataItems: PickedItems?
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -62,6 +63,7 @@ struct MediaGridScreen<Accessory: View>: View {
             }
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
+            .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $infoItem) { item in
                 NavigationStack { InfoPanel(item: item) }
                     .presentationDetents([.medium, .large])
@@ -235,6 +237,15 @@ struct MediaGridScreen<Accessory: View>: View {
                     _ in
                     Task { await session.unarchive(items) }
                     endSelection()
+                })
+        }
+        if session.features.has(.metadataEdit), items.contains(where: \.permissions.canWrite) {
+            actions.append(
+                GridMenuAction(
+                    id: "metadata", title: String(localized: "Edit date and location…", bundle: .module),
+                    systemImage: "calendar.badge.clock"
+                ) { _ in
+                    metadataItems = PickedItems(items: items.filter(\.permissions.canWrite))
                 })
         }
         actions += extraActions(items)
