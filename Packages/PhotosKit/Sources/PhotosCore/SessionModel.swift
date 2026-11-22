@@ -14,7 +14,7 @@ import PhotosStore
 public final class SessionModel {
     public internal(set) var account: Account
     public private(set) var services: AccountServices?
-    public private(set) var features: ServerFeatures
+    public internal(set) var features: ServerFeatures
     public private(set) var syncStatus: SyncStatus = .idle(lastSync: nil)
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?

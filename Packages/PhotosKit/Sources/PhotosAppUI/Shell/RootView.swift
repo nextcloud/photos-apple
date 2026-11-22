@@ -17,9 +17,11 @@ public struct RootView: View {
             if app.needsLogin {
                 LoginView()
             } else if let session = app.session {
-                MainView()
-                    .environment(session)
-                    .id(session.account.id)
+                AppLockGate {
+                    MainView()
+                        .environment(session)
+                        .id(session.account.id)
+                }
             } else {
                 ProgressView()
             }

@@ -16,6 +16,8 @@ public struct SettingsView: View {
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
+    @AppStorage("appLockEnabled") private var appLock = false
+    @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
 
     public init() {}
 
@@ -85,6 +87,22 @@ public struct SettingsView: View {
                 Text("Library", bundle: .module)
             } footer: {
                 Text("These settings are shared with the Photos app on the web.", bundle: .module)
+            }
+
+            Section {
+                Toggle(String(localized: "Lock with Face ID or passcode", bundle: .module), isOn: $appLock)
+                if appLock {
+                    Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
+                        Text("Immediately", bundle: .module).tag(0.0)
+                        Text("1 minute", bundle: .module).tag(60.0)
+                        Text("5 minutes", bundle: .module).tag(300.0)
+                        Text("15 minutes", bundle: .module).tag(900.0)
+                    }
+                }
+            } header: {
+                Text("Privacy", bundle: .module)
+            } footer: {
+                Text("Archived photos always need Face ID or your passcode.", bundle: .module)
             }
 
             Section(String(localized: "Storage", bundle: .module)) {
