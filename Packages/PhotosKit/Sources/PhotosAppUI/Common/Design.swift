@@ -54,7 +54,7 @@ enum Formatters {
     }
 }
 
-/// The Nextcloud logo (three rings), drawn as a shape so it scales and needs no asset.
+/// The official Nextcloud logo (vector, from nextcloud/server), in the accent colour by default.
 public struct NextcloudLogo: View {
     var color: Color = Design.accent
 
@@ -63,19 +63,9 @@ public struct NextcloudLogo: View {
     }
 
     public var body: some View {
-        GeometryReader { proxy in
-            let height = min(proxy.size.height, proxy.size.width / 2)
-            let big = height * 0.78
-            let small = height * 0.44
-            let line = height * 0.13
-            ZStack {
-                Circle().stroke(color, lineWidth: line).frame(width: big - line, height: big - line)
-                Circle().stroke(color, lineWidth: line * 0.75).frame(width: small - line, height: small - line)
-                    .offset(x: -height * 0.72)
-                Circle().stroke(color, lineWidth: line * 0.75).frame(width: small - line, height: small - line)
-                    .offset(x: height * 0.72)
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-        }
+        NextcloudLogoShape()
+            .fill(color, style: FillStyle(eoFill: true))
+            .aspectRatio(2, contentMode: .fit)
+            .accessibilityLabel(Text(verbatim: "Nextcloud"))
     }
 }
