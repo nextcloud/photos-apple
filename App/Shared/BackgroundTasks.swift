@@ -55,7 +55,15 @@
                 }
             }
             BackgroundTasks.schedule()
+            Task { @MainActor in
+                NotificationRouter.shared.app = AppDelegate.app
+                NotificationRouter.shared.requestAuthorizationAndRegister { UIApplication.shared.registerForRemoteNotifications() }
+            }
             return true
+        }
+
+        func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+            Task { @MainActor in AppDelegate.app?.didRegisterForPush(deviceToken: deviceToken) }
         }
     }
 #endif

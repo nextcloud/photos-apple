@@ -17,6 +17,7 @@ public struct SettingsView: View {
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
     @AppStorage("appLockEnabled") private var appLock = false
+    @AppStorage("pushEnabled") private var pushEnabled = true
     @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
 
     public init() {}
@@ -87,6 +88,23 @@ public struct SettingsView: View {
                 Text("Library", bundle: .module)
             } footer: {
                 Text("These settings are shared with the Photos app on the web.", bundle: .module)
+            }
+
+            Section {
+                Toggle(String(localized: "Notifications", bundle: .module), isOn: $pushEnabled)
+                if session.features.has(.onThisDayNotifications) {
+                    Toggle(
+                        String(localized: "On this day", bundle: .module),
+                        isOn: Binding(
+                            get: { session.features.userConfig.onThisDayNotifications ?? true },
+                            set: { value in
+                                Task { try? await session.setUserConfig(.onThisDayNotifications) { $0.onThisDayNotifications = value } }
+                            }))
+                }
+            } header: {
+                Text("Notifications", bundle: .module)
+            } footer: {
+                Text("Notifications are delivered through Nextcloud's push service.", bundle: .module)
             }
 
             Section {

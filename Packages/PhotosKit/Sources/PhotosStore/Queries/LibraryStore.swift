@@ -169,6 +169,31 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// Items within ±3 days of today in each of the last 20 years (cheap SQL for widgets).
+    public func onThisDayItems(now: Date = Date(), calendar: Calendar = .current, limit: Int = 200) throws -> [MediaItem] {
+        var ranges: [String] = []
+        var arguments: StatementArguments = []
+        for yearsAgo in 1...20 {
+            guard let anchor = calendar.date(byAdding: .year, value: -yearsAgo, to: now),
+                let start = calendar.date(byAdding: .day, value: -3, to: calendar.startOfDay(for: anchor)),
+                let end = calendar.date(byAdding: .day, value: 4, to: calendar.startOfDay(for: anchor))
+            else { continue }
+            ranges.append("(timestamp >= ? AND timestamp < ?)")
+            arguments += [start.timeIntervalSince1970, end.timeIntervalSince1970]
+        }
+        let sql =
+            "SELECT * FROM media WHERE isLivePhotoVideo = 0 AND isArchived = 0 AND kind = 'image' AND (\(ranges.joined(separator: " OR "))) ORDER BY isFavorite DESC, timestamp DESC LIMIT \(limit)"
+        return try database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: arguments) }
+    }
+
+    public func favoriteImages(limit: Int = 50) throws -> [MediaItem] {
+        try database.writer.read { db in
+            try MediaItem.fetchAll(
+                db, sql: "SELECT * FROM media WHERE isFavorite = 1 AND isArchived = 0 AND kind = 'image' ORDER BY timestamp DESC LIMIT ?",
+                arguments: [limit])
+        }
+    }
+
     public func count() throws -> Int {
         try database.writer.read { db in try MediaItem.fetchCount(db) }
     }
