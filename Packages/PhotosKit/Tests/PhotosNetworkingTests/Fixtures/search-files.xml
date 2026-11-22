@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+<d:response><d:href>/nextcloud/remote.php/dav/files/alice/Photos/2026/IMG_0001.HEIC</d:href><d:propstat><d:prop>
+ <oc:fileid>42</oc:fileid><d:getcontenttype>image/heic</d:getcontenttype><oc:size>2345678</oc:size><d:getetag>"abc123"</d:getetag>
+ <d:getlastmodified>Sun, 22 Nov 2026 10:00:00 GMT</d:getlastmodified><nc:upload_time>1795356300</nc:upload_time>
+ <oc:favorite>1</oc:favorite><oc:permissions>RGDNVW</oc:permissions><nc:mount-type></nc:mount-type>
+ <nc:metadata-files-live-photo>43</nc:metadata-files-live-photo><nc:hidden>false</nc:hidden>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/nextcloud/remote.php/dav/files/alice/Photos/2026/IMG_0001.MOV</d:href><d:propstat><d:prop>
+ <oc:fileid>43</oc:fileid><d:getcontenttype>video/quicktime</d:getcontenttype><oc:size>3000000</oc:size><d:getetag>"def"</d:getetag>
+ <d:getlastmodified>Sun, 22 Nov 2026 10:00:00 GMT</d:getlastmodified>
+ <nc:metadata-files-live-photo>42</nc:metadata-files-live-photo><nc:hidden>true</nc:hidden>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/nextcloud/remote.php/dav/files/alice/Photos/2026/</d:href><d:propstat><d:prop>
+ <oc:fileid>40</oc:fileid><d:resourcetype><d:collection/></d:resourcetype>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>

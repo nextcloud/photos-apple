@@ -1,0 +1,82 @@
+name: NextcloudPhotos
+options:
+  bundleIdPrefix: com.nextcloud
+  deploymentTarget:
+    iOS: "27.0"
+    macOS: "27.0"
+    visionOS: "27.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: NKUJUXUJ3B
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+packages:
+  PhotosKit:
+    path: Packages/PhotosKit
+targets:
+  NextcloudPhotos:
+    type: application
+    supportedDestinations: [iOS, macOS, visionOS]
+    sources:
+      - path: App/Shared
+      - path: App/Resources
+    dependencies:
+      - package: PhotosKit
+        product: PhotosUI
+      - package: PhotosKit
+        product: PhotosCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos
+        PRODUCT_NAME: Nextcloud Photos
+        TARGETED_DEVICE_FAMILY: "1,2,7"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleDisplayName: Nextcloud Photos
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: App/NextcloudPhotos-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: App/NextcloudPhotos.entitlements
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.photography
+        UILaunchScreen: {}
+        UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
+        NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
+        NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
+        NSCameraUsageDescription: Nextcloud Photos uses the camera to scan login QR codes and to take photos directly to your Nextcloud.
+        NSFaceIDUsageDescription: Nextcloud Photos uses Face ID to protect the app and your archived photos.
+        NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
+        NSAppTransportSecurity:
+          # Nextcloud servers are self-hosted: http and self-signed certificates must be possible (user-approved per host).
+          NSAllowsArbitraryLoads: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.nextcloud.photos
+            CFBundleURLSchemes: [nextcloudphotos]
+        LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
+schemes:
+  NextcloudPhotos:
+    build:
+      targets:
+        NextcloudPhotos: all
+    test:
+      gatherCoverageData: true
