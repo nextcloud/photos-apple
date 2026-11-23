@@ -83,7 +83,12 @@ let package = Package(
             resources: [.copy("Fixtures")],
             swiftSettings: swiftSettings
         ),
-        .testTarget(name: "PhotosStoreTests", dependencies: ["PhotosStore"], swiftSettings: swiftSettings),
+        .testTarget(
+            name: "PhotosStoreTests",
+            dependencies: ["PhotosStore"],
+            resources: [.copy("Fixtures")],
+            swiftSettings: swiftSettings
+        ),
         .testTarget(name: "PhotosMediaTests", dependencies: ["PhotosMedia"], swiftSettings: swiftSettings),
         .testTarget(
             name: "PhotosCoreTests",
