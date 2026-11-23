@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -34,7 +36,8 @@ struct AlbumsScreen: View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
                 ForEach(sorted) { album in
-                    NavigationLink(value: album) {
+                    // By value: the stack's path (MainView) knows which album is open.
+                    NavigationLink(value: AppRoute.album(id: album.id)) {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
@@ -65,7 +68,6 @@ struct AlbumsScreen: View {
             }
         }
         .navigationTitle(title)
-        .navigationDestination(for: Album.self) { album in AlbumDetailScreen(albumId: album.id, initial: album) }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
@@ -77,12 +79,14 @@ struct AlbumsScreen: View {
                 } label: {
                     Label(String(localized: "Sort", bundle: .module), systemImage: "arrow.up.arrow.down")
                 }
+                .help(String(localized: "Sort", bundle: .module))
                 if kind == .shared {
                     Button {
                         openingLink = true
                     } label: {
                         Label(String(localized: "Open public link", bundle: .module), systemImage: "link")
                     }
+                    .help(String(localized: "Open public link", bundle: .module))
                 }
                 if kind == .own {
                     Button {
@@ -90,6 +94,7 @@ struct AlbumsScreen: View {
                     } label: {
                         Label(String(localized: "New album", bundle: .module), systemImage: "plus")
                     }
+                    .help(String(localized: "New album", bundle: .module))
                 }
             }
         }
@@ -131,14 +136,13 @@ struct AlbumCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Group {
+            // The placeholder stays behind the cover: an album without photos, or whose cover has no preview, is not blank.
+            ZStack {
+                Color.secondary.opacity(0.15)
+                Image(systemName: "photo.on.rectangle").font(.largeTitle).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 if let cover = album.displayCoverFileId {
-                    PreviewImage(fileId: cover, etag: "", bucket: 256)
-                } else {
-                    ZStack {
-                        Color.secondary.opacity(0.15)
-                        Image(systemName: "photo.on.rectangle").font(.largeTitle).foregroundStyle(.secondary)
-                    }
+                    AlbumCover(fileId: cover)
                 }
             }
             .aspectRatio(1, contentMode: .fit)
@@ -163,5 +167,63 @@ struct AlbumCard: View {
         if let owner = album.ownerDisplayName ?? album.ownerId, album.kind == .shared { parts.append(owner) }
         if !album.location.isEmpty { parts.append(album.location) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// An album's cover photo; draws nothing until the preview is there, so the card's placeholder shows through.
+struct AlbumCover: View {
+    let fileId: FileID
+    @Environment(SessionModel.self) private var session
+    @State private var image: CGImage?
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+        }
+        .task(id: fileId) {
+            guard let services = session.services else { return }
+            let request = ImagePipeline.Request(
+                fileId: fileId, etag: "", bucket: 256, hasPreview: true, mimeType: "image/jpeg", originalURL: nil)
+            if let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: "", upTo: 256) { image = cached }
+            if let loaded = await services.images.preview(request) { image = loaded }
+        }
+    }
+}
+
+/// Opens an album by id (list, deep link, scene restoration): the album comes from the local index, after a refresh if needed.
+struct AlbumRouteScreen: View {
+    let albumId: String
+    @Environment(SessionModel.self) private var session
+    @State private var album: Album?
+    @State private var missing = false
+
+    var body: some View {
+        Group {
+            if let album {
+                AlbumDetailScreen(albumId: albumId, initial: album)
+            } else if missing {
+                ContentUnavailableView(
+                    String(localized: "Album not found", bundle: .module), systemImage: "rectangle.stack.badge.minus",
+                    description: Text("It may have been renamed or deleted.", bundle: .module))
+            } else {
+                ProgressView()
+            }
+        }
+        .task(id: albumId) {
+            guard album == nil else { return }
+            if let found = try? session.services?.collections.album(id: albumId) {
+                album = found
+                return
+            }
+            try? await session.refreshAlbums(force: true)
+            album = try? session.services?.collections.album(id: albumId)
+            missing = album == nil
+        }
     }
 }

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Places of the app (SPEC §6.2). Mirrors the web app's navigation incl. the "Advanced" group.
+/// Places of the app (SPEC §6.2). Mirrors the web app's navigation; `SidebarLayout` groups them.
 public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendable {
     case library, photos, videos, favorites, onThisDay, memories, map
     case albums, sharedAlbums, smartAlbums, people, places, tags
@@ -18,7 +19,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
 
     var title: LocalizedStringResource {
         switch self {
-        case .library: LocalizedStringResource("All media", bundle: .module)
+        case .library: LocalizedStringResource("Library", bundle: .module)
         case .photos: LocalizedStringResource("Photos", bundle: .module)
         case .videos: LocalizedStringResource("Videos", bundle: .module)
         case .favorites: LocalizedStringResource("Favorites", bundle: .module)
@@ -36,7 +37,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .archive: LocalizedStringResource("Archive", bundle: .module)
         case .recentlyDeleted: LocalizedStringResource("Recently deleted", bundle: .module)
         case .duplicates: LocalizedStringResource("Duplicates", bundle: .module)
-        case .freeSpace: LocalizedStringResource("Free up space", bundle: .module)
+        case .freeSpace: LocalizedStringResource("Free up server space", bundle: .module)
         case .search: LocalizedStringResource("Search", bundle: .module)
         case .backup: LocalizedStringResource("Backup", bundle: .module)
         case .settings: LocalizedStringResource("Settings", bundle: .module)
@@ -59,7 +60,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .places: "mappin.and.ellipse"
         case .tags: "tag"
         case .folders: "folder"
-        case .sharedWithYou: "person.2.badge.plus"
+        case .sharedWithYou: "folder.badge.person.crop"
         case .archive: "archivebox"
         case .recentlyDeleted: "trash"
         case .duplicates: "square.on.square"
@@ -92,25 +93,60 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     }
 }
 
-/// Main navigation: tab bar on iPhone, sidebar on iPad, Mac and Vision Pro (`sidebarAdaptable`).
+/// How the destinations are grouped in the sidebar (SPEC §6.2). "On this day" is the first section of Memories and has no
+/// row of its own; it stays a destination for notifications, widgets and links.
+enum SidebarLayout {
+    static let primary: [AppDestination] = [.library, .photos, .videos, .favorites, .memories, .map]
+    static let collections: [AppDestination] = [.albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou]
+    static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace]
+
+    /// The row that is highlighted while `destination` is shown.
+    static func row(for destination: AppDestination) -> AppDestination? {
+        switch destination {
+        case .onThisDay: .memories
+        case .search, .settings: nil
+        #if os(macOS)
+            // On the Mac, backup is a tab of the Settings window.
+            case .backup: nil
+        #endif
+        default: destination
+        }
+    }
+}
+
+/// Main navigation: tab bar on iPhone, sidebar on iPad, Mac and Vision Pro.
+///
+/// Every destination has its own navigation path, kept here and not inside the stacks: a stack that is rebuilt when the user
+/// comes back to a destination starts from this state, so links keep working (they did not after leaving a screen with an
+/// open album), and the selected destination and open album can be restored with the scene and set by deep links.
 struct MainView: View {
     @Environment(SessionModel.self) private var session
     @Environment(AppModel.self) private var app
-    @State private var selection: AppDestination = MainView.initialDestination
-
-    /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
-    static var initialDestination: AppDestination {
-        #if DEBUG
-            if let raw = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_DESTINATION"], let destination = AppDestination(rawValue: raw) {
-                return destination
-            }
-        #endif
-        return .library
-    }
-    @SceneStorage("tabCustomization") private var customization: TabViewCustomization
+    @State private var selection: AppDestination = .library
+    @State private var paths: [AppDestination: [AppRoute]] = [:]
+    @State private var restored = false
+    /// Selected destination and open album of this window (`NavigationSnapshot`), restored with the scene.
+    @SceneStorage("navigation") private var storedNavigation = ""
+    #if !os(macOS)
+        @SceneStorage("tabCustomization") private var customization: TabViewCustomization
+        @State private var linkedPhoto: ViewerStart?
+    #else
+        @AppStorage("sidebarUtilitiesExpanded") private var utilitiesExpanded = false
+        @FocusState private var searchFocused: Bool
+    #endif
+    @State private var searchText = ""
+    @State private var searchFilters: [SearchFilter] = []
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
+
+    /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
+    static var debugDestination: AppDestination? {
+        #if DEBUG
+            if let raw = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_DESTINATION"] { return AppDestination(rawValue: raw) }
+        #endif
+        return nil
+    }
 
     func visible(_ destination: AppDestination) -> Bool {
         guard let feature = destination.requiredFeature else { return true }
@@ -118,106 +154,274 @@ struct MainView: View {
     }
 
     var body: some View {
-        TabView(selection: $selection) {
-            Tab(value: AppDestination.library) {
-                NavigationStack { TimelineScreen(filter: .all) }
-            } label: {
-                Label(String(localized: "Library", bundle: .module), systemImage: "photo.on.rectangle")
-            }
-            .customizationID(AppDestination.library.rawValue)
-
-            Tab(value: AppDestination.search, role: .search) {
-                NavigationStack { DestinationView(destination: .search) }
-            } label: {
-                Label(String(localized: AppDestination.search.title), systemImage: AppDestination.search.systemImage)
-            }
-
-            TabSection {
-                ForEach([AppDestination.photos, .videos, .favorites, .onThisDay, .memories, .map]) { destination in
-                    tab(destination)
+        navigation
+            .onChange(of: app.requestedDestination, initial: true) { _, raw in
+                restoreOnce()
+                if let raw {
+                    if let link = DeepLink(request: raw) { open(link) }
+                    app.requestedDestination = nil
                 }
-            } header: {
-                Text("Library", bundle: .module)
             }
-            .defaultVisibility(.hidden, for: .tabBar)
-
-            TabSection {
-                ForEach([AppDestination.albums, .sharedAlbums, .smartAlbums, .people, .places, .tags].filter(visible)) { destination in
-                    tab(destination)
-                }
-            } header: {
-                Text("Collections", bundle: .module)
-            }
-            .defaultVisibility(.hidden, for: .tabBar)
-
-            TabSection {
-                ForEach([AppDestination.folders, .sharedWithYou, .archive, .recentlyDeleted, .duplicates, .freeSpace].filter(visible)) {
-                    destination in
-                    tab(destination)
-                }
-            } header: {
-                Text("Advanced", bundle: .module)
-            }
-            .defaultVisibility(.hidden, for: .tabBar)
-
-            Tab(value: AppDestination.backup) {
-                NavigationStack { BackupScreen() }
-            } label: {
-                Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
-            }
-            .defaultVisibility(.hidden, for: .tabBar)
-
-            #if !os(macOS)
-                Tab(value: AppDestination.settings) {
-                    NavigationStack { SettingsView() }
-                } label: {
-                    Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
-                }
-            #endif
-        }
-        .onChange(of: app.requestedDestination, initial: true) { _, raw in
-            if let raw, let destination = AppDestination(rawValue: raw) {
-                selection = destination
-                app.requestedDestination = nil
-            }
-        }
-        .tabViewStyle(.sidebarAdaptable)
-        .tabViewCustomization($customization)
-        .tabViewSidebarHeader { AccountHeader() }
-        .focusedSceneValue(
-            \.mainActions,
-            MainActions(
-                go: { selection = $0 },
-                newAlbum: {
-                    selection = .albums
-                    creatingAlbum = true
-                },
-                upload: { importingFiles = true },
-                openPublicLink: { openingLink = true },
-                syncNow: { Task { await session.syncNow(forceReconcile: true) } }
+            .onChange(of: selection) { _, _ in remember() }
+            .onChange(of: paths) { _, _ in remember() }
+            .focusedSceneValue(
+                \.mainActions,
+                MainActions(
+                    available: AppDestination.allCases.filter(visible),
+                    go: { go($0) },
+                    focusSearch: { focusSearch() },
+                    newAlbum: {
+                        go(.albums)
+                        creatingAlbum = true
+                    },
+                    upload: { importingFiles = true },
+                    openPublicLink: { openingLink = true },
+                    syncNow: { Task { await session.syncNow(forceReconcile: true) } }
+                )
             )
-        )
-        .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
-        .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
-        .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else { return }
-            session.transfers.upload(UploadSources.copies(of: urls))
+            .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
+            .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
+            .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result else { return }
+                session.transfers.upload(UploadSources.copies(of: urls))
+            }
+    }
+
+    // MARK: State
+
+    func path(_ destination: AppDestination) -> Binding<[AppRoute]> {
+        Binding(get: { paths[destination] ?? [] }, set: { paths[destination] = $0.isEmpty ? nil : $0 })
+    }
+
+    /// Shows a destination from its root, like choosing it in the sidebar.
+    func go(_ destination: AppDestination) {
+        guard visible(destination) else { return }
+        paths[destination] = nil
+        selection = destination
+        #if os(macOS)
+            if SidebarLayout.utilities.contains(destination) { utilitiesExpanded = true }
+        #endif
+    }
+
+    func open(_ link: DeepLink) {
+        switch link {
+        case .destination(let raw):
+            if let destination = AppDestination(rawValue: raw) { go(destination) }
+        case .album(let id):
+            let destination: AppDestination = id.hasPrefix("\(AlbumKind.shared.rawValue):") ? .sharedAlbums : .albums
+            guard visible(destination) else { return }
+            selection = destination
+            paths[destination] = [.album(id: id)]
+        case .photo(let fileId):
+            #if os(macOS)
+                // The viewer is pushed in the window; "Back" returns to where the user was.
+                let below: [AppRoute] = (paths[selection] ?? []).filter { if case .photo = $0 { false } else { true } }
+                paths[selection] = below + [.photo(fileId: fileId)]
+            #else
+                linkedPhoto = ViewerStart(ids: [fileId], startId: fileId)
+            #endif
         }
     }
 
-    func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {
-        Tab(value: destination) {
-            NavigationStack { DestinationView(destination: destination) }
-        } label: {
-            Label(String(localized: destination.title), systemImage: destination.systemImage)
+    func restoreOnce() {
+        guard !restored else { return }
+        restored = true
+        if let destination = Self.debugDestination {
+            selection = destination
+        } else if let snapshot = NavigationSnapshot(stored: storedNavigation),
+            let destination = AppDestination(rawValue: snapshot.destination),
+            visible(destination)
+        {
+            selection = destination
+            paths[destination] = snapshot.routes.isEmpty ? nil : snapshot.routes
         }
-        .customizationID(destination.rawValue)
+        #if os(macOS)
+            if selection == .backup || selection == .settings { selection = .library }
+            if SidebarLayout.utilities.contains(selection) { utilitiesExpanded = true }
+        #endif
+    }
+
+    func remember() {
+        storedNavigation = NavigationSnapshot(destination: selection.rawValue, routes: paths[selection] ?? []).stored
+    }
+
+    func focusSearch() {
+        #if os(macOS)
+            searchFocused = true
+        #else
+            selection = .search
+        #endif
+    }
+
+    /// A destination's screen in its own stack, bound to its path.
+    func stack(_ destination: AppDestination) -> some View {
+        NavigationStack(path: path(destination)) {
+            DestinationView(destination: destination, searchText: $searchText, searchFilters: $searchFilters)
+                .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
+        }
+    }
+
+    // MARK: Layout
+
+    #if os(macOS)
+        /// Sidebar and content. A split view and not `TabView(.sidebarAdaptable)`: the sidebar needs a width, a collapsible
+        /// section that remembers its state, and the window toolbar a search field.
+        var navigation: some View {
+            NavigationSplitView {
+                List(selection: sidebarSelection) {
+                    Section {
+                        rows(SidebarLayout.primary)
+                    }
+                    Section {
+                        rows(SidebarLayout.collections)
+                    } header: {
+                        Text("Collections", bundle: .module)
+                    }
+                    Section(isExpanded: $utilitiesExpanded) {
+                        rows(SidebarLayout.utilities)
+                    } header: {
+                        Text("Utilities", bundle: .module)
+                    }
+                }
+                .listStyle(.sidebar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    AccountHeader().padding(.horizontal, 16).padding(.vertical, 8)
+                }
+                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 320)
+            } detail: {
+                // A new stack per destination; what is open in it comes from `paths`.
+                stack(selection).id(selection)
+            }
+            // The chosen filters are tokens in the field, as in Finder and Mail.
+            .searchable(text: $searchText, tokens: $searchFilters, placement: .toolbar, prompt: Text("Search", bundle: .module)) {
+                (filter: SearchFilter) in
+                Label(filter.label, systemImage: filter.systemImage)
+            }
+            .searchFocused($searchFocused)
+            .onSubmit(of: .search) { showSearch() }
+            .onChange(of: searchText) { _, text in
+                if !text.isEmpty { showSearch() }
+            }
+            .onChange(of: selection) { _, destination in
+                // Leaving the search ends it; the field is empty on the other screens.
+                if destination != .search {
+                    searchText = ""
+                    searchFilters = []
+                }
+            }
+        }
+
+        var sidebarSelection: Binding<AppDestination?> {
+            Binding(
+                get: { SidebarLayout.row(for: selection) },
+                set: { destination in
+                    if let destination { go(destination) }
+                })
+        }
+
+        func rows(_ destinations: [AppDestination]) -> some View {
+            ForEach(destinations.filter(visible)) { destination in
+                Label(String(localized: destination.title), systemImage: destination.systemImage)
+                    .tag(destination)
+            }
+        }
+
+        func showSearch() {
+            if selection != .search { selection = .search }
+        }
+    #else
+        var navigation: some View {
+            TabView(selection: $selection) {
+                Tab(value: AppDestination.library) {
+                    stack(.library)
+                } label: {
+                    Label(String(localized: AppDestination.library.title), systemImage: AppDestination.library.systemImage)
+                }
+                .customizationID(AppDestination.library.rawValue)
+
+                Tab(value: AppDestination.search, role: .search) {
+                    stack(.search)
+                } label: {
+                    Label(String(localized: AppDestination.search.title), systemImage: AppDestination.search.systemImage)
+                }
+
+                TabSection {
+                    ForEach(SidebarLayout.primary.filter { $0 != .library }) { destination in
+                        tab(destination)
+                    }
+                } header: {
+                    Text("Browse", bundle: .module)
+                }
+                .defaultVisibility(.hidden, for: .tabBar)
+
+                TabSection {
+                    ForEach(SidebarLayout.collections.filter(visible)) { destination in
+                        tab(destination)
+                    }
+                } header: {
+                    Text("Collections", bundle: .module)
+                }
+                .defaultVisibility(.hidden, for: .tabBar)
+
+                TabSection {
+                    ForEach(SidebarLayout.utilities.filter(visible)) { destination in
+                        tab(destination)
+                    }
+                } header: {
+                    Text("Utilities", bundle: .module)
+                }
+                .defaultVisibility(.hidden, for: .tabBar)
+
+                Tab(value: AppDestination.backup) {
+                    stack(.backup)
+                } label: {
+                    Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
+                }
+                .defaultVisibility(.hidden, for: .tabBar)
+
+                Tab(value: AppDestination.settings) {
+                    stack(.settings)
+                } label: {
+                    Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
+                }
+            }
+            .tabViewStyle(.sidebarAdaptable)
+            .tabViewCustomization($customization)
+            .tabViewSidebarHeader { AccountHeader() }
+            .fullScreenCover(item: $linkedPhoto) { start in
+                MediaViewer(ids: start.ids, startId: start.startId).environment(session)
+            }
+        }
+
+        func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {
+            Tab(value: destination) {
+                stack(destination)
+            } label: {
+                Label(String(localized: destination.title), systemImage: destination.systemImage)
+            }
+            .customizationID(destination.rawValue)
+        }
+    #endif
+}
+
+/// A screen opened by value: from a link in a list, a deep link or scene restoration.
+struct RouteView: View {
+    let route: AppRoute
+
+    var body: some View {
+        switch route {
+        case .album(let id): AlbumRouteScreen(albumId: id)
+        case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
+        }
     }
 }
 
 /// Content of a navigation destination.
 struct DestinationView: View {
     let destination: AppDestination
+    /// Text of the window's search field (macOS); the search tab has its own field elsewhere.
+    @Binding var searchText: String
+    @Binding var searchFilters: [SearchFilter]
 
     var body: some View {
         switch destination {
@@ -238,12 +442,16 @@ struct DestinationView: View {
         case .sharedWithYou: FoldersScreen(sharedWithYou: true)
         case .smartAlbums: SmartAlbumsScreen()
         case .archive: ArchiveScreen()
-        case .search: SearchScreen()
+        case .search:
+            #if os(macOS)
+                SearchScreen(query: $searchText, filters: $searchFilters)
+            #else
+                SearchTab()
+            #endif
         case .recentlyDeleted: RecentlyDeletedScreen()
         case .duplicates: DuplicatesScreen()
         case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
-        default: MilestonePlaceholder(destination: destination)
         }
     }
 }

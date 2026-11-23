@@ -41,6 +41,22 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
 - ⬜ Performance budgets (§10) not measured; no synthetic 100k performance tests yet.
 
+## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
+- Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
+  search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
+  iPhone/iPad/Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping 🟡 (compiled for iOS, not run).
+- Every destination has its own navigation path (`MainView.paths`); selected destination and open album are restored per
+  scene (`NavigationSnapshot`) ✅ on the Mac.
+- Deep links `nextcloudphotos://<destination>`, `…/album/<name>` (`…/album/shared/<name>`), `…/photo/<fileId>` ✅ parsing unit-tested,
+  destination and album links ✅ in the Mac app, photo links 🟡. ⬜ The account part and the other routes of §4.8
+  (`places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`), web URLs of the server.
+- Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
+  Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
+  structure read from the running app; the same commands are the keyboard shortcuts on iPadOS 🟡.
+  ⬜ Image ▸ Rotate (only inside the editor), Edit ▸ Copy of photos, "Add to Album" as a submenu, Share… in the grid's context
+  menu (toolbar and File menu only), opening an album in a new window, View ▸ Square Tiles.
+- Mac: "Export…" saves the originals of the selection into a folder 🟡 (the panel was not driven by hand).
+
 ## M2 Albums, sharing, upload, offline — ✅
 Albums and shared albums ✅, collaborators 🟡 (sharee search not exercised), public links ✅, public album viewer ✅, quick share 🟡,
 comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share extension 🟡, drag and drop 🟡, offline albums 🟡

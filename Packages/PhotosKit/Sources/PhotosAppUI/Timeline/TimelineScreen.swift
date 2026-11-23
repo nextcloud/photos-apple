@@ -47,6 +47,7 @@ struct TimelineScreen: View {
     @State private var feed = GridFeed()
     @AppStorage("gridColumns") private var columns = GridColumns.default
     @State private var mediaKind: MediaFilter
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(filter: MediaFilter) {
         self.filter = filter
@@ -93,18 +94,22 @@ struct TimelineScreen: View {
             TransfersIndicator()
             UploadMenu()
             #if os(macOS)
-                // Mac: zoom slider and a segmented control, like Apple Photos.
+                // Mac: zoom slider, like Apple Photos.
                 Slider(value: zoomLevel, in: 0...maxZoomLevel) {
                     Text("Zoom", bundle: .module)
                 } minimumValueLabel: {
                     Image(systemName: "square.grid.4x3.fill").imageScale(.small)
+                        .accessibilityLabel(Text("Smallest thumbnails", bundle: .module))
                 } maximumValueLabel: {
                     Image(systemName: "square.grid.2x2.fill").imageScale(.small)
+                        .accessibilityLabel(Text("Largest thumbnails", bundle: .module))
                 }
                 .frame(width: 140)
+                .accessibilityLabel(Text("Zoom", bundle: .module))
                 .help(String(localized: "Zoom", bundle: .module))
             #endif
-            if filter == .all {
+            // Only where no sidebar offers Photos, Videos and Favorites (iPhone, narrow iPad windows).
+            if filter == .all && TimelineToolbar.showsMediaKindPicker(sizeClass) {
                 Picker(selection: $mediaKind) {
                     Text("All", bundle: .module).tag(MediaFilter.all)
                     Text("Photos", bundle: .module).tag(MediaFilter.photos)
@@ -113,12 +118,7 @@ struct TimelineScreen: View {
                 } label: {
                     Label(String(localized: "Show", bundle: .module), systemImage: "line.3.horizontal.decrease.circle")
                 }
-                #if os(macOS)
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                #else
-                    .pickerStyle(.menu)
-                #endif
+                .pickerStyle(.menu)
             }
         }
         .task(id: mediaKind) { observe() }

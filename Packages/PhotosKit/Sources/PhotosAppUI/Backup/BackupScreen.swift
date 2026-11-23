@@ -16,7 +16,7 @@ struct BackupScreen: View {
         Group {
             if !backup.isAvailable {
                 ContentUnavailableView(
-                    String(localized: "Backup is not available on this device", bundle: .module), systemImage: "icloud.slash")
+                    BackupWording.notAvailable, systemImage: "icloud.slash")
             } else if backup.settings.isEnabled || backup.settings.filesAppMode == .keepFiles {
                 BackupStatusView()
             } else {
@@ -38,12 +38,9 @@ struct BackupSetupView: View {
             VStack(spacing: 20) {
                 Image(systemName: "icloud.and.arrow.up").font(.system(size: 56)).foregroundStyle(.tint)
                 Text("Back up your photos to Nextcloud", bundle: .module).font(.title.bold()).multilineTextAlignment(.center)
-                Text(
-                    "Nextcloud Photos uploads the photos and videos of this device to \(session.account.hostDisplayName). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server.",
-                    bundle: .module
-                )
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                Text(BackupWording.explanation(host: session.account.hostDisplayName))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
                 if backup.authorization == .denied || backup.authorization == .restricted {
                     Label(String(localized: "Allow access to your photos in Settings to use backup.", bundle: .module), systemImage: "lock")
                         .foregroundStyle(.orange)
@@ -121,7 +118,7 @@ struct BackupStatusView: View {
                 }
             } footer: {
                 if backup.settings.filesAppMode == .keepFiles {
-                    Text("The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
+                    Text(BackupWording.filesAppNote)
                 } else if backup.isForOtherAccount, let account = backup.account {
                     // Backup belongs to one account and keeps running while another one is shown.
                     Text(
@@ -332,5 +329,38 @@ struct BackupOptions: View {
                 String(localized: "Download originals from iCloud", bundle: .module),
                 isOn: Binding(get: { settings.downloadFromICloud }, set: { value in backup.update { $0.downloadFromICloud = value } }))
         }
+    }
+}
+
+/// Backup texts that name the device: "this Mac" and its Photos library on macOS, "this device" elsewhere.
+enum BackupWording {
+    static var notAvailable: String {
+        #if os(macOS)
+            String(localized: "Backup is not available on this Mac", bundle: .module)
+        #else
+            String(localized: "Backup is not available on this device", bundle: .module)
+        #endif
+    }
+
+    static func explanation(host: String) -> String {
+        #if os(macOS)
+            String(
+                localized:
+                    "Nextcloud Photos uploads the photos and videos in the Photos library of this Mac to \(host). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this Mac never deletes it on the server.",
+                bundle: .module)
+        #else
+            String(
+                localized:
+                    "Nextcloud Photos uploads the photos and videos of this device to \(host). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server.",
+                bundle: .module)
+        #endif
+    }
+
+    static var filesAppNote: String {
+        #if os(macOS)
+            String(localized: "The Files app backs up this Mac. This shows which photos are already on your Nextcloud.", bundle: .module)
+        #else
+            String(localized: "The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
+        #endif
     }
 }
