@@ -9,6 +9,8 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 
 - Unit tests (`xcodebuild test -scheme PhotosKit-Package -destination platform=macOS`): parsing, request bodies, initial-state scraping,
   store, timeline sections, memories, stacks, duplicates, search suggestions, backup matcher and naming, editing, BlurHash, push key encoding.
+  In CI they run on the `xcode-27` runner (macOS 27); before 2026-11-23 the CI job skipped them because `macos-26` cannot load
+  test bundles built for OS 27.
 - Integration tests against a local Nextcloud 36 + Photos master server (504-item test library): feature detection, sync, albums,
   album content, places, previews, album/link/upload round trip, public album access, reconciliation SEARCH, trash, tags, folders.
 - The Mac app was run against the same server (timeline, albums, places, memories).
