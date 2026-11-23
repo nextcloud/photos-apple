@@ -189,6 +189,47 @@ import Testing
                 == .finished(uploaded: 2, remaining: 3, failed: 1))
     }
 
+    /// Review r2 item 1: a pass after which items are still failed is not "your photos are backed up".
+    @Test func failedItemsAreNeverReportedAsBackedUp() {
+        let outcome = BackupOutcome(status: status(.incomplete(failed: 2), uploaded: 40, thisPass: 3, failed: 2))
+        #expect(outcome == .finished(uploaded: 3, remaining: 0, failed: 2))
+        #expect(!outcome.isComplete)
+        #expect(outcome.message == "Backup finished, but 2 items could not be uploaded.")
+        #expect(outcome.message != BackupOutcome.upToDate.message)
+    }
+
+    /// Item 7: originals that are only in iCloud while downloads are off.
+    @Test func skippedItemsAreNamed() {
+        var skipped = status(.upToDate)
+        skipped.skipped = 4
+        let outcome = BackupOutcome(status: skipped)
+        #expect(outcome == .skipped(4))
+        #expect(!outcome.isComplete)
+        #expect(outcome.message.contains("4 items that are only in iCloud"))
+        #expect(BackupOutcome.skipped(1).message.contains("1 item that is only in iCloud was not backed up"))
+    }
+
+    /// Item 7: a full device is named as what it is.
+    @Test func aFullDeviceIsABlocker() {
+        var full = status(.failed("no space"))
+        full.blocker = .deviceStorageFull
+        let outcome = BackupOutcome(status: full)
+        #expect(outcome == .blocked(.deviceStorageFull))
+        #expect(outcome.message.contains("free up space on this"))
+        #expect(!outcome.message.contains("Nextcloud storage"))
+    }
+
+    /// Item 10: with access to selected photos only, the answer says so.
+    @Test func limitedAccessIsPartOfTheAnswer() {
+        let note = "Only the photos you selected for Nextcloud Photos are backed up."
+        #expect(BackupOutcome.upToDate.message(limitedAccess: false) == BackupOutcome.upToDate.message)
+        #expect(BackupOutcome.upToDate.message(limitedAccess: true) == "Your photos are backed up. " + note)
+        #expect(BackupOutcome.paused("Waiting for Wi-Fi").message(limitedAccess: true).hasSuffix(note))
+        // Without any access, or without a backup, there is nothing to add.
+        #expect(BackupOutcome.notAuthorized.message(limitedAccess: true) == BackupOutcome.notAuthorized.message)
+        #expect(BackupOutcome.unavailable("x").message(limitedAccess: true) == "x")
+    }
+
     @Test func aPassTheSystemInterruptedIsNeitherFinishedNorPaused() {
         var interrupted = status(.idle, uploaded: 40, thisPass: 4, pending: 9)
         interrupted.isInterrupted = true

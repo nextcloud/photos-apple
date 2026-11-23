@@ -26,10 +26,18 @@ final class FakeLibrary: BackupLibrary {
         var scans: [[String]] = []
         var exports: [String] = []
         var exportErrors: [String: any Error] = [:]
+        /// Names of resources whose data is only in iCloud.
+        var cloudOnly: Set<String> = []
+        /// Whether each export was allowed to use the network.
+        var networkAllowed: [Bool] = []
+        var isLimited = false
+        /// Size of the file an export writes, when it is not what the resource says.
+        var exportedSizes: [String: Int] = [:]
     }
 
     let state = Mutex(State())
     var isAuthorized: Bool { true }
+    var isLimited: Bool { state.withLock { $0.isLimited } }
 
     var lastScan: [String] { state.withLock { $0.scans.last ?? [] } }
     var exports: [String] { state.withLock { $0.exports } }
@@ -41,16 +49,18 @@ final class FakeLibrary: BackupLibrary {
         return wanted.flatMap(\.resources)
     }
 
-    func export(_ resource: BackupResource, settings: BackupSettings) async throws -> URL {
-        let error = state.withLock { state -> (any Error)? in
+    func export(_ resource: BackupResource, settings: BackupSettings, allowNetwork: Bool) async throws -> URL {
+        let (error, size) = state.withLock { state -> ((any Error)?, Int?) in
             state.exports.append(resource.originalName)
-            return state.exportErrors[resource.originalName]
+            state.networkAllowed.append(allowNetwork)
+            if state.cloudOnly.contains(resource.originalName), !allowNetwork { return (BackupDeviceError.needsICloudDownload, nil) }
+            return (state.exportErrors[resource.originalName], state.exportedSizes[resource.originalName])
         }
         if let error { throw error }
         let directory = FileManager.default.temporaryDirectory.appending(path: "BackupTests/\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appending(path: resource.originalName)
-        try Data(repeating: 7, count: Int(resource.byteSize ?? 10)).write(to: file)
+        try Data(repeating: 7, count: size ?? Int(resource.byteSize ?? 10)).write(to: file)
         return file
     }
 }

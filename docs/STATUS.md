@@ -111,7 +111,8 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
   checksum); the next attempt lists the chunks and continues with the first missing one ✅ unit-tested against a stub
   server and against the test server (interrupted after 2 of 5 chunks, continued, checksum compared).
 - Share extension: uploaded items leave the list, the rest can be tried again after a failure, and it uses the app's
-  trusted and client certificates 🟡 (compiled; not run). ⬜ It still uploads in its own process, not in a background session.
+  trusted and client certificates 🟡 (compiled; not run). Items that cannot be read are counted ("2 of 5 items could
+  not be read"), and its temporary copies are removed on cancel, on completion and (leftovers) at the start ✅ unit-tested. ⬜ It still uploads in its own process, not in a background session.
 
 ## M3 Backup — 🟡
 Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against server), matcher ✅, engine, UI, background tasks 🟡.
@@ -121,7 +122,9 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   suspended; the app is woken for finished uploads (`handleEventsForBackgroundURLSession`), records them and hands over
   the next ones. Engine and bookkeeping ✅ unit-tested with a fake session; the real session ✅ against the test server
   on macOS. **Not run on a device**: suspension, relaunch for finished uploads, behaviour when the device is locked.
-  ⬜ Larger files (chunked) are only uploaded while the app runs; they continue where they stopped.
+  ⬜ Larger files (chunked) are only uploaded while the app runs; they continue where they stopped. They come after
+  everything the system can take, so one big video no longer holds back the queue in a short background pass, and
+  their export is kept for the next attempt when the upload is interrupted (`tmp/Backup/Kept`) ✅ unit-tested.
   macOS uploads everything in the app.
 - A pass that a background task has to give up is interrupted, not "Paused": it stays due and goes on with the next
   background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
@@ -136,6 +139,27 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 `BackupModel` passes changed options to a waiting run (`BackupEngine.settingsChanged`); the Backup screen and the
   "Back up now" intent name what blocks the backup (full storage, login, refused upload, certificate). Compiled and
   unit-tested (outcome mapping), not looked at in the running app.
+- ✅ "Up to date" only when the ledger has no failed and no waiting item; otherwise the Backup screen and the "Back up
+  now" intent say "N items could not be uploaded" (reason, "Try again"). Entries of photos that were deleted on the
+  device no longer wait forever. Unit-tested (engine, outcome); the screen is 🟡 compiled, not looked at.
+- ✅ A new file is sent with `If-None-Match: *` (direct PUT and background session), so a file that appeared after the
+  name check is never overwritten; 412 → the name is looked up again (same size = already uploaded, otherwise the next
+  free name). Unit-tested against the stub server and the fake session; the header ✅ against the test server.
+- ✅ Matcher: a server name only stands for a device file when it is the same name or has every number of it
+  (`PXL_20240501_123045123`, `20240501_123045_001`, UUID names no longer collide), and never when two device files of
+  that second would fit. The Files app's record covers the photo or video itself, not RAW / edit / motion part.
+- 🟡 Device side: no room on the device stops the pass ("free up space" blocker, checked before each export); originals
+  that are only in iCloud are downloaded on Wi-Fi only and wait otherwise ("Waiting for Wi-Fi to download originals
+  from iCloud"); with "Download originals from iCloud" off they are skipped and counted on the Backup screen until the
+  option changes. Engine ✅ unit-tested with a fake library; PhotoKit's error for "only in iCloud"
+  (`PHPhotosError.networkAccessRequired`) and the free-space value are **not exercised on a device**.
+- 🟡 Scope: only the user's own library (no iCloud Shared Albums); hidden photos only with "Include hidden photos" (off
+  by default, the screen says so). The unused "include shared-library photos" option (§7.18.2) is gone: PhotoKit has no
+  public way to tell iCloud Shared Photo Library items apart, they are part of the user library. With access to
+  selected photos only, the Backup screen keeps saying so (button to Settings) and the intent adds it to its answer.
+  Fetch options compiled, not run against a real library.
+- ✅ Leftover exports in `tmp/Backup` are removed before an engine's first pass; which resources of an asset are uploaded
+  (edited / RAW / Live Photo) is unit-tested (`PhotoLibrarySource.select`).
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡

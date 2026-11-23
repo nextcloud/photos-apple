@@ -136,6 +136,65 @@ import Testing
 
     // MARK: Chunked uploads
 
+    // MARK: A name that is taken after the check (review r2 item 6)
+
+    @Test func aFileThatAppearedAfterTheNameCheckIsNotOverwritten() async throws {
+        defer { cleanUp() }
+        let file = try makeFile(size: 8)
+        let other = Data("somebody else's photo".utf8)
+        server.state.withLock { $0.folders.insert("/Photos") }
+        server.appear("/Photos/a.jpg", content: other)
+        let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
+        // The other file is untouched; this one got the next free name.
+        #expect(server.file("/Photos/a.jpg") == other)
+        #expect(uploaded.path == "/Photos/a (2).jpg")
+        #expect(server.file("/Photos/a (2).jpg") == (try Data(contentsOf: file)))
+        let puts = server.requests.filter { $0.method == "PUT" }
+        #expect(puts.count == 2)
+        #expect(puts.allSatisfy { $0.headers["If-None-Match"] == "*" })
+    }
+
+    @Test func aFileOfTheSameSizeThatAppearedMeanwhileIsThisUpload() async throws {
+        defer { cleanUp() }
+        let file = try makeFile(size: 8)
+        server.state.withLock { $0.folders.insert("/Photos") }
+        server.appear("/Photos/a.jpg", content: try Data(contentsOf: file))
+        let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
+        #expect(uploaded.path == "/Photos/a.jpg")
+        #expect(uploaded.fileId > 0)
+        #expect(server.file("/Photos/a (2).jpg") == nil)
+        #expect(server.requests.filter { $0.method == "PUT" }.count == 1)
+    }
+
+    @Test func aChunkedUploadWhoseNameWasTakenMeanwhileGetsTheNextName() async throws {
+        defer { cleanUp() }
+        let file = try makeFile(size: 25)
+        let other = Data("somebody else's video".utf8)
+        server.state.withLock { $0.folders.insert("/Photos") }
+        server.appear("/Photos/a.jpg", content: other)
+        let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
+        #expect(server.file("/Photos/a.jpg") == other)
+        #expect(uploaded.path == "/Photos/a (2).jpg")
+        #expect(server.file("/Photos/a (2).jpg") == (try Data(contentsOf: file)))
+    }
+
+    @Test func aPreparedPutDoesNotOverwrite() async throws {
+        defer { cleanUp() }
+        let file = try makeFile(size: 8)
+        guard
+            case .put(let path, let request) = try await server.uploader.prepare(
+                file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil, conflict: .skipIfSameSize)
+        else {
+            Issue.record("nothing is there yet")
+            return
+        }
+        #expect(request.headers["If-None-Match"] == "*")
+        // The answer of a server that had the name taken meanwhile says "prepare again".
+        await #expect(throws: NetworkError.preconditionFailed) {
+            _ = try await server.uploader.finish(path: path, response: HTTPResponse(status: 412))
+        }
+    }
+
     @Test func chunkedUploadArrivesComplete() async throws {
         defer { cleanUp() }
         let file = try makeFile("v.mov", size: 35)

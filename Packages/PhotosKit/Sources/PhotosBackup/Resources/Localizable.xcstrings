@@ -13,10 +13,22 @@
     "Photo" : {
 
     },
+    "The original is only in iCloud, and downloading from iCloud is turned off." : {
+
+    },
+    "There is not enough free space on this Mac to prepare the upload." : {
+
+    },
+    "There is not enough free space on this device to prepare the upload." : {
+
+    },
     "Video" : {
 
     },
     "Waiting for Wi-Fi" : {
+
+    },
+    "Waiting for Wi-Fi to download originals from iCloud" : {
 
     },
     "Waiting for a network connection" : {

@@ -68,28 +68,55 @@ public struct Uploader: Sendable {
         checksum: Bool = true,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> UploadedFile {
-        let target: Target
-        switch try await resolve(
-            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum, reserved: [])
-        {
-        case .existing(let existing): return existing
-        case .free(let free): target = free
-        }
-        let response: HTTPResponse
-        if target.size > chunkThreshold {
-            response = try await uploadChunked(
-                file: file, size: target.size, path: target.path, headers: target.headers,
-                fingerprint: target.digest ?? Self.fingerprint(of: file), progress: progress)
-        } else {
-            do {
-                response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.headers)
-            } catch NetworkError.conflict {
-                try await dav.mkcolRecursive(userPath: folder)
-                response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.headers)
+        var attempt = 1
+        while true {
+            let target: Target
+            switch try await resolve(
+                file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum, reserved: [])
+            {
+            case .existing(let existing): return existing
+            case .free(let free): target = free
             }
-            progress?(1)
+            do {
+                let response: HTTPResponse
+                if target.size > chunkThreshold {
+                    response = try await uploadChunked(
+                        file: file, size: target.size, path: target.path, headers: target.headers,
+                        fingerprint: target.digest ?? Self.fingerprint(of: file), progress: progress)
+                } else {
+                    do {
+                        response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.newFileHeaders)
+                    } catch NetworkError.conflict {
+                        try await dav.mkcolRecursive(userPath: folder)
+                        response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.newFileHeaders)
+                    }
+                    progress?(1)
+                }
+                return try await finish(path: target.path, response: response)
+            } catch NetworkError.preconditionFailed where attempt < Self.maxNameAttempts {
+                // The name was taken after it was found free (`If-None-Match: *`, `Overwrite: F`): nothing was overwritten.
+                // A file of the same size there is this upload (its answer got lost, or another device was faster);
+                // anything else gets the next free name.
+                attempt += 1
+                if let existing = try await existingFile(at: target.path, size: target.size) { return existing }
+            }
         }
-        return try await finish(path: target.path, response: response)
+    }
+
+    /// How often an upload looks for a free name again after the server said the name was taken meanwhile.
+    static let maxNameAttempts = 3
+
+    /// The file at `path` when it has this size.
+    func existingFile(at path: String, size: Int64) async throws -> UploadedFile? {
+        do {
+            let existing = try await dav.propfind(
+                connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag]
+            ).first
+            guard let existing, existing.int64(DAVProp.size) == size, let fileId = existing.int64(DAVProp.fileId) else { return nil }
+            return UploadedFile(fileId: fileId, path: path, etag: existing.string(DAVProp.etag))
+        } catch NetworkError.notFound {
+            return nil
+        }
     }
 
     /// Where a file goes and what is sent with it.
@@ -98,6 +125,12 @@ public struct Uploader: Sendable {
         var size: Int64
         var headers: [String: String]
         var digest: String?
+
+        /// The headers of the PUT that creates the file. `If-None-Match: *` makes the server refuse it (412) when a file
+        /// with this name appeared after the name was found free, instead of overwriting that file.
+        var newFileHeaders: [String: String] {
+            headers.merging(["If-None-Match": "*"]) { $1 }
+        }
     }
 
     enum Resolved {
@@ -132,7 +165,9 @@ public struct Uploader: Sendable {
     public enum Prepared: Sendable {
         /// A file with this name and size is there already (`ConflictPolicy.skipIfSameSize`).
         case existing(UploadedFile)
-        /// Send `request` with the file as its body, then pass the answer to `finish(path:response:)`.
+        /// Send `request` with the file as its body, then pass the answer to `finish(path:response:)`. The request does
+        /// not overwrite: when the name was taken meanwhile, the answer is 412 (`NetworkError.preconditionFailed`) and
+        /// the upload has to be prepared again.
         case put(path: String, request: HTTPRequest)
     }
 
@@ -151,7 +186,7 @@ public struct Uploader: Sendable {
         case .existing(let existing): return .existing(existing)
         case .free(let target):
             let request = HTTPRequest(
-                method: "PUT", url: connection.filesURL(target.path), headers: dav.headers(target.headers), timeout: 3600)
+                method: "PUT", url: connection.filesURL(target.path), headers: dav.headers(target.newFileHeaders), timeout: 3600)
             return .put(path: target.path, request: request)
         }
     }
