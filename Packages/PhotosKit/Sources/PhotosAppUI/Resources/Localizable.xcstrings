@@ -2221,9 +2221,6 @@
     "Square" : {
       "comment" : "Crop aspect ratio."
     },
-    "Square tiles" : {
-      "comment" : "Switch in Settings: photos in the grid are cropped to squares instead of keeping their shape."
-    },
     "Standard" : {
       "comment" : "Value of \"Photos features\" in Settings: the server's Photos app offers the standard features."
     },
