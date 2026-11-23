@@ -81,6 +81,28 @@
     "Backup finished." : {
 
     },
+    "Backup finished. %lld items that are only in iCloud were not backed up, because downloading from iCloud is turned off." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Backup finished. %lld item that is only in iCloud was not backed up, because downloading from iCloud is turned off."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Backup finished. %lld items that are only in iCloud were not backed up, because downloading from iCloud is turned off."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Backup is not turned on in Nextcloud Photos." : {
 
     },
@@ -96,6 +118,12 @@
           }
         }
       }
+    },
+    "Backup stopped: free up space on this Mac." : {
+
+    },
+    "Backup stopped: free up space on this device." : {
+
     },
     "Backup stopped: log in to your Nextcloud again." : {
 
@@ -119,6 +147,9 @@
 
     },
     "Nextcloud Photos has no access to your photos." : {
+
+    },
+    "Only the photos you selected for Nextcloud Photos are backed up." : {
 
     },
     "Only your own photos can be shared by link." : {

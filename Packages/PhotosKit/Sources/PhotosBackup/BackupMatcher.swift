@@ -90,15 +90,18 @@ public enum BackupMatcher {
     /// Rules, in order:
     /// 1. same kind, capture second equal (capture time or mtime), same byte size → exact copy (whatever the name says,
     ///    except across RAW / non-RAW).
-    /// 2. same kind, capture second equal, the original's number (`IMG_1234` → `1234`) appears in the server name → Files-app naming.
+    /// 2. same kind, capture second equal, and the names agree (`namesAgree`): the same name, or every number of the
+    ///    original's name (`IMG_1234` → `1234`) appears in the server name → Files-app naming. Not when another device
+    ///    resource of that second has the same numbers (`isAmbiguousName`): the name cannot tell those apart.
     /// 3. same kind, capture second equal, same pixel size, and it is the only candidate on both sides → converted copy (not bursts).
-    /// 4. capture times differ by whole hours (≤ 14 h), minutes and seconds equal, and the number matches → EXIF read without offset.
+    /// 4. capture times differ by whole hours (≤ 14 h), minutes and seconds equal, and the names agree → EXIF read without offset.
     public static func match(_ resource: LocalResource, candidates: [RemoteCandidate], localSiblings: [LocalResource]) -> (
         RemoteCandidate, MatchReason
     )? {
         let localIsRaw = isRaw(resource)
         let sameKind = candidates.filter { $0.kind == resource.kind && isRawName($0.name) == localIsRaw }
-        let number = BackupNaming.number(in: resource.originalName)
+        // Names only say something when no other device resource of that second would fit the same server file.
+        let byName = !isAmbiguousName(resource, among: localSiblings)
 
         if let size = resource.byteSize, size > 0,
             let exact = sameKind.first(where: { $0.size == size && sameSecond($0, resource.createdAt) })
@@ -107,7 +110,7 @@ public enum BackupMatcher {
         }
         let compatible = sameKind.filter { isCompatible(resource, candidateName: $0.name) }
         let atSameSecond = compatible.filter { sameSecond($0, resource.createdAt) }
-        if let number, let named = atSameSecond.first(where: { containsNumber($0.name, number) }) {
+        if byName, let named = atSameSecond.first(where: { namesAgree(local: resource.originalName, server: $0.name) }) {
             return (named, .serverTimeName)
         }
         if let width = resource.pixelWidth, let height = resource.pixelHeight {
@@ -124,9 +127,11 @@ public enum BackupMatcher {
                 return (sameSize[0], .serverTimeSize)
             }
         }
-        if let number {
+        if byName {
             for candidate in compatible {
-                guard let captured = candidate.capturedAt, containsNumber(candidate.name, number) else { continue }
+                guard let captured = candidate.capturedAt, namesAgree(local: resource.originalName, server: candidate.name) else {
+                    continue
+                }
                 let difference = captured.timeIntervalSince(resource.createdAt)
                 let hours = (difference / 3600).rounded()
                 if hours != 0, abs(hours) <= 14, abs(difference - hours * 3600) < tolerance {
@@ -175,6 +180,46 @@ public enum BackupMatcher {
     static func sameSecond(_ candidate: RemoteCandidate, _ date: Date) -> Bool {
         if let captured = candidate.capturedAt, abs(captured.timeIntervalSince(date)) < tolerance { return true }
         return abs(candidate.modifiedAt.timeIntervalSince(date)) < tolerance
+    }
+
+    // MARK: Names
+
+    /// The digit runs of a file name without its extension: `PXL_20240501_123045123.jpg` → `20240501`, `123045123`.
+    static func numbers(in name: String) -> [String] {
+        (name as NSString).deletingPathExtension.matches(of: /\d+/).map { String($0.output) }
+    }
+
+    /// The name without extension, case and the marker of an edited version, for "is this the same name".
+    static func stem(_ name: String) -> String {
+        var base = (name as NSString).deletingPathExtension
+        if let range = base.range(of: BackupNaming.editedSuffix, options: .caseInsensitive) { base.removeSubrange(range) }
+        return base.lowercased()
+    }
+
+    /// Whether a server file's name can stand for the device resource: the same name, or a name that has every number
+    /// of the original name as a whole digit run. The Files app's scheme (`24-05-01 12-30-45 1234.jpg` for `IMG_1234`)
+    /// keeps the number; a name with several numbers (`PXL_20240501_123045123`, `20240501_123045_001`, a UUID) is only
+    /// found when all of them are there, so the next photo of the same day or second is not taken for this one.
+    static func namesAgree(local: String, server: String) -> Bool {
+        if stem(local) == stem(server) { return true }
+        let numbers = numbers(in: local)
+        guard !numbers.isEmpty else { return false }
+        return numbers.allSatisfy { containsNumber(server, $0) }
+    }
+
+    /// Whether another device resource of the same second (another asset, same kind and rendition) has a name that the
+    /// same server file would agree with: the same name, or the same numbers.
+    static func isAmbiguousName(_ resource: LocalResource, among siblings: [LocalResource]) -> Bool {
+        let numbers = numbers(in: resource.originalName)
+        let stem = stem(resource.originalName)
+        let raw = isRaw(resource)
+        return siblings.contains { other in
+            guard other.localIdentifier != resource.localIdentifier, other.kind == resource.kind,
+                other.rendition == resource.rendition, isRaw(other) == raw,
+                abs(other.createdAt.timeIntervalSince(resource.createdAt)) < tolerance
+            else { return false }
+            return Self.stem(other.originalName) == stem || Self.numbers(in: other.originalName) == numbers
+        }
     }
 
     /// The number must appear as a whole digit run (so `123` does not match `1234`).

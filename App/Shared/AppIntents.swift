@@ -45,7 +45,9 @@ struct BackUpNowIntent: AppIntent {
         guard backup.settings.isEnabled else {
             return .result(dialog: "Backup is not turned on in Nextcloud Photos.")
         }
-        let message = await backup.runNow().message
+        // With access to selected photos only, the answer says so.
+        let outcome = await backup.runNow()
+        let message = outcome.message(limitedAccess: backup.hasLimitedAccess)
         return .result(dialog: IntentDialog(stringLiteral: message))
     }
 }

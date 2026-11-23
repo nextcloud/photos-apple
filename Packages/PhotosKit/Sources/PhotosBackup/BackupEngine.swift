@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import CryptoKit
 import Foundation
 import GRDB
 import OSLog
@@ -18,7 +19,11 @@ public struct BackupStatus: Sendable, Equatable {
         case reconciling(checked: Int, total: Int)
         case uploading(done: Int, total: Int, current: String)
         case paused(String)
+        /// Everything this device has is on the server: nothing failed, nothing waits.
         case upToDate
+        /// The pass ran to its end, but this many items could not be uploaded (`lastFailure` says why). They are tried
+        /// again after their waiting time, or at once when the user asks.
+        case incomplete(failed: Int)
         case failed(String)
     }
 
@@ -28,8 +33,17 @@ public struct BackupStatus: Sendable, Equatable {
     /// What the current or last pass uploaded.
     public var uploadedThisPass = 0
     public var matched = 0
+    /// Items that still have to be uploaded (they wait for Wi-Fi, for the system, or for the next pass). Failed items
+    /// are not in here; see `failed`.
     public var pending = 0
+    /// Items whose upload failed and that wait for their next attempt.
     public var failed = 0
+    /// Why the most recent of them failed.
+    public var lastFailure: String?
+    /// Items left out because their original is only in iCloud and "Download originals from iCloud" is off.
+    public var skipped = 0
+    /// The app may only see the photos the user selected ("limited access"); everything else is not backed up.
+    public var isLimitedAccess = false
     public var lastRun: Date?
     /// Set when a run stopped because of something only the user can fix (the phase is then `.failed` with the message).
     public var blocker: Blocker?
@@ -41,7 +55,7 @@ public struct BackupStatus: Sendable, Equatable {
     public var isRunning: Bool {
         switch phase {
         case .scanning, .reconciling, .uploading: true
-        case .idle, .notAuthorized, .paused, .upToDate, .failed: false
+        case .idle, .notAuthorized, .paused, .upToDate, .incomplete, .failed: false
         }
     }
 
@@ -55,6 +69,8 @@ public struct BackupStatus: Sendable, Equatable {
         case forbidden
         /// The server's certificate is not trusted, or it asks for a client certificate.
         case serverTrust
+        /// This device has no room for the file that would be uploaded.
+        case deviceStorageFull
     }
 
     public init() {}
@@ -122,6 +138,16 @@ public actor BackupEngine {
     var missingCheckInterval: TimeInterval = 60
     /// Counts of the upload phase of the running pass.
     private var progress: (done: Int, total: Int, current: String)?
+    /// Uploads the server refused because their name was taken meanwhile (412): the running pass prepares them again.
+    private var retake: [BackupResource] = []
+    /// Where the library writes its exports (`PhotoLibrarySource.exportDirectory`); nil: nothing is kept or swept.
+    let exportDirectory: URL?
+    private var exportsSwept = false
+    private var keptExportMinimumSize = BackupPolicy.keptExportMinimumSize
+    /// What the Files app uploaded (SPEC §7.18.5).
+    let filesLedger: @Sendable (AccountID) -> Set<String>
+    /// Free space on this device, when it can be told.
+    private var freeSpace: @Sendable () -> Int64?
 
     struct Resume {
         var settings: BackupSettings
@@ -129,6 +155,15 @@ public actor BackupEngine {
         var videosOnly: Bool
         /// A request failed although the path looked fine: wait for the next change instead of trying again at once.
         var needsChange: Bool
+        /// Originals wait for a connection that may download from iCloud (Wi-Fi, no Low Data Mode).
+        var needsICloud = false
+    }
+
+    /// Why some resources still wait after the upload phase.
+    struct Waiting: Equatable {
+        var reason: BackupPause
+        var videosOnly = false
+        var needsICloud = false
     }
 
     static let scanSignatureKey = "backup.scanSignature"
@@ -139,16 +174,22 @@ public actor BackupEngine {
         self.init(
             library: PhotoLibrarySource(),
             remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database),
-            database: database, accountId: accountId, systemConditions: true, background: background)
+            database: database, accountId: accountId, systemConditions: true, background: background,
+            exportDirectory: PhotoLibrarySource.exportDirectory)
     }
 
     /// - Parameter systemConditions: watch the network path and Low Power Mode. Tests pass `false` and call
     ///   `setNetwork` / `setLowPower` themselves.
     init(
         library: any BackupLibrary, remote: any BackupRemote, database: AccountDatabase, accountId: AccountID,
-        systemConditions: Bool = false, background: BackgroundUploads? = nil, now: @escaping @Sendable () -> Date = { Date() }
+        systemConditions: Bool = false, background: BackgroundUploads? = nil, exportDirectory: URL? = nil,
+        filesLedger: @escaping @Sendable (AccountID) -> Set<String> = { FilesAppLedger.uploadedAssets(accountId: $0) },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.background = background
+        self.exportDirectory = exportDirectory
+        self.filesLedger = filesLedger
+        freeSpace = { Self.freeDeviceSpace(at: exportDirectory ?? FileManager.default.temporaryDirectory) }
         if let background {
             let journal = BackgroundUploadJournal(directory: background.directory)
             journal.removeUnknownFiles()
@@ -175,6 +216,22 @@ public actor BackupEngine {
     }
 
     public func setMetadataEditing(_ enabled: Bool) { metadataEditing = enabled }
+
+    func setFreeSpace(_ freeSpace: @escaping @Sendable () -> Int64?) { self.freeSpace = freeSpace }
+
+    func setKeptExportMinimumSize(_ size: Int64) { keptExportMinimumSize = size }
+
+    /// What the system says can be written for something the user asked for (it frees caches for that), in bytes.
+    static func freeDeviceSpace(at directory: URL) -> Int64? {
+        // The directory may not exist yet; its volume is that of the first parent that does.
+        var url = directory
+        while !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)), url.pathComponents.count > 1 {
+            url = url.deletingLastPathComponent()
+        }
+        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        return values?.volumeAvailableCapacity.map(Int64.init)
+    }
 
     private func publish(_ phase: BackupStatus.Phase) {
         status.phase = phase
@@ -221,12 +278,20 @@ public actor BackupEngine {
             resume = waiting
         }
         guard !waiting.needsChange, pauseReason(waiting.settings, isVideo: waiting.videosOnly) == nil else { return }
+        // Originals from iCloud wait for Wi-Fi; switching the download off ends the wait (they are skipped then).
+        if waiting.needsICloud, waiting.settings.downloadFromICloud,
+            !BackupPolicy.allowsICloudDownload(waiting.settings, network: network)
+        {
+            return
+        }
         resume = nil
         Task { await self.run(waiting.settings) }
     }
 
-    private func pause(_ reason: BackupPause, settings: BackupSettings, videosOnly: Bool = false, needsChange: Bool = false) {
-        resume = Resume(settings: settings, videosOnly: videosOnly, needsChange: needsChange)
+    private func pause(
+        _ reason: BackupPause, settings: BackupSettings, videosOnly: Bool = false, needsChange: Bool = false, needsICloud: Bool = false
+    ) {
+        resume = Resume(settings: settings, videosOnly: videosOnly, needsChange: needsChange, needsICloud: needsICloud)
         publish(.paused(reason.message))
     }
 
@@ -295,6 +360,8 @@ public actor BackupEngine {
             publish(.notAuthorized)
             return
         }
+        status.isLimitedAccess = library.isLimited
+        sweepExports()
         if !dryRun, let reason = pauseReason(settings, isVideo: false) {
             pause(reason, settings: settings)
             return
@@ -302,11 +369,12 @@ public actor BackupEngine {
         publish(.scanning)
         do {
             let toUpload = try await scanAndReconcile(settings, retryFailed: retryFailed)
-            status.pending = toUpload.count
             try refreshCounts()
             if dryRun || toUpload.isEmpty {
                 status.lastRun = now()
-                publish(toUpload.isEmpty ? .upToDate : .idle)
+                // "Up to date" is what the ledger says, not what this pass found to do: items that failed earlier and
+                // wait for their next attempt are not in `toUpload`.
+                publish(toUpload.isEmpty ? BackupPolicy.finalPhase(failed: status.failed, pending: status.pending) : .idle)
                 return
             }
             await remote.removeStaleUploads()
@@ -314,9 +382,9 @@ public actor BackupEngine {
             status.lastRun = now()
             try refreshCounts()
             if let waiting {
-                pause(waiting.reason, settings: settings, videosOnly: waiting.videosOnly)
+                pause(waiting.reason, settings: settings, videosOnly: waiting.videosOnly, needsICloud: waiting.needsICloud)
             } else {
-                publish(status.pending == 0 ? .upToDate : .idle)
+                publish(BackupPolicy.finalPhase(failed: status.failed, pending: status.pending))
             }
         } catch  where Task.isCancelled || BackupPolicy.isCancellation(error) {
             // A request that was cancelled in the middle reports it as a network error.
@@ -365,7 +433,10 @@ public actor BackupEngine {
             if fullScan || retryFailed { return true }
             return BackupPolicy.needsScan(entries: byAsset[localIdentifier] ?? [], modifiedAt: modifiedAt, now: now)
         }
-        let filesUploaded = settings.filesAppMode == .notUsed ? [] : FilesAppLedger.uploadedAssets(accountId: accountId)
+        let filesUploaded = settings.filesAppMode == .notUsed ? [] : filesLedger(accountId)
+        // Files' record stands for the photo or video itself, not for every resource of the asset.
+        let filesPrimary = filesUploaded.isEmpty ? [] : BackupPolicy.filesAppPrimary(resources)
+        try removeStaleEntries(ledger: ledger, scanned: resources, everythingScanned: fullScan || retryFailed, now: now)
 
         var order: [LedgerKey: Int] = [:]
         var work: [BackupResource] = []
@@ -376,12 +447,14 @@ public actor BackupEngine {
             let key = LedgerKey(localIdentifier: resource.localIdentifier, kind: resource.kind.rawValue)
             order[key] = index
             let entry = ledger[key]
-            switch BackupPolicy.action(for: resource, entry: entry, now: now, retryFailed: retryFailed) {
+            let action = BackupPolicy.action(
+                for: resource, entry: entry, now: now, retryFailed: retryFailed, retrySkipped: settings.downloadFromICloud)
+            switch action {
             case .done, .waiting: continue
             case .touch: touched.append(resource)
             case .upload: direct.append(resource)
             case .reconcile:
-                if filesUploaded.contains(resource.localIdentifier) {
+                if filesUploaded.contains(resource.localIdentifier), filesPrimary.contains(key) {
                     try record(resource, state: .matched, matchedBy: .filesLedger)
                     continue
                 }
@@ -444,42 +517,89 @@ public actor BackupEngine {
     ///
     /// With `background`, files up to its size limit are prepared here (name, folder) and handed to the system, a few
     /// ahead of what it has finished; the pass ends when the system has reported all of them, or leaves them to it when it
-    /// is interrupted. Larger files are sent in chunks by the app itself, as without `background`.
-    func upload(_ work: [BackupResource], settings: BackupSettings) async throws -> (reason: BackupPause, videosOnly: Bool)? {
+    /// is interrupted. Larger files are sent in chunks by the app itself, as without `background`; they come last
+    /// (`BackupPolicy.uploadOrder`), so that a pass that only gets a short time hands everything else over first.
+    func upload(_ work: [BackupResource], settings: BackupSettings) async throws -> Waiting? {
         backgroundStop = nil
+        retake = []
         await checkForMissingUploads()
         // What the system reported while the server was asked is done already.
         progress = (work.count { settled.contains(LedgerKey($0)) }, work.count, "")
         defer { progress = nil }
         publishProgress()
         var heldVideos: BackupPause?
-        for resource in work {
+        var heldForICloud = false
+        let order = BackupPolicy.uploadOrder(work, backgroundLimit: background?.maxFileSize)
+        var queue = order.first + order.last
+        /// Resources the app sends itself, after everything the system can take.
+        var large = Set(order.last.map { LedgerKey($0) })
+        /// Exports that turned out too large for the system while smaller files were still waiting.
+        var postponed: [LedgerKey: (resource: BackupResource, file: URL)] = [:]
+        defer {
+            // The pass ended before it got to them: the next one does not have to read them again.
+            for (resource, file) in postponed.values { keepOrDiscard(file, of: resource, settings: settings, keep: true) }
+        }
+        var nameAttempts: [LedgerKey: Int] = [:]
+        var index = 0
+        while true {
             try Task.checkCancellation()
             try throwBackgroundStop()
-            if let reason = pauseReason(settings, isVideo: false) { return (reason, false) }
+            if !retake.isEmpty {
+                // Their name was taken meanwhile: once more, with a new look at what is there.
+                for resource in retake { nameAttempts[LedgerKey(resource), default: 0] += 1 }
+                queue.insert(contentsOf: retake, at: index)
+                retake = []
+            }
+            guard index < queue.count else {
+                // The pass is through when the system is.
+                guard (journal?.jobs.count ?? 0) + finishing > 0 else { break }
+                try await waitForBackgroundUploads()
+                if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
+                if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
+                continue
+            }
+            let resource = queue[index]
+            let key = LedgerKey(resource)
+            index += 1
+            if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
             if resource.mediaKind == .video, let reason = pauseReason(settings, isVideo: true) {
                 // Photos go on while the videos wait for Wi-Fi.
                 heldVideos = reason
                 continue
             }
             // With the system since an earlier pass, or reported by it since this one started.
-            if journal?.job(for: resource) != nil || settled.contains(LedgerKey(resource)) { continue }
-            while backgroundIsFull(adding: resource) {
+            if journal?.job(for: resource) != nil || settled.contains(key) { continue }
+            // The system has to have room for a file it will take; a file the app sends itself does not wait for it.
+            while !large.contains(key), backgroundIsFull(adding: resource) {
                 try await waitForBackgroundUploads()
-                if let reason = pauseReason(settings, isVideo: false) { return (reason, false) }
+                if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
                 if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
             }
             progress?.current = resource.originalName
             publishProgress()
-            var file: URL?
+            var file: URL? = postponed.removeValue(forKey: key)?.file
             var handedOver = false
-            defer { if let file { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) } }
+            var keep = false
+            defer { if let file { keepOrDiscard(file, of: resource, settings: settings, keep: keep) } }
+            let mayDownload = BackupPolicy.allowsICloudDownload(settings, network: network)
             do {
-                var exported = try await library.export(resource, settings: settings)
-                file = exported
-                if settings.format == .mostCompatible, resource.mediaKind == .image, resource.kind != .raw {
-                    exported = try PhotoLibrarySource.convertToJPEG(exported)
-                    file = exported
+                if nameAttempts[key, default: 0] > Self.maxNameAttempts { throw NetworkError.preconditionFailed }
+                let exported: URL
+                if let file {
+                    exported = file
+                } else if let kept = keptExport(of: resource, settings: settings) {
+                    exported = kept
+                    file = kept
+                } else {
+                    // Before anything is written: a full device is not this file's fault, and the next one would not fit either.
+                    guard BackupPolicy.hasRoom(free: freeSpace(), size: resource.byteSize) else { throw BackupDeviceError.outOfSpace }
+                    var written = try await library.export(resource, settings: settings, allowNetwork: mayDownload)
+                    file = written
+                    if settings.format == .mostCompatible, resource.mediaKind == .image, resource.kind != .raw {
+                        written = try PhotoLibrarySource.convertToJPEG(written)
+                        file = written
+                    }
+                    exported = written
                 }
                 let name = BackupNaming.fileName(
                     originalName: resource.originalName, fileExtension: exported.pathExtension, isVideo: resource.mediaKind == .video,
@@ -488,11 +608,28 @@ public actor BackupEngine {
                 // Layer 5: an existing file with the same name and size counts as uploaded; otherwise " (2)".
                 if let background, Self.size(of: exported) <= background.maxFileSize {
                     handedOver = try await handOver(resource, file: exported, fileName: name, folder: folder, settings: settings)
+                } else if background != nil, !large.contains(key), queue[index...].contains(where: { !large.contains(LedgerKey($0)) }) {
+                    // Larger than PhotoKit said (or it did not say): after the files the system can take, like the others.
+                    large.insert(key)
+                    postponed[key] = (resource, exported)
+                    file = nil
+                    queue.append(resource)
+                    continue
                 } else {
                     let uploaded = try await remote.upload(file: exported, fileName: name, folder: folder, capturedAt: resource.createdAt)
                     try await completed(resource, uploaded: uploaded)
                 }
+            } catch BackupDeviceError.needsICloudDownload where !mayDownload {
+                if settings.downloadFromICloud {
+                    // It waits for Wi-Fi; that is not a failure.
+                    heldForICloud = true
+                    continue
+                }
+                // The user does not want downloads from iCloud: left out until that changes.
+                try record(resource, state: .skipped, error: BackupDeviceError.needsICloudDownload.localizedDescription)
             } catch {
+                // An upload that was interrupted goes on with the same file (a large one is expensive to read again).
+                keep = Task.isCancelled || BackupPolicy.isCancellation(error) || (error as? NetworkError)?.isTransient == true
                 // The user's pause is not a failure of this file.
                 if Task.isCancelled { throw CancellationError() }
                 if let stop = uploadFailed(resource, error: error) { throw stop }
@@ -500,17 +637,15 @@ public actor BackupEngine {
             // An upload that is with the system now is counted when the system reports it.
             if handedOver { continue }
             progress?.done += 1
-            status.pending = max(0, status.pending - 1)
-        }
-        // The pass is through when the system is.
-        while (journal?.jobs.count ?? 0) + finishing > 0 {
-            try await waitForBackgroundUploads()
-            if let reason = pauseReason(settings, isVideo: false) { return (reason, false) }
-            if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
+            try? refreshCounts()
         }
         try throwBackgroundStop()
-        return heldVideos.map { ($0, true) }
+        if let heldVideos { return Waiting(reason: heldVideos, videosOnly: true, needsICloud: heldForICloud) }
+        return heldForICloud ? Waiting(reason: .iCloud, needsICloud: true) : nil
     }
+
+    /// How often a pass prepares an upload again whose name was taken between the name check and the PUT.
+    static let maxNameAttempts = 3
 
     /// The upload of a resource arrived: remembers it, links Live Photo halves, puts the file into the local index.
     private func completed(_ resource: BackupResource, uploaded: UploadedFile) async throws {
@@ -530,9 +665,9 @@ public actor BackupEngine {
         let blocker = BackupPolicy.blocker(for: error)
         // A full quota or a refusal may concern this file only (too big, blocked type): it backs off like any
         // failed file, so the next run starts with another one. A lost login or certificate says nothing about the file.
-        if blocker != .unauthorized, blocker != .serverTrust {
+        // Nor does a full device.
+        if blocker != .unauthorized, blocker != .serverTrust, blocker != .deviceStorageFull {
             try? record(resource, state: .failed, error: error.localizedDescription)
-            status.failed += 1
         }
         return blocker != nil ? error : nil
     }
@@ -596,32 +731,50 @@ public actor BackupEngine {
         missing.remove(job.id)
         guard !isShutDown else { return }
         finishing += 1
-        let counts = await finish(job, event: event)
+        let result = await finish(job, event: event)
         finishing -= 1
-        settled.insert(LedgerKey(job.resource))
-        if counts {
+        switch result {
+        case .done:
+            settled.insert(LedgerKey(job.resource))
             progress?.done += 1
-            status.pending = max(0, status.pending - 1)
+        case .stillToDo:
+            settled.insert(LedgerKey(job.resource))
+        case .nameTaken:
+            // Only a running pass can prepare it again; otherwise the next one does.
+            if progress != nil { retake.append(job.resource) }
         }
+        try? refreshCounts()
         publishProgress()
         wakeWaiters()
     }
 
-    /// Returns whether the resource is done with for this pass (uploaded, or failed and recorded).
-    private func finish(_ job: BackgroundUploadJob, event: BackgroundUploadEvent) async -> Bool {
+    enum Finished {
+        /// Done with for this pass: uploaded, or failed and recorded.
+        case done
+        /// Not sent (taken back, or the pass was stopped): it stays to do.
+        case stillToDo
+        /// The server did not take the file because its name was taken after the name check (`If-None-Match: *` → 412).
+        /// Nothing was overwritten; the upload is prepared again, which finds the file that is there now (the same size
+        /// counts as uploaded) or the next free name.
+        case nameTaken
+    }
+
+    private func finish(_ job: BackgroundUploadJob, event: BackgroundUploadEvent) async -> Finished {
         do {
             if let error = event.error { throw error }
             guard let response = event.response else { throw NetworkError.invalidResponse("upload without an answer") }
             let uploaded = try await remote.finishUpload(path: job.path, response: response)
             try await completed(job.resource, uploaded: uploaded)
-            return true
+            return .done
+        } catch NetworkError.preconditionFailed {
+            return .nameTaken
         } catch {
             // Taken back (the user's pause, a video that has to wait for Wi-Fi): still to do, not a failure.
-            if BackupPolicy.isCancellation(error) { return false }
-            guard let stop = uploadFailed(job.resource, error: error) else { return true }
+            if BackupPolicy.isCancellation(error) { return .stillToDo }
+            guard let stop = uploadFailed(job.resource, error: error) else { return .done }
             // Only a running pass can be stopped; without one the resource simply stays to do.
             if progress != nil, backgroundStop == nil { backgroundStop = stop }
-            return false
+            return .stillToDo
         }
     }
 
@@ -798,15 +951,138 @@ public actor BackupEngine {
         }
     }
 
+    /// The counts of the status are those of the ledger: what failed stays "failed" (and not "up to date") until it is
+    /// uploaded, also across passes that do not touch it because it waits for its next attempt.
     func refreshCounts() throws {
-        let counts = try database.writer.read { db in
-            try Row.fetchAll(db, sql: "SELECT state, count(*) AS n FROM backupAsset GROUP BY state").reduce(into: [String: Int]()) {
+        let (counts, lastFailure) = try database.writer.read { db in
+            let counts = try Row.fetchAll(db, sql: "SELECT state, count(*) AS n FROM backupAsset GROUP BY state").reduce(
+                into: [String: Int]()
+            ) {
                 $0[$1["state"]] = $1["n"]
             }
+            let lastFailure = try String.fetchOne(
+                db, sql: "SELECT lastError FROM backupAsset WHERE state = ? AND lastError IS NOT NULL ORDER BY updatedAt DESC LIMIT 1",
+                arguments: [BackupItemState.failed.rawValue])
+            return (counts, lastFailure)
         }
         status.uploaded = counts[BackupItemState.uploaded.rawValue] ?? 0
         status.matched = counts[BackupItemState.matched.rawValue] ?? 0
         status.failed = counts[BackupItemState.failed.rawValue] ?? 0
+        status.pending = counts[BackupItemState.pending.rawValue] ?? 0
+        status.skipped = counts[BackupItemState.skipped.rawValue] ?? 0
+        status.lastFailure = lastFailure
+    }
+
+    /// Removes entries of resources that are no longer there to upload (the photo was deleted on the device, the options
+    /// no longer select it, an edit was reverted). They were never uploaded, and nothing would ever change them again:
+    /// the backup could not become "up to date".
+    ///
+    /// An asset with a pending entry is always scanned, so a pending entry without a scanned resource is stale. A failed
+    /// one is only scanned again when its waiting time is over, a skipped one only in a scan of everything.
+    func removeStaleEntries(ledger: [LedgerKey: BackupLedgerEntry], scanned: [BackupResource], everythingScanned: Bool, now: Date) throws {
+        let found = Set(scanned.map { LedgerKey($0) })
+        let stale = ledger.filter { key, entry in
+            guard !found.contains(key), journal?.jobs.values.contains(where: { LedgerKey($0.resource) == key }) != true else {
+                return false
+            }
+            switch BackupItemState(rawValue: entry.state) {
+            case .pending: return true
+            case .failed: return everythingScanned || !BackupPolicy.isBackingOff(entry, now: now)
+            case .skipped: return everythingScanned
+            default: return false
+            }
+        }
+        guard !stale.isEmpty else { return }
+        try database.writer.write { db in
+            for key in stale.keys {
+                try db.execute(
+                    sql: "DELETE FROM backupAsset WHERE localIdentifier = ? AND resourceKind = ?", arguments: [key.localIdentifier, key.kind])
+            }
+        }
+    }
+
+    // MARK: Exported files
+
+    /// The directory an interrupted upload's export waits in for the next attempt.
+    private func keptDirectory(of resource: BackupResource, settings: BackupSettings) -> URL? {
+        guard let exportDirectory else { return nil }
+        // Another edit, another size or another format is another file.
+        let identity =
+            "\(resource.localIdentifier)|\(resource.kind.rawValue)|\(resource.modifiedAt?.timeIntervalSince1970 ?? 0)|\(resource.byteSize ?? -1)|\(settings.format.rawValue)"
+        let name = SHA256.hash(data: Data(identity.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        return exportDirectory.appending(path: "\(Self.keptFolder)/\(name)")
+    }
+
+    static let keptFolder = "Kept"
+    static let keptInfoFile = "resource.json"
+
+    /// What a kept export belongs to, next to it, so that it can be told later whether anybody still needs it.
+    struct KeptExport: Codable {
+        var localIdentifier: String
+        var kind: String
+        var keptAt: Date
+    }
+
+    /// The export an earlier, interrupted attempt left for this resource.
+    private func keptExport(of resource: BackupResource, settings: BackupSettings) -> URL? {
+        guard let directory = keptDirectory(of: resource, settings: settings) else { return nil }
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory.appending(path: "data"), includingPropertiesForKeys: nil)) ?? []
+        guard let file = files.first, Self.size(of: file) > 0 else { return nil }
+        return file
+    }
+
+    /// What happens to an exported file when the engine is done with it: removed, or, when its upload was interrupted and
+    /// it is large, put aside for the next attempt (`keep`).
+    private func keepOrDiscard(_ file: URL, of resource: BackupResource, settings: BackupSettings, keep: Bool) {
+        let files = FileManager.default
+        let directory = file.deletingLastPathComponent()
+        let kept = keptDirectory(of: resource, settings: settings)
+        let isKept = kept.map { directory.standardizedFileURL.path == $0.appending(path: "data").standardizedFileURL.path } ?? false
+        guard keep, let kept, files.fileExists(atPath: file.path(percentEncoded: false)),
+            Self.size(of: file) >= keptExportMinimumSize
+        else {
+            try? files.removeItem(at: isKept ? directory.deletingLastPathComponent() : directory)
+            return
+        }
+        if isKept { return }
+        do {
+            try? files.removeItem(at: kept)
+            try files.createDirectory(at: kept, withIntermediateDirectories: true)
+            try files.moveItem(at: directory, to: kept.appending(path: "data"))
+            let info = KeptExport(localIdentifier: resource.localIdentifier, kind: resource.kind.rawValue, keptAt: now())
+            try JSONEncoder().encode(info).write(to: kept.appending(path: Self.keptInfoFile))
+        } catch {
+            try? files.removeItem(at: directory)
+            try? files.removeItem(at: kept)
+        }
+    }
+
+    /// Removes what earlier runs left in the export directory, once, before the first pass of this engine: exports of a
+    /// pass that did not end (the app was ended in the middle), and kept exports nobody needs any more (their resource is
+    /// uploaded, gone from the ledger, or they are old).
+    func sweepExports() {
+        guard let exportDirectory, !exportsSwept else { return }
+        exportsSwept = true
+        let files = FileManager.default
+        let ledger = (try? loadLedger()) ?? [:]
+        for url in (try? files.contentsOfDirectory(at: exportDirectory, includingPropertiesForKeys: nil)) ?? [] {
+            guard url.lastPathComponent == Self.keptFolder else {
+                try? files.removeItem(at: url)
+                continue
+            }
+            for kept in (try? files.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [] {
+                if !isNeeded(kept, ledger: ledger) { try? files.removeItem(at: kept) }
+            }
+        }
+    }
+
+    private func isNeeded(_ kept: URL, ledger: [LedgerKey: BackupLedgerEntry]) -> Bool {
+        guard let data = try? Data(contentsOf: kept.appending(path: Self.keptInfoFile)),
+            let info = try? JSONDecoder().decode(KeptExport.self, from: data),
+            now().timeIntervalSince(info.keptAt) < BackupPolicy.keptExportAge,
+            let entry = ledger[LedgerKey(localIdentifier: info.localIdentifier, kind: info.kind)]
+        else { return false }
+        return !BackupPolicy.isComplete(entry) && !BackupPolicy.isSkipped(entry)
     }
 
     /// Ledger entries for the details list.

@@ -53,6 +53,85 @@ import Testing
         #expect(BackupMatcher.match(second, candidates: [candidate], localSiblings: [first, second])?.1 == .serverTimeName)
     }
 
+    // MARK: Names with more than one number (review r2 item 5)
+
+    @Test func androidNamesOfTheSameSecondAreNotTakenForEachOther() {
+        // Pixel: date, then time with milliseconds. Two photos in one second; only the second one is on the server
+        // (re-encoded there, so neither size nor dimensions say anything).
+        let first = local("PXL_20240501_123045123.jpg", w: nil, h: nil)
+        let second = local("PXL_20240501_123045789.jpg", at: 0.6, w: nil, h: nil)
+        let onServer = remote("/Photos/2024/05/PXL_20240501_123045789.jpg", size: 1_234)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first, second]) == nil)
+        #expect(BackupMatcher.match(second, candidates: [onServer], localSiblings: [first, second])?.1 == .serverTimeName)
+        // Also when the other photo of that second is not in the batch (it was deleted on the device).
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first]) == nil)
+    }
+
+    @Test func samsungBurstNamesAreNotTakenForEachOther() {
+        let first = local("20240501_123045_001.jpg", w: nil, h: nil)
+        let second = local("20240501_123045_002.jpg", w: nil, h: nil)
+        let onServer = remote("/Photos/20240501_123045_002.jpg", size: 1_234)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first, second]) == nil)
+        #expect(BackupMatcher.match(second, candidates: [onServer], localSiblings: [first, second])?.0 == onServer)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first]) == nil)
+    }
+
+    @Test func uuidNamesAreNotMatchedByTheirFirstDigit() {
+        // Saved from a messenger: UUID names. The first digit run of the first one is "3", which is in the other name too.
+        let first = local("3F2504E0-4F89-11D3-9A0C-0305E82C3301.jpg", w: nil, h: nil)
+        let second = local("9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D.jpg", w: nil, h: nil)
+        let onServer = remote("/Photos/9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D.jpg", size: 1_234)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first, second]) == nil)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first]) == nil)
+        // The same name, in any case and with another extension, is the same photo.
+        #expect(BackupMatcher.match(second, candidates: [onServer], localSiblings: [first, second])?.1 == .serverTimeName)
+        let converted = remote("/Photos/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d.jpeg", size: 1_234)
+        #expect(BackupMatcher.match(second, candidates: [converted], localSiblings: [second])?.1 == .serverTimeName)
+    }
+
+    @Test func aNameWithoutNumbersMatchesTheSameName() {
+        let resource = local("holiday.jpeg", w: nil, h: nil)
+        #expect(BackupMatcher.match(resource, candidates: [remote("/Photos/Holiday.jpg", size: 9)], localSiblings: [resource]) != nil)
+        #expect(BackupMatcher.match(resource, candidates: [remote("/Photos/birthday.jpg", size: 9)], localSiblings: [resource]) == nil)
+    }
+
+    @Test func twoDeviceFilesWithTheSameNumbersInOneSecondAreNotDecidedByName() {
+        // Two different assets that would both fit the one server file: the name cannot tell which one it is.
+        let first = LocalResource(localIdentifier: "a", kind: .image, createdAt: t0, originalName: "IMG_1234.HEIC", byteSize: 2_000)
+        let second = LocalResource(localIdentifier: "b", kind: .image, createdAt: t0 + 0.5, originalName: "IMG_1234.JPG", byteSize: 3_000)
+        let filesNaming = remote("/Photos/26-09-21 16-53-20 1234.jpg", captured: nil, modified: 0, size: 3_100)
+        #expect(BackupMatcher.match(first, candidates: [filesNaming], localSiblings: [first, second]) == nil)
+        #expect(BackupMatcher.match(second, candidates: [filesNaming], localSiblings: [first, second]) == nil)
+        // The exact size still decides.
+        let exact = remote("/Photos/IMG_1234.JPG", size: 3_000)
+        #expect(BackupMatcher.match(second, candidates: [exact], localSiblings: [first, second])?.1 == .serverTimeSize)
+        #expect(BackupMatcher.match(first, candidates: [exact], localSiblings: [first, second]) == nil)
+        // The renditions of one asset share its second and its number; they are told apart by their kind, not here.
+        let edit = LocalResource(
+            localIdentifier: "a", kind: .image, createdAt: t0, originalName: "IMG_E1234.HEIC", byteSize: 1_000, rendition: .edited)
+        #expect(BackupMatcher.match(first, candidates: [filesNaming], localSiblings: [first, edit])?.1 == .serverTimeName)
+    }
+
+    @Test func aShiftedTimeNeedsAllNumbersToo() {
+        // EXIF time read without its offset: two hours off. Only the photo whose whole name fits is taken.
+        let first = local("PXL_20240501_123045123.jpg", w: nil, h: nil)
+        let onServer = remote("/Photos/PXL_20240501_123045789.jpg", captured: 7200, size: 1_234)
+        #expect(BackupMatcher.match(first, candidates: [onServer], localSiblings: [first]) == nil)
+        let own = remote("/Photos/PXL_20240501_123045123.jpg", captured: 7200, size: 1_234)
+        #expect(BackupMatcher.match(first, candidates: [own], localSiblings: [first])?.1 == .serverTimeName)
+    }
+
+    @Test func numbersAndStems() {
+        #expect(BackupMatcher.numbers(in: "PXL_20240501_123045123.jpg") == ["20240501", "123045123"])
+        #expect(BackupMatcher.numbers(in: "IMG_1234.HEIC") == ["1234"])
+        #expect(BackupMatcher.numbers(in: "holiday.mp4").isEmpty)
+        #expect(BackupMatcher.namesAgree(local: "IMG_1234.HEIC", server: "26-09-21 16-53-20 1234.jpg"))
+        #expect(!BackupMatcher.namesAgree(local: "IMG_1234.HEIC", server: "26-09-21 16-53-20 1235.jpg"))
+        #expect(!BackupMatcher.namesAgree(local: "IMG_123.HEIC", server: "IMG_1234.HEIC"))
+        #expect(BackupMatcher.namesAgree(local: "IMG_1234 (edited).jpg", server: "img_1234.heic"))
+        #expect(!BackupMatcher.namesAgree(local: "holiday.jpg", server: "IMG_1234.jpg"))
+    }
+
     @Test func convertedCopyByDimensionsWhenUnique() {
         let resource = local("DSC.HEIC")  // no number in the name
         let candidate = remote("/Photos/Photo 26-09-21.jpg", size: 999, w: 3024, h: 4032)  // rotated dimensions still match

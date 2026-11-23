@@ -7,6 +7,10 @@ import PhotosCore
 import PhotosModel
 import SwiftUI
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
 /// Backup setup, status and options (SPEC §7.18).
 struct BackupScreen: View {
     @Environment(SessionModel.self) private var session
@@ -85,6 +89,7 @@ struct BackupSetupView: View {
 struct BackupStatusView: View {
     @Environment(SessionModel.self) private var session
     @State private var entries: [BackupLedgerEntry] = []
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         let backup = session.backup
@@ -98,6 +103,9 @@ struct BackupStatusView: View {
                         Text(statusTitle(status)).font(.headline)
                         if let blocker = activeBlocker(status) {
                             Text(blockerAdvice(blocker)).font(.subheadline).foregroundStyle(.secondary)
+                        } else if case .incomplete = status.phase, let reason = status.lastFailure {
+                            // Why the most recent one failed; the details list has each item's reason.
+                            Text(reason).font(.subheadline).foregroundStyle(.secondary)
                         }
                         if let lastRun = status.lastRun {
                             Text("Last checked \(lastRun.formatted(.relative(presentation: .named)))", bundle: .module)
@@ -114,7 +122,9 @@ struct BackupStatusView: View {
                 LabeledContent(String(localized: "Uploaded", bundle: .module), value: status.uploaded.formatted())
                 LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: status.matched.formatted())
                 LabeledContent(String(localized: "Waiting", bundle: .module), value: status.pending.formatted())
-                if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: status.failed.formatted()) }
+                if status.failed > 0 { BackupFailedRow(failed: status.failed, isRunning: isRunning(status.phase)) }
+                if status.skipped > 0 { BackupSkippedRow(skipped: status.skipped) }
+                if backup.hasLimitedAccess { BackupLimitedAccessRow() }
                 HStack {
                     Button(String(localized: "Back up now", bundle: .module)) {
                         // The user asks: items that failed are tried again now instead of after their waiting time.
@@ -170,6 +180,8 @@ struct BackupStatusView: View {
         .formStyle(.grouped)
         .task(id: status.lastRun) { entries = await backup.entries() }
         .task { if status.lastRun == nil { await backup.runNow() } }
+        // Back from Settings: the access may be another one now.
+        .onChange(of: scenePhase) { _, phase in if phase == .active { backup.refreshAuthorization() } }
     }
 
     func isRunning(_ phase: BackupStatus.Phase) -> Bool {
@@ -191,6 +203,7 @@ struct BackupStatusView: View {
         case .unauthorized: "person.crop.circle.badge.exclamationmark"
         case .forbidden: "lock.fill"
         case .serverTrust: "lock.trianglebadge.exclamationmark"
+        case .deviceStorageFull: "internaldrive"
         }
     }
 
@@ -200,6 +213,7 @@ struct BackupStatusView: View {
         case .unauthorized: String(localized: "Log in again to continue the backup", bundle: .module)
         case .forbidden: String(localized: "The server does not allow the upload", bundle: .module)
         case .serverTrust: String(localized: "The connection to your Nextcloud is not trusted", bundle: .module)
+        case .deviceStorageFull: BackupWording.deviceFull
         }
     }
 
@@ -213,6 +227,10 @@ struct BackupStatusView: View {
         case .serverTrust:
             String(
                 localized: "The server's certificate changed or is not trusted, or the server asks for a client certificate.",
+                bundle: .module)
+        case .deviceStorageFull:
+            String(
+                localized: "A photo or video has to be copied before it is uploaded, and there is no room for that. Free up space, then back up again.",
                 bundle: .module)
         }
     }
@@ -234,6 +252,7 @@ struct BackupStatusView: View {
         switch phase {
         case .upToDate: Image(systemName: "checkmark.icloud.fill").foregroundStyle(.green).font(.title)
         case .failed, .notAuthorized: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.red).font(.title)
+        case .incomplete: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.orange).font(.title)
         case .paused: Image(systemName: "pause.circle.fill").foregroundStyle(.orange).font(.title)
         case .idle: Image(systemName: "icloud").font(.title)
         default: ProgressView()
@@ -249,6 +268,7 @@ struct BackupStatusView: View {
         case .uploading(let done, let total, _): String(localized: "Uploading \(done + 1) of \(total)", bundle: .module)
         case .paused(let reason): reason
         case .upToDate: String(localized: "Up to date", bundle: .module)
+        case .incomplete(let failed): BackupWording.couldNotBeUploaded(failed)
         case .failed(let message): message
         }
     }
@@ -261,7 +281,68 @@ struct BackupStatusView: View {
                 ? String(localized: "Uploaded by Nextcloud Files", bundle: .module)
                 : String(localized: "Already on your Nextcloud", bundle: .module)
         case .failed: entry.lastError ?? String(localized: "Failed", bundle: .module)
+        case .skipped: entry.lastError ?? String(localized: "Not backed up", bundle: .module)
         default: String(localized: "Waiting", bundle: .module)
+        }
+    }
+}
+
+/// Items whose upload failed: how many, and a way to try them again now instead of after their waiting time.
+struct BackupFailedRow: View {
+    @Environment(SessionModel.self) private var session
+    let failed: Int
+    let isRunning: Bool
+
+    var body: some View {
+        LabeledContent {
+            Button(String(localized: "Try again", bundle: .module)) {
+                let backup: BackupModel = session.backup
+                Task { await backup.runNow(retryFailed: true) }
+            }
+            .disabled(isRunning)
+        } label: {
+            Label {
+                Text(BackupWording.couldNotBeUploaded(failed))
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        }
+    }
+}
+
+/// Originals that are only in iCloud while "Download originals from iCloud" is off.
+struct BackupSkippedRow: View {
+    let skipped: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            LabeledContent(String(localized: "Only in iCloud, not backed up", bundle: .module), value: skipped.formatted())
+            Text("Turn on “Download originals from iCloud” to back them up.", bundle: .module)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Shown as long as the app may only see selected photos: the backup is not one of the whole library.
+struct BackupLimitedAccessRow: View {
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text("Only selected photos are backed up", bundle: .module).font(.headline)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            Text(
+                "Nextcloud Photos can only see the photos you selected. Allow access to all photos to back up your whole library.",
+                bundle: .module
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
+            Button(BackupWording.openSettings) {
+                if let url = BackupWording.photoAccessSettings { openURL(url) }
+            }
         }
     }
 }
@@ -273,7 +354,7 @@ struct BackupOptions: View {
     var body: some View {
         let backup = session.backup
         let settings = backup.settings
-        Section(String(localized: "Options", bundle: .module)) {
+        Section {
             TextField(
                 String(localized: "Folder", bundle: .module),
                 text: Binding(
@@ -320,6 +401,15 @@ struct BackupOptions: View {
             Toggle(
                 String(localized: "Videos", bundle: .module),
                 isOn: Binding(get: { settings.videos }, set: { value in backup.update { $0.videos = value } }))
+            Toggle(
+                String(localized: "Include hidden photos", bundle: .module),
+                isOn: Binding(get: { settings.includeHidden }, set: { value in backup.update { $0.includeHidden = value } }))
+        } header: {
+            Text("Options", bundle: .module)
+        } footer: {
+            if !settings.includeHidden {
+                Text("Photos you have hidden in the Photos app are not backed up.", bundle: .module)
+            }
         }
         Section(String(localized: "Network and battery", bundle: .module)) {
             Toggle(
@@ -362,6 +452,37 @@ enum BackupWording {
                 localized:
                     "Nextcloud Photos uploads the photos and videos of this device to \(host). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server.",
                 bundle: .module)
+        #endif
+    }
+
+    static var deviceFull: String {
+        #if os(macOS)
+            String(localized: "Not enough free space on this Mac", bundle: .module)
+        #else
+            String(localized: "Not enough free space on this device", bundle: .module)
+        #endif
+    }
+
+    static func couldNotBeUploaded(_ count: Int) -> String {
+        String(localized: "\(count) items could not be uploaded", bundle: .module)
+    }
+
+    static var openSettings: String {
+        #if os(macOS)
+            String(localized: "Open System Settings", bundle: .module)
+        #else
+            String(localized: "Allow full access in Settings", bundle: .module)
+        #endif
+    }
+
+    /// Where the user changes the app's access to the photo library.
+    static var photoAccessSettings: URL? {
+        #if os(macOS)
+            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos")
+        #elseif canImport(UIKit)
+            URL(string: UIApplication.openSettingsURLString)
+        #else
+            nil
         #endif
     }
 

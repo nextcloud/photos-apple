@@ -31,11 +31,17 @@ public enum BackupOutcome: Sendable, Equatable {
 
     /// The system stopped the pass before its end (the background time ran out); it goes on at the next opportunity.
     case interrupted(uploaded: Int)
+    /// Everything that may be uploaded is, but this many items were left out: their originals are only in iCloud and
+    /// "Download originals from iCloud" is off.
+    case skipped(Int)
 
     /// Derives the outcome from the engine's status after a pass.
     public init(status: BackupStatus) {
         switch status.phase {
-        case .upToDate: self = .upToDate
+        case .upToDate: self = status.skipped > 0 ? .skipped(status.skipped) : .upToDate
+        // The pass ran to its end, but items failed (now or in an earlier pass, still waiting for their next attempt).
+        case .incomplete(let failed):
+            self = .finished(uploaded: status.uploadedThisPass, remaining: status.pending, failed: failed)
         // A pause is the final state of a pass now: the engine keeps it until the run continues (by itself when the
         // network or power state allows it, or with the next pass after the user's pause).
         case .paused(let reason): self = .paused(reason)
@@ -80,9 +86,32 @@ public enum BackupOutcome: Sendable, Equatable {
             case .unauthorized: String(localized: "Backup stopped: log in to your Nextcloud again.", bundle: .module)
             case .forbidden: String(localized: "Backup stopped: the server does not allow uploads to the backup folder.", bundle: .module)
             case .serverTrust: String(localized: "Backup stopped: the connection to your Nextcloud is not trusted.", bundle: .module)
+            case .deviceStorageFull:
+                #if os(macOS)
+                    String(localized: "Backup stopped: free up space on this Mac.", bundle: .module)
+                #else
+                    String(localized: "Backup stopped: free up space on this device.", bundle: .module)
+                #endif
             }
+        case .skipped(let count):
+            String(
+                localized:
+                    "Backup finished. \(count) items that are only in iCloud were not backed up, because downloading from iCloud is turned off.",
+                bundle: .module)
         case .notAuthorized: String(localized: "Nextcloud Photos has no access to your photos.", bundle: .module)
         case .unavailable(let reason): reason
+        }
+    }
+
+    /// The sentence for the user, with what the outcome cannot know: with access to selected photos only, "your photos
+    /// are backed up" would promise too much.
+    public func message(limitedAccess: Bool) -> String {
+        guard limitedAccess else { return message }
+        switch self {
+        case .notAuthorized, .unavailable: return message
+        default:
+            let note = String(localized: "Only the photos you selected for Nextcloud Photos are backed up.", bundle: .module)
+            return message + " " + note
         }
     }
 }
@@ -205,6 +234,14 @@ public final class BackupModel {
         authorization = await PhotoLibrarySource.requestAuthorization()
     }
 
+    /// Only the photos the user selected can be seen (and backed up).
+    public var hasLimitedAccess: Bool { authorization == .limited }
+
+    /// Reads the access again (the user comes back from Settings).
+    public func refreshAuthorization() {
+        authorization = PhotoLibrarySource.authorization
+    }
+
     /// Turns backup on for the active account and runs the first pass.
     public func enable(mode: BackupSettings.FilesAppMode) async {
         guard let session = app?.session else { return }
@@ -239,6 +276,8 @@ public final class BackupModel {
             return .unavailable(reason)
         }
         let box = statusBox
+        // The user may have changed the access in Settings since the app asked.
+        authorization = PhotoLibrarySource.authorization
         runningPasses += 1
         await engine.run(settings, dryRun: !settings.isEnabled, retryFailed: retryFailed)
         runningPasses -= 1
