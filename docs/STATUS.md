@@ -55,12 +55,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   build: initial index 6.3 s (store only; was 382 s in a debug build before the search index was fixed, 15 s now in debug),
   1000-row page 65 ms, local search 0.1–10 ms (budget 100 ms), timeline 58 ms as grid rows and 13 ms as lightweight rows,
   map cells for 50 000 geotagged items 8–9 ms (budget 200 ms). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
-  measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet.
+  measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet (its observation of grid
+  rows is coalesced to one refetch per 300 ms during a sync).
 - Search index: FTS5 (trigram, `rowid = fileId`), kept current by triggers on `media`, used for free-text search (SR-3) over
   file name, place, country, caption and folder path. ⬜ Tag, person and album names are not in the index (their memberships
   are not stored locally); tag and person filters still ask the server.
 - Preview loading: a load is cancelled when nobody waits for it any more, loads are queued newest first with a limit, prefetches
-  can be taken back (`ImagePipeline.cancelPrefetch`, 🟡 not called by the grid yet). Preview and original caches are trimmed
+  are taken back when the grid cancels them (`ImagePipeline.cancelPrefetch`), and previews are decoded at the tile's pixel size
+  rather than the size of their bucket (a 400 px tile from the 1024 px bucket holds ~0.6 MB, not 3 MB). Preview and original caches are trimmed
   (LRU; 2 GB / 1 GB) at launch, in the background and every 2000 downloads; previews of offline files are kept; the memory
   cache is emptied on memory pressure and smaller on iPhone. ✅ unit-tested, 🟡 not measured on a device.
 
