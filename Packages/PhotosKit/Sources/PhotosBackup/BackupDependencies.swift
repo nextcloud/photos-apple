@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import GRDB
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -27,7 +28,23 @@ protocol BackupRemote: Sendable {
     func candidates(from start: Date, to end: Date) async throws -> [RemoteCandidate]
 
     /// Uploads a file; an existing file with the same name and size counts as uploaded (SPEC §7.18.4 layer 5).
+    ///
+    /// Requests are repeated after transient failures, and a large file that was interrupted continues where it stopped
+    /// (`Uploader`).
     func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile
+
+    /// The first half of an upload that the system sends (`BackgroundUploads`): the same lookups as `upload`, and the PUT
+    /// request instead of sending it.
+    ///
+    /// - Parameter reserved: destinations of uploads that are still on their way; they count as taken.
+    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+
+    /// The second half: what the server answered to the PUT. Throws what the answer's status stands for.
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile
+
+    /// Removes what interrupted uploads left on the server and nobody continued. Best effort.
+    func removeStaleUploads() async
 
     func linkLivePhoto(imagePath: String, imageFileId: FileID, videoPath: String, videoFileId: FileID) async throws
 
@@ -39,6 +56,14 @@ protocol BackupRemote: Sendable {
 struct PhotosBackupRemote: BackupRemote {
     let api: PhotosAPI
     let library: LibraryStore
+    let database: AccountDatabase
+
+    /// Remembers the upload folders of interrupted uploads in the account's database.
+    var uploader: Uploader {
+        var uploader = Uploader(dav: api.dav)
+        uploader.folders = BackupUploadFolders(database: database)
+        return uploader
+    }
 
     func candidates(from start: Date, to end: Date) async throws -> [RemoteCandidate] {
         let mimes =
@@ -76,8 +101,22 @@ struct PhotosBackupRemote: BackupRemote {
     }
 
     func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile {
-        try await Uploader(dav: api.dav).upload(
-            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize)
+        try await uploader.upload(file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize)
+    }
+
+    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+    {
+        try await uploader.prepare(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize, reserved: reserved)
+    }
+
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
+        try await uploader.finish(path: path, response: response)
+    }
+
+    func removeStaleUploads() async {
+        await uploader.removeStaleUploads()
     }
 
     func linkLivePhoto(imagePath: String, imageFileId: FileID, videoPath: String, videoFileId: FileID) async throws {
@@ -91,6 +130,38 @@ struct PhotosBackupRemote: BackupRemote {
             let longitude = resource.longitude
         else { return }
         try? await api.setMetadata(userPath: item.path, latitude: latitude, longitude: longitude)
+    }
+}
+
+/// The upload folders of interrupted chunked uploads, kept in the account's database (`syncState`), so they go with the account.
+struct BackupUploadFolders: UploadFolderRegistry {
+    static let key = "backup.uploadFolders"
+    let database: AccountDatabase
+
+    func entries() -> [String: Date] {
+        ((try? database.writer.read { db in try Self.load(db) }) ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+    }
+
+    func touch(_ name: String, at date: Date) {
+        change { $0[name] = date.timeIntervalSince1970 }
+    }
+
+    func remove(_ name: String) {
+        change { $0[name] = nil }
+    }
+
+    private func change(_ change: (inout [String: Double]) -> Void) {
+        try? database.writer.write { db in
+            var folders = try Self.load(db)
+            change(&folders)
+            let json = String(decoding: try JSONEncoder().encode(folders), as: UTF8.self)
+            try db.execute(sql: "INSERT OR REPLACE INTO syncState(key, value) VALUES (?, ?)", arguments: [Self.key, json])
+        }
+    }
+
+    private static func load(_ db: Database) throws -> [String: Double] {
+        guard let json = try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: [key]) else { return [:] }
+        return (try? JSONDecoder().decode([String: Double].self, from: Data(json.utf8))) ?? [:]
     }
 }
 

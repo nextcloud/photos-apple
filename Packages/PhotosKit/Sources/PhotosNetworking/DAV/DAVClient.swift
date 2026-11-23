@@ -11,6 +11,9 @@ public struct DAVClient: Sendable {
     public var extraHeaders: [String: String]
     /// Called with `.unauthorized` errors so the app can re-verify the account (SPEC §5.1.6).
     public var onUnauthorized: (@Sendable () -> Void)?
+    /// Repeats requests after transient failures. Off by default: only callers whose requests are safe to send twice
+    /// set it (the uploader).
+    public var retry: RetryPolicy?
 
     public init(
         http: HTTPClient, connection: ServerConnection, extraHeaders: [String: String] = [:], onUnauthorized: (@Sendable () -> Void)? = nil
@@ -31,7 +34,7 @@ public struct DAVClient: Sendable {
         async throws
         -> HTTPResponse
     {
-        let request = HTTPRequest(method: method, url: url, headers: headers(more), body: body, timeout: timeout)
+        let request = HTTPRequest(method: method, url: url, headers: headers(more), body: body, timeout: timeout, retry: retry)
         let response = try await http.send(request)
         if let error = NetworkError.from(status: response.status, data: response.data) {
             if error == .unauthorized { onUnauthorized?() }
@@ -128,7 +131,7 @@ public struct DAVClient: Sendable {
     }
 
     public func put(_ url: URL, file: URL, headers more: [String: String] = [:]) async throws -> HTTPResponse {
-        let request = HTTPRequest(method: "PUT", url: url, headers: headers(more), timeout: 3600)
+        let request = HTTPRequest(method: "PUT", url: url, headers: headers(more), timeout: 3600, retry: retry)
         let response = try await http.upload(request, fromFile: file)
         if let error = NetworkError.from(status: response.status, data: response.data) {
             if error == .unauthorized { onUnauthorized?() }

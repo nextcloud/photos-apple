@@ -84,11 +84,27 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 Albums and shared albums ✅, collaborators 🟡 (sharee search not exercised), public links ✅, public album viewer ✅, quick share 🟡,
 comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share extension 🟡, drag and drop 🟡, offline albums 🟡
 (originals download on Wi-Fi only by default — Settings → Storage; the folder is excluded from device backups).
+- Uploads repeat a request after a timeout, a lost connection, a 5xx or a 429/503 with a short `Retry-After` (4 attempts,
+  1/2/4 s). A chunked upload that still fails keeps its upload folder (named after destination, size, chunk size and
+  checksum); the next attempt lists the chunks and continues with the first missing one ✅ unit-tested against a stub
+  server and against the test server (interrupted after 2 of 5 chunks, continued, checksum compared).
+- Share extension: uploaded items leave the list, the rest can be tried again after a failure, and it uses the app's
+  trusted and client certificates 🟡 (compiled; not run). ⬜ It still uploads in its own process, not in a background session.
 
 ## M3 Backup — 🟡
 Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against server), matcher ✅, engine, UI, background tasks 🟡.
 - Backup belongs to one account and keeps running for it while another account is shown (the Backup screen says which) 🟡.
 - ⬜ PhotoKit background-upload extension (iOS 27, §7.18.6).
+- 🟡 iOS: files up to 100 MB are handed to a background `URLSession` (16 files / 256 MB ahead) and go on while the app is
+  suspended; the app is woken for finished uploads (`handleEventsForBackgroundURLSession`), records them and hands over
+  the next ones. Engine and bookkeeping ✅ unit-tested with a fake session; the real session ✅ against the test server
+  on macOS. **Not run on a device**: suspension, relaunch for finished uploads, behaviour when the device is locked.
+  ⬜ Larger files (chunked) are only uploaded while the app runs; they continue where they stopped.
+  macOS uploads everything in the app.
+- A pass that a background task has to give up is interrupted, not "Paused": it stays due and goes on with the next
+  background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
+- Background tasks, silent pushes and the "Back up now" intent find the app model after a launch without a window
+  (`AppHost`) 🟡 compiled for iOS, not run on a device.
 - ⬜ §7.18.8 remove backed-up photos from the device.
 - ⬜ Most-compatible video conversion (HEVC → H.264); images only.
 - ✅ Run state machine unit-tested with a fake library and server: pause and resume (Wi-Fi, Low Data, Low Power, lost connection),
@@ -105,8 +121,8 @@ Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API)
 memories ✅, search and smart albums 🟡, archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
 - Push: permission is asked after login or when the Notifications switch is turned on, not at first launch; the switch unregisters
   and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
-  needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5), and silent delete
-  pushes need `AppModel.handleBackgroundPush` wired into the app delegate plus the `remote-notification` background mode.
+  needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
+  pushes reach `AppModel.handleBackgroundPush` through the app delegates (`remote-notification` background mode).
 - ⬜ Memory player (ME-4) and "Save as album" from a memory.
 - ⬜ Map time slider; MapKit native clustering (grid clustering is used).
 - ⬜ Tag assignment UI (API exists).

@@ -29,7 +29,7 @@ struct OpenPhotosViewIntent: AppIntent {
     }
 
     @MainActor func perform() async throws -> some IntentResult {
-        AppIntentRouter.app?.requestedDestination = destination.rawValue
+        AppHost.model.requestedDestination = destination.rawValue
         return .result()
     }
 }
@@ -39,8 +39,10 @@ struct BackUpNowIntent: AppIntent {
     static let description = IntentDescription("Uploads new photos of this device to your Nextcloud.")
 
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
-        // The backup belongs to the app, not to the account on screen; it says itself how the pass ended.
-        guard let backup = AppIntentRouter.app?.backup, backup.settings.isEnabled else {
+        // The backup belongs to the app, not to the account on screen; it says itself how the pass ended. The app may have
+        // been launched in the background just for this: the model does not depend on a window (`AppHost`).
+        let backup = AppHost.model.backup
+        guard backup.settings.isEnabled else {
             return .result(dialog: "Backup is not turned on in Nextcloud Photos.")
         }
         let message = await backup.runNow().message
@@ -62,9 +64,4 @@ struct PhotosShortcuts: AppShortcutsProvider {
             intent: BackUpNowIntent(), phrases: ["Back up my photos with \(.applicationName)"], shortTitle: "Back up now",
             systemImageName: "icloud.and.arrow.up")
     }
-}
-
-/// The running app model for intents.
-@MainActor enum AppIntentRouter {
-    static var app: AppModel?
 }

@@ -8,7 +8,7 @@ import SwiftUI
 
 @main
 struct NextcloudPhotosApp: App {
-    @State private var app = AppModel()
+    @State private var app = AppHost.model
     #if os(iOS)
         @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #elseif os(macOS)
@@ -30,18 +30,6 @@ struct NextcloudPhotosApp: App {
                 #if os(macOS)
                     .frame(minWidth: 760, minHeight: 480)
                 #endif
-                #if os(iOS)
-                    .onAppear {
-                        AppDelegate.app = app
-                        NotificationRouter.shared.app = app
-                    }
-                #elseif os(macOS)
-                    .onAppear {
-                        MacAppDelegate.app = app
-                        NotificationRouter.shared.app = app
-                    }
-                #endif
-                .onAppear { AppIntentRouter.app = app }
                 .onOpenURL { url in
                     // nextcloudphotos://<destination>, …/album/<name>, …/photo/<fileId> from widgets, notifications and other apps.
                     if let link = DeepLink(url: url) { app.requestedDestination = link.request }

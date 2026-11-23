@@ -152,29 +152,40 @@ import Testing
 }
 
 @Suite struct BackupOutcomeTests {
-    func status(_ phase: BackupStatus.Phase, uploaded: Int = 0, pending: Int = 0, failed: Int = 0) -> BackupStatus {
+    func status(_ phase: BackupStatus.Phase, uploaded: Int = 0, thisPass: Int = 0, pending: Int = 0, failed: Int = 0) -> BackupStatus {
         var status = BackupStatus()
         status.phase = phase
         status.uploaded = uploaded
+        status.uploadedThisPass = thisPass
         status.pending = pending
         status.failed = failed
         return status
     }
 
     @Test func outcomeFollowsTheFinalStatus() {
-        #expect(BackupOutcome(status: status(.upToDate), uploadedBefore: 0) == .upToDate)
-        #expect(BackupOutcome(status: status(.paused("Waiting for Wi-Fi")), uploadedBefore: 0) == .paused("Waiting for Wi-Fi"))
-        #expect(BackupOutcome(status: status(.failed("Server error")), uploadedBefore: 0) == .failed("Server error"))
-        #expect(BackupOutcome(status: status(.notAuthorized), uploadedBefore: 0) == .notAuthorized)
+        #expect(BackupOutcome(status: status(.upToDate)) == .upToDate)
+        #expect(BackupOutcome(status: status(.paused("Waiting for Wi-Fi"))) == .paused("Waiting for Wi-Fi"))
+        #expect(BackupOutcome(status: status(.failed("Server error"))) == .failed("Server error"))
+        #expect(BackupOutcome(status: status(.notAuthorized)) == .notAuthorized)
         var full = status(.failed("Insufficient storage"))
         full.blocker = .insufficientStorage
-        #expect(BackupOutcome(status: full, uploadedBefore: 0) == .blocked(.insufficientStorage))
+        #expect(BackupOutcome(status: full) == .blocked(.insufficientStorage))
         #expect(BackupOutcome.blocked(.insufficientStorage).message.contains("storage is full"))
         #expect(BackupOutcome.blocked(.unauthorized).message.contains("log in"))
         #expect(!BackupOutcome.blocked(.forbidden).isComplete)
+        // The count is what the pass uploaded, not everything the ledger knows (also in the first pass after a launch).
         #expect(
-            BackupOutcome(status: status(.idle, uploaded: 12, pending: 3, failed: 1), uploadedBefore: 10)
+            BackupOutcome(status: status(.idle, uploaded: 1200, thisPass: 2, pending: 3, failed: 1))
                 == .finished(uploaded: 2, remaining: 3, failed: 1))
+    }
+
+    @Test func aPassTheSystemInterruptedIsNeitherFinishedNorPaused() {
+        var interrupted = status(.idle, uploaded: 40, thisPass: 4, pending: 9)
+        interrupted.isInterrupted = true
+        let outcome = BackupOutcome(status: interrupted)
+        #expect(outcome == .interrupted(uploaded: 4))
+        #expect(!outcome.isComplete)
+        #expect(outcome.message.contains("interrupted"))
     }
 
     @Test func onlyACompletePassCountsAsDone() {

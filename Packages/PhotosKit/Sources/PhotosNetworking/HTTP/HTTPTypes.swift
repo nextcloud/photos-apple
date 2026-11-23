@@ -9,13 +9,23 @@ public struct HTTPRequest: Sendable {
     public var headers: [String: String]
     public var body: Data?
     public var timeout: TimeInterval
+    /// Set when the request may be sent again after a transient failure (it is then repeated by `HTTPClient`).
+    public var retry: RetryPolicy?
+    /// False keeps the request off cellular connections and personal hotspots.
+    public var allowsExpensiveNetwork = true
+    /// False keeps the request off connections in Low Data Mode.
+    public var allowsConstrainedNetwork = true
 
-    public init(method: String = "GET", url: URL, headers: [String: String] = [:], body: Data? = nil, timeout: TimeInterval = 60) {
+    public init(
+        method: String = "GET", url: URL, headers: [String: String] = [:], body: Data? = nil, timeout: TimeInterval = 60,
+        retry: RetryPolicy? = nil
+    ) {
         self.method = method
         self.url = url
         self.headers = headers
         self.body = body
         self.timeout = timeout
+        self.retry = retry
     }
 
     var urlRequest: URLRequest {
@@ -23,6 +33,8 @@ public struct HTTPRequest: Sendable {
         request.httpMethod = method
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         request.httpBody = body
+        request.allowsExpensiveNetworkAccess = allowsExpensiveNetwork
+        request.allowsConstrainedNetworkAccess = allowsConstrainedNetwork
         return request
     }
 }

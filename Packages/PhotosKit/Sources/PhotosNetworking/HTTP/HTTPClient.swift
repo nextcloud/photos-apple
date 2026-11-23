@@ -35,7 +35,13 @@ public final class HTTPClient: Sendable {
         return configuration
     }
 
+    /// Sends a request; one with a `retry` policy is sent again after a transient failure.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        guard let retry = request.retry else { return try await sendOnce(request) }
+        return try await retry.run { try await self.sendOnce(request) }
+    }
+
+    private func sendOnce(_ request: HTTPRequest) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.data(for: request.urlRequest)
             return Self.makeResponse(response, data: data)
@@ -58,8 +64,13 @@ public final class HTTPClient: Sendable {
         }
     }
 
-    /// Uploads a file from disk.
+    /// Uploads a file from disk; with a `retry` policy the whole file is sent again after a transient failure.
     public func upload(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
+        guard let retry = request.retry else { return try await uploadOnce(request, fromFile: file) }
+        return try await retry.run { try await self.uploadOnce(request, fromFile: file) }
+    }
+
+    private func uploadOnce(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.upload(for: request.urlRequest, fromFile: file)
             return Self.makeResponse(response, data: data)
@@ -78,28 +89,7 @@ public final class HTTPClient: Sendable {
     }
 
     func mapError(_ error: any Error, url: URL) -> NetworkError {
-        if let error = error as? NetworkError { return error }
-        let host = url.host() ?? ""
-        guard let urlError = error as? URLError else {
-            return .transport(code: (error as NSError).code, message: error.localizedDescription)
-        }
-        switch urlError.code {
-        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
-            return .offline
-        case .timedOut: return .timedOut
-        case .cancelled:
-            if let certificate = trustStore.lastFailure(for: host), delegate.didRejectTrust(for: host) {
-                return .untrustedCertificate(host: host, certificate: certificate)
-            }
-            return .cancelled
-        case .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateHasBadDate,
-            .serverCertificateNotYetValid, .secureConnectionFailed:
-            return .untrustedCertificate(host: host, certificate: trustStore.lastFailure(for: host))
-        case .clientCertificateRequired, .clientCertificateRejected:
-            return .clientCertificateRequired(host: host)
-        default:
-            return .transport(code: urlError.errorCode, message: urlError.localizedDescription)
-        }
+        delegate.networkError(for: error, url: url)
     }
 }
 
@@ -115,6 +105,32 @@ final class SessionDelegate: NSObject, URLSessionTaskDelegate, Sendable {
 
     func didRejectTrust(for host: String) -> Bool {
         rejectedHosts.withLock { $0.remove(host.lowercased()) != nil }
+    }
+
+    /// Maps a failure of a task of this delegate's session to a `NetworkError`.
+    func networkError(for error: any Error, url: URL) -> NetworkError {
+        if let error = error as? NetworkError { return error }
+        let host = url.host() ?? ""
+        guard let urlError = error as? URLError else {
+            return .transport(code: (error as NSError).code, message: error.localizedDescription)
+        }
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+            return .offline
+        case .timedOut: return .timedOut
+        case .cancelled:
+            if let certificate = trustStore.lastFailure(for: host), didRejectTrust(for: host) {
+                return .untrustedCertificate(host: host, certificate: certificate)
+            }
+            return .cancelled
+        case .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateHasBadDate,
+            .serverCertificateNotYetValid, .secureConnectionFailed:
+            return .untrustedCertificate(host: host, certificate: trustStore.lastFailure(for: host))
+        case .clientCertificateRequired, .clientCertificateRejected:
+            return .clientCertificateRequired(host: host)
+        default:
+            return .transport(code: urlError.errorCode, message: urlError.localizedDescription)
+        }
     }
 
     func urlSession(
