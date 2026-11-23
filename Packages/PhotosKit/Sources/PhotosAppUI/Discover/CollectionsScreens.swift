@@ -279,6 +279,7 @@ struct FoldersScreen: View {
     @State private var items: [MediaItem] = []
     @State private var previews: [String: [FileID]] = [:]
     @State private var error: String?
+    @State private var loaded = false
     @State private var viewer: ViewerStart?
 
     var title: String {
@@ -318,8 +319,9 @@ struct FoldersScreen: View {
                     }
                 }
             }
-            if let error { Text(error).foregroundStyle(.red).padding() }
+            if let error, !folders.isEmpty || !items.isEmpty { Text(error).foregroundStyle(.red).padding() }
         }
+        .overlay { status }
         .navigationTitle(title)
         .task { await load() }
         .refreshable { await load() }
@@ -330,9 +332,36 @@ struct FoldersScreen: View {
         #endif
     }
 
+    /// Progress while loading, and a centred empty or error state instead of a blank screen.
+    @ViewBuilder var status: some View {
+        if !folders.isEmpty || !items.isEmpty {
+            EmptyView()
+        } else if !loaded {
+            ProgressView()
+        } else if let error {
+            ContentUnavailableView {
+                Label(String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button(String(localized: "Try again", bundle: .module)) { Task { await load() } }
+            }
+        } else if sharedWithYou && path == "/" {
+            ContentUnavailableView(
+                String(localized: "Nothing shared with you", bundle: .module), systemImage: "person.2",
+                description: Text("Folders with photos that others share with you appear here.", bundle: .module))
+        } else {
+            ContentUnavailableView(
+                String(localized: "No photos in this folder", bundle: .module), systemImage: "folder",
+                description: Text("Folders that contain photos or videos appear here.", bundle: .module))
+        }
+    }
+
     func load() async {
         guard let services = session.services else { return }
+        defer { loaded = true }
         do {
+            error = nil
             if sharedWithYou && path == "/" {
                 folders = try await services.api.sharedWithYou().filter(\.isFolder)
             } else {
