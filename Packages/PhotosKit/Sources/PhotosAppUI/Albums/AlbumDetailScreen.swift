@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -21,6 +22,7 @@ struct AlbumDetailScreen: View {
     @State private var error: String?
     @State private var newName = ""
     @State private var renaming = false
+    @State private var showingNotes = false
 
     init(albumId: String, initial: Album) {
         self.albumId = albumId
@@ -35,20 +37,23 @@ struct AlbumDetailScreen: View {
     var isOwn: Bool { album.kind == .own }
 
     var body: some View {
-        VStack(spacing: 0) {
-            AlbumHeader(album: album, isOffline: isOffline)
-            MediaGridScreen(
-                feed: feed,
-                title: album.title,
-                showsHeaders: false,
-                emptyTitle: String(localized: "This album is empty", bundle: .module),
-                emptyMessage: isOwn ? String(localized: "Add photos from your library.", bundle: .module) : "",
-                columns: $columns,
-                extraActions: extraActions
-            ) {
-                albumMenu
-            }
+        // The title is the window's (or navigation bar's) title and nothing else; place, dates and count are its subtitle.
+        // The grid starts right under the toolbar like in the library: a header above it left the grid's scroll-edge blur
+        // lying over the first row.
+        MediaGridScreen(
+            feed: feed,
+            title: album.title,
+            showsHeaders: false,
+            emptyTitle: String(localized: "This album is empty", bundle: .module),
+            emptyMessage: isOwn ? String(localized: "Add photos from your library.", bundle: .module) : "",
+            columns: $columns,
+            extraActions: extraActions
+        ) {
+            albumMenu
         }
+        #if !os(visionOS)
+            .navigationSubtitle(AlbumDetails.summary(of: album))
+        #endif
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
@@ -137,17 +142,31 @@ struct AlbumDetailScreen: View {
     }
 
     @ViewBuilder var albumMenu: some View {
+        if AlbumDetails.hasNotes(album, isOffline: isOffline) {
+            // Description, collaborators and offline state: in a popover, so nothing sits between the toolbar and the grid.
+            Button {
+                showingNotes = true
+            } label: {
+                Label(String(localized: "About this album", bundle: .module), systemImage: "info.circle")
+            }
+            .help(String(localized: "About this album", bundle: .module))
+            .popover(isPresented: $showingNotes) {
+                AlbumNotes(album: album, isOffline: isOffline)
+            }
+        }
         if isOwn {
             Button {
                 sheet = .addPhotos
             } label: {
                 Label(String(localized: "Add photos", bundle: .module), systemImage: "plus")
             }
+            .help(String(localized: "Add photos", bundle: .module))
             Button {
                 sheet = .share
             } label: {
-                Label(String(localized: "Share", bundle: .module), systemImage: "person.crop.circle.badge.plus")
+                Label(String(localized: "Share album", bundle: .module), systemImage: "person.crop.circle.badge.plus")
             }
+            .help(String(localized: "Share album", bundle: .module))
         }
         Menu {
             if let link = session.publicLink(of: album) {
@@ -203,8 +222,9 @@ struct AlbumDetailScreen: View {
                     systemImage: isOwn ? "trash" : "rectangle.portrait.and.arrow.right")
             }
         } label: {
-            Label(String(localized: "Album", bundle: .module), systemImage: "ellipsis.circle")
+            Label(String(localized: "Album options", bundle: .module), systemImage: "ellipsis.circle")
         }
+        .help(String(localized: "Album options", bundle: .module))
     }
 
     func extraActions(_ items: [MediaItem]) -> [GridMenuAction] {
@@ -213,7 +233,10 @@ struct AlbumDetailScreen: View {
         if items.contains(where: { removable.contains($0.fileId) }) {
             actions.append(
                 GridMenuAction(
-                    id: "removeFromAlbum", title: String(localized: "Remove from album", bundle: .module),
+                    id: "removeFromAlbum",
+                    title: PlatformWording.title(
+                        mac: LocalizedStringResource("Remove from Album", bundle: .module),
+                        other: LocalizedStringResource("Remove from album", bundle: .module)),
                     systemImage: "rectangle.stack.badge.minus"
                 ) { _ in
                     Task { await session.removeFromAlbum(items, album: album) }
@@ -221,8 +244,13 @@ struct AlbumDetailScreen: View {
         }
         if isOwn, items.count == 1, session.features.has(.albumCover), let item = items.first {
             actions.append(
-                GridMenuAction(id: "cover", title: String(localized: "Make album cover", bundle: .module), systemImage: "photo.artframe") {
-                    _ in
+                GridMenuAction(
+                    id: "cover",
+                    title: PlatformWording.title(
+                        mac: LocalizedStringResource("Make Album Cover", bundle: .module),
+                        other: LocalizedStringResource("Make album cover", bundle: .module)),
+                    systemImage: "photo.artframe"
+                ) { _ in
                     Task {
                         do { try await session.updateAlbum(album, cover: item.fileId) } catch { self.error = error.localizedDescription }
                     }
@@ -232,45 +260,49 @@ struct AlbumDetailScreen: View {
     }
 }
 
-/// Title, place, dates, description and sharing state above the album grid.
-struct AlbumHeader: View {
+/// Texts about an album shown around its grid.
+enum AlbumDetails {
+    /// Place, dates, count and owner in one line (the subtitle under the album's title).
+    static func summary(of album: Album) -> String {
+        let details: [String?] = [
+            album.location.isEmpty ? nil : album.location,
+            album.dateStart.map { DateRangeLabel.string(from: $0, to: album.dateEnd ?? $0) },
+            String(localized: "\(album.itemCount) items", bundle: .module),
+            album.kind == .shared
+                ? (album.ownerDisplayName ?? album.ownerId).map { String(localized: "Shared by \($0)", bundle: .module) } : nil,
+        ]
+        return details.compactMap { $0 }.joined(separator: " · ")
+    }
+
+    static func hasNotes(_ album: Album, isOffline: Bool) -> Bool {
+        !album.albumDescription.isEmpty || !album.collaborators.isEmpty || isOffline
+    }
+}
+
+/// Description, collaborators and offline state of an album (the "About this album" popover).
+struct AlbumNotes: View {
     let album: Album
     let isOffline: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(album.title).font(.largeTitle.bold()).lineLimit(2)
+            if !album.albumDescription.isEmpty {
+                Text(album.albumDescription).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if !album.collaborators.isEmpty {
+                    Label(album.collaborators.map(\.label).joined(separator: ", "), systemImage: "person.2")
+                }
                 if isOffline {
-                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(.secondary)
-                        .accessibilityLabel(Text("Available offline", bundle: .module))
+                    Label(String(localized: "Available offline", bundle: .module), systemImage: "arrow.down.circle.fill")
                 }
             }
-            let details = [
-                album.location.isEmpty ? nil : album.location,
-                dateText,
-                String(localized: "\(album.itemCount) items", bundle: .module),
-                album.kind == .shared
-                    ? (album.ownerDisplayName ?? album.ownerId).map { String(localized: "Shared by \($0)", bundle: .module) } : nil,
-            ].compactMap { $0 }
-            Text(details.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-            if !album.albumDescription.isEmpty {
-                Text(album.albumDescription).font(.body).padding(.top, 4)
-            }
-            if !album.collaborators.isEmpty {
-                Label(album.collaborators.map(\.label).joined(separator: ", "), systemImage: "person.2")
-                    .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-    }
-
-    var dateText: String? {
-        guard let start = album.dateStart else { return nil }
-        let end = album.dateEnd ?? start
-        return (start..<max(end, start.addingTimeInterval(1))).formatted(.interval.day().month().year())
+        .frame(minWidth: 240, maxWidth: 360, alignment: .leading)
+        .padding()
+        .presentationCompactAdaptation(.popover)
     }
 }
 

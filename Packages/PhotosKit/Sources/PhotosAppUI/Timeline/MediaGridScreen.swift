@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -13,9 +14,12 @@ struct MediaGridScreen<Accessory: View>: View {
     var showsHeaders: Bool
     var emptyTitle: String
     var emptyMessage: String
+    /// Zoom step (`GridColumns.options`): the target tile size; the column count follows from the width.
     @Binding var columns: Int
     /// Extra actions offered for selected items (e.g. "Remove from album").
     var extraActions: ([MediaItem]) -> [GridMenuAction] = { _ in [] }
+    /// The grid shows the synced library (timeline): "empty" is only said once a first sync has finished.
+    var waitsForFirstSync = false
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -29,6 +33,10 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var albumPicker: PickedItems?
     @State private var sharedLink: SharedLink?
     @State private var metadataItems: PickedItems?
+    @State private var editedItem: MediaItem?
+    /// Haptic triggers (iPhone, iPad).
+    @State private var favoriteToggles = 0
+    @State private var deletions = 0
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -53,7 +61,10 @@ struct MediaGridScreen<Accessory: View>: View {
                 titleVisibility: .visible
             ) {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                    if let items = confirmDelete { Task { await session.delete(items) } }
+                    if let items = confirmDelete {
+                        deletions += 1
+                        Task { await session.delete(items) }
+                    }
                     endSelection()
                 }
             } message: {
@@ -65,6 +76,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
+            .sheet(item: $editedItem) { item in EditorView(item: item) }
             .infoInspector(isPresented: $showingInfo) {
                 if let item = infoItem ?? selectedItems.first {
                     InfoPanel(item: item, inInspector: true)
@@ -76,9 +88,27 @@ struct MediaGridScreen<Accessory: View>: View {
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
             }
             .focusedSceneValue(\.gridActions, gridActions)
+            .selectionHaptic(selection, isActive: isSelecting)
+            .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
+            .photosHaptic(.impact(weight: .medium), trigger: deletions)
+            // Zoomed out, the timeline is cut into months and years instead of days.
+            .onChange(of: columns, initial: true) { _, step in
+                feed.setZoom(step: step)
+            }
+            #if DEBUG
+                // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
+                .task(id: feed.items.isEmpty) {
+                    if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
+                }
+            #endif
             #if os(iOS)
+                // The viewer's Close button, title and bottom bar are toolbar items: they need a navigation stack to
+                // show up in, which a full-screen cover does not bring along.
                 .fullScreenCover(item: $viewerStart) { start in
-                    MediaViewer(ids: start.ids, startId: start.startId).environment(session)
+                    NavigationStack {
+                        MediaViewer(ids: start.ids, startId: start.startId)
+                    }
+                    .environment(session)
                 }
             #else
                 .navigationDestination(item: $viewerStart) { start in
@@ -97,15 +127,14 @@ struct MediaGridScreen<Accessory: View>: View {
     @ViewBuilder var content: some View {
         if let services = session.services, !feed.items.isEmpty {
             PhotoGrid(
-                sections: feed.sections,
-                items: feed.byId,
-                columns: columns,
+                update: feed.update,
+                zoomStep: feed.zoomStep,
                 selection: selection,
                 isSelecting: isSelecting,
                 showsHeaders: showsHeaders,
                 services: services,
                 callbacks: GridCallbacks(
-                    open: { id in viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: id) },
+                    open: { id in viewerStart = ViewerStart(ids: feed.model.ids, startId: id) },
                     menu: { ids in menuActions(for: ids) },
                     selectionChanged: { ids in
                         selection = ids
@@ -115,12 +144,15 @@ struct MediaGridScreen<Accessory: View>: View {
                             if !ids.isEmpty { isSelecting = true }
                         #endif
                     },
-                    columnsChanged: { columns = $0 }
+                    columnsChanged: { columns = $0 },
+                    cancelSelection: { endSelection() }
                 )
             )
             .ignoresSafeArea(edges: .bottom)
         } else if session.isSignedOut {
             SignedOutView()
+        } else if emptyPhase == .loading {
+            GridSkeleton(zoomStep: columns, showsHeader: showsHeaders, caption: loadingCaption)
         } else {
             ContentUnavailableView {
                 Label(emptyTitle, systemImage: "photo.on.rectangle.angled")
@@ -130,6 +162,31 @@ struct MediaGridScreen<Accessory: View>: View {
                 if session.syncStatus.isWorking { ProgressView() }
             }
         }
+    }
+
+    /// Skeleton or empty state (SPEC §6.3): the timeline is only called empty after a first sync has finished.
+    var emptyPhase: GridEmptyPhase {
+        var firstSyncRunning = false
+        var hasSyncedBefore = false
+        var syncStopped = false
+        switch session.syncStatus {
+        case .initialSync: firstSyncRunning = true
+        case .idle(let lastSync): hasSyncedBefore = lastSync != nil
+        // Incremental sync and reconciliation only run after the first sync.
+        case .syncing, .reconciling: hasSyncedBefore = true
+        case .offline, .failed: syncStopped = true
+        }
+        return GridEmptyPhase.phase(
+            feedLoaded: feed.loaded, waitsForFirstSync: waitsForFirstSync, firstSyncRunning: firstSyncRunning,
+            hasSyncedBefore: hasSyncedBefore, syncStopped: syncStopped)
+    }
+
+    var loadingCaption: String? {
+        guard waitsForFirstSync else { return nil }
+        if case .initialSync(let count) = session.syncStatus, count > 0 {
+            return String(localized: "Loading library… \(count)", bundle: .module)
+        }
+        return String(localized: "Loading your library…", bundle: .module)
     }
 
     var selectionTitle: String {
@@ -143,30 +200,34 @@ struct MediaGridScreen<Accessory: View>: View {
     }
 
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            HStack {
-                accessory()
-                #if !os(macOS)
-                    Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
-                        if isSelecting { endSelection() } else { isSelecting = true }
-                    }
-                    .disabled(feed.items.isEmpty)
-                #endif
-            }
+        // A group, not one item holding a stack: every control is a toolbar item of its own, with its own accessibility
+        // label and tooltip, and the toolbar can move single items to the overflow menu instead of clipping at the window edge.
+        ToolbarItemGroup(placement: .primaryAction) {
+            accessory()
+            #if !os(macOS)
+                Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
+                    if isSelecting { endSelection() } else { isSelecting = true }
+                }
+                .disabled(feed.items.isEmpty)
+            #endif
         }
         if isSelecting && !selection.isEmpty {
             ToolbarItemGroup(placement: selectionPlacement) {
                 let items = selectedItems
                 ShareMediaButton(items: items)
+                    .help(String(localized: "Share", bundle: .module))
                 Button {
+                    favoriteToggles += 1
                     Task { await session.setFavorite(items, !items.allSatisfy(\.isFavorite)) }
                 } label: {
                     Label(
-                        String(localized: "Favorite", bundle: .module),
+                        favoriteTitle(remove: items.allSatisfy(\.isFavorite)),
                         systemImage: items.allSatisfy(\.isFavorite) ? "heart.slash" : "heart")
                 }
+                .help(favoriteTitle(remove: items.allSatisfy(\.isFavorite)))
                 Menu {
-                    ForEach(menuActions(for: Array(selection)), id: \.id) { action in
+                    ForEach(menuActions(for: Array(selection)).filter { $0.id != "delete" }, id: \.id) { action in
+                        if action.startsGroup { Divider() }
                         Button(role: action.isDestructive ? .destructive : nil) {
                             action.handler(Array(selection))
                         } label: {
@@ -176,11 +237,13 @@ struct MediaGridScreen<Accessory: View>: View {
                 } label: {
                     Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
                 }
+                .help(String(localized: "More", bundle: .module))
                 Button(role: .destructive) {
                     confirmDelete = items.filter(\.permissions.canDelete)
                 } label: {
                     Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
                 }
+                .help(String(localized: "Delete", bundle: .module))
                 .disabled(!items.contains { $0.permissions.canDelete })
             }
         }
@@ -213,8 +276,45 @@ struct MediaGridScreen<Accessory: View>: View {
             },
             addToAlbum: { albumPicker = PickedItems(items: items) },
             zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
-            zoomOut: { columns = GridColumns.step(columns, zoomIn: false) }
+            zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
+            open: items.count == 1 ? { viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: items[0].fileId) } : nil,
+            edit: items.count == 1 && items[0].kind == .image ? { editedItem = items[0] } : nil,
+            editDateAndLocation: canEditMetadata(items)
+                ? { metadataItems = PickedItems(items: items.filter(\.permissions.canWrite)) } : nil,
+            export: items.isEmpty ? nil : { export(items) },
+            shareItems: session.services.map { services in items.map { ShareableMedia(item: $0, services: services) } } ?? [],
+            shareTitle: items.count == 1 ? items[0].name : String(localized: "\(items.count) items", bundle: .module)
         )
+    }
+
+    func canEditMetadata(_ items: [MediaItem]) -> Bool {
+        session.features.has(.metadataEdit) && items.contains(where: \.permissions.canWrite)
+    }
+
+    func favoriteTitle(remove: Bool) -> String {
+        remove
+            ? PlatformWording.title(
+                mac: LocalizedStringResource("Remove from Favorites", bundle: .module),
+                other: LocalizedStringResource("Remove from favorites", bundle: .module))
+            : PlatformWording.title(
+                mac: LocalizedStringResource("Add to Favorites", bundle: .module),
+                other: LocalizedStringResource("Add to favorites", bundle: .module))
+    }
+
+    /// Saves the originals: to a folder the user picks on the Mac, to the photo library on the other platforms.
+    func export(_ items: [MediaItem]) {
+        guard let services = session.services else { return }
+        Task {
+            do {
+                #if os(macOS)
+                    try await MediaFileExport.exportToFolder(items, services: services)
+                #else
+                    try await MediaExport.saveToPhotoLibrary(items, services: services)
+                #endif
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
     }
 
     func endSelection() {
@@ -226,30 +326,42 @@ struct MediaGridScreen<Accessory: View>: View {
         guard let services = session.services, let map = try? services.library.items(ids) else { return [] }
         let items = ids.compactMap { map[$0] }
         guard !items.isEmpty else { return [] }
+        // Open, Get Info · Add to Album, Export · Favorite, Archive, Edit… · screen-specific actions · Delete.
         var actions: [GridMenuAction] = []
-        let allFavorite = items.allSatisfy(\.isFavorite)
-        actions.append(
-            GridMenuAction(
-                id: "favorite",
-                title: allFavorite
-                    ? String(localized: "Remove from favorites", bundle: .module) : String(localized: "Add to favorites", bundle: .module),
-                systemImage: allFavorite ? "heart.slash" : "heart"
-            ) { _ in Task { await session.setFavorite(items, !allFavorite) } })
-        if items.count == 1 {
+        if items.count == 1, let item = items.first {
             actions.append(
-                GridMenuAction(id: "info", title: String(localized: "Info", bundle: .module), systemImage: "info.circle") { _ in
-                    infoItem = items.first
+                GridMenuAction(
+                    id: "open", title: String(localized: "Open", bundle: .module), systemImage: "arrow.up.left.and.arrow.down.right"
+                ) { _ in
+                    viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: item.fileId)
+                })
+            let infoTitle: String = PlatformWording.title(
+                mac: LocalizedStringResource("Get Info", bundle: .module), other: LocalizedStringResource("Info", bundle: .module))
+            actions.append(
+                GridMenuAction(id: "info", title: infoTitle, systemImage: "info.circle") { _ in
+                    infoItem = item
                     showingInfo = true
                 })
         }
+        let albumTitle: String = PlatformWording.title(
+            mac: LocalizedStringResource("Add to Album…", bundle: .module),
+            other: LocalizedStringResource("Add to album…", bundle: .module))
         actions.append(
-            GridMenuAction(id: "save", title: String(localized: "Save to device", bundle: .module), systemImage: "square.and.arrow.down") {
-                _ in
-                Task {
-                    do { try await MediaExport.saveToPhotoLibrary(items, services: services) } catch {
-                        actionError = error.localizedDescription
-                    }
-                }
+            GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { _ in
+                albumPicker = PickedItems(items: items)
+            })
+        let exportTitle: String = PlatformWording.title(
+            mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
+        actions.append(
+            GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { _ in export(items) })
+        let allFavorite = items.allSatisfy(\.isFavorite)
+        actions.append(
+            GridMenuAction(
+                id: "favorite", title: favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart",
+                startsGroup: true
+            ) { _ in
+                favoriteToggles += 1
+                Task { await session.setFavorite(items, !allFavorite) }
             })
         if items.contains(where: { $0.isOwnStorage && !$0.isArchived && $0.permissions.canDelete }) {
             actions.append(
@@ -266,20 +378,30 @@ struct MediaGridScreen<Accessory: View>: View {
                     endSelection()
                 })
         }
-        if session.features.has(.metadataEdit), items.contains(where: \.permissions.canWrite) {
+        if items.count == 1, let item = items.first, item.kind == .image {
             actions.append(
-                GridMenuAction(
-                    id: "metadata", title: String(localized: "Edit date and location…", bundle: .module),
-                    systemImage: "calendar.badge.clock"
-                ) { _ in
+                GridMenuAction(id: "edit", title: String(localized: "Edit…", bundle: .module), systemImage: "slider.horizontal.3") { _ in
+                    editedItem = item
+                })
+        }
+        if canEditMetadata(items) {
+            let metadataTitle: String = PlatformWording.title(
+                mac: LocalizedStringResource("Edit Date and Location…", bundle: .module),
+                other: LocalizedStringResource("Edit date and location…", bundle: .module))
+            actions.append(
+                GridMenuAction(id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock") { _ in
                     metadataItems = PickedItems(items: items.filter(\.permissions.canWrite))
                 })
         }
-        actions += extraActions(items)
+        var extras: [GridMenuAction] = extraActions(items)
+        if !extras.isEmpty { extras[0].startsGroup = true }
+        actions += extras
         if items.contains(where: { $0.permissions.canDelete }) {
             actions.append(
-                GridMenuAction(id: "delete", title: String(localized: "Delete", bundle: .module), systemImage: "trash", isDestructive: true)
-                { _ in
+                GridMenuAction(
+                    id: "delete", title: String(localized: "Delete…", bundle: .module), systemImage: "trash", isDestructive: true,
+                    startsGroup: true
+                ) { _ in
                     confirmDelete = items.filter(\.permissions.canDelete)
                 })
         }
@@ -317,6 +439,62 @@ struct MediaGridScreen<Accessory: View>: View {
                 .background(.regularMaterial, in: .capsule)
                 .padding(.bottom, 12)
         }
+    }
+}
+
+/// Placeholder tiles in the grid's own geometry while nothing is known yet (first load, first sync).
+struct GridSkeleton: View {
+    let zoomStep: Int
+    var showsHeader = true
+    var caption: String?
+    @State private var dimmed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { proxy in
+            let geometry: GridGeometry = GridColumns.geometry(width: Double(proxy.size.width), step: zoomStep)
+            let side: CGFloat = CGFloat(geometry.side)
+            let spacing: CGFloat = CGFloat(geometry.spacing)
+            let rows: Int = max(1, Int((proxy.size.height / (side + spacing)).rounded(.up)))
+            VStack(alignment: .leading, spacing: spacing) {
+                if showsHeader {
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 5).frame(width: 150, height: 20)
+                        RoundedRectangle(cornerRadius: 4).frame(width: 90, height: 11)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                }
+                ForEach(0..<rows, id: \.self) { _ in
+                    HStack(spacing: spacing) {
+                        ForEach(0..<geometry.columns, id: \.self) { _ in
+                            Rectangle().frame(width: side, height: side)
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(.quaternary)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
+        }
+        .opacity(dimmed ? 0.45 : 1)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dimmed)
+        .onAppear { dimmed = true }
+        .overlay(alignment: .bottom) {
+            if let caption {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(caption)
+                }
+                .font(.footnote)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: .capsule)
+                .padding(.bottom, 12)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caption ?? String(localized: "Loading…", bundle: .module))
     }
 }
 

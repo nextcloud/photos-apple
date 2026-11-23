@@ -16,31 +16,98 @@ public final class AppModel {
     public private(set) var session: SessionModel?
     /// A destination requested from outside (notification tap, widget, deep link), consumed by the main view.
     public var requestedDestination: String?
+    /// The Notifications switch in Settings. Change it with `setPushEnabled(_:)`.
+    public private(set) var pushEnabled: Bool
     @ObservationIgnored private var deviceToken: Data?
+    @ObservationIgnored private var unauthorizedChecks: Set<AccountID> = []
+    /// Sessions that were replaced and are still shutting down.
+    @ObservationIgnored private var retiring: [ObjectIdentifier: Task<Void, Never>] = [:]
     public let http: HTTPClient
     public let keychain: Keychain
     public let userAgent: String
     public let appVersion: String
+    /// The app's backup; it belongs to one account and runs independently of the active session.
+    public let backup: BackupModel
+    /// The background transfer session for backup uploads, where the app has one (iOS).
+    @ObservationIgnored let backgroundUploads: (any BackgroundUploading)?
+    @ObservationIgnored let layout: StorageLayout
+    @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "app")
 
-    public init(appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0") {
-        self.appVersion = appVersion
-        self.userAgent = UserAgent.make(appVersion: appVersion)
-        self.keychain = Keychain()
-        let trustStore = TrustStore(directory: AppPaths.certificates)
-        let keychain = self.keychain
-        self.http = HTTPClient(
-            trustStore: trustStore, clientCredentials: { host in AppModel.clientCredential(host: host, keychain: keychain) })
-        self.registry = AccountRegistry.load()
-        if let account = registry.activeAccount { activate(account) }
+    public convenience init(appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0") {
+        self.init(
+            appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard,
+            backgroundUploads: AppModel.systemBackgroundUploads)
         #if DEBUG
-            // Development and UI tests: PHOTOS_DEBUG_LOGIN=nc://login/server:…&user:…&password:… signs in without a browser.
+            // Development and UI tests: PHOTOS_DEBUG_LOGIN=nc://login/server:…&user:…&password:… signs in without a browser
+            // (and without the notification permission prompt).
             if registry.accounts.isEmpty, let link = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_LOGIN"],
                 let credentials = LoginService.parseLoginURL(link)
             {
-                Task { try? await self.addAccount(credentials) }
+                Task { try? await self.addAccount(credentials, askForNotifications: false) }
             }
         #endif
+    }
+
+    /// Everything the model touches is passed in, so tests can run it in a temporary directory against a stubbed server.
+    init(
+        appVersion: String, layout: StorageLayout, keychain: Keychain, defaults: UserDefaults,
+        httpConfiguration: URLSessionConfiguration = HTTPClient.defaultConfiguration(),
+        backgroundUploads: BackgroundUploadsFactory? = nil
+    ) {
+        self.appVersion = appVersion
+        self.userAgent = UserAgent.make(appVersion: appVersion)
+        self.keychain = keychain
+        self.layout = layout
+        self.defaults = defaults
+        self.pushEnabled = PushNotifications.isEnabled(defaults)
+        let credentials: ClientCredentialProvider = { host in AppModel.clientCredential(host: host, keychain: keychain) }
+        self.http = AppModel.makeHTTPClient(layout: layout, keychain: keychain, configuration: httpConfiguration)
+        self.backgroundUploads = backgroundUploads?(http.trustStore, credentials)
+        self.registry = AccountRegistry.load(from: layout.accountsFile)
+        self.backup = BackupModel(settingsFile: layout.backupSettingsFile)
+        if let transport = self.backgroundUploads { backup.attachBackgroundUploads(transport) }
+        backup.attach(self)
+        if let account = registry.activeAccount { activate(account) }
+    }
+
+    /// The app's HTTP client: certificates the user trusted and the client certificates stored for a host. The share
+    /// extension builds its own with the same configuration.
+    public nonisolated static func makeHTTPClient(
+        layout: StorageLayout = AppPaths.layout, keychain: Keychain = Keychain(),
+        configuration: URLSessionConfiguration = HTTPClient.defaultConfiguration()
+    ) -> HTTPClient {
+        HTTPClient(
+            trustStore: TrustStore(directory: layout.certificates),
+            clientCredentials: { host in AppModel.clientCredential(host: host, keychain: keychain) }, configuration: configuration)
+    }
+
+    /// Creates the background transfer session with the app's trust handling.
+    typealias BackgroundUploadsFactory = @MainActor (TrustStore, @escaping ClientCredentialProvider) -> any BackgroundUploading
+
+    /// Where the system suspends the app while there is still something to upload — on iOS — backup uploads go through a
+    /// background transfer session. The Mac keeps the app running, and there the app sends everything itself.
+    static var systemBackgroundUploads: BackgroundUploadsFactory? {
+        #if os(iOS)
+            // Only the app: an extension that created a session with the app's identifier would take its uploads away.
+            guard let bundle = Bundle.main.bundleIdentifier, Bundle.main.bundleURL.pathExtension == "app" else { return nil }
+            return { trustStore, credentials in
+                BackgroundUploadSession(identifier: bundle + ".backup", trustStore: trustStore, clientCredentials: credentials)
+            }
+        #else
+            return nil
+        #endif
+    }
+
+    /// The system launched or woke the app because uploads of a background transfer session have finished
+    /// (`application(_:handleEventsForBackgroundURLSession:completionHandler:)`). The reports themselves arrive through
+    /// the session; `completion` is called once they are recorded.
+    public func handleBackgroundUploadEvents(identifier: String, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let backgroundUploads, backgroundUploads.identifier == identifier else {
+            completion()
+            return
+        }
+        backgroundUploads.setEventsCompletion(completion)
     }
 
     public var accounts: [Account] { registry.accounts }
@@ -49,8 +116,19 @@ public final class AppModel {
 
     public func loginService() -> LoginService { LoginService(http: http, userAgent: userAgent) }
 
+    private func saveRegistry() {
+        do {
+            try registry.save(to: layout.accountsFile)
+        } catch {
+            logger.error("could not save accounts: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Completes a login: verifies the credentials, stores them and activates the account.
-    public func addAccount(_ credentials: LoginService.Credentials) async throws {
+    ///
+    /// - Parameter askForNotifications: ask for the notification permission now that there is an account to notify about
+    ///   (the system only prompts the first time; nothing is asked at first launch).
+    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true) async throws {
         let status = try await loginService().status(serverURL: credentials.serverURL)
         let provisional = ServerConnection(
             serverURL: credentials.serverURL, userId: credentials.loginName, loginName: credentials.loginName,
@@ -62,18 +140,21 @@ public final class AppModel {
         try keychain.set(credentials.appPassword, for: Keychain.passwordKey(account.id.rawValue))
         registry.upsert(account)
         registry.activeAccountID = account.id
-        do {
-            try registry.save()
-        } catch {
-            logger.error("could not save accounts: \(error.localizedDescription, privacy: .public)")
-        }
+        saveRegistry()
         activate(account)
+        if pushEnabled {
+            if askForNotifications {
+                Task { await PushNotifications.requestAuthorization() }
+            } else if let deviceToken {
+                registerForPush(account, deviceToken: deviceToken)
+            }
+        }
     }
 
     public func switchTo(_ id: AccountID) {
         guard let account = registry.accounts.first(where: { $0.id == id }), account.id != session?.account.id else { return }
         registry.activeAccountID = id
-        try? registry.save()
+        saveRegistry()
         activate(account)
     }
 
@@ -81,49 +162,89 @@ public final class AppModel {
     public func removeAccount(_ id: AccountID) async {
         guard let account = registry.accounts.first(where: { $0.id == id }) else { return }
         if let password = keychain.string(for: Keychain.passwordKey(id.rawValue)) {
-            let connection = ServerConnection(
-                serverURL: account.serverURL, userId: account.userId, loginName: account.loginName, appPassword: password,
-                userAgent: userAgent)
-            try? await AccountAPI(ocs: OCSClient(http: http, connection: connection)).revokeAppPassword()
+            await Self.signOutOnServer(account: account, appPassword: password, http: http, userAgent: userAgent, keychain: keychain)
         }
-        if let password = keychain.string(for: Keychain.passwordKey(id.rawValue)) {
-            await PushNotifications.unregister(
-                account: account, appPassword: password, http: http, userAgent: userAgent, keychain: keychain)
-        }
-        if session?.account.id == id {
-            session?.stop()
-            session = nil
-        }
-        keychain.delete(Keychain.passwordKey(id.rawValue))
-        AccountServices.deleteLocalData(id)
-        registry.remove(id)
-        try? registry.save()
-        if let next = registry.activeAccount { activate(next) }
+        await purge(account)
     }
 
-    /// Marks an account as signed out after a confirmed 401 (local data is kept).
+    /// The server side of a logout, in the only order that works: the push registration is removed while the app password
+    /// is still valid, then the app password is revoked.
+    static func signOutOnServer(account: Account, appPassword: String, http: HTTPClient, userAgent: String, keychain: Keychain) async {
+        await PushNotifications.unregister(account: account, appPassword: appPassword, http: http, userAgent: userAgent, keychain: keychain)
+        let connection = ServerConnection(
+            serverURL: account.serverURL, userId: account.userId, loginName: account.loginName, appPassword: appPassword,
+            userAgent: userAgent)
+        try? await AccountAPI(ocs: OCSClient(http: http, connection: connection)).revokeAppPassword()
+    }
+
+    /// Removes an account from this device: stops everything that runs for it, waits, then deletes every local trace
+    /// (`AccountPurge`). Shared by account removal and remote wipe.
+    private func purge(_ account: Account) async {
+        let id = account.id
+        // Out of the list first: nothing new starts for this account while its work is being stopped.
+        registry.remove(id)
+        saveRegistry()
+        let removed = session?.account.id == id ? session : nil
+        if removed != nil { session = nil }
+        await backup.accountWillBeRemoved(id)
+        for task in Array(retiring.values) { await task.value }
+        await removed?.shutdown(closeDatabase: true)
+        AccountPurge(layout: layout, keychain: keychain, trustStore: http.trustStore).purge(account, remaining: registry.accounts)
+        if session == nil, let next = registry.activeAccount { activate(next) }
+    }
+
+    /// Marks an account as signed out after a confirmed 401 (local data is kept until the account is removed, SPEC §5.1.6).
     func markSignedOut(_ id: AccountID) {
         guard var account = registry.accounts.first(where: { $0.id == id }) else { return }
         account.isSignedOut = true
         registry.upsert(account)
-        try? registry.save()
+        saveRegistry()
         if session?.account.id == id { session?.account = account }
+        backup.accountSignedOut(id)
     }
 
     /// Server-requested wipe: delete everything and confirm.
     func wipe(_ id: AccountID, api: AccountAPI) async {
-        session?.stop()
-        session = nil
-        keychain.delete(Keychain.passwordKey(id.rawValue))
-        AccountServices.deleteLocalData(id)
+        guard let account = registry.accounts.first(where: { $0.id == id }) else { return }
+        // The server no longer accepts the app password, but the push proxy can still be told to forget this device.
+        await PushNotifications.unregister(
+            account: account, appPassword: api.ocs.connection.appPassword, http: http, userAgent: userAgent, keychain: keychain)
+        await purge(account)
         try? await api.confirmRemoteWipe()
-        registry.remove(id)
-        try? registry.save()
-        if let next = registry.activeAccount { activate(next) }
     }
 
+    // MARK: Unauthorized (SPEC §5.1.6)
+
+    /// A request of this account was answered with 401: check whether the app password really stopped working, then wipe
+    /// (when the server asks for it) or mark the account as signed out.
+    func handleUnauthorized(_ id: AccountID) async {
+        guard !unauthorizedChecks.contains(id), let account = registry.accounts.first(where: { $0.id == id }), !account.isSignedOut,
+            let password = keychain.string(for: Keychain.passwordKey(id.rawValue))
+        else { return }
+        unauthorizedChecks.insert(id)
+        defer { unauthorizedChecks.remove(id) }
+        let connection = ServerConnection(
+            serverURL: account.serverURL, userId: account.userId, loginName: account.loginName, appPassword: password,
+            userAgent: userAgent)
+        let accountAPI = AccountAPI(ocs: OCSClient(http: http, connection: connection))
+        do {
+            _ = try await accountAPI.profile()
+            return  // credentials still valid
+        } catch NetworkError.unauthorized {
+            if (try? await accountAPI.remoteWipeRequested()) == true {
+                await wipe(id, api: accountAPI)
+            } else {
+                markSignedOut(id)
+            }
+        } catch {
+            return
+        }
+    }
+
+    // MARK: Sessions
+
     private func activate(_ account: Account) {
-        session?.stop()
+        retire(session)
         guard let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else {
             logger.error("no password for account")
             var signedOut = account
@@ -135,30 +256,98 @@ public final class AppModel {
         session?.start()
     }
 
-    /// Registers all accounts for push once APNs delivered a device token (SPEC §7.21).
+    /// Stops a session that is being replaced: its tasks are cancelled at once, and it is kept alive until its sync,
+    /// outbox worker, uploads and offline downloads have really stopped.
+    private func retire(_ old: SessionModel?) {
+        guard let old else { return }
+        old.stop()
+        let key = ObjectIdentifier(old)
+        retiring[key] = Task { [weak self] in
+            await old.shutdown()
+            self?.retiring[key] = nil
+        }
+    }
+
+    /// Waits until replaced sessions have stopped (tests).
+    func waitForRetiredSessions() async {
+        for task in Array(retiring.values) { await task.value }
+    }
+
+    /// Services for an account that is not the active one (the backup account while another account is shown).
+    func makeServices(for account: Account) -> AccountServices? {
+        guard !account.isSignedOut, let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { return nil }
+        let id = account.id
+        let features =
+            AccountServices.loadFeatures(id, layout: layout)
+            ?? ServerFeatures(serverVersion: account.serverVersion ?? ServerVersion(major: 0))
+        do {
+            return try AccountServices(
+                account: account, appPassword: password, http: http, features: features, userAgent: userAgent, layout: layout,
+                onUnauthorized: { [weak self] in Task { @MainActor in await self?.handleUnauthorized(id) } })
+        } catch {
+            logger.error("could not open account database: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    // MARK: Push (SPEC §7.21)
+
+    /// Registers all accounts for push once APNs delivered a device token.
     public func didRegisterForPush(deviceToken: Data) {
         self.deviceToken = deviceToken
-        guard UserDefaults.standard.object(forKey: "pushEnabled") as? Bool ?? true else { return }
-        for account in registry.accounts where !account.isSignedOut {
-            guard let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { continue }
-            Task {
-                do {
-                    try await PushNotifications.register(
-                        deviceToken: deviceToken, account: account, appPassword: password, http: http, userAgent: userAgent,
-                        keychain: keychain)
-                } catch {
-                    logger.error("push registration failed: \(error.localizedDescription, privacy: .public)")
-                }
+        guard pushEnabled else { return }
+        for account in registry.accounts where !account.isSignedOut { registerForPush(account, deviceToken: deviceToken) }
+    }
+
+    private func registerForPush(_ account: Account, deviceToken: Data) {
+        guard let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { return }
+        Task {
+            do {
+                try await PushNotifications.register(
+                    deviceToken: deviceToken, account: account, appPassword: password, http: http, userAgent: userAgent,
+                    keychain: keychain)
+            } catch {
+                logger.error("push registration failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// The Notifications switch. Off: every account is unregistered on its server and the push proxy, and the push keys are
+    /// deleted. On: asks for permission when needed and registers every account again.
+    public func setPushEnabled(_ enabled: Bool) async {
+        guard enabled != pushEnabled else { return }
+        pushEnabled = enabled
+        defaults.set(enabled, forKey: PushNotifications.enabledKey)
+        if enabled {
+            // With permission the system delivers the device token (again), which registers all accounts.
+            let asked = await PushNotifications.requestAuthorization()
+            if !asked, let deviceToken { didRegisterForPush(deviceToken: deviceToken) }
+        } else {
+            for account in registry.accounts {
+                guard let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { continue }
+                await PushNotifications.unregister(
+                    account: account, appPassword: password, http: http, userAgent: userAgent, keychain: keychain)
             }
         }
     }
 
     /// Maps a delivered notification to a destination (On this day for the Photos "onthisday" notification).
     public func handleNotification(userInfo: [AnyHashable: Any]) {
-        if let destination = userInfo["photosDestination"] as? String { requestedDestination = destination }
+        if let destination = userInfo[PushNotifications.destinationKey] as? String { requestedDestination = destination }
     }
 
+    /// A silent push (`content-available`): the server withdrew notifications. Removes them from Notification Centre.
+    /// Returns false when the push was not one of ours.
+    @discardableResult
+    public func handleBackgroundPush(subject: String?) async -> Bool {
+        guard let subject else { return false }
+        return await PushNotifications.handleBackgroundPush(subject: subject, accounts: registry.accounts, keychain: keychain)
+    }
+
+    // MARK: Client certificates
+
     nonisolated static func clientCredential(host: String, keychain: Keychain) -> URLCredential? {
+        let host = host.lowercased()
         guard let data = keychain.data(for: Keychain.clientCertificateKey(host)) else { return nil }
         let password = keychain.string(for: Keychain.clientCertificatePasswordKey(host)) ?? ""
         var items: CFArray?
@@ -169,7 +358,7 @@ public final class AppModel {
         return URLCredential(identity: identity, certificates: nil, persistence: .forSession)
     }
 
-    /// Imports a PKCS#12 client certificate for a host (mTLS).
+    /// Imports a PKCS#12 client certificate for a host (mTLS). It is removed with the last account on that host.
     public func importClientCertificate(_ data: Data, password: String, host: String) throws {
         var items: CFArray?
         let status = SecPKCS12Import(data as CFData, [kSecImportExportPassphrase: password] as CFDictionary, &items)

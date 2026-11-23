@@ -1,0 +1,135 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld items were backed up, %lld are still waiting." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@uploaded@, %#@remaining@."
+          },
+          "substitutions" : {
+            "uploaded" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg item was backed up"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg items were backed up"
+                    }
+                  }
+                }
+              }
+            },
+            "remaining" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg is still waiting"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg are still waiting"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Backup failed: %@" : {
+
+    },
+    "Backup finished, but %lld items could not be uploaded." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Backup finished, but %lld item could not be uploaded."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Backup finished, but %lld items could not be uploaded."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Backup finished." : {
+
+    },
+    "Backup is not turned on in Nextcloud Photos." : {
+
+    },
+    "Backup is paused: %@" : {
+
+    },
+    "Backup is paused: log in to %@ on %@ again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Backup is paused: log in to %1$@ on %2$@ again."
+          }
+        }
+      }
+    },
+    "Backup stopped: log in to your Nextcloud again." : {
+
+    },
+    "Backup stopped: the connection to your Nextcloud is not trusted." : {
+
+    },
+    "Backup stopped: the server does not allow uploads to the backup folder." : {
+
+    },
+    "Backup stopped: your Nextcloud storage is full." : {
+
+    },
+    "Backup was interrupted. It continues the next time Nextcloud Photos is running." : {
+
+    },
+    "Cancelled" : {
+
+    },
+    "Log in to back up your photos." : {
+
+    },
+    "Nextcloud Photos has no access to your photos." : {
+
+    },
+    "Only your own photos can be shared by link." : {
+
+    },
+    "Shared on %@" : {
+
+    },
+    "Your photos are backed up." : {
+
+    }
+  },
+  "version" : "1.1"
+}

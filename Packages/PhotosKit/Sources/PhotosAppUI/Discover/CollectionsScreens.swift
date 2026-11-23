@@ -37,8 +37,8 @@ struct PlacesScreen: View {
                                     }
                                 } label: {
                                     CollectionTile(
-                                        title: place.name, subtitle: String(localized: "\(place.itemCount) photos", bundle: .module),
-                                        coverFileId: place.coverFileId)
+                                        title: place.name, subtitle: AccessibilityText.photos(place.itemCount),
+                                        coverFileId: place.coverFileId, kind: String(localized: "place", bundle: .module))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -47,6 +47,7 @@ struct PlacesScreen: View {
                         if grouped.count > 1 {
                             Text(group.country.isEmpty ? String(localized: "Other", bundle: .module) : group.country)
                                 .font(.title2.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4).background(.bar)
+                                .accessibilityAddTraits(.isHeader)
                         }
                     }
                 }
@@ -95,8 +96,8 @@ struct PeopleScreen: View {
                     } label: {
                         CollectionTile(
                             title: person.isUnnamed ? String(localized: "Add name", bundle: .module) : person.name,
-                            subtitle: String(localized: "\(person.itemCount) photos", bundle: .module), coverFileId: person.coverFileId,
-                            faceBox: person.coverBox, circular: true)
+                            subtitle: AccessibilityText.photos(person.itemCount), coverFileId: person.coverFileId,
+                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module))
                     }
                     .buttonStyle(.plain)
                 }
@@ -253,8 +254,8 @@ struct TagsScreen: View {
                         ItemsScreen(title: tag.name) { services in try await services.api.tagContent(tag.id) }
                     } label: {
                         CollectionTile(
-                            title: tag.name, subtitle: String(localized: "\(tag.itemCount) photos", bundle: .module),
-                            coverFileId: tag.coverFileId)
+                            title: tag.name, subtitle: AccessibilityText.photos(tag.itemCount),
+                            coverFileId: tag.coverFileId, kind: String(localized: "tag", bundle: .module))
                     }
                     .buttonStyle(.plain)
                 }
@@ -279,6 +280,7 @@ struct FoldersScreen: View {
     @State private var items: [MediaItem] = []
     @State private var previews: [String: [FileID]] = [:]
     @State private var error: String?
+    @State private var loaded = false
     @State private var viewer: ViewerStart?
 
     var title: String {
@@ -301,6 +303,10 @@ struct FoldersScreen: View {
                                 .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
                             Label(folder.name, systemImage: "folder").font(.headline).lineLimit(1)
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            AccessibilityText.collection(
+                                title: folder.name, kind: String(localized: "folder", bundle: .module), detail: nil))
                     }
                     .buttonStyle(.plain)
                     .task { await loadPreviews(folder) }
@@ -315,11 +321,21 @@ struct FoldersScreen: View {
                             .clipped()
                             .contentShape(.rect)
                             .onTapGesture { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
+                            // A tap gesture alone is invisible to VoiceOver, Voice Control and keyboard users.
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(
+                                AccessibilityText.media(
+                                    isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp,
+                                    duration: item.duration, place: item.place, isFavorite: item.isFavorite)
+                            )
+                            .accessibilityAddTraits([.isButton, .isImage])
+                            .accessibilityAction { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
                     }
                 }
             }
-            if let error { Text(error).foregroundStyle(.red).padding() }
+            if let error, !folders.isEmpty || !items.isEmpty { Text(error).foregroundStyle(.red).padding() }
         }
+        .overlay { status }
         .navigationTitle(title)
         .task { await load() }
         .refreshable { await load() }
@@ -330,9 +346,36 @@ struct FoldersScreen: View {
         #endif
     }
 
+    /// Progress while loading, and a centred empty or error state instead of a blank screen.
+    @ViewBuilder var status: some View {
+        if !folders.isEmpty || !items.isEmpty {
+            EmptyView()
+        } else if !loaded {
+            ProgressView()
+        } else if let error {
+            ContentUnavailableView {
+                Label(String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button(String(localized: "Try again", bundle: .module)) { Task { await load() } }
+            }
+        } else if sharedWithYou && path == "/" {
+            ContentUnavailableView(
+                String(localized: "Nothing shared with you", bundle: .module), systemImage: "person.2",
+                description: Text("Folders with photos that others share with you appear here.", bundle: .module))
+        } else {
+            ContentUnavailableView(
+                String(localized: "No photos in this folder", bundle: .module), systemImage: "folder",
+                description: Text("Folders that contain photos or videos appear here.", bundle: .module))
+        }
+    }
+
     func load() async {
         guard let services = session.services else { return }
+        defer { loaded = true }
         do {
+            error = nil
             if sharedWithYou && path == "/" {
                 folders = try await services.api.sharedWithYou().filter(\.isFolder)
             } else {

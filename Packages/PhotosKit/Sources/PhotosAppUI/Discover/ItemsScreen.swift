@@ -36,12 +36,22 @@ struct ItemsScreen<Accessory: View>: View {
         guard let services = session.services else { return }
         do {
             let items = try await load(services).filter { !$0.isLivePhotoVideo }
-            try? services.library.storeCollectionMedia(items)
-            feed.apply(items.sorted { $0.timestamp > $1.timestamp }.map(GridMedia.init), flat: !sectioned)
+            feed.apply(await ItemsPreparation.prepare(items, library: services.library), flat: !sectioned)
         } catch {
             self.error = error.localizedDescription
             feed.apply([], flat: true)
         }
+    }
+}
+
+enum ItemsPreparation {
+    /// Stores the items for the viewer and turns them into grid rows, newest first. Off the main thread: a memory or a
+    /// map area can have tens of thousands of items.
+    static func prepare(_ items: [MediaItem], library: LibraryStore) async -> [GridMedia] {
+        await Task.detached(priority: .userInitiated) {
+            try? library.storeCollectionMedia(items)
+            return items.sorted { $0.timestamp > $1.timestamp }.map(GridMedia.init)
+        }.value
     }
 }
 
@@ -62,6 +72,9 @@ struct CollectionTile: View {
     var coverFileId: FileID?
     var faceBox: FaceBox?
     var circular = false
+    /// What the tile is, for VoiceOver ("place", "person", "tag").
+    var kind: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: circular ? .center : .leading, spacing: 6) {
@@ -77,10 +90,14 @@ struct CollectionTile: View {
             }
             .aspectRatio(1, contentMode: .fit)
             .clipShape(circular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: Design.coverCornerRadius)))
-            Text(title).font(.headline).lineLimit(1)
-            if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            // One line in the grid; wrapped at the accessibility text sizes instead of cut off after a few letters.
+            Text(title).font(.headline).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            if let subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.collection(title: title, kind: kind, detail: subtitle))
     }
 }
 

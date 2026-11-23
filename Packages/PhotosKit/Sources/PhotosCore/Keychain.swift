@@ -10,9 +10,23 @@ import Security
 /// Unsigned development builds on macOS lack the entitlement; they fall back to the login keychain.
 public struct Keychain: Sendable {
     public let service: String
+    /// Items are kept as files in this directory instead of the keychain: unsigned Debug builds on the Mac, and unit
+    /// tests (also when they are built in Release). The app's public initializer sets it only in Debug builds.
+    let fileStore: DevelopmentSecretStore?
 
     public init(service: String = "com.nextcloud.photos") {
         self.service = service
+        #if DEBUG && os(macOS)
+            fileStore = Self.useDevelopmentStore ? DevelopmentSecretStore(directory: DevelopmentSecretStore.defaultDirectory) : nil
+        #else
+            fileStore = nil
+        #endif
+    }
+
+    /// A store that never touches the keychain: one file per item in `directory`. For tests only (internal).
+    init(service: String, fileStore directory: URL) {
+        self.service = service
+        self.fileStore = DevelopmentSecretStore(directory: directory)
     }
 
     public enum KeychainError: Error {
@@ -34,12 +48,10 @@ public struct Keychain: Sendable {
     }
 
     public func set(_ data: Data, for key: String) throws {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore {
-                try DevelopmentSecretStore.set(data, for: "\(service).\(key)")
-                return
-            }
-        #endif
+        if let fileStore {
+            try fileStore.set(data, for: "\(service).\(key)")
+            return
+        }
         for dataProtection in [true, false] {
             let query = baseQuery(key, dataProtection: dataProtection)
             SecItemDelete(query as CFDictionary)
@@ -53,9 +65,7 @@ public struct Keychain: Sendable {
     }
 
     public func data(for key: String) -> Data? {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore { return DevelopmentSecretStore.data(for: "\(service).\(key)") }
-        #endif
+        if let fileStore { return fileStore.data(for: "\(service).\(key)") }
         for dataProtection in [true, false] {
             var query = baseQuery(key, dataProtection: dataProtection)
             query[kSecReturnData] = true
@@ -72,12 +82,10 @@ public struct Keychain: Sendable {
     }
 
     public func delete(_ key: String) {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore {
-                DevelopmentSecretStore.delete("\(service).\(key)")
-                return
-            }
-        #endif
+        if let fileStore {
+            fileStore.delete("\(service).\(key)")
+            return
+        }
         for dataProtection in [true, false] {
             SecItemDelete(baseQuery(key, dataProtection: dataProtection) as CFDictionary)
         }
@@ -86,8 +94,15 @@ public struct Keychain: Sendable {
     // MARK: Conventions
 
     public static func passwordKey(_ account: String) -> String { "password:\(account)" }
-    public static func clientCertificateKey(_ account: String) -> String { "client-certificate:\(account)" }
-    public static func clientCertificatePasswordKey(_ account: String) -> String { "client-certificate-password:\(account)" }
+    public static func clientCertificateKey(_ host: String) -> String { "client-certificate:\(host)" }
+    public static func clientCertificatePasswordKey(_ host: String) -> String { "client-certificate-password:\(host)" }
+    public static func pushPrivateKeyKey(_ account: String) -> String { "push-private-key:\(account)" }
+    public static func pushRegistrationKey(_ account: String) -> String { "push-registration:\(account)" }
+
+    /// Every item that belongs to one account alone. Client certificates are per host and handled by `AccountPurge`.
+    public static func accountKeys(_ account: String) -> [String] {
+        [passwordKey(account), pushPrivateKeyKey(account), pushRegistrationKey(account)]
+    }
 }
 
 #if DEBUG && os(macOS)
@@ -107,24 +122,27 @@ public struct Keychain: Sendable {
             return status == errSecMissingEntitlement
         }()
     }
-
-    /// Development-only secret store (one file per key in the app's sandbox container).
-    enum DevelopmentSecretStore {
-        static var directory: URL {
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "DevelopmentSecrets")
-        }
-
-        static func file(_ key: String) -> URL {
-            directory.appending(path: Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_"))
-        }
-
-        static func set(_ data: Data, for key: String) throws {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: file(key), options: .atomic)
-        }
-
-        static func data(for key: String) -> Data? { try? Data(contentsOf: file(key)) }
-
-        static func delete(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
-    }
 #endif
+
+/// Secret store of unsigned Debug builds and unit tests (one file per key in a directory).
+struct DevelopmentSecretStore: Sendable {
+    let directory: URL
+
+    /// In the app's sandbox container.
+    static var defaultDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "DevelopmentSecrets")
+    }
+
+    func file(_ key: String) -> URL {
+        directory.appending(path: Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_"))
+    }
+
+    func set(_ data: Data, for key: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: file(key), options: .atomic)
+    }
+
+    func data(for key: String) -> Data? { try? Data(contentsOf: file(key)) }
+
+    func delete(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
+}

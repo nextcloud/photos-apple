@@ -64,9 +64,16 @@ All code lives in the local Swift package `Packages/PhotosKit`; the app target o
 
 ## Tests
 
+The unit tests need macOS 27 (the package's deployment target). Either of these runs all of them:
+
 ```sh
-cd Packages/PhotosKit && swift test
+cd Packages/PhotosKit
+swift test
+xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS'   # what CI runs
 ```
+
+CI runs them on GitHub's `xcode-27` runner (macOS 27 with Xcode 27); the job fails when no test ran. The other CI jobs
+(lint, REUSE, builds for iOS, macOS and visionOS) run on `macos-26`.
 
 Integration tests against a real server run when these variables are set (use a test server; the test only reads):
 
@@ -84,5 +91,5 @@ Lint with `xcrun swift-format lint --strict --configuration .swift-format` on th
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). The app links [NextcloudKit](https://github.com/nextcloud/NextcloudKit) (GPL-3.0-or-later with App Store
-exception), so the distributed app is also subject to its terms. The Nextcloud name and logo are trademarks of Nextcloud GmbH.
+MIT, see [LICENSE](LICENSE). The only third-party dependency is [GRDB](https://github.com/groue/GRDB.swift) (MIT).
+The Nextcloud name and logo are trademarks of Nextcloud GmbH.

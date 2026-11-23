@@ -1,0 +1,50 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld years ago" : {
+      "comment" : "Widget title; plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld year ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld years ago"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Favorites" : {
+
+    },
+    "Nextcloud Photos" : {
+
+    },
+    "No photos yet" : {
+
+    },
+    "On this day" : {
+
+    },
+    "Open the app to log in" : {
+
+    },
+    "Photos from this day in past years." : {
+
+    },
+    "Your favourite photos." : {
+
+    }
+  },
+  "version" : "1.1"
+}

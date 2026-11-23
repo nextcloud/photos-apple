@@ -43,24 +43,23 @@ struct MemoriesScreen: View {
         .navigationTitle(onlyOnThisDay ? String(localized: "On this day", bundle: .module) : String(localized: "Memories", bundle: .module))
         .task {
             guard let services = session.services else { return }
-            let items = (try? services.library.allVisibleItems()) ?? []
-            onThisDay = Memories.onThisDay(items)
-            if !onlyOnThisDay {
-                trips = Memories.trips(items)
-                recap = Memories.yearRecap(items)
-            }
+            // Purpose-built queries on a database queue; the library itself never comes into memory.
+            let memories = (try? await services.library.memories(onlyOnThisDay: onlyOnThisDay)) ?? MemoriesSnapshot()
+            onThisDay = memories.onThisDay
+            trips = memories.trips
+            recap = memories.recap
             loaded = true
         }
     }
 
     func section(_ title: String, _ memories: [Memory]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title2.bold())
+            Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {
                         ItemsScreen(title: memory.title, sectioned: false) { services in
-                            let map = try services.library.items(memory.items)
+                            let map = try await services.library.fetchItems(memory.items)
                             return memory.items.compactMap { map[$0] }
                         }
                     } label: {
@@ -75,24 +74,54 @@ struct MemoriesScreen: View {
 
 struct MemoryCard: View {
     let memory: Memory
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// The date under the title; nil when the title already is the date (a trip without places).
+    var dateLine: String? { Memories.dateLine(for: memory) }
 
     var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                // Large text does not fit on the picture: it goes below it, and wraps.
+                VStack(alignment: .leading, spacing: 6) {
+                    cover.clipShape(.rect(cornerRadius: 14))
+                    titles
+                }
+            } else {
+                cover
+                    .overlay(alignment: .bottomLeading) {
+                        titles
+                            .foregroundStyle(.white)
+                            .shadow(radius: 4)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                    }
+                    .clipShape(.rect(cornerRadius: 14))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.memory(title: memory.title, dateLine: dateLine, itemCount: memory.items.count))
+    }
+
+    var cover: some View {
         PreviewImage(fileId: memory.cover, etag: "", bucket: 1024)
             .aspectRatio(4 / 3, contentMode: .fit)
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(memory.title).font(.title3.bold())
-                    Text((memory.start..<max(memory.end, memory.start.addingTimeInterval(1))).formatted(.interval.day().month().year()))
-                        .font(.caption)
-                }
-                .foregroundStyle(.white)
-                .shadow(radius: 4)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
-            }
-            .clipShape(.rect(cornerRadius: 14))
-            .accessibilityElement(children: .combine)
+    }
+
+    var titles: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(memory.title).font(.title3.bold())
+            if let dateLine { Text(dateLine).font(.caption) }
+        }
+    }
+
+    /// Stronger with Increase Contrast or Reduce Transparency, so the white titles stay readable on bright photos.
+    var scrimOpacity: Double {
+        OverlayLegibility.scrimOpacity(base: 0.6, increased: contrast == .increased || reduceTransparency)
     }
 }
 
@@ -100,57 +129,71 @@ struct MemoryCard: View {
 
 struct MapScreen: View {
     @Environment(SessionModel.self) private var session
-    @State private var items: [MediaItem] = []
+    /// One marker per grid cell of the visible region, aggregated by the database. The located items are never loaded.
+    @State private var cells: [MapCell] = []
     @State private var region: MKCoordinateRegion?
     @State private var position: MapCameraPosition = .automatic
-    @State private var selected: [FileID]?
+    @State private var selected: Selection?
+    /// Place names of the markers' covers, for VoiceOver ("Lisbon, 12 photos").
+    @State private var places: [FileID: String] = [:]
 
-    struct Cluster: Identifiable {
-        var id: String
-        var coordinate: CLLocationCoordinate2D
-        var items: [MediaItem]
+    /// What the sheet lists: the items of a marker or of the visible area.
+    enum Selection: Identifiable, Hashable {
+        case cell(MapCell)
+        case area(MapRegion, count: Int)
+
+        var id: String {
+            switch self {
+            case .cell(let cell): "cell-\(cell.id)-\(cell.cover.fileId)-\(cell.count)"
+            case .area(let area, let count):
+                "area-\(area.minLatitude)-\(area.minLongitude)-\(area.maxLatitude)-\(area.maxLongitude)-\(count)"
+            }
+        }
+
+        var count: Int {
+            switch self {
+            case .cell(let cell): cell.count
+            case .area(_, let count): count
+            }
+        }
     }
 
-    /// Grid clustering in the visible region (MapKit's own clustering needs MKMapView).
-    var clusters: [Cluster] {
-        guard let region else { return [] }
-        let cellLat = max(region.span.latitudeDelta / 8, 0.0001)
-        let cellLon = max(region.span.longitudeDelta / 8, 0.0001)
-        var cells: [String: [MediaItem]] = [:]
-        for item in items {
-            guard let lat = item.latitude, let lon = item.longitude,
-                abs(lat - region.center.latitude) <= region.span.latitudeDelta,
-                abs(lon - region.center.longitude) <= region.span.longitudeDelta
-            else { continue }
-            cells["\(Int((lat / cellLat).rounded(.down)))-\(Int((lon / cellLon).rounded(.down)))", default: []].append(item)
+    /// Identifies a region for `.task(id:)`.
+    struct RegionKey: Hashable {
+        var latitude: Double
+        var longitude: Double
+        var latitudeDelta: Double
+        var longitudeDelta: Double
+
+        init?(_ region: MKCoordinateRegion?) {
+            guard let region else { return nil }
+            latitude = region.center.latitude
+            longitude = region.center.longitude
+            latitudeDelta = region.span.latitudeDelta
+            longitudeDelta = region.span.longitudeDelta
         }
-        return cells.map { key, members in
-            Cluster(
-                id: key, coordinate: CLLocationCoordinate2D(latitude: members[0].latitude!, longitude: members[0].longitude!),
-                items: members)
-        }
+    }
+
+    /// The query for a camera region: cells of an eighth of the visible span, for the visible region and half a screen
+    /// around it (so markers are there when the map is dragged a little).
+    static func query(for key: RegionKey) -> (region: MapRegion, cellLatitude: Double, cellLongitude: Double) {
+        let area = MapRegion(
+            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta,
+            longitudeReach: key.longitudeDelta)
+        return (area, max(key.latitudeDelta / 8, 0.0001), max(key.longitudeDelta / 8, 0.0001))
     }
 
     var body: some View {
         Map(position: $position) {
-            ForEach(clusters) { cluster in
-                Annotation("", coordinate: cluster.coordinate) {
-                    Button {
-                        selected = cluster.items.map(\.fileId)
-                    } label: {
-                        PreviewImage(item: cluster.items[0], bucket: 256)
-                            .frame(width: 52, height: 52)
-                            .clipShape(.rect(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white, lineWidth: 2))
-                            .overlay(alignment: .topTrailing) {
-                                if cluster.items.count > 1 {
-                                    Text("\(cluster.items.count)").font(.caption2.bold()).padding(4).background(.tint, in: .capsule)
-                                        .foregroundStyle(.white).offset(x: 8, y: -8)
-                                }
-                            }
-                            .shadow(radius: 3)
-                    }
-                    .buttonStyle(.plain)
+            ForEach(cells) { cell in
+                let label = AccessibilityText.mapMarker(place: places[cell.cover.fileId], count: cell.count, newest: cell.cover.timestamp)
+                // The title ("Lisbon, 12 photos") is drawn under the marker when there is room, and it is what VoiceOver and
+                // Voice Control get for the marker: MapKit does not pass on the button's own label, and with hidden titles
+                // the markers had no name at all.
+                Annotation(coordinate: CLLocationCoordinate2D(latitude: cell.latitude, longitude: cell.longitude)) {
+                    MapMarkerButton(cell: cell, label: label) { selected = .cell(cell) }
+                } label: {
+                    Text(label)
                 }
             }
         }
@@ -158,34 +201,80 @@ struct MapScreen: View {
         .navigationTitle(String(localized: "Map", bundle: .module))
         .toolbar {
             Button {
-                if let region {
-                    selected = items.filter { item in
-                        guard let lat = item.latitude, let lon = item.longitude else { return false }
-                        return abs(lat - region.center.latitude) <= region.span.latitudeDelta / 2
-                            && abs(lon - region.center.longitude) <= region.span.longitudeDelta / 2
-                    }.map(\.fileId)
-                }
+                Task { await selectVisibleArea() }
             } label: {
                 Label(String(localized: "Photos in this area", bundle: .module), systemImage: "square.grid.2x2")
             }
         }
-        .sheet(item: Binding(get: { selected.map { SelectedIds(ids: $0) } }, set: { selected = $0?.ids })) { selection in
+        .sheet(item: $selected) { selection in
             NavigationStack {
-                ItemsScreen(title: String(localized: "\(selection.ids.count) photos", bundle: .module)) { services in
-                    let map = try services.library.items(selection.ids)
-                    return selection.ids.compactMap { map[$0] }
+                ItemsScreen(title: AccessibilityText.photos(selection.count)) { services in
+                    switch selection {
+                    case .cell(let cell): try await services.library.mapItems(in: cell)
+                    case .area(let area, _): try await services.library.mapItems(in: area)
+                    }
                 }
             }
             .frame(minWidth: 600, minHeight: 500)
         }
-        .task {
-            items = ((try? session.services?.library.allVisibleItems()) ?? []).filter(\.hasLocation)
-        }
+        .task(id: RegionKey(region)) { await loadCells() }
     }
 
-    struct SelectedIds: Identifiable {
-        var id: String { ids.map(String.init).joined(separator: ",") }
-        var ids: [FileID]
+    /// Aggregates the markers of the current region in the database, off the main thread.
+    func loadCells() async {
+        guard let key = RegionKey(region), let library = session.services?.library else { return }
+        let query = Self.query(for: key)
+        guard
+            let loaded = try? await library.mapCells(in: query.region, cellLatitude: query.cellLatitude, cellLongitude: query.cellLongitude)
+        else { return }
+        // The camera has moved on; the newer region is being loaded.
+        guard !Task.isCancelled else { return }
+        cells = loaded
+        var names: [FileID: String] = [:]
+        for cell in loaded {
+            if let place = (try? library.item(cell.cover.fileId))?.place, !place.isEmpty { names[cell.cover.fileId] = place }
+        }
+        places = names
+    }
+
+    func selectVisibleArea() async {
+        guard let key = RegionKey(region), let library = session.services?.library else { return }
+        let area = MapRegion(
+            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta / 2,
+            longitudeReach: key.longitudeDelta / 2)
+        guard let count = try? await library.mapItemCount(in: area) else { return }
+        selected = .area(area, count: count)
+    }
+}
+
+/// A map marker: the newest photo of a cell with the number of photos there.
+struct MapMarkerButton: View {
+    let cell: MapCell
+    /// "Lisbon, 12 photos".
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            PreviewImage(
+                fileId: cell.cover.fileId, etag: cell.cover.etag, bucket: 256, blurhash: cell.cover.blurhash,
+                hasPreview: cell.cover.hasPreview, mimeType: cell.cover.mimeType,
+                path: cell.cover.directory == "/" ? "/" + cell.cover.name : cell.cover.directory + "/" + cell.cover.name
+            )
+            .frame(width: 52, height: 52)
+            .clipShape(.rect(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white, lineWidth: 2))
+            .overlay(alignment: .topTrailing) {
+                if cell.count > 1 {
+                    Text(cell.count, format: .number).font(.caption2.bold()).padding(4).background(.tint, in: .capsule)
+                        .foregroundStyle(.white).offset(x: 8, y: -8)
+                }
+            }
+            .shadow(radius: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(label)
     }
 }
 

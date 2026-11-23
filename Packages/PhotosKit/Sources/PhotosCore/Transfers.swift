@@ -56,9 +56,30 @@ public final class TransferQueue {
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "upload")
     @ObservationIgnored private var running = false
     @ObservationIgnored private var pending: [(UUID, UploadSource, String, Album?)] = []
+    @ObservationIgnored private var drainTask: Task<Void, Never>?
     @ObservationIgnored weak var session: SessionModel?
 
     init() {}
+
+    /// Stops uploading and waits until the running upload has stopped (account switch, removal). Uploads that had not
+    /// finished are marked as failed and their temporary files are removed.
+    func shutdown() async {
+        let abandoned = pending
+        pending = []
+        for (id, source, _, _) in abandoned {
+            update(id, .failed(String(localized: "Cancelled", bundle: .module)))
+            Self.removeTemporaryFiles(of: source)
+        }
+        drainTask?.cancel()
+        await drainTask?.value
+        drainTask = nil
+    }
+
+    static func removeTemporaryFiles(of source: UploadSource) {
+        guard source.isTemporary else { return }
+        try? FileManager.default.removeItem(at: source.file)
+        if let video = source.pairedVideo { try? FileManager.default.removeItem(at: video) }
+    }
 
     public var activeCount: Int { transfers.filter { !$0.isFinished }.count }
 
@@ -83,7 +104,10 @@ public final class TransferQueue {
             transfers.append(transfer)
             pending.append((transfer.id, source, target, album))
         }
-        if !running { Task { await drain() } }
+        if !running {
+            running = true
+            drainTask = Task { await drain() }
+        }
     }
 
     private func update(_ id: UUID, _ state: Transfer.State) {
@@ -123,10 +147,7 @@ public final class TransferQueue {
                 logger.error("upload failed: \(error.localizedDescription, privacy: .public)")
                 update(id, .failed(error.localizedDescription))
             }
-            if source.isTemporary {
-                try? FileManager.default.removeItem(at: source.file)
-                if let video = source.pairedVideo { try? FileManager.default.removeItem(at: video) }
-            }
+            Self.removeTemporaryFiles(of: source)
         }
     }
 }

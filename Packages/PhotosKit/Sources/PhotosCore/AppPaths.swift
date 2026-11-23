@@ -30,27 +30,61 @@ public enum AppPaths {
         }
     }
 
-    public static var accountsFile: URL { container.appending(path: "Library/Application Support/accounts.json") }
+    /// The layout of the app's own container.
+    public static var layout: StorageLayout { StorageLayout(container: container) }
 
-    public static var certificates: URL { container.appending(path: "Library/Application Support/Certificates") }
+    public static var accountsFile: URL { layout.accountsFile }
 
-    public static func accountDirectory(_ id: AccountID) -> URL {
+    public static var certificates: URL { layout.certificates }
+
+    public static func accountDirectory(_ id: AccountID) -> URL { layout.accountDirectory(id) }
+
+    public static func database(_ id: AccountID) -> URL { layout.database(id) }
+
+    public static func featuresFile(_ id: AccountID) -> URL { layout.featuresFile(id) }
+
+    public static func previews(_ id: AccountID) -> URL { layout.previews(id) }
+
+    public static func originals(_ id: AccountID) -> URL { layout.originals(id) }
+
+    public static func offline(_ id: AccountID) -> URL { layout.offline(id) }
+
+    public static var logs: URL { layout.logs }
+}
+
+/// Where things live below a container directory. The app uses `AppPaths.layout`; tests use a temporary directory.
+public struct StorageLayout: Sendable, Hashable {
+    public let container: URL
+
+    public init(container: URL) {
+        self.container = container
+    }
+
+    public var accountsFile: URL { container.appending(path: "Library/Application Support/accounts.json") }
+
+    /// Server certificates the user trusted (`<host>.der`).
+    public var certificates: URL { container.appending(path: "Library/Application Support/Certificates") }
+
+    /// Backup options; they belong to one account (`BackupSettings.accountId`).
+    public var backupSettingsFile: URL { container.appending(path: "Library/Application Support/backup.json") }
+
+    public func accountDirectory(_ id: AccountID) -> URL {
         container.appending(path: "Library/Application Support/Accounts/\(id.storageKey)")
     }
 
-    public static func database(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "library.sqlite") }
+    public func database(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "library.sqlite") }
 
-    public static func featuresFile(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "features.json") }
+    public func featuresFile(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "features.json") }
 
-    public static func previews(_ id: AccountID) -> URL {
+    public func previews(_ id: AccountID) -> URL {
         container.appending(path: "Library/Caches/Previews/\(id.storageKey)")
     }
 
-    public static func originals(_ id: AccountID) -> URL {
+    public func originals(_ id: AccountID) -> URL {
         container.appending(path: "Library/Caches/Originals/\(id.storageKey)")
     }
 
-    public static func offline(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "Offline") }
+    public func offline(_ id: AccountID) -> URL { accountDirectory(id).appending(path: "Offline") }
 
-    public static var logs: URL { container.appending(path: "Library/Logs") }
+    public var logs: URL { container.appending(path: "Library/Logs") }
 }

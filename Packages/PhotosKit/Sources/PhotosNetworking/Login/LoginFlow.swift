@@ -57,6 +57,14 @@ public struct LoginService: Sendable {
         return ServerConnection.normalized(url)
     }
 
+    /// True when logging in to this server sends the password and every photo unencrypted: plain `http://` to anything
+    /// but this device itself. The login screen asks for confirmation first.
+    public static func isUnencrypted(_ serverURL: URL) -> Bool {
+        guard serverURL.scheme?.lowercased() == "http" else { return false }
+        let host = (serverURL.host() ?? "").lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return !["localhost", "127.0.0.1", "::1"].contains(host)
+    }
+
     public func status(serverURL: URL) async throws -> ServerStatus {
         let url = serverURL.appending(path: "status.php")
         let response = try await http.send(

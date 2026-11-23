@@ -16,7 +16,7 @@ struct BackupScreen: View {
         Group {
             if !backup.isAvailable {
                 ContentUnavailableView(
-                    String(localized: "Backup is not available on this device", bundle: .module), systemImage: "icloud.slash")
+                    BackupWording.notAvailable, systemImage: "icloud.slash")
             } else if backup.settings.isEnabled || backup.settings.filesAppMode == .keepFiles {
                 BackupStatusView()
             } else {
@@ -31,19 +31,20 @@ struct BackupScreen: View {
 struct BackupSetupView: View {
     @Environment(SessionModel.self) private var session
     @State private var askingFiles = false
+    /// The artwork grows with the text size.
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize = 56.0
 
     var body: some View {
         let backup = session.backup
         ScrollView {
             VStack(spacing: 20) {
-                Image(systemName: "icloud.and.arrow.up").font(.system(size: 56)).foregroundStyle(.tint)
+                Image(systemName: "icloud.and.arrow.up").font(.system(size: iconSize)).foregroundStyle(.tint)
+                    .accessibilityHidden(true)
                 Text("Back up your photos to Nextcloud", bundle: .module).font(.title.bold()).multilineTextAlignment(.center)
-                Text(
-                    "Nextcloud Photos uploads the photos and videos of this device to \(session.account.hostDisplayName). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server.",
-                    bundle: .module
-                )
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                Text(BackupWording.explanation(host: session.account.hostDisplayName))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
                 if backup.authorization == .denied || backup.authorization == .restricted {
                     Label(String(localized: "Allow access to your photos in Settings to use backup.", bundle: .module), systemImage: "lock")
                         .foregroundStyle(.orange)
@@ -91,31 +92,46 @@ struct BackupStatusView: View {
         Form {
             Section {
                 HStack(spacing: 14) {
-                    statusIcon(status.phase)
+                    // The title says what the icon shows.
+                    statusIcon(status).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(statusTitle(status.phase)).font(.headline)
+                        Text(statusTitle(status)).font(.headline)
+                        if let blocker = activeBlocker(status) {
+                            Text(blockerAdvice(blocker)).font(.subheadline).foregroundStyle(.secondary)
+                        }
                         if let lastRun = status.lastRun {
                             Text("Last checked \(lastRun.formatted(.relative(presentation: .named)))", bundle: .module)
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.updatesFrequently)
                 }
                 if case .uploading(let done, let total, _) = status.phase {
                     ProgressView(value: Double(done), total: Double(max(total, 1)))
+                        .accessibilityLabel(Text("Backup progress", bundle: .module))
                 }
-                LabeledContent(String(localized: "Uploaded", bundle: .module), value: "\(status.uploaded)")
-                LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: "\(status.matched)")
-                LabeledContent(String(localized: "Waiting", bundle: .module), value: "\(status.pending)")
-                if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: "\(status.failed)") }
+                LabeledContent(String(localized: "Uploaded", bundle: .module), value: status.uploaded.formatted())
+                LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: status.matched.formatted())
+                LabeledContent(String(localized: "Waiting", bundle: .module), value: status.pending.formatted())
+                if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: status.failed.formatted()) }
                 HStack {
-                    Button(String(localized: "Back up now", bundle: .module)) { Task { await backup.runNow() } }
+                    Button(String(localized: "Back up now", bundle: .module)) {
+                        // The user asks: items that failed are tried again now instead of after their waiting time.
+                        Task { await backup.runNow(retryFailed: true) }
+                    }
                     if isRunning(status.phase) {
                         Button(String(localized: "Pause", bundle: .module)) { backup.cancel() }
                     }
                 }
             } footer: {
                 if backup.settings.filesAppMode == .keepFiles {
-                    Text("The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
+                    Text(BackupWording.filesAppNote)
+                } else if backup.isForOtherAccount, let account = backup.account {
+                    // Backup belongs to one account and keeps running while another one is shown.
+                    Text(
+                        "Backup goes to the account \(account.displayName) on \(account.hostDisplayName), not to the account you are looking at.",
+                        bundle: .module)
                 }
             }
 
@@ -130,6 +146,7 @@ struct BackupStatusView: View {
                             Text(entry.serverPath.map { ($0 as NSString).lastPathComponent } ?? entry.resourceKind).lineLimit(1)
                             Text(detail(entry)).font(.caption).foregroundStyle(.secondary)
                         }
+                        .accessibilityElement(children: .combine)
                         Spacer()
                         if entry.state == BackupItemState.matched.rawValue {
                             Button(String(localized: "Upload anyway", bundle: .module)) { Task { await backup.forceUpload(entry) } }
@@ -160,6 +177,57 @@ struct BackupStatusView: View {
         case .scanning, .reconciling, .uploading: true
         default: false
         }
+    }
+
+    /// What stopped the whole backup, while the status still is that failure.
+    func activeBlocker(_ status: BackupStatus) -> BackupStatus.Blocker? {
+        guard case .failed = status.phase else { return nil }
+        return status.blocker
+    }
+
+    func blockerSymbol(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage: "externaldrive.badge.exclamationmark"
+        case .unauthorized: "person.crop.circle.badge.exclamationmark"
+        case .forbidden: "lock.fill"
+        case .serverTrust: "lock.trianglebadge.exclamationmark"
+        }
+    }
+
+    func blockerTitle(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage: String(localized: "Your Nextcloud storage is full", bundle: .module)
+        case .unauthorized: String(localized: "Log in again to continue the backup", bundle: .module)
+        case .forbidden: String(localized: "The server does not allow the upload", bundle: .module)
+        case .serverTrust: String(localized: "The connection to your Nextcloud is not trusted", bundle: .module)
+        }
+    }
+
+    func blockerAdvice(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage:
+            String(localized: "Free up space on your Nextcloud or get more storage, then back up again.", bundle: .module)
+        case .unauthorized: String(localized: "Your login on this server is no longer valid.", bundle: .module)
+        case .forbidden:
+            String(localized: "Check that you are allowed to add files to the backup folder, or choose another folder.", bundle: .module)
+        case .serverTrust:
+            String(
+                localized: "The server's certificate changed or is not trusted, or the server asks for a client certificate.",
+                bundle: .module)
+        }
+    }
+
+    @ViewBuilder func statusIcon(_ status: BackupStatus) -> some View {
+        if let blocker = activeBlocker(status) {
+            Image(systemName: blockerSymbol(blocker)).foregroundStyle(.red).font(.title)
+        } else {
+            statusIcon(status.phase)
+        }
+    }
+
+    func statusTitle(_ status: BackupStatus) -> String {
+        if let blocker = activeBlocker(status) { return blockerTitle(blocker) }
+        return statusTitle(status.phase)
     }
 
     @ViewBuilder func statusIcon(_ phase: BackupStatus.Phase) -> some View {
@@ -270,5 +338,38 @@ struct BackupOptions: View {
                 String(localized: "Download originals from iCloud", bundle: .module),
                 isOn: Binding(get: { settings.downloadFromICloud }, set: { value in backup.update { $0.downloadFromICloud = value } }))
         }
+    }
+}
+
+/// Backup texts that name the device: "this Mac" and its Photos library on macOS, "this device" elsewhere.
+enum BackupWording {
+    static var notAvailable: String {
+        #if os(macOS)
+            String(localized: "Backup is not available on this Mac", bundle: .module)
+        #else
+            String(localized: "Backup is not available on this device", bundle: .module)
+        #endif
+    }
+
+    static func explanation(host: String) -> String {
+        #if os(macOS)
+            String(
+                localized:
+                    "Nextcloud Photos uploads the photos and videos in the Photos library of this Mac to \(host). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this Mac never deletes it on the server.",
+                bundle: .module)
+        #else
+            String(
+                localized:
+                    "Nextcloud Photos uploads the photos and videos of this device to \(host). Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server.",
+                bundle: .module)
+        #endif
+    }
+
+    static var filesAppNote: String {
+        #if os(macOS)
+            String(localized: "The Files app backs up this Mac. This shows which photos are already on your Nextcloud.", bundle: .module)
+        #else
+            String(localized: "The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
+        #endif
     }
 }

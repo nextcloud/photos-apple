@@ -6,40 +6,6 @@ import PhotosModel
 import PhotosStore
 import SwiftUI
 
-/// Observes a grid query from the store.
-@MainActor
-@Observable
-final class GridFeed {
-    private(set) var items: [GridMedia] = []
-    private(set) var byId: [FileID: GridMedia] = [:]
-    private(set) var sections: [GridSection] = []
-    private(set) var loaded = false
-    @ObservationIgnored private var task: Task<Void, Never>?
-
-    func observe(_ observation: @escaping @Sendable () -> GridStream, flat: Bool) {
-        task?.cancel()
-        task = Task { [weak self] in
-            do {
-                for try await items in observation() {
-                    guard let self else { return }
-                    self.apply(items, flat: flat)
-                }
-            } catch {}
-        }
-    }
-
-    func apply(_ items: [GridMedia], flat: Bool) {
-        self.items = items
-        byId = Dictionary(items.map { ($0.fileId, $0) }, uniquingKeysWith: { a, _ in a })
-        sections = flat ? GridSectioning.flat(items) : GridSectioning.byDay(items)
-        loaded = true
-    }
-
-    func cancel() { task?.cancel() }
-}
-
-typealias GridStream = AsyncThrowingStream<[GridMedia], any Error>
-
 /// Timeline views: All media, Photos, Videos, Favorites (SPEC §7.1).
 struct TimelineScreen: View {
     let filter: MediaFilter
@@ -47,6 +13,7 @@ struct TimelineScreen: View {
     @State private var feed = GridFeed()
     @AppStorage("gridColumns") private var columns = GridColumns.default
     @State private var mediaKind: MediaFilter
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(filter: MediaFilter) {
         self.filter = filter
@@ -56,6 +23,22 @@ struct TimelineScreen: View {
     #if os(macOS)
         /// Zoom slider position: 0 shows the most columns, `maxZoomLevel` the fewest.
         private var maxZoomLevel: Double { Double(GridColumns.options.count - 1) }
+
+        private func zoomButton(zoomIn: Bool) -> some View {
+            let title: String =
+                zoomIn ? String(localized: "Zoom In", bundle: .module) : String(localized: "Zoom Out", bundle: .module)
+            let next: Int = GridColumns.step(columns, zoomIn: zoomIn)
+            return Button {
+                columns = next
+            } label: {
+                Label(title, systemImage: zoomIn ? "square.grid.2x2.fill" : "square.grid.4x3.fill")
+                    .labelStyle(.iconOnly)
+                    .imageScale(.small)
+            }
+            .buttonStyle(.borderless)
+            .disabled(next == columns)
+            .help(title)
+        }
 
         private var zoomLevel: Binding<Double> {
             Binding<Double>(
@@ -88,23 +71,26 @@ struct TimelineScreen: View {
             showsHeaders: true,
             emptyTitle: emptyTitle,
             emptyMessage: emptyMessage,
-            columns: $columns
+            columns: $columns,
+            waitsForFirstSync: true
         ) {
             TransfersIndicator()
             UploadMenu()
             #if os(macOS)
-                // Mac: zoom slider and a segmented control, like Apple Photos.
+                // Mac: zoom slider between two buttons that step, like Apple Photos. Three toolbar items, not a slider
+                // with value labels or a stack: the toolbar gives every control of an item that item's label, so the
+                // end caps would both be read as "Zoom".
+                zoomButton(zoomIn: false)
                 Slider(value: zoomLevel, in: 0...maxZoomLevel) {
                     Text("Zoom", bundle: .module)
-                } minimumValueLabel: {
-                    Image(systemName: "square.grid.4x3.fill").imageScale(.small)
-                } maximumValueLabel: {
-                    Image(systemName: "square.grid.2x2.fill").imageScale(.small)
                 }
-                .frame(width: 140)
+                .frame(width: 100)
+                .accessibilityLabel(Text("Zoom", bundle: .module))
                 .help(String(localized: "Zoom", bundle: .module))
+                zoomButton(zoomIn: true)
             #endif
-            if filter == .all {
+            // Only where no sidebar offers Photos, Videos and Favorites (iPhone, narrow iPad windows).
+            if filter == .all && TimelineToolbar.showsMediaKindPicker(sizeClass) {
                 Picker(selection: $mediaKind) {
                     Text("All", bundle: .module).tag(MediaFilter.all)
                     Text("Photos", bundle: .module).tag(MediaFilter.photos)
@@ -113,12 +99,7 @@ struct TimelineScreen: View {
                 } label: {
                     Label(String(localized: "Show", bundle: .module), systemImage: "line.3.horizontal.decrease.circle")
                 }
-                #if os(macOS)
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                #else
-                    .pickerStyle(.menu)
-                #endif
+                .pickerStyle(.menu)
             }
         }
         .task(id: mediaKind) { observe() }
@@ -126,7 +107,7 @@ struct TimelineScreen: View {
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
         }
-        .refreshable { await session.syncNow() }
+        .refreshable { await session.syncNow(forceReconcile: true) }
     }
 
     func observe() {
@@ -134,11 +115,17 @@ struct TimelineScreen: View {
         let library = services.library
         let excluded = session.excludedFolders
         let kind = mediaKind
-        feed.observe({ library.observeGrid(kind, excludedFolders: excluded) }, flat: false)
+        // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.
+        feed.observe({ library.observeGrid(kind, excludedFolders: excluded, coalescing: .milliseconds(300)) }, flat: false)
     }
 
     var emptyTitle: String {
-        if case .initialSync = session.syncStatus { return String(localized: "Loading your library…", bundle: .module) }
+        // While the first sync runs the grid shows a skeleton; these are for a library that could not be loaded.
+        switch session.syncStatus {
+        case .offline(lastSync: nil): return String(localized: "You're offline", bundle: .module)
+        case .failed(_, lastSync: nil): return String(localized: "Couldn't load your library", bundle: .module)
+        default: break
+        }
         switch mediaKind {
         case .favorites: return String(localized: "No favorites yet", bundle: .module)
         case .videos: return String(localized: "No videos", bundle: .module)
@@ -147,8 +134,11 @@ struct TimelineScreen: View {
     }
 
     var emptyMessage: String {
-        if case .initialSync(let count) = session.syncStatus {
-            return String(localized: "\(count) items found so far.", bundle: .module)
+        switch session.syncStatus {
+        case .offline(lastSync: nil):
+            return String(localized: "Your library is loaded as soon as the server can be reached.", bundle: .module)
+        case .failed(let message, lastSync: nil): return message
+        default: break
         }
         let folders = session.features.userConfig.photosSourceFolders.joined(separator: ", ")
         return String(localized: "Photos and videos in \(folders) on your Nextcloud appear here.", bundle: .module)

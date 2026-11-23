@@ -29,29 +29,44 @@ jobs:
         uses: fsfe/reuse-action@v5
 
   test:
-    runs-on: macos-26
+    # The package targets OS 27, so its test bundles only load on macOS 27. `xcode-27` is GitHub's hosted macOS 27 image with
+    # Xcode 27 (public preview, https://github.com/actions/runner-images/issues/14404); `macos-26` cannot run them.
+    # Switch to `macos-27` once that label exists.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Unit tests
         working-directory: Packages/PhotosKit
-        # xcodebuild (not `swift test`) builds the resource bundles of dependencies such as NextcloudKit.
-        # The app targets OS 27; hosted runners run macOS 26, so tests run on an iOS 27 simulator when one exists.
         run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          data = json.load(sys.stdin)["devices"]
-          ids = [d["udid"] for runtime, devices in data.items() if "iOS-27" in runtime for d in devices if d["name"].startswith("iPhone")]
-          print(ids[0] if ids else "")')
-          if [ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 ]; then
-            xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation
-          elif [ -n "$DEVICE" ]; then
-            xcodebuild test -scheme PhotosKit-Package -destination "id=$DEVICE" -skipPackagePluginValidation
-          else
-            echo "::warning::No macOS 27 runner or iOS 27 simulator available; unit tests skipped."
+          set -o pipefail
+          OS=$(sw_vers -productVersion)
+          if [ "${OS%%.*}" -lt 27 ]; then
+            echo "::error::Unit tests need macOS 27 (the package's deployment target); this runner has macOS $OS."
+            exit 1
+          fi
+          xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation \
+            | tee "$RUNNER_TEMP/unit-tests.log"
+      - name: Test summary
+        # A green job must mean that tests ran: count them and fail when there were none.
+        if: always()
+        run: |
+          LOG="$RUNNER_TEMP/unit-tests.log"
+          TOTAL=0
+          if [ -f "$LOG" ]; then
+            TOTAL=$(grep -Eo 'Test run with [0-9]+ tests?' "$LOG" | awk '{ sum += $4 } END { print sum + 0 }')
+          fi
+          {
+            echo "### Unit tests"
+            echo "macOS $(sw_vers -productVersion), $(xcodebuild -version | head -1): Swift Testing ran **$TOTAL** tests."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "::error::No unit test ran."
+            exit 1
           fi
 
   build:
-    runs-on: macos-26
+    # Same image as the tests: the app targets OS 27 and uses API from the 27 SDKs (e.g. `PHAssetResource.dataSize`).
+    runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:

@@ -9,43 +9,38 @@ import SwiftUI
 
 /// Evaluates search filters on the local index (SPEC SR-2): AND between kinds, OR within a kind.
 enum SearchEvaluator {
-    @MainActor static func items(for filters: [SearchFilter], session: SessionModel) async throws -> [MediaItem] {
-        guard let services = session.services else { return [] }
-        var items = try services.library.allVisibleItems()
-        let places = filters.compactMap { if case .place(let name) = $0 { name } else { nil } }
-        if !places.isEmpty { items = items.filter { $0.place.map(places.contains) ?? false } }
-        let ranges = filters.compactMap { if case .dateRange(let start, let end, _) = $0 { (start, end) } else { nil } }
-        if !ranges.isEmpty { items = items.filter { item in ranges.contains { item.timestamp >= $0.0 && item.timestamp < $0.1 } } }
-        let texts = filters.compactMap { if case .text(let text) = $0 { text } else { nil } }
-        for text in texts {
-            items = items.filter { item in
-                [item.name, item.caption ?? "", item.place ?? "", item.directory].contains {
-                    $0.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                }
-            }
-        }
-        if filters.contains(.favorites) { items = items.filter(\.isFavorite) }
-        if filters.contains(.videos) { items = items.filter { $0.kind == .video } }
+    /// The store query for a set of filter chips. Everything the index knows is answered by one SQL query (full-text
+    /// index and indexed columns, SPEC SR-3) on a database queue; only the tag and person memberships come from the server.
+    @MainActor static func search(for filters: [SearchFilter], session: SessionModel) async throws -> LibrarySearch? {
+        guard let services = session.services else { return nil }
+        var search = LibrarySearch(filters: filters)
         let tagIds = filters.compactMap { if case .tag(let id, _) = $0 { id } else { nil } }
         if !tagIds.isEmpty {
             var allowed = Set<FileID>()
-            for id in tagIds { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
+            // A tag of a smart album that no longer exists on the server matches nothing.
+            for id in tagIds where id != unknownTagId { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
+            search.memberships.append(allowed)
         }
         let people = filters.compactMap { if case .person(let name) = $0 { name } else { nil } }
         if !people.isEmpty {
             var allowed = Set<FileID>()
             let key = await session.recognizeKey()
             for name in people { allowed.formUnion(try await services.api.personPhotos(name, key: key).map(\.item.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
+            search.memberships.append(allowed)
         }
-        let albums = filters.compactMap { if case .album(let id, _) = $0 { id } else { nil } }
-        if !albums.isEmpty {
-            var allowed = Set<FileID>()
-            for id in albums { allowed.formUnion(try services.collections.albumItems(albumId: id).map(\.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
-        }
-        return items
+        return search
+    }
+
+    /// Search results as grid rows.
+    @MainActor static func gridItems(for filters: [SearchFilter], session: SessionModel) async throws -> [GridMedia] {
+        guard let services = session.services, let search = try await search(for: filters, session: session) else { return [] }
+        return try await services.library.search(search)
+    }
+
+    /// Search results as full items (smart albums).
+    @MainActor static func items(for filters: [SearchFilter], session: SessionModel) async throws -> [MediaItem] {
+        guard let services = session.services, let search = try await search(for: filters, session: session) else { return [] }
+        return try await services.library.searchItems(search)
     }
 
     /// Filters that can be stored in a smart album (`AlbumFilters`: places, dates, names, tags).
@@ -64,51 +59,105 @@ enum SearchEvaluator {
         return result
     }
 
-    static func searchFilters(_ filters: AlbumFilters) -> [SearchFilter] {
-        filters.places.map { .place($0) } + filters.names.map { .text($0) }
-            + filters.dateRanges.map {
-                .dateRange(
-                    start: $0.startDate, end: $0.endDateExclusive,
-                    label: ($0.startDate..<$0.endDateExclusive).formatted(.interval.day().month().year()))
-            }
+    /// Tag id of a smart-album tag whose name the server no longer knows.
+    static let unknownTagId = -1
+
+    /// The search filters of a smart album. Smart albums store tags by name (as the web app does), so the server's tags
+    /// map them back to ids; a tag that is gone matches nothing rather than being dropped, which would widen the album.
+    static func searchFilters(_ filters: AlbumFilters, tags: [SystemTag] = []) -> [SearchFilter] {
+        let ids = Dictionary(tags.map { ($0.name, $0.id) }, uniquingKeysWith: { first, _ in first })
+        let tagFilters: [SearchFilter] = filters.tags.map { .tag(id: ids[$0] ?? unknownTagId, name: $0) }
+        let dateFilters: [SearchFilter] = filters.dateRanges.map {
+            .dateRange(
+                start: $0.startDate, end: $0.endDateExclusive,
+                label: DateRangeLabel.string(for: $0.startDate..<$0.endDateExclusive))
+        }
+        return filters.places.map { .place($0) } + filters.names.map { .text($0) } + dateFilters + tagFilters
+    }
+
+    /// The items of a smart album.
+    @MainActor static func items(of album: SmartAlbum, session: SessionModel) async throws -> [MediaItem] {
+        var tags: [SystemTag] = []
+        if !album.filters.tags.isEmpty, session.features.has(.systemtags), let services = session.services {
+            tags = try await services.api.tagsInUse()
+        }
+        return try await items(for: searchFilters(album.filters, tags: tags), session: session)
+    }
+}
+
+/// The search tab (iPhone, iPad, Vision Pro) with its own search field. On the Mac the field is in the window toolbar.
+struct SearchTab: View {
+    @State private var query = ""
+    @State private var filters: [SearchFilter] = []
+
+    var body: some View {
+        SearchScreen(query: $query, filters: $filters)
+            .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
+    }
+}
+
+extension SearchFilter {
+    var systemImage: String {
+        switch self {
+        case .place: "mappin"
+        case .person: "person"
+        case .tag: "tag"
+        case .album: "rectangle.stack"
+        case .dateRange: "calendar"
+        case .text: "textformat"
+        case .favorites: "heart"
+        case .videos: "video"
+        }
     }
 }
 
 struct SearchScreen: View {
     @Environment(SessionModel.self) private var session
-    @State private var query = ""
-    @State private var filters: [SearchFilter] = []
+    /// Text of the search field, which the caller provides.
+    @Binding var query: String
+    /// The chosen filters. On the Mac they are the tokens of the search field; elsewhere a row of chips above the results.
+    @Binding var filters: [SearchFilter]
     @State private var vocabulary = SearchSuggestions.Vocabulary()
+    /// Counts the steps in which the vocabulary arrives (it loads off the main thread, tags and people from the server),
+    /// so that suggestions for text typed before it was there are computed again.
+    @State private var vocabularyRevision = 0
     @State private var feed = GridFeed()
     @State private var saving = false
     @State private var smartName = ""
     @AppStorage("gridColumns") private var columns = GridColumns.default
     @State private var asking = false
     @State private var askError: String?
+    /// Suggestions for the typed text, computed after a pause in typing and off the main thread.
+    @State private var matches: [SearchFilter] = []
 
-    var suggestions: [SearchFilter] {
-        SearchSuggestions.suggestions(for: query, vocabulary: vocabulary).filter { !filters.contains($0) }
+    var suggestions: [SearchFilter] { matches.filter { !filters.contains($0) } }
+
+    /// How long typing must pause before suggestions are computed.
+    static let typingPause: Duration = .milliseconds(120)
+
+    nonisolated static func suggestions(for query: String, vocabulary: SearchSuggestions.Vocabulary) async -> [SearchFilter] {
+        SearchSuggestions.suggestions(for: query, vocabulary: vocabulary)
+    }
+
+    func updateSuggestions() async {
+        let typed = query
+        if typed.isEmpty {
+            matches = []
+            return
+        }
+        // The first suggestions come at once; while they are on screen, further typing is debounced.
+        if !matches.isEmpty { try? await Task.sleep(for: Self.typingPause) }
+        guard !Task.isCancelled else { return }
+        let result = await Self.suggestions(for: typed, vocabulary: vocabulary)
+        guard !Task.isCancelled else { return }
+        matches = result
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !filters.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(filters) { filter in
-                            Button {
-                                filters.removeAll { $0 == filter }
-                            } label: {
-                                Label(filter.label, systemImage: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.bordered)
-                            .buttonBorderShape(.capsule)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 6)
-                }
-            }
+            #if !os(macOS)
+                if !filters.isEmpty { filterBar }
+            #endif
             if !query.isEmpty {
                 if query.split(separator: " ").count >= 3 {
                     Button {
@@ -128,7 +177,22 @@ struct SearchScreen: View {
                         filters.append(suggestion)
                         query = ""
                     } label: {
-                        Label(suggestion.label, systemImage: icon(suggestion))
+                        // A full-width row: what it is, and what kind of thing it is.
+                        HStack {
+                            Label(suggestion.label, systemImage: suggestion.systemImage)
+                            Spacer()
+                            Text(kind(suggestion)).font(.callout).foregroundStyle(.secondary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.inset)
+                .overlay {
+                    if suggestions.isEmpty {
+                        ContentUnavailableView(
+                            String(localized: "No suggestions", bundle: .module), systemImage: "magnifyingglass",
+                            description: Text("Try a place, an album, a date like “june 2023”, or part of a file name.", bundle: .module))
                     }
                 }
             } else if filters.isEmpty {
@@ -154,15 +218,21 @@ struct SearchScreen: View {
                     } label: {
                         Label(String(localized: "Save as smart album", bundle: .module), systemImage: "plus.rectangle.on.rectangle")
                     }
+                    .help(String(localized: "Save as smart album", bundle: .module))
                 }
+                #if os(macOS)
+                    .navigationSubtitle(feed.loaded ? String(localized: "\(feed.items.count) results", bundle: .module) : "")
+                #endif
             }
         }
-        .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
+        .task(id: SuggestionInput(query: query, vocabularyRevision: vocabularyRevision)) { await updateSuggestions() }
         .task(id: filters) {
-            guard !filters.isEmpty, let items = try? await SearchEvaluator.items(for: filters, session: session) else { return }
-            feed.apply(items.map(GridMedia.init), flat: false)
+            guard !filters.isEmpty, let items = try? await SearchEvaluator.gridItems(for: filters, session: session) else { return }
+            // A newer set of filters is already being evaluated.
+            guard !Task.isCancelled else { return }
+            feed.apply(items, flat: false)
         }
         .alert(String(localized: "Save as smart album", bundle: .module), isPresented: $saving) {
             TextField(String(localized: "Name", bundle: .module), text: $smartName)
@@ -171,6 +241,32 @@ struct SearchScreen: View {
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         }
+    }
+
+    /// The active filters (click one to remove it) and the number of results.
+    var filterBar: some View {
+        HStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    ForEach(filters) { filter in
+                        Button {
+                            filters.removeAll { $0 == filter }
+                        } label: {
+                            Label(filter.label, systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel(Text("Remove filter \(filter.label)", bundle: .module))
+                    }
+                }
+            }
+            if query.isEmpty && feed.loaded {
+                Text("\(feed.items.count) results", bundle: .module)
+                    .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 
     /// Natural-language search (SPEC SR-4).
@@ -194,34 +290,44 @@ struct SearchScreen: View {
         }
     }
 
-    func icon(_ filter: SearchFilter) -> String {
+    /// What kind of filter a suggestion is, shown at the end of its row.
+    func kind(_ filter: SearchFilter) -> String {
         switch filter {
-        case .place: "mappin"
-        case .person: "person"
-        case .tag: "tag"
-        case .album: "rectangle.stack"
-        case .dateRange: "calendar"
-        case .text: "textformat"
-        case .favorites: "heart"
-        case .videos: "video"
+        case .place: String(localized: "Place", bundle: .module)
+        case .person: String(localized: "Person", bundle: .module)
+        case .tag: String(localized: "Tag", bundle: .module)
+        case .album: String(localized: "Album", bundle: .module)
+        case .dateRange: String(localized: "Date", bundle: .module)
+        case .text: String(localized: "Name or caption", bundle: .module)
+        case .favorites: String(localized: "Favorites", bundle: .module)
+        case .videos: String(localized: "Videos", bundle: .module)
         }
     }
 
     func loadVocabulary() async {
         guard let services = session.services else { return }
-        let items = (try? services.library.allVisibleItems()) ?? []
-        var places = Set(items.compactMap(\.place))
+        var places = Set((try? await services.library.placeNames()) ?? [])
         places.formUnion(((try? services.collections.albums(.own)) ?? []).map(\.location).filter { !$0.isEmpty })
         let albums = (((try? services.collections.albums(.own)) ?? []) + ((try? services.collections.albums(.shared)) ?? [])).map {
             ($0.id, $0.title)
         }
         vocabulary = SearchSuggestions.Vocabulary(places: places.sorted(), albums: albums)
+        vocabularyRevision += 1
         if session.features.has(.systemtags), let tags = try? await services.api.tagsInUse() {
             vocabulary.tags = tags.map { ($0.id, $0.name) }
+            vocabularyRevision += 1
         }
         if session.features.has(.recognize), let people = try? await services.api.people(key: await session.recognizeKey()) {
             vocabulary.people = people.filter { !$0.isUnnamed }.map(\.name)
+            vocabularyRevision += 1
         }
+    }
+
+    /// What the suggestions depend on. On the Mac the screen opens with the first typed letters already in the field,
+    /// before the vocabulary has loaded.
+    struct SuggestionInput: Hashable {
+        var query: String
+        var vocabularyRevision: Int
     }
 }
 
@@ -235,7 +341,7 @@ struct SmartAlbumsScreen: View {
             ForEach(albums, id: \.0.id) { album, isLocal in
                 NavigationLink {
                     ItemsScreen(title: album.name) { _ in
-                        try await SearchEvaluator.items(for: SearchEvaluator.searchFilters(album.filters), session: session)
+                        try await SearchEvaluator.items(of: album, session: session)
                     }
                 } label: {
                     VStack(alignment: .leading) {

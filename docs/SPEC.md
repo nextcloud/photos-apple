@@ -47,11 +47,11 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 | Topic | Decision |
 |---|---|
 | Identity | Official **Nextcloud Photos** app by Nextcloud GmbH, Nextcloud branding, published under Nextcloud's Apple team (`NKUJUXUJ3B`). Repo **github.com/nextcloud/photos-ios**. |
-| Licence | **MIT** for all of the app's own code (the repo's `LICENSE`). REUSE-compliant SPDX headers in every file. Logos are `LicenseRef-NextcloudTrademarks`. The app links **NextcloudKit (GPL-3.0-or-later with App Store exception)**, which is a deliberate decision: the source stays MIT, the distributed app as a combined work is also subject to NextcloudKit's GPL terms (the source is public anyway). **Never copy code from nextcloud/ios or other GPL projects into this repo** — use them only as a reference and write your own implementation. Other dependencies must be MIT-compatible (MIT, BSD, Apache-2.0). |
+| Licence | **MIT** for all of the app's own code (the repo's `LICENSE`). REUSE-compliant SPDX headers in every file. Logos are `LicenseRef-NextcloudTrademarks`. The app does **not** link NextcloudKit or any other GPL library, so the distributed app is MIT as well (*decision 2026-11-23, replaces the earlier plan to link NextcloudKit; the dependency was declared but never used and has been removed*). **Never copy code from nextcloud/ios, NextcloudKit or other GPL projects into this repo** — use them only as a reference and write your own implementation. All dependencies must be MIT-compatible (MIT, BSD, Apache-2.0). |
 | Platforms | iOS, iPadOS, **macOS as a native SwiftUI target (not Catalyst, not "Designed for iPad")**, **visionOS**. |
 | Minimum OS | **27 only** (iOS/iPadOS/macOS/visionOS 27). No availability checks for older OSes. |
 | Look | **Native Apple look** (system navigation, Liquid Glass, sidebar on iPad/Mac/visionOS, SF Symbols), with Nextcloud blue as accent and the Nextcloud logo. Do not imitate the web UI. |
-| Networking | **NextcloudKit** (Swift package) wrapped by the app's own service layer. |
+| Networking | The app's **own client on `URLSession`** (`HTTPClient` in `PhotosNetworking`): WebDAV, OCS, Login Flow v2, chunked upload, push registration. No NextcloudKit (see Licence and §4.3). |
 | Server | **Nextcloud 33 and later.** Core features must work with the Photos app that ships with each of these servers. |
 | Feature detection | **At runtime.** Extended features (from the feature branches / future Photos versions) switch on when the server supports them. |
 | Server work | The spec may define **optional companion server APIs** (`SERVER-COMPANION.md`). The app uses them when present and falls back otherwise. |
@@ -74,9 +74,9 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 - **SwiftUI** for all UI. The photo grid is the one exception (see §6.4): it is a platform collection view (`UICollectionView` on iOS/iPadOS/visionOS, `NSCollectionView` on macOS) wrapped in a SwiftUI view, because it must scroll 100 000+ items smoothly with pinch-zoom, drag-selection and section headers.
 - **Observation** (`@Observable`) for view models; structured concurrency (`async/await`, actors) everywhere; no Combine in new code.
 - **Persistence:** **GRDB** (SQLite, WAL) in the app's App Group container. Chosen over SwiftData for predictable performance with 100k+ rows, FTS5 search, and safe concurrent access from extensions.
-- **Networking:** NextcloudKit ≥ 7.6.5 (SPM, product `NextcloudKit`; `NextcloudKitUI` may be used for the login UI). In Swift 6 mode `NextcloudKit.shared` does not exist: create one `NextcloudKit()` instance and own it in the networking layer.
+- **Networking:** `URLSession` through the app's own `HTTPClient` (certificate trust, client certificates, 401 handling), `XMLParser` for multistatus responses, `Codable` for OCS. NextcloudKit is not a dependency.
 - **Media:** PhotoKit (backup, export, picker), AVFoundation/AVKit (video), ImageIO (decoding, thumbnails, metadata), Core Image (editing), VisionKit/Vision (Live Text, OCR), MapKit (places/map), WidgetKit, App Intents, Core Spotlight, LocalAuthentication, UserNotifications, BackgroundTasks, FoundationModels (on-device language model, optional).
-- **Third-party dependencies** are limited to: NextcloudKit (+ its Alamofire, SwiftyJSON, SwiftyXMLParser), GRDB, a BlurHash decoder (or a small own implementation). Anything else needs a reason in the PR.
+- **Third-party dependencies** are limited to: GRDB (MIT). The BlurHash decoder is an own implementation. Anything else needs a reason in the PR and an MIT-compatible licence.
 - **Formatting/lint:** `swift-format` with a checked-in `.swift-format`, run in CI with `--strict`.
 
 ---
@@ -98,7 +98,7 @@ photos-ios/
     BackgroundUpload/       # iOS/iPadOS PhotoKit background-upload extension (com.apple.photos.background-upload)
   Packages/
     PhotosModel/            # value types, IDs, feature flags; no I/O
-    PhotosNetworking/       # NextcloudKit wrapper, Photos DAV client, XML builders/parsers, feature detection
+    PhotosNetworking/       # HTTP client, Photos DAV client, XML builders/parsers, feature detection
     PhotosStore/            # GRDB schema, migrations, queries, sync engine, outbox
     PhotosDomain/           # pure algorithms: grouping, stacking, bursts, memories, duplicates, cleanup, search parsing
     PhotosMedia/            # preview cache, image pipeline, video/live-photo loading, editing pipeline
@@ -125,14 +125,14 @@ The bundle id is confirmed. The derived group names still need to be provisioned
 | URL scheme | `nextcloudphotos://` (deep links, widgets) and handling of `nc://login/…` / `nc://onetime-login/…` QR codes |
 | Background task ids | `com.nextcloud.photos.refresh`, `com.nextcloud.photos.processing` |
 
-**Never** call `NextcloudKit.setup(groupIdentifier:)` with the Files app's group: NextcloudKit stores "unauthorized" markers per account in that group and the two apps would block each other.
+The app never writes to the Files app's App Group: NextcloudKit (used by Files) stores "unauthorized" markers per account in that group, and a second writer would make the two apps block each other.
 
 ### 4.3 Layers
 
 1. **Networking** (`PhotosNetworking`)
-   - `NextcloudSession` per account wraps a NextcloudKit session (`appendSession`), the user agent, credentials and the trust/client-certificate delegate.
+   - `ServerConnection` per account holds the `HTTPClient`, the user agent, credentials and the trust/client-certificate delegate.
    - `DAVClient` / `PhotosAPI`: typed requests for everything under `/remote.php/dav` (SEARCH bodies, `files/`, `photos/`, `photospublic/`, `recognize/`, `systemtags*`, `comments/photos_album`, `trashbin`, PROPPATCH of metadata, REPORT), parsed with an own `XMLParser`-based multistatus parser that keeps **all** properties (NextcloudKit drops unknown ones). Handle 401 yourself (§5.1.6).
-   - *Implementation decision (M0):* WebDAV, OCS and Login Flow v2 run on the app's own `HTTPClient` (one `URLSession` with the app's certificate trust and client-certificate handling), because NextcloudKit has no generic REPORT/PROPPATCH helpers, drops unknown DAV properties and keeps per-account "unauthorized" state in a shared App Group. Chunked upload (v2) is also implemented on `HTTPClient` (`Uploader`, M2) so uploads share the same trust handling and can set `OC-Checksum`. NextcloudKit remains a dependency for push registration (M4).
+   - *Implementation decision (M0):* WebDAV, OCS and Login Flow v2 run on the app's own `HTTPClient` (one `URLSession` with the app's certificate trust and client-certificate handling), because NextcloudKit has no generic REPORT/PROPPATCH helpers, drops unknown DAV properties and keeps per-account "unauthorized" state in a shared App Group. Chunked upload (v2) is also implemented on `HTTPClient` (`Uploader`, M2) so uploads share the same trust handling and can set `OC-Checksum`. Push registration (M4) is implemented on the same client (`PhotosCore/PushNotifications.swift`), so NextcloudKit is not used at all and was removed from the package (2026-11-23).
    - `OCSClient`: OCS calls (capabilities, sharees, notifications, push, task processing, Photos OCS routes). Always send `OCS-APIRequest: true` — this is also what makes the classic Photos routes pass the CSRF check (they return 412 without it).
    - XML request bodies are built by small, tested builder functions; every value is XML-escaped (the web app doesn't escape — don't copy that).
 2. **Store** (`PhotosStore`): one SQLite database per account (`<AppGroup>/Accounts/<accountId>/library.sqlite`) plus a small global database for accounts and settings. Schema in §5.4.2. All UI reads come from the store; the network only writes to the store (single source of truth, offline for free).
@@ -179,7 +179,7 @@ One `Brand` type (modelled on the Files app's `NCBrandOptions`) holds name, acce
    4. `POST /index.php/login/v2`, open the login URL in an **ephemeral `ASWebAuthenticationSession`** (callback scheme `nc`), poll the endpoint every second (404 = pending) until it returns `server`, `loginName`, `appPassword`. Fall back to an in-app `WKWebView` when the session fails for client-certificate (mTLS) reasons.
    5. `GET /ocs/v2.php/cloud/user` to get the real user id (may differ from login name) and display name.
    6. Store the app password in the **own** keychain group (accessibility `afterFirstUnlock` — needed for background uploads), never in the database.
-   - `NextcloudKitUI`'s `ServerAddressView` may be reused if it fits the native look; otherwise build an equivalent SwiftUI flow.
+   - The login UI is the app's own SwiftUI flow (`NextcloudKitUI`'s `ServerAddressView` is a reference only).
 2. **QR codes** `nc://login/server:…&user:…&password:…` and `nc://onetime-login/…` (camera scanner on iOS/iPadOS; paste on macOS).
 3. **Server suggestions:** read `group.com.nextcloud.apps/Library/Application Support/NextcloudAccounts/accounts.json` (written by Files/Talk/Notes) to offer "Use an account from Nextcloud Files" — prefill server and user only; still run a fresh Login Flow (each app has its own app password, so revoking one doesn't break the other).
 4. **Certificates:** system trust by default. On an untrusted certificate show the certificate details and let the user trust this host's leaf certificate explicitly (store DER per host in the own App Group). Client certificates (PKCS#12 import, stored in the keychain per account) for mTLS. Extensions use exactly the same trust logic (the Files app's extensions accept any certificate — do not copy that).
@@ -281,15 +281,15 @@ Triggered on foreground, pull-to-refresh, every 5 min while the app is open and 
 
 1. **Companion change feed** (`SERVER-COMPANION.md` §S2) if available: apply added/changed/removed since the stored `syncToken`. Done.
 2. Otherwise:
-   1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when anything below changes). Unchanged → nothing to do.
+   1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when files below are added, changed, moved or deleted — but **not** when a favourite is set or the server fills in place/caption). Read it once, before anything is fetched, and store that value only after the sync is through, so a change made while syncing is seen by the next sync. Unchanged → only the favourites check: one SEARCH for the file ids with `oc:favorite = 1`, compared with the store.
    2. Changed → SEARCH for items with `d:getlastmodified > lastDeltaSync − 10 min` **or** `nc:upload_time > lastDeltaSync − 10 min` (covers new uploads with old mtimes) → upsert.
-   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h on each delta sync, and run a full **reconciliation** (step 4) at most once a day.
-   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), compare with the store: delete what is gone, fix moved paths, re-fetch full props of changed etags. Run on Wi-Fi in a `BGProcessingTask` or when the user pulls to refresh twice.
+   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h on each sync, and run a full **reconciliation** (step 4) whenever a root ETag changed (the delta SEARCH cannot see deletes and moves), on pull-to-refresh / "Sync now", and otherwise at most once a day.
+   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due.
 3. **Collections**: album list PROPFIND is expensive on the server (every album resolves all its files). Refresh the album list when the Albums view appears if older than 10 min, after own album writes, and in background daily; refresh one album's content when it is opened. Places/tags/people: when their view appears if older than 30 min. If the companion album change tag (`SERVER-COMPANION.md` §S7) exists, use it to skip unchanged albums.
 
 #### 5.4.5 Conflict rules
 
-Server wins for everything except operations still in the outbox. A queued favorite toggle is re-applied after a sync that overwrote it. If an outbox operation fails with 403/404/409 (file gone, no permission, already in album), drop it and refresh the affected item; 409 on album add means "already there" and is a success.
+Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs operations strictly in the order they were queued; while the oldest one waits for a retry (transient error, exponential backoff up to 1 h) nothing behind it runs, and it is retried when the backoff ends or the network comes back. If an outbox operation fails with 403/404/409 (file gone, no permission, already in album), drop it and refresh the affected item; 409 on album add means "already there" and is a success.
 
 ### 5.5 Previews, originals, video
 
@@ -308,7 +308,7 @@ Progressive: blurhash → cached tile preview → 1024 preview → 4096 preview 
 
 #### 5.5.3 Video
 
-- Stream with `AVPlayer`. Get a temporary unauthenticated URL from the direct-download API (`POST /ocs/v2.php/apps/dav/api/v1/direct` with `fileId`; NextcloudKit `getDirectDownload(fileId:)`) so AVFoundation can do range requests without custom headers. Verify range support; fallback: `AVAssetResourceLoaderDelegate` that fetches byte ranges with the account's auth.
+- Play with `AVPlayer`. Prefer a local copy (offline album file, cached original). Otherwise get a temporary URL from the direct-download API (`POST /ocs/v2.php/apps/dav/api/v1/direct` with `fileId`) and feed the player through an `AVAssetResourceLoaderDelegate` that fetches byte ranges with the app's own `HTTPClient` (`PhotosMedia/VideoStreaming.swift`): AVFoundation loading the URL itself would ignore certificates the user trusted in the app and the account's client certificate.
 - Formats AVFoundation can't play (WebM, MKV, some AVI): if `videoRenditions` is available, fetch `GET /apps/photos/api/v1/video/{fileId}` (it may 404 while the conversion is queued: show "Preparing video…" and retry with back-off up to 2 min). The rendition currently has `Accept-Ranges: none`, so download it to a temp file before playing (companion §S6 fixes this). Otherwise offer "Download" / "Open in…".
 - Grid tiles of videos show the duration (from companion metadata `nc:metadata-photos-duration`, `SERVER-COMPANION.md` §S8, else read lazily when first played and cached; the server has no duration today).
 
@@ -510,7 +510,7 @@ Requires: `metadataEdit` (Nextcloud ≥ 35). Capture date & time and location fo
 - Sources: Photos picker (`PhotosPicker`, multi-select, videos), Files/Finder document picker, drag & drop onto the window/an album/a folder, the share extension, camera capture (iOS: "Take photo" straight to Nextcloud).
 - Destination: the Photos upload folder `photosLocation` (default `/Photos`, created if missing; warn if it is a received share), or the current folder in Folders, plus optional album.
 - Upload **originals** with their resources (HEIC/ProRAW/HEVC, Live Photo pairs), set `X-OC-MTime` and `X-OC-CTime` to the capture time, link Live Photo parts (PROPPATCH `nc:metadata-files-live-photo` on both, after both uploads have file ids), and — where `metadataEdit` is available and the server did not extract a capture time/GPS (check after upload) — PROPPATCH them from the PhotoKit asset.
-- Chunked upload (NextcloudKit `uploadChunkAsync`, v2) above 10 MB; parallelism from capability `files.chunked_upload.max_parallel_count`; `X-NC-WebDAV-Auto-Mkcol: 1` for missing parents.
+- Chunked upload (v2, own `Uploader`) above 10 MB; parallelism from capability `files.chunked_upload.max_parallel_count`; `X-NC-WebDAV-Auto-Mkcol: 1` for missing parents.
 - Name collisions: append " (2)", " (3)" (never overwrite on manual upload).
 - Progress in the toolbar and in a transfers view; uploads continue in a background `URLSession`.
 
@@ -714,7 +714,7 @@ A checklist per milestone in `docs/test-plan.md` (to be written in M0) covering 
 - Deliver all work as PRs against `main`; never push to `main` directly.
 - CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Docker Nextcloud.
 - Server-side work for `SERVER-COMPANION.md` happens in the Photos server repo following its `AGENTS.md` (agents prepare local branches in `~/aloha-work/photos-wt/<name>`; Frank opens the PRs).
-- NextcloudKit gaps (REPORT, Photos DAV helpers) are implemented in the app first; upstreaming a `NextcloudKit+Photos.swift` is optional and decided later.
+- The Photos DAV helpers live in this app; offering them upstream as a `NextcloudKit+Photos.swift` is optional and decided later (it would not add a dependency here).
 
 ## 13. Milestones
 

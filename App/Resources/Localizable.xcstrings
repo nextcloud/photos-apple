@@ -1,0 +1,63 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Albums" : {
+
+    },
+    "Back up now" : {
+
+    },
+    "Back up photos to Nextcloud" : {
+
+    },
+    "Backup" : {
+
+    },
+    "Backup is not turned on in Nextcloud Photos." : {
+
+    },
+    "Favorites" : {
+
+    },
+    "Library" : {
+
+    },
+    "Map" : {
+
+    },
+    "Memories" : {
+
+    },
+    "Nextcloud Photos view" : {
+
+    },
+    "On this day" : {
+
+    },
+    "Open in Nextcloud Photos" : {
+
+    },
+    "Opens a view of Nextcloud Photos, such as On this day or the map." : {
+
+    },
+    "People" : {
+
+    },
+    "Photo map" : {
+
+    },
+    "Places" : {
+
+    },
+    "Search" : {
+
+    },
+    "Uploads new photos of this device to your Nextcloud." : {
+
+    },
+    "View" : {
+
+    }
+  },
+  "version" : "1.1"
+}

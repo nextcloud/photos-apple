@@ -36,10 +36,12 @@ struct PhotoPickerSheet: View {
                                 }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(GridTile.accessibilityLabel(for: item))
                         .accessibilityAddTraits(selection.contains(item.fileId) ? .isSelected : [])
                     }
                 }
             }
+            .selectionHaptic(selection, isActive: true)
             .navigationTitle(String(localized: "Add to “\(album.title)”", bundle: .module))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -61,8 +63,10 @@ struct PhotoPickerSheet: View {
                 guard let services = session.services else { return }
                 existing = Set(((try? services.collections.albumItems(albumId: album.id)) ?? []).map(\.fileId))
                 // Only own files can be added to albums (the server refuses others).
-                let all = (try? services.library.gridItems(.all, excludedFolders: session.excludedFolders)) ?? []
-                let own = Set(((try? services.library.items(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
+                // Read off the main thread: this is the whole timeline, 100 000 rows in a large library.
+                let all = (try? await services.library.fetchGridItems(.all, excludedFolders: session.excludedFolders)) ?? []
+                let own = Set(
+                    ((try? await services.library.fetchItems(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
                 items = all.filter { own.contains($0.fileId) && !existing.contains($0.fileId) }
             }
         }
@@ -109,11 +113,12 @@ struct AlbumPickerSheet: View {
                                 .clipShape(.rect(cornerRadius: 6))
                                 VStack(alignment: .leading) {
                                     Text(album.title)
-                                    Text("\(album.itemCount) items", bundle: .module).font(.caption).foregroundStyle(.secondary)
+                                    Text(AccessibilityText.items(album.itemCount)).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(AccessibilityText.album(title: album.title, itemCount: album.itemCount))
                     }
                 }
                 if items.contains(where: { !$0.isOwnStorage }) {
@@ -180,6 +185,8 @@ struct CollaboratorsSheet: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(Text("Remove \(collaborator.label)", bundle: .module))
+                            .help(String(localized: "Remove \(collaborator.label)", bundle: .module))
                         }
                     }
                 }
@@ -308,7 +315,18 @@ struct CommentsSheet: View {
 
     func load() async {
         guard let id = album.serverAlbumId, let services = session.services else { return }
-        do { comments = try await services.api.comments(albumId: id) } catch { self.error = error.localizedDescription }
+        do {
+            comments = try await services.api.comments(albumId: id)
+        } catch {
+            self.error = Self.message(for: error)
+            // The server's Photos app no longer has album comments (downgraded): stop offering them.
+            if FeatureDetector.isMissingAPI(error) { session.featureUnavailable(.albumComments) }
+        }
+    }
+
+    static func message(for error: any Error) -> String {
+        FeatureDetector.isMissingAPI(error)
+            ? String(localized: "Comments on albums aren't available on this server.", bundle: .module) : error.localizedDescription
     }
 
     func send() {
@@ -319,7 +337,10 @@ struct CommentsSheet: View {
             do {
                 try await services.api.postComment(albumId: id, message: text)
                 await load()
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                self.error = Self.message(for: error)
+                if FeatureDetector.isMissingAPI(error) { session.featureUnavailable(.albumComments) }
+            }
         }
     }
 

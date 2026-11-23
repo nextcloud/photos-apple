@@ -1,24 +1,6 @@
 {
-  "originHash" : "828f2293ec25b8c2c1c73ab153d51dcda38bc2602410a2136432052c7294e182",
+  "originHash" : "4fbfce1ce55cd87747f05dab7ce17e1d5cb239a48bfd96c859219467e1340231",
   "pins" : [
-    {
-      "identity" : "alamofire",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alamofire/Alamofire",
-      "state" : {
-        "revision" : "bda9ed57d72988a3a2ada33d824583541f86eac6",
-        "version" : "5.12.2"
-      }
-    },
-    {
-      "identity" : "codescanner",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/twostraws/CodeScanner.git",
-      "state" : {
-        "revision" : "5e886430238944c7200fc9e10dbf2d9550dba865",
-        "version" : "2.5.2"
-      }
-    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
@@ -26,33 +8,6 @@
       "state" : {
         "revision" : "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
         "version" : "7.12.0"
-      }
-    },
-    {
-      "identity" : "nextcloudkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/nextcloud/NextcloudKit.git",
-      "state" : {
-        "revision" : "202f0cb056886ce1e522cc86e124219d36bc6cac",
-        "version" : "7.6.5"
-      }
-    },
-    {
-      "identity" : "swiftyjson",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SwiftyJSON/SwiftyJSON",
-      "state" : {
-        "revision" : "af76cf3ef710b6ca5f8c05f3a31307d44a3c5828",
-        "version" : "5.0.2"
-      }
-    },
-    {
-      "identity" : "swiftyxmlparser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/yahoojapan/SwiftyXMLParser",
-      "state" : {
-        "revision" : "d7a1d23f04c86c1cd2e8f19247dd15d74e0ea8be",
-        "version" : "5.6.0"
       }
     }
   ],

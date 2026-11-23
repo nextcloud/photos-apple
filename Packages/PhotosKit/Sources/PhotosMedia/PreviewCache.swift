@@ -9,7 +9,12 @@ import PhotosModel
 /// Wraps a `CGImage` for `NSCache`.
 final class ImageBox: @unchecked Sendable {
     let image: CGImage
-    init(_ image: CGImage) { self.image = image }
+    /// The size limit it was decoded with (long edge in pixels). An image smaller than that is the whole preview.
+    let maxPixelSize: Int
+    init(_ image: CGImage, maxPixelSize: Int) {
+        self.image = image
+        self.maxPixelSize = maxPixelSize
+    }
 }
 
 /// Disk + memory cache of preview images keyed by `(fileId, etag, bucket)` (SPEC §5.5.1).
@@ -18,12 +23,36 @@ public final class PreviewCache: @unchecked Sendable {
     private let memory = NSCache<NSString, ImageBox>()
     private let fileManager = FileManager.default
     private let ioQueue = DispatchQueue(label: "com.nextcloud.photos.previewcache", qos: .utility)
+    /// Fires when the system is short of memory (the notification behind `didReceiveMemoryWarning`, also on the Mac).
+    private let memoryPressure: any DispatchSourceMemoryPressure
 
-    public init(directory: URL, memoryLimitBytes: Int = 200 * 1024 * 1024) {
+    /// Downloaded previews after which the pipeline trims the disk cache again.
+    public static let trimInterval = 2000
+
+    /// Decoded previews kept in memory. The whole app has 300 MB while scrolling on an iPhone (SPEC §10), so there the
+    /// cache gets about 1/80 of the device's memory, between 48 and 120 MB (77 MB with 6 GB, 102 MB with 8 GB); on iPad
+    /// that is the upper bound. Mac and Vision Pro keep 200 MB.
+    public static func defaultMemoryLimit(physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Int {
+        #if os(iOS)
+            return Int(min(max(physicalMemory / 80, 48 * 1024 * 1024), 120 * 1024 * 1024))
+        #else
+            return 200 * 1024 * 1024
+        #endif
+    }
+
+    public init(directory: URL, memoryLimitBytes: Int = PreviewCache.defaultMemoryLimit()) {
         self.directory = directory
         memory.totalCostLimit = memoryLimitBytes
+        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: ioQueue)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Decoded previews are the largest thing the app can give back at once; they come back from disk when needed.
+        memoryPressure.setEventHandler { [weak self] in self?.clearMemory() }
+        memoryPressure.activate()
     }
+
+    deinit { memoryPressure.cancel() }
+
+    public var memoryLimitBytes: Int { memory.totalCostLimit }
 
     static func key(fileId: FileID, etag: String, bucket: Int) -> String {
         "\(fileId)-\(etag.isEmpty ? "0" : etag)-\(bucket)"
@@ -36,8 +65,14 @@ public final class PreviewCache: @unchecked Sendable {
     }
 
     /// Memory-only lookup (fast path for cell configuration).
-    public func memoryImage(fileId: FileID, etag: String, bucket: Int) -> CGImage? {
-        memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket) as NSString)?.image
+    ///
+    /// Previews are decoded no larger than they are shown (`maxPixelSize`), so the image in memory may be smaller than
+    /// its bucket: with `minPixelSize` only an image decoded with at least that limit counts.
+    public func memoryImage(fileId: FileID, etag: String, bucket: Int, minPixelSize: Int = 0) -> CGImage? {
+        guard let box = memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket) as NSString),
+            box.maxPixelSize >= min(minPixelSize, bucket)
+        else { return nil }
+        return box.image
     }
 
     /// Best image already in memory with at least `minBucket` (or any smaller one as placeholder).
@@ -48,41 +83,55 @@ public final class PreviewCache: @unchecked Sendable {
         return nil
     }
 
-    public func diskImage(fileId: FileID, etag: String, bucket: Int) -> CGImage? {
+    /// Decodes a preview from disk, downsampled to `maxPixelSize` (long edge; the whole bucket when nil).
+    public func diskImage(fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage? {
         let key = Self.key(fileId: fileId, etag: etag, bucket: bucket)
         let url = fileURL(key: key)
-        guard let image = ImageDecoding.decode(url: url, maxPixelSize: bucket) else { return nil }
+        let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
+        guard let image = ImageDecoding.decode(url: url, maxPixelSize: limit) else { return nil }
         // Touch for LRU.
         try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
-        remember(image, key: key)
+        remember(image, key: key, maxPixelSize: limit)
         return image
+    }
+
+    /// The limit a preview of `bucket` is decoded with: the requested size, never more than the bucket.
+    static func decodeLimit(_ maxPixelSize: Int?, bucket: Int) -> Int {
+        guard let maxPixelSize, maxPixelSize > 0 else { return bucket }
+        return min(maxPixelSize, bucket)
     }
 
     public func hasDiskImage(fileId: FileID, etag: String, bucket: Int) -> Bool {
         fileManager.fileExists(atPath: fileURL(key: Self.key(fileId: fileId, etag: etag, bucket: bucket)).path(percentEncoded: false))
     }
 
-    /// Stores encoded image data and returns the decoded image.
+    /// Stores encoded image data (the whole preview) and returns the image decoded to `maxPixelSize` (the bucket when nil).
     @discardableResult
-    public func store(_ data: Data, fileId: FileID, etag: String, bucket: Int) -> CGImage? {
+    public func store(_ data: Data, fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage? {
         let key = Self.key(fileId: fileId, etag: etag, bucket: bucket)
         let url = fileURL(key: key)
         try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
-        guard let image = ImageDecoding.decode(data: data, maxPixelSize: bucket) else { return nil }
-        remember(image, key: key)
+        let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
+        guard let image = ImageDecoding.decode(data: data, maxPixelSize: limit) else { return nil }
+        remember(image, key: key, maxPixelSize: limit)
         return image
     }
 
     /// Stores a locally generated image (e.g. a thumbnail of a HEIC original without server preview).
     @discardableResult
-    public func store(_ image: CGImage, fileId: FileID, etag: String, bucket: Int) -> CGImage {
-        if let data = ImageDecoding.jpegData(image) { return store(data, fileId: fileId, etag: etag, bucket: bucket) ?? image }
+    public func store(_ image: CGImage, fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage {
+        if let data = ImageDecoding.jpegData(image) {
+            return store(data, fileId: fileId, etag: etag, bucket: bucket, maxPixelSize: maxPixelSize) ?? image
+        }
         return image
     }
 
-    func remember(_ image: CGImage, key: String) {
-        memory.setObject(ImageBox(image), forKey: key as NSString, cost: image.bytesPerRow * image.height)
+    func remember(_ image: CGImage, key: String, maxPixelSize: Int) {
+        // A larger decode already in memory serves this size too; don't replace it with a smaller one.
+        if let existing = memory.object(forKey: key as NSString), existing.maxPixelSize > maxPixelSize { return }
+        memory.setObject(
+            ImageBox(image, maxPixelSize: maxPixelSize), forKey: key as NSString, cost: image.bytesPerRow * image.height)
     }
 
     public func clearMemory() { memory.removeAllObjects() }
@@ -96,30 +145,49 @@ public final class PreviewCache: @unchecked Sendable {
         return total
     }
 
-    /// Deletes least-recently-used files until the cache is below `limit` bytes.
-    public func trim(toBytes limit: Int64) {
+    /// Deletes least-recently-used files until the cache is below `limit` bytes, in the background.
+    ///
+    /// "Used" is the file's modification date: `diskImage` touches a file whenever it is read.
+    /// - Parameters:
+    ///   - protecting: files whose previews are never deleted (offline-pinned items); they still count towards the size.
+    ///   - completion: called on the cache's queue when the trim is done.
+    public func trim(toBytes limit: Int64, protecting: Set<FileID> = [], completion: (@Sendable () -> Void)? = nil) {
         ioQueue.async { [self] in
-            guard
-                let enumerator = fileManager.enumerator(
-                    at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
-            else { return }
-            var files: [(URL, Int64, Date)] = []
-            var total: Int64 = 0
-            for case let url as URL in enumerator {
-                guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]), let size = values.fileSize
-                else {
-                    continue
-                }
-                files.append((url, Int64(size), values.contentModificationDate ?? .distantPast))
-                total += Int64(size)
-            }
-            guard total > limit else { return }
-            for (url, size, _) in files.sorted(by: { $0.2 < $1.2 }) {
-                try? fileManager.removeItem(at: url)
-                total -= size
-                if total <= limit { break }
-            }
+            trimNow(toBytes: limit, protecting: protecting)
+            completion?()
         }
+    }
+
+    /// The trim itself. Returns the bytes left in the cache.
+    @discardableResult
+    func trimNow(toBytes limit: Int64, protecting: Set<FileID> = []) -> Int64 {
+        guard
+            let enumerator = fileManager.enumerator(
+                at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
+        else { return 0 }
+        var files: [(URL, Int64, Date)] = []
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            guard
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
+                values.isRegularFile == true, let size = values.fileSize
+            else { continue }
+            total += Int64(size)
+            if !protecting.isEmpty, let fileId = Self.fileId(ofCacheFile: url), protecting.contains(fileId) { continue }
+            files.append((url, Int64(size), values.contentModificationDate ?? .distantPast))
+        }
+        guard total > limit else { return total }
+        for (url, size, _) in files.sorted(by: { $0.2 < $1.2 }) {
+            try? fileManager.removeItem(at: url)
+            total -= size
+            if total <= limit { break }
+        }
+        return total
+    }
+
+    /// The file id a cache file belongs to (`<fileId>-<etag>-<bucket>.jpg`).
+    static func fileId(ofCacheFile url: URL) -> FileID? {
+        FileID(url.lastPathComponent.prefix(while: { $0 != "-" }))
     }
 
     public func removeAll() {
