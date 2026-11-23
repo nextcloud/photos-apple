@@ -156,7 +156,8 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   (description, "3 of 120", favourite/info/delete actions, swipe up/down to step on iOS) have VoiceOver labels; Reduce Motion,
   Increase Contrast / Reduce Transparency and accessibility text sizes are handled in the viewer, scrubber, tiles and cards; iOS
   haptics for selection, favourite and delete. Checked on the Mac through the accessibility tree; iOS only compiled.
-  ⬜ Transifex setup (`.tx/config` for string catalogs), ⬜ server feature names in Settings › Server features are not localised.
+  Server feature names in Settings › Server features come from the PhotosAppUI catalog. ⬜ Transifex setup (`.tx/config` for
+  string catalogs).
 - ⬜ App Store assets and review notes.
 
 ## Prerequisites from SPEC §14 still open
