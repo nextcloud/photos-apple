@@ -59,7 +59,10 @@ struct PhotosBackupRemote: BackupRemote {
                         .gte(DAVProp.metadataOriginalDateTime, String(Int64(startSeconds - 14 * 3600))),
                         .lte(DAVProp.metadataOriginalDateTime, String(Int64(endSeconds + 14 * 3600))),
                     ]),
-                    .and([.gte(DAVProp.lastModified, Self.iso(startSeconds)), .lte(DAVProp.lastModified, Self.iso(endSeconds))]),
+                    .and([
+                        .gte(DAVProp.lastModified, PhotosAPI.isoDate(startSeconds)),
+                        .lte(DAVProp.lastModified, PhotosAPI.isoDate(endSeconds)),
+                    ]),
                 ]),
             ])
         )
@@ -70,12 +73,6 @@ struct PhotosBackupRemote: BackupRemote {
                 modifiedAt: item.modifiedAt,
                 width: item.width, height: item.height)
         }
-    }
-
-    static func iso(_ seconds: Double) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: Date(timeIntervalSince1970: seconds))
     }
 
     func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile {

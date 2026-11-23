@@ -6,6 +6,7 @@ import PhotosCore
 import PhotosDomain
 import PhotosMedia
 import PhotosModel
+import PhotosNetworking
 import PhotosStore
 
 /// A section of the grid (one local calendar day, or one flat section for albums).
@@ -82,14 +83,8 @@ enum GridColumns {
 extension AccountServices {
     func previewRequest(for item: GridMedia, pixels: Double, path: String? = nil) -> ImagePipeline.Request {
         ImagePipeline.Request(
-            fileId: item.fileId, etag: item.etag, bucket: PhotosAPIBucket.bucket(pixels), hasPreview: item.hasPreview,
+            fileId: item.fileId, etag: item.etag, bucket: PhotosAPI.previewBucket(forPixels: pixels), hasPreview: item.hasPreview,
             mimeType: item.mimeType,
             originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"))
-    }
-}
-
-enum PhotosAPIBucket {
-    static func bucket(_ pixels: Double) -> Int {
-        [64, 256, 1024, 4096].first { Double($0) >= pixels * 0.8 } ?? 4096
     }
 }

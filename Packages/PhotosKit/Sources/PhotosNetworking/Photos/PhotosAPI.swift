@@ -105,7 +105,8 @@ public struct PhotosAPI: Sendable {
         return try await dav.search(search, timeout: 300).compactMap { MediaParser.mediaItem(from: $0, connection: connection) }
     }
 
-    static func isoDate(_ seconds: Double) -> String {
+    /// A Unix time as the ISO 8601 date SEARCH conditions on `getlastmodified` expect.
+    public static func isoDate(_ seconds: Double) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: Date(timeIntervalSince1970: seconds))
