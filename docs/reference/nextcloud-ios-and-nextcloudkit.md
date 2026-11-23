@@ -1,5 +1,9 @@
 # Nextcloud iOS app + NextcloudKit — research for a native "Nextcloud Photos" app
 
+> **Note (2026-11-23):** this is research from before the implementation. The Photos app does **not** depend on NextcloudKit
+> (its networking is its own `URLSession` client, see SPEC §4.3) and stays MIT. Where this document recommends using
+> NextcloudKit, read it as a description of how the Files app does things, not as the app's architecture.
+
 Snapshot analysed (shallow clones, 2026-11-22):
 
 | Repo | Commit (HEAD of default branch) | Notes |

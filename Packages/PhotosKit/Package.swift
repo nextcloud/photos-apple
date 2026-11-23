@@ -23,18 +23,17 @@ let package = Package(
         .library(name: "PhotosAppUI", targets: ["PhotosAppUI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/nextcloud/NextcloudKit.git", from: "7.6.5"),
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0")
     ],
     targets: [
         // Value types, identifiers, feature flags. No I/O.
         .target(name: "PhotosModel", swiftSettings: swiftSettings),
         // Pure algorithms ported from the web app (grouping, stacks, memories, duplicates, search parsing).
         .target(name: "PhotosDomain", dependencies: ["PhotosModel"], swiftSettings: swiftSettings),
-        // HTTP, WebDAV, OCS, login, feature detection. Wraps NextcloudKit where it helps.
+        // HTTP, WebDAV, OCS, login, feature detection, on the app's own URLSession client.
         .target(
             name: "PhotosNetworking",
-            dependencies: ["PhotosModel", .product(name: "NextcloudKit", package: "NextcloudKit")],
+            dependencies: ["PhotosModel"],
             resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
