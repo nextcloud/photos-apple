@@ -25,6 +25,8 @@ public struct GridActions {
     var addToAlbum: () -> Void
     var zoomIn: (() -> Void)?
     var zoomOut: (() -> Void)?
+    /// Back to the whole photo (viewer only).
+    var zoomToFit: (() -> Void)? = nil
     /// Opens the selected item in the viewer (grid only).
     var open: (() -> Void)? = nil
     /// Opens the photo editor for the selected photo.
@@ -99,6 +101,9 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Zoom Out", bundle: .module)) { grid?.zoomOut?() }
                 .keyboardShortcut("-")
                 .disabled(grid?.zoomOut == nil)
+            Button(String(localized: "Zoom to Fit", bundle: .module)) { grid?.zoomToFit?() }
+                .keyboardShortcut("0")
+                .disabled(grid?.zoomToFit == nil)
             Divider()
             Button(String(localized: "Sync Now", bundle: .module)) { main?.syncNow() }
                 .keyboardShortcut("r")
