@@ -6,6 +6,7 @@ import Observation
 import Photos
 import PhotosBackup
 import PhotosModel
+import PhotosNetworking
 import Synchronization
 
 #if os(iOS)
@@ -112,6 +113,9 @@ public final class BackupModel {
     /// Services of the backup account while another account is the active one.
     @ObservationIgnored private var ownServices: AccountServices?
     @ObservationIgnored private var runningPasses = 0
+    /// The app's background transfer session, where it has one (iOS): uploads go on while the app is suspended.
+    @ObservationIgnored private(set) var backgroundUploads: (any BackgroundUploading)?
+    @ObservationIgnored private var backgroundEvents: Task<Void, Never>?
     @ObservationIgnored private var observer: LibraryObserver?
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored weak var app: AppModel?
@@ -134,6 +138,29 @@ public final class BackupModel {
                 Task { @MainActor in await self?.resumeIfInterrupted() }
             }
         #endif
+    }
+
+    /// Gives the backup a background transfer session and starts listening to what the system reports about it. Called
+    /// once, before the first engine exists.
+    func attachBackgroundUploads(_ transport: any BackgroundUploading) {
+        backgroundUploads = transport
+        backgroundEvents = Task { [weak self] in
+            for await signal in transport.signals {
+                switch signal {
+                case .finished(let event): await self?.backgroundUploadFinished(event)
+                // Everything that finished while the app was not running has been recorded: the system may suspend it again.
+                case .drained: transport.eventsHandled()
+                }
+            }
+        }
+    }
+
+    /// The system reports the end of an upload, possibly one that an earlier launch handed over. The engine of the backup
+    /// account has the record of what it was. Without an engine (the account is signed out) the report is dropped; the
+    /// record is then found stale by the next pass and the file is looked up on the server.
+    func backgroundUploadFinished(_ event: BackgroundUploadEvent) async {
+        guard let engine = await configuredEngine() else { return }
+        await engine.backgroundUploadFinished(event)
     }
 
     public var isAvailable: Bool {
@@ -280,7 +307,11 @@ public final class BackupModel {
             if engineServices.account.id == account.id, isPassRunning { return engine }
         }
         dropEngine()
-        let engine = BackupEngine(api: services.api, database: services.database, accountId: account.id)
+        // Files that wait for their upload live with the account's data and go with it.
+        let background = backgroundUploads.map {
+            BackgroundUploads(transport: $0, directory: services.layout.accountDirectory(account.id).appending(path: "BackgroundUploads"))
+        }
+        let engine = BackupEngine(api: services.api, database: services.database, accountId: account.id, background: background)
         self.engine = engine
         engineServices = services
         engineConfigured = false

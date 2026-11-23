@@ -68,10 +68,51 @@ public struct Uploader: Sendable {
         checksum: Bool = true,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> UploadedFile {
+        let target: Target
+        switch try await resolve(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum, reserved: [])
+        {
+        case .existing(let existing): return existing
+        case .free(let free): target = free
+        }
+        let response: HTTPResponse
+        if target.size > chunkThreshold {
+            response = try await uploadChunked(
+                file: file, size: target.size, path: target.path, headers: target.headers,
+                fingerprint: target.digest ?? Self.fingerprint(of: file), progress: progress)
+        } else {
+            do {
+                response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.headers)
+            } catch NetworkError.conflict {
+                try await dav.mkcolRecursive(userPath: folder)
+                response = try await dav.put(connection.filesURL(target.path), file: file, headers: target.headers)
+            }
+            progress?(1)
+        }
+        return try await finish(path: target.path, response: response)
+    }
+
+    /// Where a file goes and what is sent with it.
+    struct Target {
+        var path: String
+        var size: Int64
+        var headers: [String: String]
+        var digest: String?
+    }
+
+    enum Resolved {
+        case existing(UploadedFile)
+        case free(Target)
+    }
+
+    /// The lookups before an upload: the folder exists, and the name is free (or the file is there already).
+    func resolve(
+        file: URL, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy, checksum: Bool, reserved: Set<String>
+    ) async throws -> Resolved {
         let size = Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         try await ensureFolder(folder)
-        let name = try await freeName(fileName, in: folder, size: size, conflict: conflict)
-        if case .existing(let existing) = name { return existing }
+        let name = try await freeName(fileName, in: folder, size: size, conflict: conflict, reserved: reserved)
+        if case .existing(let existing) = name { return .existing(existing) }
         guard case .free(let targetName) = name else { throw NetworkError.conflict }
         let path = (folder.hasSuffix("/") ? folder : folder + "/") + targetName
         var headers: [String: String] = ["X-NC-WebDAV-Auto-Mkcol": "1"]
@@ -82,20 +123,44 @@ public struct Uploader: Sendable {
         }
         let digest = checksum ? try? Self.sha256(of: file) : nil
         if let digest { headers["OC-Checksum"] = "SHA256:\(digest)" }
+        return .free(Target(path: path, size: size, headers: headers, digest: digest))
+    }
 
-        let response: HTTPResponse
-        if size > chunkThreshold {
-            response = try await uploadChunked(
-                file: file, size: size, path: path, headers: headers, fingerprint: digest ?? Self.fingerprint(of: file),
-                progress: progress)
-        } else {
-            do {
-                response = try await dav.put(connection.filesURL(path), file: file, headers: headers)
-            } catch NetworkError.conflict {
-                try await dav.mkcolRecursive(userPath: folder)
-                response = try await dav.put(connection.filesURL(path), file: file, headers: headers)
-            }
-            progress?(1)
+    // MARK: Uploads someone else sends (background transfers)
+
+    /// An upload that is ready to be sent as one PUT.
+    public enum Prepared: Sendable {
+        /// A file with this name and size is there already (`ConflictPolicy.skipIfSameSize`).
+        case existing(UploadedFile)
+        /// Send `request` with the file as its body, then pass the answer to `finish(path:response:)`.
+        case put(path: String, request: HTTPRequest)
+    }
+
+    /// Does the lookups of an upload and returns the PUT request instead of sending it, for a background transfer session
+    /// that sends the file while the app is suspended.
+    ///
+    /// - Parameter reserved: destination paths that count as taken although nothing is there yet: uploads still on their way.
+    public func prepare(
+        file: URL, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy = .rename, checksum: Bool = true,
+        reserved: Set<String> = []
+    ) async throws -> Prepared {
+        switch try await resolve(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum,
+            reserved: reserved)
+        {
+        case .existing(let existing): return .existing(existing)
+        case .free(let target):
+            let request = HTTPRequest(
+                method: "PUT", url: connection.filesURL(target.path), headers: dav.headers(target.headers), timeout: 3600)
+            return .put(path: target.path, request: request)
+        }
+    }
+
+    /// Turns the answer to an upload's last request into the uploaded file; throws what the answer's status stands for.
+    public func finish(path: String, response: HTTPResponse) async throws -> UploadedFile {
+        if let error = NetworkError.from(status: response.status, data: response.data) {
+            if error == .unauthorized { dav.onUnauthorized?() }
+            throw error
         }
         if let fileId = Self.parseFileId(response.header("oc-fileid")) {
             return UploadedFile(fileId: fileId, path: path, etag: response.header("oc-etag") ?? response.header("etag"))
@@ -119,24 +184,30 @@ public struct Uploader: Sendable {
         case existing(UploadedFile)
     }
 
-    func freeName(_ fileName: String, in folder: String, size: Int64, conflict: ConflictPolicy) async throws -> NameResult {
+    /// - Parameter reserved: paths that count as taken without asking the server (uploads on their way).
+    func freeName(_ fileName: String, in folder: String, size: Int64, conflict: ConflictPolicy, reserved: Set<String> = [])
+        async throws -> NameResult
+    {
         let base = (fileName as NSString).deletingPathExtension
         let ext = (fileName as NSString).pathExtension
         var candidate = fileName
         var counter = 2
         while true {
             let path = (folder.hasSuffix("/") ? folder : folder + "/") + candidate
-            let existing: DAVResource?
-            do {
-                existing = try await dav.propfind(
-                    connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag]
-                ).first
-            } catch NetworkError.notFound {
-                return .free(candidate)
-            }
-            if conflict == .skipIfSameSize, let existing, existing.int64(DAVProp.size) == size, let fileId = existing.int64(DAVProp.fileId)
-            {
-                return .existing(UploadedFile(fileId: fileId, path: path, etag: existing.string(DAVProp.etag)))
+            if !reserved.contains(path) {
+                let existing: DAVResource?
+                do {
+                    existing = try await dav.propfind(
+                        connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag]
+                    ).first
+                } catch NetworkError.notFound {
+                    return .free(candidate)
+                }
+                if conflict == .skipIfSameSize, let existing, existing.int64(DAVProp.size) == size,
+                    let fileId = existing.int64(DAVProp.fileId)
+                {
+                    return .existing(UploadedFile(fileId: fileId, path: path, etag: existing.string(DAVProp.etag)))
+                }
             }
             candidate = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
             counter += 1

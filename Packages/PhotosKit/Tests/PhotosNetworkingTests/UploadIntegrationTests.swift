@@ -106,3 +106,71 @@ struct UploadIntegrationTests {
         try await dav.delete(dav.connection.filesURL(folder))
     }
 }
+
+/// The real background transfer session, against a real server. macOS runs background sessions too, so the session's
+/// delegate handling is exercised here; what only iOS does (suspending the app, launching it for finished uploads) is not.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+struct BackgroundUploadIntegrationTests {
+    let base = UploadIntegrationTests()
+
+    @Test func theSystemUploadsAFileAndReportsTheServersAnswer() async throws {
+        let dav = base.dav
+        let folder = base.folder
+        let session = BackgroundUploadSession(
+            identifier: "com.nextcloud.photos.tests.\(UUID().uuidString)", trustStore: TrustStore(directory: nil))
+        let file = try base.makeFile(size: 300_000)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let uploader = Uploader(dav: dav)
+        do {
+            guard
+                case .put(let path, let request) = try await uploader.prepare(
+                    file: file, fileName: "background.bin", folder: folder, capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+            else {
+                Issue.record("the file cannot be there yet")
+                return
+            }
+            try await session.start(jobId: "job-1", request: request, file: file)
+            #expect(await session.activeJobIds() == ["job-1"])
+            // A second one that the server refuses (404): the parent folder does not exist and may not be created.
+            var refused = request
+            refused.url = dav.connection.filesURL("\(folder)/missing/sub/background.bin")
+            refused.headers["X-NC-WebDAV-Auto-Mkcol"] = nil
+            try await session.start(jobId: "job-2", request: refused, file: file)
+
+            var events: [String: BackgroundUploadEvent] = [:]
+            for await signal in session.signals {
+                if case .finished(let event) = signal { events[event.jobId] = event }
+                if events.count == 2 { break }
+            }
+            let done = try #require(events["job-1"])
+            #expect(done.error == nil)
+            #expect(done.response?.status == 201)
+            let uploaded = try await uploader.finish(path: path, response: try #require(done.response))
+            #expect(uploaded.fileId > 0)
+            #expect(uploaded.path == "\(folder)/background.bin")
+            let (downloaded, _) = try await dav.download(dav.connection.filesURL(path))
+            defer { try? FileManager.default.removeItem(at: downloaded) }
+            #expect(try Uploader.sha256(of: downloaded) == (try Uploader.sha256(of: file)))
+
+            let failed = try #require(events["job-2"])
+            let response = try #require(failed.response)
+            #expect(response.status == 404)
+            await #expect(throws: NetworkError.notFound) { _ = try await uploader.finish(path: "x", response: response) }
+            #expect(await session.activeJobIds().isEmpty)
+
+            // A cancelled upload is reported as cancelled.
+            try await session.start(jobId: "job-3", request: refused, file: file)
+            await session.cancel(jobIds: ["job-3"])
+            for await signal in session.signals {
+                guard case .finished(let event) = signal else { continue }
+                #expect(event.jobId == "job-3")
+                #expect(event.error == .cancelled || event.response != nil)
+                break
+            }
+        } catch {
+            try? await dav.delete(dav.connection.filesURL(folder))
+            throw error
+        }
+        try await dav.delete(dav.connection.filesURL(folder))
+    }
+}

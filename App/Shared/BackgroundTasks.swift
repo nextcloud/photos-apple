@@ -16,10 +16,12 @@
         /// When the system takes the time away, the task this runs in is cancelled (by the expiration handler of the
         /// processing task; SwiftUI does it for the refresh task). The sync stops with its task. The backup pass is
         /// interrupted, which is not the user's pause: it stays due and goes on with the next task or in the foreground.
-        @MainActor static func run() async {
+        ///
+        /// - Parameter sync: false when only the backup is to go on (the short time after finished uploads).
+        @MainActor static func run(sync: Bool = true) async {
             let app = AppHost.model
             await withTaskCancellationHandler {
-                await app.session?.syncNow()
+                if sync { await app.session?.syncNow() }
                 guard !Task.isCancelled else { return }
                 await app.backup.runInBackground()
             } onCancel: {
@@ -38,6 +40,19 @@
             await AppHost.model.backup.interrupt()
         }
 
+        /// Uses the short time the system grants outside the foreground (after it reported finished uploads, or when the
+        /// app has just left the screen) for a backup pass: it records what arrived and hands the next files to the
+        /// system. When the time is over the pass is interrupted; what it handed over goes on.
+        @MainActor static func continueBackup(_ application: UIApplication) {
+            guard application.applicationState != .active, AppHost.model.backup.settings.isEnabled else { return }
+            let work = Task { @MainActor in await run(sync: false) }
+            let identifier = application.beginBackgroundTask(withName: "Backup") { work.cancel() }
+            Task { @MainActor in
+                await work.value
+                application.endBackgroundTask(identifier)
+            }
+        }
+
         /// Requests the next refresh and a longer processing window (network required) for backup and reconciliation.
         static func schedule() {
             let refreshRequest = BGAppRefreshTaskRequest(identifier: refresh)
@@ -48,6 +63,13 @@
             processingRequest.requiresExternalPower = false
             try? BGTaskScheduler.shared.submit(processingRequest)
         }
+    }
+
+    /// A completion handler of UIKit, which is not declared Sendable.
+    ///
+    /// `@unchecked Sendable`: it is only passed along and then called on the main actor, where UIKit expects it.
+    struct SystemCompletion: @unchecked Sendable {
+        let call: () -> Void
     }
 
     final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -68,12 +90,27 @@
                 }
             }
             BackgroundTasks.schedule()
+            // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.
+            NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in
+                    if AppHost.model.backup.status.isRunning { BackgroundTasks.continueBackup(UIApplication.shared) }
+                }
+            }
             PushNotifications.install(delegate: NotificationRouter.shared) { UIApplication.shared.registerForRemoteNotifications() }
             return true
         }
 
         func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
             AppHost.model.didRegisterForPush(deviceToken: deviceToken)
+        }
+
+        /// Uploads of the backup's background transfer session have finished while the app was suspended or not running.
+        func application(
+            _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void
+        ) {
+            let done = SystemCompletion(call: completionHandler)
+            AppHost.model.handleBackgroundUploadEvents(identifier: identifier) { done.call() }
+            BackgroundTasks.continueBackup(application)
         }
 
         /// Silent pushes withdraw notifications that were read or dismissed elsewhere (SPEC §7.21). Needs the

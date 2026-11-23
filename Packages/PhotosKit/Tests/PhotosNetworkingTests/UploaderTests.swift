@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import Synchronization
 import Testing
 
 @testable import PhotosNetworking
@@ -363,5 +364,151 @@ import Testing
         #expect(server.lines.filter { $0.hasSuffix("/photos-there") }.count == 1)  // best effort, no retry
         #expect(await uploader.removeStaleUploads() == 1)
         #expect(folders.entries().isEmpty)
+    }
+}
+
+@Suite struct BackgroundUploadTests {
+    final class Counter: Sendable {
+        private let count = Mutex(0)
+        var value: Int { count.withLock { $0 } }
+        func increment() { count.withLock { $0 += 1 } }
+    }
+
+    func eventually(_ condition: @Sendable () -> Bool) async -> Bool {
+        for _ in 0..<300 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @Test func theSystemsHandlerIsCalledOnceTheReportsAreDealtWith() async {
+        let completion = BackgroundEventsCompletion()
+        let calls = Counter()
+        completion.set { calls.increment() }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(calls.value == 0)
+        completion.eventsHandled()
+        #expect(await eventually { calls.value == 1 })
+        // Never twice.
+        completion.eventsHandled()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(calls.value == 1)
+    }
+
+    @Test func reportsDealtWithBeforeTheHandlerArrivedCount() async {
+        let completion = BackgroundEventsCompletion()
+        completion.eventsHandled()
+        let calls = Counter()
+        completion.set { calls.increment() }
+        #expect(await eventually { calls.value == 1 })
+        // That was used up: the next handler waits for the next reports.
+        let later = Counter()
+        completion.set { later.increment() }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(later.value == 0)
+        completion.eventsHandled()
+        #expect(await eventually { later.value == 1 })
+    }
+
+    @Test func reportsFromLongAgoDoNotCount() async {
+        let completion = BackgroundEventsCompletion(memory: 0.05)
+        completion.eventsHandled()
+        try? await Task.sleep(for: .milliseconds(120))
+        let calls = Counter()
+        completion.set { calls.increment() }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(calls.value == 0)
+    }
+
+    @Test func theSystemIsNeverLeftWaiting() async {
+        let completion = BackgroundEventsCompletion(limit: 0.05)
+        let calls = Counter()
+        completion.set { calls.increment() }
+        #expect(await eventually { calls.value == 1 })
+    }
+
+    @Test func reportsCarryTheAnswerOrTheError() throws {
+        let trust = SessionDelegate(trustStore: TrustStore(directory: nil), clientCredentials: nil)
+        let url = URL(string: "https://cloud.example.com/remote.php/dav/files/alice/Photos/a.jpg")!
+        let http = try #require(
+            HTTPURLResponse(url: url, statusCode: 201, httpVersion: "HTTP/1.1", headerFields: ["OC-FileId": "00000123ocabc", "OC-ETag": "\"e1\""]))
+        let done = BackgroundSessionDelegate.event(jobId: "1", response: http, body: Data(), error: nil, url: url, trust: trust)
+        #expect(done.error == nil)
+        #expect(done.response?.status == 201)
+        #expect(done.response?.header("oc-fileid") == "00000123ocabc")
+
+        let full = try #require(HTTPURLResponse(url: url, statusCode: 507, httpVersion: "HTTP/1.1", headerFields: [:]))
+        let refused = BackgroundSessionDelegate.event(jobId: "2", response: full, body: Data("x".utf8), error: nil, url: url, trust: trust)
+        #expect(refused.response?.status == 507)
+        #expect(refused.response?.data == Data("x".utf8))
+
+        let lost = BackgroundSessionDelegate.event(
+            jobId: "3", response: nil, body: Data(), error: URLError(.networkConnectionLost), url: url, trust: trust)
+        #expect(lost.error == .offline)
+        #expect(lost.response == nil)
+        let cancelled = BackgroundSessionDelegate.event(jobId: "4", response: http, body: Data(), error: URLError(.cancelled), url: url, trust: trust)
+        #expect(cancelled.error == .cancelled)
+        let nothing = BackgroundSessionDelegate.event(jobId: "5", response: nil, body: Data(), error: nil, url: url, trust: trust)
+        #expect(nothing.error != nil)
+    }
+
+    @Test func aPreparedUploadIsTheSamePutTheAppWouldSend() async throws {
+        let server = UploadStubServer()
+        let directory = FileManager.default.temporaryDirectory.appending(path: "PrepareTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appending(path: "a.jpg")
+        try Data([1, 2, 3, 4]).write(to: file)
+        let uploader = server.uploader
+        let captured = Date(timeIntervalSince1970: 1_700_000_000)
+
+        guard
+            case .put(let path, let request) = try await uploader.prepare(
+                file: file, fileName: "a.jpg", folder: "/Photos/2026", capturedAt: captured, conflict: .skipIfSameSize)
+        else {
+            Issue.record("nothing is there yet")
+            return
+        }
+        #expect(path == "/Photos/2026/a.jpg")
+        #expect(request.method == "PUT")
+        #expect(request.url.path() == "/remote.php/dav/files/alice/Photos/2026/a.jpg")
+        #expect(request.headers["Authorization"] == server.connection.authorizationHeader)
+        #expect(request.headers["X-OC-MTime"] == "1700000000")
+        #expect(request.headers["OC-Checksum"] == "SHA256:\(try Uploader.sha256(of: file))")
+        #expect(request.headers["X-NC-WebDAV-Auto-Mkcol"] == "1")
+        // The folder was created, nothing was uploaded.
+        #expect(server.lines.contains("MKCOL /files/alice/Photos/2026"))
+        #expect(!server.lines.contains { $0.hasPrefix("PUT") })
+
+        // A name that is on its way counts as taken.
+        guard
+            case .put(let second, _) = try await uploader.prepare(
+                file: file, fileName: "a.jpg", folder: "/Photos/2026", capturedAt: captured, conflict: .skipIfSameSize, reserved: [path])
+        else {
+            Issue.record("nothing is there yet")
+            return
+        }
+        #expect(second == "/Photos/2026/a (2).jpg")
+
+        // The answer to the PUT gives the file id; a refusal is thrown.
+        let uploaded = try await uploader.finish(path: path, response: HTTPResponse(status: 201, headers: ["oc-fileid": "00000042ocstub"]))
+        #expect(uploaded == UploadedFile(fileId: 42, path: path, etag: nil))
+        await #expect(throws: NetworkError.insufficientStorage) { _ = try await uploader.finish(path: path, response: HTTPResponse(status: 507)) }
+
+        // Once the file is there, preparing it again finds it.
+        server.state.withLock { state in
+            state.files[path] = Data([1, 2, 3, 4])
+            state.fileIds[path] = 42
+        }
+        guard case .existing(let existing) = try await uploader.prepare(
+            file: file, fileName: "a.jpg", folder: "/Photos/2026", capturedAt: captured, conflict: .skipIfSameSize)
+        else {
+            Issue.record("the file is there")
+            return
+        }
+        #expect(existing.fileId == 42)
+        // Without the id in the answer it is asked for.
+        #expect(try await uploader.finish(path: path, response: HTTPResponse(status: 201)).fileId == 42)
     }
 }

@@ -14,7 +14,7 @@ public enum BackupResourceKind: String, Codable, Sendable, CaseIterable {
 }
 
 /// One resource to back up.
-public struct BackupResource: Sendable, Hashable {
+public struct BackupResource: Sendable, Hashable, Codable {
     public var localIdentifier: String
     public var kind: BackupResourceKind
     public var mediaKind: MediaKind

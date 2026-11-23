@@ -73,18 +73,23 @@ final class FakeRemote: BackupRemote {
         var searchErrors: [NetworkError] = []
         var nextFileId: Int64 = 100
         var cleanups = 0
+        /// Uploads prepared for the system and not reported yet: size and capture time by path.
+        var prepared: [String: (size: Int64, capturedAt: Date)] = [:]
     }
 
     let state = Mutex(State())
     /// Runs before an upload is answered, e.g. to change the network in the middle of a run.
     let beforeUpload = Mutex<(@Sendable (String) async -> Void)?>(nil)
+    /// Runs before the reconciliation is answered.
+    let beforeCandidates = Mutex<(@Sendable () async -> Void)?>(nil)
 
     var uploads: [String] { state.withLock { $0.uploads } }
     var attempts: [String] { state.withLock { $0.attempts } }
     var links: [Link] { state.withLock { $0.links } }
 
     func candidates(from start: Date, to end: Date) async throws -> [RemoteCandidate] {
-        try state.withLock { state in
+        if let hook = beforeCandidates.withLock({ $0 }) { await hook() }
+        return try state.withLock { state in
             if !state.searchErrors.isEmpty { throw state.searchErrors.removeFirst() }
             return state.files
         }
@@ -109,6 +114,48 @@ final class FakeRemote: BackupRemote {
 
     func removeStaleUploads() async {
         state.withLock { $0.cleanups += 1 }
+    }
+
+    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+    {
+        if let hook = beforeUpload.withLock({ $0 }) { await hook(fileName) }
+        let size = Int64((try? Data(contentsOf: file).count) ?? 0)
+        return try state.withLock { state in
+            state.attempts.append(fileName)
+            if let error = state.uploadErrors[fileName] ?? state.uploadError { throw error }
+            let base = (fileName as NSString).deletingPathExtension
+            let ext = (fileName as NSString).pathExtension
+            var name = fileName
+            var counter = 2
+            while true {
+                let path = "\(folder)/\(name)"
+                if !reserved.contains(path) {
+                    guard let existing = state.files.first(where: { $0.path == path }) else {
+                        state.prepared[path] = (size, capturedAt)
+                        return .put(path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
+                    }
+                    if existing.size == size { return .existing(UploadedFile(fileId: existing.fileId, path: path, etag: nil)) }
+                }
+                name = "\(base) (\(counter)).\(ext)"
+                counter += 1
+            }
+        }
+    }
+
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
+        if let error = NetworkError.from(status: response.status, data: response.data) { throw error }
+        return state.withLock { state in
+            state.nextFileId += 1
+            let name = (path as NSString).lastPathComponent
+            let prepared = state.prepared.removeValue(forKey: path)
+            state.uploads.append(name)
+            state.files.append(
+                RemoteCandidate(
+                    fileId: state.nextFileId, path: path, kind: name.hasSuffix("mov") ? .video : .image, size: prepared?.size ?? 0,
+                    capturedAt: prepared?.capturedAt, modifiedAt: prepared?.capturedAt ?? Date()))
+            return UploadedFile(fileId: state.nextFileId, path: path, etag: nil)
+        }
     }
 
     func linkLivePhoto(imagePath: String, imageFileId: FileID, videoPath: String, videoFileId: FileID) async throws {

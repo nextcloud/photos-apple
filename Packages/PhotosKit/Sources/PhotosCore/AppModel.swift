@@ -28,12 +28,16 @@ public final class AppModel {
     public let appVersion: String
     /// The app's backup; it belongs to one account and runs independently of the active session.
     public let backup: BackupModel
+    /// The background transfer session for backup uploads, where the app has one (iOS).
+    @ObservationIgnored let backgroundUploads: (any BackgroundUploading)?
     @ObservationIgnored let layout: StorageLayout
     @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "app")
 
     public convenience init(appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0") {
-        self.init(appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard)
+        self.init(
+            appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard,
+            backgroundUploads: AppModel.systemBackgroundUploads)
         #if DEBUG
             // Development and UI tests: PHOTOS_DEBUG_LOGIN=nc://login/server:…&user:…&password:… signs in without a browser
             // (and without the notification permission prompt).
@@ -48,7 +52,8 @@ public final class AppModel {
     /// Everything the model touches is passed in, so tests can run it in a temporary directory against a stubbed server.
     init(
         appVersion: String, layout: StorageLayout, keychain: Keychain, defaults: UserDefaults,
-        httpConfiguration: URLSessionConfiguration = HTTPClient.defaultConfiguration()
+        httpConfiguration: URLSessionConfiguration = HTTPClient.defaultConfiguration(),
+        backgroundUploads: BackgroundUploadsFactory? = nil
     ) {
         self.appVersion = appVersion
         self.userAgent = UserAgent.make(appVersion: appVersion)
@@ -56,14 +61,53 @@ public final class AppModel {
         self.layout = layout
         self.defaults = defaults
         self.pushEnabled = PushNotifications.isEnabled(defaults)
-        let trustStore = TrustStore(directory: layout.certificates)
-        self.http = HTTPClient(
-            trustStore: trustStore, clientCredentials: { host in AppModel.clientCredential(host: host, keychain: keychain) },
-            configuration: httpConfiguration)
+        let credentials: ClientCredentialProvider = { host in AppModel.clientCredential(host: host, keychain: keychain) }
+        self.http = AppModel.makeHTTPClient(layout: layout, keychain: keychain, configuration: httpConfiguration)
+        self.backgroundUploads = backgroundUploads?(http.trustStore, credentials)
         self.registry = AccountRegistry.load(from: layout.accountsFile)
         self.backup = BackupModel(settingsFile: layout.backupSettingsFile)
+        if let transport = self.backgroundUploads { backup.attachBackgroundUploads(transport) }
         backup.attach(self)
         if let account = registry.activeAccount { activate(account) }
+    }
+
+    /// The app's HTTP client: certificates the user trusted and the client certificates stored for a host. The share
+    /// extension builds its own with the same configuration.
+    public nonisolated static func makeHTTPClient(
+        layout: StorageLayout = AppPaths.layout, keychain: Keychain = Keychain(),
+        configuration: URLSessionConfiguration = HTTPClient.defaultConfiguration()
+    ) -> HTTPClient {
+        HTTPClient(
+            trustStore: TrustStore(directory: layout.certificates),
+            clientCredentials: { host in AppModel.clientCredential(host: host, keychain: keychain) }, configuration: configuration)
+    }
+
+    /// Creates the background transfer session with the app's trust handling.
+    typealias BackgroundUploadsFactory = @MainActor (TrustStore, @escaping ClientCredentialProvider) -> any BackgroundUploading
+
+    /// Where the system suspends the app while there is still something to upload — on iOS — backup uploads go through a
+    /// background transfer session. The Mac keeps the app running, and there the app sends everything itself.
+    static var systemBackgroundUploads: BackgroundUploadsFactory? {
+        #if os(iOS)
+            // Only the app: an extension that created a session with the app's identifier would take its uploads away.
+            guard let bundle = Bundle.main.bundleIdentifier, Bundle.main.bundleURL.pathExtension == "app" else { return nil }
+            return { trustStore, credentials in
+                BackgroundUploadSession(identifier: bundle + ".backup", trustStore: trustStore, clientCredentials: credentials)
+            }
+        #else
+            return nil
+        #endif
+    }
+
+    /// The system launched or woke the app because uploads of a background transfer session have finished
+    /// (`application(_:handleEventsForBackgroundURLSession:completionHandler:)`). The reports themselves arrive through
+    /// the session; `completion` is called once they are recorded.
+    public func handleBackgroundUploadEvents(identifier: String, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let backgroundUploads, backgroundUploads.identifier == identifier else {
+            completion()
+            return
+        }
+        backgroundUploads.setEventsCompletion(completion)
     }
 
     public var accounts: [Account] { registry.accounts }

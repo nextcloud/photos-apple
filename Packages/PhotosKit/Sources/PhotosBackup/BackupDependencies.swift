@@ -33,6 +33,16 @@ protocol BackupRemote: Sendable {
     /// (`Uploader`).
     func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile
 
+    /// The first half of an upload that the system sends (`BackgroundUploads`): the same lookups as `upload`, and the PUT
+    /// request instead of sending it.
+    ///
+    /// - Parameter reserved: destinations of uploads that are still on their way; they count as taken.
+    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+
+    /// The second half: what the server answered to the PUT. Throws what the answer's status stands for.
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile
+
     /// Removes what interrupted uploads left on the server and nobody continued. Best effort.
     func removeStaleUploads() async
 
@@ -92,6 +102,17 @@ struct PhotosBackupRemote: BackupRemote {
 
     func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile {
         try await uploader.upload(file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize)
+    }
+
+    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+    {
+        try await uploader.prepare(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize, reserved: reserved)
+    }
+
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
+        try await uploader.finish(path: path, response: response)
     }
 
     func removeStaleUploads() async {
