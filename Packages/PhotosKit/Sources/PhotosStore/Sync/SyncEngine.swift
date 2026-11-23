@@ -390,7 +390,8 @@ public actor SyncEngine {
         let unconfirmed = try database.syncValue(Key.suspectedMassDelete) == nil
         if unconfirmed, Self.isSuspiciousRemoval(removed: removed.count, known: known.count) {
             try database.setSyncValue(Key.suspectedMassDelete, String(removed.count))
-            logger.notice("reconcile: \(removed.count) of \(known.count) items missing on the server; waiting for the next listing to confirm")
+            logger.notice(
+                "reconcile: \(removed.count) of \(known.count) items missing on the server; waiting for the next listing to confirm")
         } else {
             try library.delete(removed)
             try database.setSyncValue(Key.suspectedMassDelete, nil)

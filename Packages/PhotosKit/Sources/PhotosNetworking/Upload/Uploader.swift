@@ -72,7 +72,8 @@ public struct Uploader: Sendable {
         while true {
             let target: Target
             switch try await resolve(
-                file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum, reserved: [])
+                file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum, reserved: []
+            )
             {
             case .existing(let existing): return existing
             case .free(let free): target = free

@@ -230,7 +230,8 @@ struct BackupStatusView: View {
                 bundle: .module)
         case .deviceStorageFull:
             String(
-                localized: "A photo or video has to be copied before it is uploaded, and there is no room for that. Free up space, then back up again.",
+                localized:
+                    "A photo or video has to be copied before it is uploaded, and there is no room for that. Free up space, then back up again.",
                 bundle: .module)
         }
     }

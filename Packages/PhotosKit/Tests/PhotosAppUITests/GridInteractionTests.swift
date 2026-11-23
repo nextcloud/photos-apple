@@ -44,7 +44,10 @@ import Testing
             runs += 1
             for await _ in gate { break }
         }
-        #expect(runner.run(action) { endings += 1; signalDone.yield() })
+        #expect(
+            runner.run(action) {
+                endings += 1; signalDone.yield()
+            })
         #expect(!runner.run(action) { endings += 1 })
         open.yield()
         for await _ in done { break }

@@ -546,7 +546,8 @@ import Testing
         // A name without Apple's pattern gets the suffix.
         let imported = Resource(type: .photo, name: "holiday.jpeg", uniformTypeIdentifier: "public.jpeg")
         #expect(select(asset(), [imported, editedPhoto], settings(.editedOnly)) == ["edited:holiday (edited).jpg:1"])
-        #expect(PhotoLibrarySource.select(asset(), resources: [imported, editedPhoto], settings: settings()).last?.resource.byteSize == 1_500)
+        #expect(
+            PhotoLibrarySource.select(asset(), resources: [imported, editedPhoto], settings: settings()).last?.resource.byteSize == 1_500)
     }
 
     @Test func rawNextToAPhoto() {

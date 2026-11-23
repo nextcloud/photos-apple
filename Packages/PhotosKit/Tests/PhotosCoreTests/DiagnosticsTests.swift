@@ -40,11 +40,14 @@ import Testing
     @Test func theReportCarriesVersionsAndFeaturesButNoAccount() {
         let context = Diagnostics.Context(
             appVersion: "1.2", system: "macOS 27.3", serverVersion: "36.0.1", photosVersion: "8.0.0",
-            features: ["trashbin", "albumCover"], state: ["Sync: failed", "Sync error: The certificate of cloud.example.com is not trusted."],
+            features: ["trashbin", "albumCover"],
+            state: ["Sync: failed", "Sync error: The certificate of cloud.example.com is not trusted."],
             secrets: Self.secrets)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let entries = [
-            Diagnostics.Entry(date: now.addingTimeInterval(-60), level: "error", category: "sync", message: "sync failed: 404 at https://cloud.example.com/a"),
+            Diagnostics.Entry(
+                date: now.addingTimeInterval(-60), level: "error", category: "sync",
+                message: "sync failed: 404 at https://cloud.example.com/a"),
             Diagnostics.Entry(date: now, level: "info", category: "session", message: "upload of\n/Photos/alice/IMG_1.jpg done"),
         ]
         let report = Diagnostics.report(context: context, entries: entries, hours: 48, now: now)

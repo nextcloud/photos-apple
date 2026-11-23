@@ -93,7 +93,9 @@ import Testing
 
     @Test func aFailedSyncAndARevokedLoginShowOverACachedLibrary() {
         #expect(banner() == nil)
-        #expect(banner(status: .failed(message: "The server is in maintenance mode.", lastSync: nil)) == .syncFailed(message: "The server is in maintenance mode."))
+        #expect(
+            banner(status: .failed(message: "The server is in maintenance mode.", lastSync: nil))
+                == .syncFailed(message: "The server is in maintenance mode."))
         #expect(banner(signedOut: true, status: .failed(message: "x", lastSync: nil)) == .signedOut)
         #expect(banner(status: .offline(lastSync: nil)) == .offline)
         #expect(banner(status: .initialSync(itemsFetched: 40)) == .loading(40))
@@ -117,13 +119,17 @@ import Testing
     }
 
     @Test func theConfirmationNamesTheChange() {
-        let items = [MediaItem(fileId: 1, path: "/a.jpg", mimeType: "image/jpeg"), MediaItem(fileId: 2, path: "/b.jpg", mimeType: "image/jpeg")]
+        let items = [
+            MediaItem(fileId: 1, path: "/a.jpg", mimeType: "image/jpeg"), MediaItem(fileId: 2, path: "/b.jpg", mimeType: "image/jpeg"),
+        ]
         var notice = ChangeNotice(change: .archive(items), canUndo: true)
         #expect(ChangeNoticeText.text(notice, trashbin: true).contains("2"))
         let deleted = ChangeNotice(change: .delete(items), canUndo: true)
         #expect(ChangeNoticeText.text(deleted, trashbin: true) != ChangeNoticeText.text(deleted, trashbin: false))
         notice.isReverted = true
-        #expect(ChangeNoticeText.text(notice, trashbin: true) != ChangeNoticeText.text(ChangeNotice(change: .archive(items), canUndo: true), trashbin: true))
+        #expect(
+            ChangeNoticeText.text(notice, trashbin: true)
+                != ChangeNoticeText.text(ChangeNotice(change: .archive(items), canUndo: true), trashbin: true))
     }
 
     @Test func onlyLoginLinksAreTakenFromAQRCode() {

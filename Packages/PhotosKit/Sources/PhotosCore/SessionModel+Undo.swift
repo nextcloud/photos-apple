@@ -72,7 +72,8 @@ public enum UndoableChange: Sendable, Equatable {
             items.filter(\.isArchived).map { .unarchive(fileId: $0.fileId, path: $0.path) }
         case .removeFromAlbum(let members, let album):
             members.map {
-                .removeFromAlbum(albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: $0.fileId, childName: $0.childName)
+                .removeFromAlbum(
+                    albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: $0.fileId, childName: $0.childName)
             }
         case .delete(let items):
             items.filter(\.permissions.canDelete).map { .delete(fileId: $0.fileId, path: $0.path) }

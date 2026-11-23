@@ -84,7 +84,7 @@ enum BackupRowStatus {
             return String(localized: "\(done) of \(total)", bundle: .module, comment: "Backup progress: uploaded files of all files.")
         case .scanning, .reconciling: return String(localized: "Checking…", bundle: .module)
         case .paused: return String(localized: "Paused", bundle: .module)
-        case .failed, .notAuthorized: return String(localized: "Needs attention", bundle: .module)
+        case .failed, .notAuthorized, .incomplete: return String(localized: "Needs attention", bundle: .module)
         case .upToDate: return String(localized: "Up to date", bundle: .module)
         case .idle:
             return status.pending > 0

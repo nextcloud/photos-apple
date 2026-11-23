@@ -996,7 +996,8 @@ public actor BackupEngine {
         try database.writer.write { db in
             for key in stale.keys {
                 try db.execute(
-                    sql: "DELETE FROM backupAsset WHERE localIdentifier = ? AND resourceKind = ?", arguments: [key.localIdentifier, key.kind])
+                    sql: "DELETE FROM backupAsset WHERE localIdentifier = ? AND resourceKind = ?",
+                    arguments: [key.localIdentifier, key.kind])
             }
         }
     }
@@ -1026,7 +1027,8 @@ public actor BackupEngine {
     /// The export an earlier, interrupted attempt left for this resource.
     private func keptExport(of resource: BackupResource, settings: BackupSettings) -> URL? {
         guard let directory = keptDirectory(of: resource, settings: settings) else { return nil }
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory.appending(path: "data"), includingPropertiesForKeys: nil)) ?? []
+        let files =
+            (try? FileManager.default.contentsOfDirectory(at: directory.appending(path: "data"), includingPropertiesForKeys: nil)) ?? []
         guard let file = files.first, Self.size(of: file) > 0 else { return nil }
         return file
     }

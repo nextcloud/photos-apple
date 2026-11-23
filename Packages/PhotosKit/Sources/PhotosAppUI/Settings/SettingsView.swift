@@ -282,7 +282,9 @@ public struct SettingsView: View {
             LabeledContent {
                 Button(String(localized: "Review…", bundle: .module)) { reviewedCertificate = problem }
             } label: {
-                Label(String(localized: "The server's certificate changed", bundle: .module), systemImage: "lock.trianglebadge.exclamationmark")
+                Label(
+                    String(localized: "The server's certificate changed", bundle: .module),
+                    systemImage: "lock.trianglebadge.exclamationmark")
                 Text("Nothing is synced until you have reviewed and trusted the new certificate.", bundle: .module)
             }
         }

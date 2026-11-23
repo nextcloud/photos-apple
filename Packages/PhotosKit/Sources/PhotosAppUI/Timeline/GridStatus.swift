@@ -60,7 +60,10 @@ struct GridStatusBanner: View {
                     Button(String(localized: "Log in again", bundle: .module)) { relogin = true }
                 }
             case .certificateChanged:
-                bar(String(localized: "The server's certificate changed", bundle: .module), systemImage: "lock.trianglebadge.exclamationmark") {
+                bar(
+                    String(localized: "The server's certificate changed", bundle: .module),
+                    systemImage: "lock.trianglebadge.exclamationmark"
+                ) {
                     Button(String(localized: "Review…", bundle: .module)) { reviewedCertificate = session.certificateProblem }
                 }
             case .failedChanges(let count):
@@ -74,7 +77,10 @@ struct GridStatusBanner: View {
                     }
                 }
             case .syncFailed(let message):
-                bar(String(localized: "Couldn't sync", bundle: .module), detail: message, systemImage: "exclamationmark.arrow.triangle.2.circlepath") {
+                bar(
+                    String(localized: "Couldn't sync", bundle: .module), detail: message,
+                    systemImage: "exclamationmark.arrow.triangle.2.circlepath"
+                ) {
                     Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
                 }
             case .offline:

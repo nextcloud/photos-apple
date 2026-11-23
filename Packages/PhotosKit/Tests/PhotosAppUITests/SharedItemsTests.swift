@@ -62,7 +62,8 @@ import UniformTypeIdentifiers
             try Data(repeating: 1, count: 10).write(to: share.appending(path: "item/a.jpg"))
         }
         let now = Date()
-        try files.setAttributes([.modificationDate: now.addingTimeInterval(-2 * SharedItems.leftoverAge)], ofItemAtPath: old.path(percentEncoded: false))
+        try files.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-2 * SharedItems.leftoverAge)], ofItemAtPath: old.path(percentEncoded: false))
         SharedItems.removeLeftovers(in: directory, now: now)
         #expect(!exists(old))
         // Another share that is uploading right now keeps its files.

@@ -113,7 +113,9 @@ public enum Diagnostics {
         ]
         lines += context.state.map { redact($0, secrets: context.secrets) }
         lines.append("")
-        lines.append("Log of this run of the app, last \(hours) hours (\(entries.count) entries). Account names, addresses, file names and tokens are removed.")
+        lines.append(
+            "Log of this run of the app, last \(hours) hours (\(entries.count) entries). Account names, addresses, file names and tokens are removed."
+        )
         lines.append("")
         let time = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
         for entry in entries {

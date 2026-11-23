@@ -300,7 +300,8 @@ import Testing
         try CollectionStore(database: database).upsertAlbum(album)
         try await database.writer.write { db in
             try db.execute(
-                sql: "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 2, '2-2.jpg', 'user', '/Photos/2.jpg', 1)",
+                sql:
+                    "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 2, '2-2.jpg', 'user', '/Photos/2.jpg', 1)",
                 arguments: [album.id])
         }
 
