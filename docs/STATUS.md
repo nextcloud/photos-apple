@@ -110,7 +110,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the mode exists.
 - Undo ✅ (Mac app): favourite, archive, remove from album and delete (restored from the server's trash bin) register with
   the window's undo manager (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
-  ("Archived 3 items · Undo"). Only for changes made in a grid; the viewer's own buttons are not undoable yet. A photo
+  ("Archived 3 items · Undo"), in the grids and in the viewer (favourite, archive, delete; an undo there brings the
+  page back, Redo takes it out again). A photo
   restored after a delete comes back to the library, not to the albums it was in (the server drops those on delete).
 - Empty and error states have an action (SPEC §6.3): "Sync now" / "Retry" in the library, "Refresh" / "Try again" in lists
   loaded from the server, "Clear search" for a search without results.

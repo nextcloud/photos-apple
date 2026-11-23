@@ -105,6 +105,17 @@ public enum UndoableChange: Sendable, Equatable {
     /// Number of items the change alters.
     public var count: Int { operations.count }
 
+    /// The photos the change alters, in the order of `operations`.
+    public var fileIds: [FileID] {
+        switch self {
+        case .favorite(let items, _): items.map(\.fileId)
+        case .archive(let items): items.filter(Self.canArchive).map(\.fileId)
+        case .unarchive(let items): items.filter(\.isArchived).map(\.fileId)
+        case .removeFromAlbum(let members, _): members.map(\.fileId)
+        case .delete(let items): items.filter(\.permissions.canDelete).map(\.fileId)
+        }
+    }
+
     /// Whether the change can be taken back on a server with these features.
     public func isUndoable(trashbin: Bool) -> Bool {
         switch self {

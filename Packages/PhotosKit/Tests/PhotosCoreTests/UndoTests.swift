@@ -67,6 +67,23 @@ import Testing
         #expect(!UndoableChange.delete([readOnly]).isUndoable(trashbin: true))
     }
 
+    @Test func fileIdsAreThoseOfTheOperations() {
+        let album = Album(kind: .own, name: "Trip")
+        let readOnly = MediaItem(fileId: 9, path: "/Shared/9.jpg", mimeType: "image/jpeg", permissions: Permissions(rawValue: "RG"))
+        let changes: [UndoableChange] = [
+            .favorite([Self.item(1), Self.item(2, favorite: true)], value: true),
+            .archive([Self.item(1), Self.item(2, archived: true), Self.item(3, mount: "shared")]),
+            .unarchive([Self.item(4, archived: true), Self.item(5)]),
+            .removeFromAlbum([.init(fileId: 6, childName: "6.jpg", ownPath: nil)], album: album),
+            .delete([Self.item(7), readOnly]),
+        ]
+        for change in changes {
+            #expect(change.fileIds == change.operations.map(\.fileId), "\(change.kind)")
+        }
+        #expect(changes[1].fileIds == [1])
+        #expect(changes[4].fileIds == [7])
+    }
+
     /// The inverse operations bring the local index back to where it was.
     @Test func inverseOperationsRestoreTheIndex() throws {
         let database = try AccountDatabase.temporary()

@@ -247,24 +247,11 @@ public final class SessionModel {
     }
 
     // MARK: Actions (optimistic, via outbox)
+    // Favourite and archive go through `perform(_:)` (SessionModel+Undo), so that they can be undone.
 
-    public func setFavorite(_ items: [MediaItem], _ value: Bool) async {
-        await enqueue(items.map { .favorite(fileId: $0.fileId, path: $0.path, value: value) })
-    }
-
+    /// A delete that is not offered for undo (duplicates, free up space: the user confirmed a list of files).
     public func delete(_ items: [MediaItem]) async {
         await enqueue(items.filter(\.permissions.canDelete).map { .delete(fileId: $0.fileId, path: $0.path) })
-    }
-
-    public func archive(_ items: [MediaItem]) async {
-        await enqueue(
-            items.filter { $0.isOwnStorage && $0.permissions.canDelete && !$0.isArchived }.map {
-                .archive(fileId: $0.fileId, path: $0.path)
-            })
-    }
-
-    public func unarchive(_ items: [MediaItem]) async {
-        await enqueue(items.filter(\.isArchived).map { .unarchive(fileId: $0.fileId, path: $0.path) })
     }
 
     public func add(_ items: [MediaItem], to album: Album) async {

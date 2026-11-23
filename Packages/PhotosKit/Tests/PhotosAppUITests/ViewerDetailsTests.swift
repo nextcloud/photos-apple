@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import PhotosCore
+import PhotosModel
 import PhotosNetworking
 import Testing
 
@@ -67,5 +69,36 @@ import Testing
     @Test func preparingAndFailedAreDifferentStates() {
         #expect(VideoLoadPhase.preparing != VideoLoadPhase.loading)
         #expect(VideoLoadPhase.failed(.conversionTakesLong) != VideoLoadPhase.preparing)
+    }
+}
+
+/// How the viewer follows undoable changes: archived and deleted photos leave it, an undo brings them back.
+@Suite struct ViewerPageChangeTests {
+    static func item(_ id: Int64, archived: Bool = false) -> MediaItem {
+        var item = MediaItem(fileId: FileID(id), path: "/Photos/\(id).jpg", mimeType: "image/jpeg")
+        item.isArchived = archived
+        return item
+    }
+
+    @Test func archiveAndDeleteTakeTheChangedPagesOut() {
+        let archive = ChangeNotice(change: .archive([Self.item(1), Self.item(2, archived: true)]), canUndo: true)
+        // The photo that already was archived is not changed by the archive.
+        #expect(ViewerPageChange(archive) == .remove([1]))
+        let delete = ChangeNotice(change: .delete([Self.item(3), Self.item(4)]), canUndo: true)
+        #expect(ViewerPageChange(delete) == .remove([3, 4]))
+    }
+
+    @Test func anUndoBringsThePagesBack() {
+        let archive = ChangeNotice(change: .archive([Self.item(1)]), isReverted: true, canUndo: false)
+        #expect(ViewerPageChange(archive) == .restore([1]))
+        let delete = ChangeNotice(change: .delete([Self.item(3)]), isReverted: true, canUndo: false, failures: 1)
+        #expect(ViewerPageChange(delete) == .restore([3]))
+    }
+
+    @Test func otherChangesLeaveThePagesAlone() {
+        #expect(ViewerPageChange(ChangeNotice(change: .favorite([Self.item(1)], value: true), canUndo: true)) == .none)
+        #expect(ViewerPageChange(ChangeNotice(change: .unarchive([Self.item(1, archived: true)]), canUndo: true)) == .none)
+        // Nothing that could be archived: nothing to take out.
+        #expect(ViewerPageChange(ChangeNotice(change: .archive([Self.item(2, archived: true)]), canUndo: false)) == .none)
     }
 }

@@ -42,6 +42,8 @@ struct MediaViewer: View {
     @State private var favoriteToggles = 0
     @State private var deletions = 0
     @Environment(SessionModel.self) private var session
+    /// The window's undo manager: favourite, archive and delete made here are undone with Edit › Undo (⌘Z, shake).
+    @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
@@ -128,13 +130,23 @@ struct MediaViewer: View {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
                     if let item = currentItem {
                         deletions += 1
-                        Task { await session.delete([item]) }
+                        Task { await session.perform(.delete([item])) }
                         moveOn(from: item.fileId)
                     }
                 }
             }
             .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
             .photosHaptic(.impact(weight: .medium), trigger: deletions)
+            // "Moved 1 item to the trash bin · Undo", as in the grid.
+            .overlay(alignment: .bottom) { ChangeNoticeToast() }
+            .animation(.default, value: session.lastChange?.id)
+            // Changes made in this window are undone by this window's Edit › Undo.
+            .onChange(of: undoManager, initial: true) { _, manager in
+                if let manager { session.undoManager = manager }
+            }
+            .onChange(of: session.lastChange) { _, notice in
+                if let notice { apply(ViewerPageChange(notice)) }
+            }
     }
 
     /// The pager with its backdrop, bars, keyboard and focus.
@@ -239,10 +251,37 @@ struct MediaViewer: View {
     /// is shown again everywhere, and "Archive" in the same menu takes it back.
     func toggleArchive(_ item: MediaItem) {
         if item.isArchived {
-            Task { await session.unarchive([item]) }
+            Task { await session.perform(.unarchive([item])) }
         } else {
-            Task { await session.archive([item]) }
+            Task { await session.perform(.archive([item])) }
             moveOn(from: item.fileId)
+        }
+    }
+
+    /// Follows changes announced by the session: a photo archived or deleted elsewhere (or again, with Redo) leaves
+    /// the viewer; one brought back with Undo gets its page back, where it was in the context.
+    func apply(_ change: ViewerPageChange) {
+        switch change {
+        case .none:
+            break
+        case .remove(let ids):
+            let gone: [FileID] = shownIds.filter { ids.contains($0) }
+            guard !gone.isEmpty else { return }
+            if let current, ids.contains(current) {
+                // The others first, so that the page shown next is one that stays.
+                removed.formUnion(gone.filter { $0 != current })
+                moveOn(from: current)
+            } else {
+                removed.formUnion(gone)
+                realignments += 1
+            }
+        case .restore(let ids):
+            let library = session.services?.library
+            // Only photos that are in the library again (a restore from the trash bin can fail).
+            let back: Set<FileID> = removed.intersection(ids).filter { id in (try? library?.item(id)) != nil }
+            guard !back.isEmpty else { return }
+            removed.subtract(back)
+            realignments += 1
         }
     }
 
@@ -308,7 +347,7 @@ struct MediaViewer: View {
 
     func toggleFavorite(_ item: MediaItem) {
         favoriteToggles += 1
-        Task { await session.setFavorite([item], !item.isFavorite) }
+        Task { await session.perform(.favorite([item], value: !item.isFavorite)) }
     }
 
     func toggleInfo() {
@@ -693,3 +732,29 @@ struct ViewerPage: View {
         }
     }
 #endif
+
+/// What a change announced by the session (`SessionModel.lastChange`) means for the viewer's pages.
+enum ViewerPageChange: Equatable {
+    case none
+    /// The photos left the context (archived, deleted): their pages are taken out.
+    case remove(Set<FileID>)
+    /// The change was undone: the photos are back and so are their pages.
+    case restore(Set<FileID>)
+
+    init(_ notice: ChangeNotice) {
+        let ids: Set<FileID>
+        switch notice.change {
+        case .archive, .delete:
+            // Only the photos the change really altered (an archived photo is not archived again).
+            ids = Set(notice.change.fileIds)
+        default:
+            self = .none
+            return
+        }
+        guard !ids.isEmpty else {
+            self = .none
+            return
+        }
+        self = notice.isReverted ? .restore(ids) : .remove(ids)
+    }
+}
