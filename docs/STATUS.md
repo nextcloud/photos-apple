@@ -32,8 +32,19 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
 (macOS ✅, iOS 🟡), year index on iOS 🟡, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
+- Grid: the zoom step sets a target tile size and the column count follows from the width; days at normal zoom, months and years
+  when zoomed out; the scroll position is kept across zoom and resize. Previews are requested for the tile's pixel size (aspect-fill
+  aware) and upgraded when the zoom or the screen scale changes. Tiles without a preview show a file-type glyph, videos a badge.
+  Sectioning runs off the main actor, bursts of database updates are coalesced, header texts are formatted for visible headers
+  only (100 000 items: sections in ~9 ms, whole model ~45 ms in a debug build, see `GridModelTests`). macOS ✅ (run), iOS 🟡 (compiles,
+  not run).
+- Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
+  were only exercised through accessibility, not with a real pointer).
+- Skeleton grid during the first load and the first sync ✅; the empty state only after a completed sync.
+- Keyboard and accessibility in the Mac grid ✅: tiles are buttons (press opens, the context menu actions are accessibility
+  actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape 🟡 (not run).
 - ⬜ TL-6 stacks in the grid (the algorithm exists in `PhotosDomain/Stacks.swift`, not yet applied to the grid).
-- ⬜ Timeline skeleton from `timelineDays` during the first sync; ⬜ date scrubber on macOS.
+- ⬜ Timeline skeleton from `timelineDays` during the first sync (a plain placeholder grid is shown instead).
 - ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles.
 - ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action), ⬜ VW-5 slideshow, ⬜ VW-6 stack strip.
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next

@@ -6,40 +6,6 @@ import PhotosModel
 import PhotosStore
 import SwiftUI
 
-/// Observes a grid query from the store.
-@MainActor
-@Observable
-final class GridFeed {
-    private(set) var items: [GridMedia] = []
-    private(set) var byId: [FileID: GridMedia] = [:]
-    private(set) var sections: [GridSection] = []
-    private(set) var loaded = false
-    @ObservationIgnored private var task: Task<Void, Never>?
-
-    func observe(_ observation: @escaping @Sendable () -> GridStream, flat: Bool) {
-        task?.cancel()
-        task = Task { [weak self] in
-            do {
-                for try await items in observation() {
-                    guard let self else { return }
-                    self.apply(items, flat: flat)
-                }
-            } catch {}
-        }
-    }
-
-    func apply(_ items: [GridMedia], flat: Bool) {
-        self.items = items
-        byId = Dictionary(items.map { ($0.fileId, $0) }, uniquingKeysWith: { a, _ in a })
-        sections = flat ? GridSectioning.flat(items) : GridSectioning.byDay(items)
-        loaded = true
-    }
-
-    func cancel() { task?.cancel() }
-}
-
-typealias GridStream = AsyncThrowingStream<[GridMedia], any Error>
-
 /// Timeline views: All media, Photos, Videos, Favorites (SPEC §7.1).
 struct TimelineScreen: View {
     let filter: MediaFilter
@@ -88,7 +54,8 @@ struct TimelineScreen: View {
             showsHeaders: true,
             emptyTitle: emptyTitle,
             emptyMessage: emptyMessage,
-            columns: $columns
+            columns: $columns,
+            waitsForFirstSync: true
         ) {
             TransfersIndicator()
             UploadMenu()
@@ -102,6 +69,7 @@ struct TimelineScreen: View {
                     Image(systemName: "square.grid.2x2.fill").imageScale(.small)
                 }
                 .frame(width: 140)
+                .accessibilityLabel(Text("Zoom", bundle: .module))
                 .help(String(localized: "Zoom", bundle: .module))
             #endif
             if filter == .all {
@@ -138,7 +106,12 @@ struct TimelineScreen: View {
     }
 
     var emptyTitle: String {
-        if case .initialSync = session.syncStatus { return String(localized: "Loading your library…", bundle: .module) }
+        // While the first sync runs the grid shows a skeleton; these are for a library that could not be loaded.
+        switch session.syncStatus {
+        case .offline(lastSync: nil): return String(localized: "You're offline", bundle: .module)
+        case .failed(_, lastSync: nil): return String(localized: "Couldn't load your library", bundle: .module)
+        default: break
+        }
         switch mediaKind {
         case .favorites: return String(localized: "No favorites yet", bundle: .module)
         case .videos: return String(localized: "No videos", bundle: .module)
@@ -147,8 +120,11 @@ struct TimelineScreen: View {
     }
 
     var emptyMessage: String {
-        if case .initialSync(let count) = session.syncStatus {
-            return String(localized: "\(count) items found so far.", bundle: .module)
+        switch session.syncStatus {
+        case .offline(lastSync: nil):
+            return String(localized: "Your library is loaded as soon as the server can be reached.", bundle: .module)
+        case .failed(let message, lastSync: nil): return message
+        default: break
         }
         let folders = session.features.userConfig.photosSourceFolders.joined(separator: ", ")
         return String(localized: "Photos and videos in \(folders) on your Nextcloud appear here.", bundle: .module)
