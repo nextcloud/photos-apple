@@ -17,7 +17,8 @@ enum SearchEvaluator {
         let tagIds = filters.compactMap { if case .tag(let id, _) = $0 { id } else { nil } }
         if !tagIds.isEmpty {
             var allowed = Set<FileID>()
-            for id in tagIds { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
+            // A tag of a smart album that no longer exists on the server matches nothing.
+            for id in tagIds where id != unknownTagId { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
             search.memberships.append(allowed)
         }
         let people = filters.compactMap { if case .person(let name) = $0 { name } else { nil } }
@@ -58,13 +59,29 @@ enum SearchEvaluator {
         return result
     }
 
-    static func searchFilters(_ filters: AlbumFilters) -> [SearchFilter] {
-        filters.places.map { .place($0) } + filters.names.map { .text($0) }
-            + filters.dateRanges.map {
-                .dateRange(
-                    start: $0.startDate, end: $0.endDateExclusive,
-                    label: DateRangeLabel.string(for: $0.startDate..<$0.endDateExclusive))
-            }
+    /// Tag id of a smart-album tag whose name the server no longer knows.
+    static let unknownTagId = -1
+
+    /// The search filters of a smart album. Smart albums store tags by name (as the web app does), so the server's tags
+    /// map them back to ids; a tag that is gone matches nothing rather than being dropped, which would widen the album.
+    static func searchFilters(_ filters: AlbumFilters, tags: [SystemTag] = []) -> [SearchFilter] {
+        let ids = Dictionary(tags.map { ($0.name, $0.id) }, uniquingKeysWith: { first, _ in first })
+        let tagFilters: [SearchFilter] = filters.tags.map { .tag(id: ids[$0] ?? unknownTagId, name: $0) }
+        let dateFilters: [SearchFilter] = filters.dateRanges.map {
+            .dateRange(
+                start: $0.startDate, end: $0.endDateExclusive,
+                label: DateRangeLabel.string(for: $0.startDate..<$0.endDateExclusive))
+        }
+        return filters.places.map { .place($0) } + filters.names.map { .text($0) } + dateFilters + tagFilters
+    }
+
+    /// The items of a smart album.
+    @MainActor static func items(of album: SmartAlbum, session: SessionModel) async throws -> [MediaItem] {
+        var tags: [SystemTag] = []
+        if !album.filters.tags.isEmpty, session.features.has(.systemtags), let services = session.services {
+            tags = try await services.api.tagsInUse()
+        }
+        return try await items(for: searchFilters(album.filters, tags: tags), session: session)
     }
 }
 
@@ -324,7 +341,7 @@ struct SmartAlbumsScreen: View {
             ForEach(albums, id: \.0.id) { album, isLocal in
                 NavigationLink {
                     ItemsScreen(title: album.name) { _ in
-                        try await SearchEvaluator.items(for: SearchEvaluator.searchFilters(album.filters), session: session)
+                        try await SearchEvaluator.items(of: album, session: session)
                     }
                 } label: {
                     VStack(alignment: .leading) {
