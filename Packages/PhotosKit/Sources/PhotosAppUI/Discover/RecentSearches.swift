@@ -130,14 +130,3 @@ enum SearchCommit {
         return active.contains(free) ? nil : free
     }
 }
-
-/// Return in a search field. The field belongs to the window (the Mac's toolbar) or the tab; the search screen, which
-/// knows the suggestions, listens here.
-@MainActor
-@Observable
-final class SearchSubmission {
-    static let shared = SearchSubmission()
-    private(set) var count = 0
-
-    func submit() { count += 1 }
-}

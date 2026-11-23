@@ -146,6 +146,8 @@ struct MainView: View {
     #endif
     @State private var searchText = ""
     @State private var searchFilters: [SearchFilter] = []
+    /// Return in this window's search field (see `SearchScreen.submissions`).
+    @State private var searchSubmissions = 0
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
@@ -276,8 +278,10 @@ struct MainView: View {
     /// A destination's screen in its own stack, bound to its path.
     func stack(_ destination: AppDestination) -> some View {
         NavigationStack(path: path(destination)) {
-            DestinationView(destination: destination, searchText: $searchText, searchFilters: $searchFilters)
-                .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
+            DestinationView(
+                destination: destination, searchText: $searchText, searchFilters: $searchFilters, searchSubmissions: searchSubmissions
+            )
+            .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
         }
     }
 
@@ -320,7 +324,7 @@ struct MainView: View {
             .searchFocused($searchFocused)
             .onSubmit(of: .search) {
                 showSearch()
-                SearchSubmission.shared.submit()
+                searchSubmissions += 1
             }
             .onChange(of: searchText) { _, text in
                 if !text.isEmpty { showSearch() }
@@ -521,6 +525,8 @@ struct DestinationView: View {
     /// Text of the window's search field (macOS); the search tab has its own field elsewhere.
     @Binding var searchText: String
     @Binding var searchFilters: [SearchFilter]
+    /// Return in the window's search field (macOS).
+    var searchSubmissions = 0
 
     var body: some View {
         switch destination {
@@ -543,7 +549,7 @@ struct DestinationView: View {
         case .archive: ArchiveScreen()
         case .search:
             #if os(macOS)
-                SearchScreen(query: $searchText, filters: $searchFilters)
+                SearchScreen(query: $searchText, filters: $searchFilters, submissions: searchSubmissions)
             #else
                 SearchTab()
             #endif

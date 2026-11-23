@@ -89,12 +89,13 @@ enum SearchEvaluator {
 struct SearchTab: View {
     @State private var query = ""
     @State private var filters: [SearchFilter] = []
+    @State private var submissions = 0
 
     var body: some View {
-        SearchScreen(query: $query, filters: $filters)
+        SearchScreen(query: $query, filters: $filters, submissions: submissions)
             .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
             // Return searches: the top suggestion, else the typed text.
-            .onSubmit(of: .search) { SearchSubmission.shared.submit() }
+            .onSubmit(of: .search) { submissions += 1 }
     }
 }
 
@@ -119,6 +120,9 @@ struct SearchScreen: View {
     @Binding var query: String
     /// The chosen filters. On the Mac they are the tokens of the search field; elsewhere a row of chips above the results.
     @Binding var filters: [SearchFilter]
+    /// Counts Return in the search field. The field belongs to the window (the Mac's toolbar) or the tab, this screen
+    /// knows the suggestions: each window or tab passes its own count, so Return searches in that window only.
+    var submissions = 0
     @State private var vocabulary = SearchSuggestions.Vocabulary()
     /// Counts the steps in which the vocabulary arrives (it loads off the main thread, tags and people from the server),
     /// so that suggestions for text typed before it was there are computed again.
@@ -206,7 +210,7 @@ struct SearchScreen: View {
         }
         .task(id: SuggestionInput(query: query, vocabularyRevision: vocabularyRevision)) { await updateSuggestions() }
         .task(id: SearchRun(filters: filters, attempt: searchAttempt)) { await runSearch() }
-        .onChange(of: SearchSubmission.shared.count) { _, _ in commit() }
+        .onChange(of: submissions) { _, _ in commit() }
         .alert(String(localized: "Save as smart album", bundle: .module), isPresented: $saving) {
             TextField(String(localized: "Name", bundle: .module), text: $smartName)
             Button(String(localized: "Save", bundle: .module)) {
