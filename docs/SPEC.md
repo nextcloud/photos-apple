@@ -308,7 +308,7 @@ Progressive: blurhash → cached tile preview → 1024 preview → 4096 preview 
 
 #### 5.5.3 Video
 
-- Stream with `AVPlayer`. Get a temporary unauthenticated URL from the direct-download API (`POST /ocs/v2.php/apps/dav/api/v1/direct` with `fileId`) so AVFoundation can do range requests without custom headers. Verify range support; fallback: `AVAssetResourceLoaderDelegate` that fetches byte ranges with the account's auth.
+- Play with `AVPlayer`. Prefer a local copy (offline album file, cached original). Otherwise get a temporary URL from the direct-download API (`POST /ocs/v2.php/apps/dav/api/v1/direct` with `fileId`) and feed the player through an `AVAssetResourceLoaderDelegate` that fetches byte ranges with the app's own `HTTPClient` (`PhotosMedia/VideoStreaming.swift`): AVFoundation loading the URL itself would ignore certificates the user trusted in the app and the account's client certificate.
 - Formats AVFoundation can't play (WebM, MKV, some AVI): if `videoRenditions` is available, fetch `GET /apps/photos/api/v1/video/{fileId}` (it may 404 while the conversion is queued: show "Preparing video…" and retry with back-off up to 2 min). The rendition currently has `Accept-Ranges: none`, so download it to a temp file before playing (companion §S6 fixes this). Otherwise offer "Download" / "Open in…".
 - Grid tiles of videos show the duration (from companion metadata `nc:metadata-photos-duration`, `SERVER-COMPANION.md` §S8, else read lazily when first played and cached; the server has no duration today).
 
