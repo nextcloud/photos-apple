@@ -1,0 +1,106 @@
+# SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: MIT
+#
+# The slow tests that pull requests skip: timings on a 100 000-item library and the tests against a real Nextcloud.
+name: Nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  performance:
+    # Scheduled runs only in the main repository, not in forks.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-ios'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Performance tests
+        working-directory: Packages/PhotosKit
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation \
+            -only-testing:PhotosStoreTests/LargeLibraryPerformanceTests | tee "$RUNNER_TEMP/performance.log"
+      - name: Timings
+        if: always()
+        run: |
+          LOG="$RUNNER_TEMP/performance.log"
+          {
+            echo "### Store timings (debug build, shared runner: compare runs, not absolute numbers)"
+            echo '```'
+            if [ -f "$LOG" ]; then grep '^PERF' "$LOG" || true; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f "$LOG" ] || ! grep -q '^PERF' "$LOG"; then
+            echo "::error::The performance tests did not run."
+            exit 1
+          fi
+  integration:
+    # Against a Nextcloud installed on the runner (release archive, SQLite, PHP's built-in web server): macOS runners
+    # have no Docker, and a server in another job could not be reached from here.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-ios'
+    runs-on: xcode-27
+    env:
+      SERVER_URL: http://127.0.0.1:8089
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: ctype, curl, dom, exif, fileinfo, gd, intl, mbstring, openssl, pdo_sqlite, posix, session, simplexml, sqlite3, xmlreader, xmlwriter, zip, zlib
+          coverage: none
+      - name: Start Nextcloud
+        run: |
+          scripts/test-server.sh "$RUNNER_TEMP/nextcloud" 8089 > "$RUNNER_TEMP/nextcloud.log" 2>&1 &
+          for _ in $(seq 1 120); do
+            if [ -f "$RUNNER_TEMP/nextcloud/ready" ]; then break; fi
+            sleep 5
+          done
+          tail -n 40 "$RUNNER_TEMP/nextcloud.log"
+          if [ ! -f "$RUNNER_TEMP/nextcloud/ready" ]; then
+            echo "::error::The test server did not come up within 10 minutes."
+            exit 1
+          fi
+          curl -fsS "$SERVER_URL/status.php"
+      - name: Integration tests
+        working-directory: Packages/PhotosKit
+        env:
+          # xcodebuild hands variables with this prefix to the test process (without the prefix).
+          TEST_RUNNER_PHOTOS_IT_SERVER: ${{ env.SERVER_URL }}
+          TEST_RUNNER_PHOTOS_IT_USER: admin
+          TEST_RUNNER_PHOTOS_IT_PASSWORD: admin
+          TEST_RUNNER_PHOTOS_SKIP_PERFORMANCE: "1"
+        run: |
+          set -o pipefail
+          # One after the other: the suites change the same account and some of them count its files.
+          xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -only-testing:PhotosStoreTests/IntegrationTests \
+            -only-testing:PhotosStoreTests/IntegrationSyncTests \
+            -only-testing:PhotosStoreTests/IntegrationWriteTests \
+            -only-testing:PhotosStoreTests/IntegrationReadTests \
+            -only-testing:PhotosStoreTests/IntegrationFeatureTests \
+            -only-testing:PhotosNetworkingTests/UploadIntegrationTests \
+            -only-testing:PhotosNetworkingTests/BackgroundUploadIntegrationTests \
+            -only-testing:PhotosBackupTests/BackupIntegrationTests \
+            | tee "$RUNNER_TEMP/integration.log"
+      - name: Test summary
+        if: always()
+        run: |
+          LOG="$RUNNER_TEMP/integration.log"
+          TOTAL=0
+          if [ -f "$LOG" ]; then
+            TOTAL=$(grep -Eo 'Test run with [0-9]+ tests?' "$LOG" | awk '{ sum += $4 } END { print sum + 0 }')
+          fi
+          echo "### Integration tests: **$TOTAL** tests ran against $(curl -fsS "$SERVER_URL/status.php" || echo 'a server that is gone')" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "::error::No integration test ran (did the variables reach the test process?)."
+            exit 1
+          fi
+      - name: Server log
+        if: failure()
+        run: |
+          tail -n 100 "$RUNNER_TEMP/nextcloud.log" || true
+          tail -n 50 "$RUNNER_TEMP/nextcloud/nextcloud/data/nextcloud.log" || true
