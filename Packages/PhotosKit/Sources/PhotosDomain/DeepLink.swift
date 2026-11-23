@@ -9,6 +9,9 @@ public enum AppRoute: Hashable, Codable, Sendable {
     /// `Album.id` (`"<kind>:<name>"`).
     case album(id: String)
     case photo(fileId: FileID)
+    /// A destination of the app (its raw value) shown inside another one's stack: on iPhone the Collections tab
+    /// lists the places that have no tab of their own and pushes them.
+    case destination(String)
 }
 
 /// What a `nextcloudphotos://` link opens (SPEC §4.8): a destination, an album or a photo.
