@@ -8,7 +8,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Nextcloud Photos uses the camera to scan login QR codes and to take photos directly to your Nextcloud."
+            "value" : "Nextcloud Photos uses the camera to scan a login QR code."
           }
         }
       }

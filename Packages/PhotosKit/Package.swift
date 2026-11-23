@@ -47,6 +47,7 @@ let package = Package(
         .target(
             name: "PhotosMedia",
             dependencies: ["PhotosModel", "PhotosNetworking", "PhotosStore"],
+            resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
         // PhotoKit scanning, reconciliation against the server, upload engine.
