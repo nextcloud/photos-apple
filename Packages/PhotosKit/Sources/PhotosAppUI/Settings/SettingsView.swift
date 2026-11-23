@@ -17,7 +17,7 @@ public struct SettingsView: View {
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
     @AppStorage("appLockEnabled") private var appLock = false
-    @AppStorage("pushEnabled") private var pushEnabled = true
+    @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
     @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
 
     /// A Settings page. iOS shows all pages in one list; the macOS Settings window shows one per tab.
@@ -107,7 +107,10 @@ public struct SettingsView: View {
 
             if shows(.general) {
                 Section {
-                    Toggle(String(localized: "Notifications", bundle: .module), isOn: $pushEnabled)
+                    // Off unregisters this device on the server and the push service; on asks for permission and registers.
+                    Toggle(
+                        String(localized: "Notifications", bundle: .module),
+                        isOn: Binding(get: { app.pushEnabled }, set: { value in Task { await app.setPushEnabled(value) } }))
                     if session.features.has(.onThisDayNotifications) {
                         Toggle(
                             String(localized: "On this day", bundle: .module),
@@ -155,6 +158,8 @@ public struct SettingsView: View {
 
             if shows(.storage) {
                 Section(String(localized: "Available offline", bundle: .module)) {
+                    Toggle(String(localized: "Download only on Wi-Fi", bundle: .module), isOn: $offlineWifiOnly)
+                        .onChange(of: offlineWifiOnly) { _, _ in Task { await session.offline?.syncPins() } }
                     if pins.isEmpty {
                         Text("Albums you make available offline appear here.", bundle: .module).foregroundStyle(.secondary)
                     }

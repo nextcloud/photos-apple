@@ -10,10 +10,29 @@ import Security
 /// Unsigned development builds on macOS lack the entitlement; they fall back to the login keychain.
 public struct Keychain: Sendable {
     public let service: String
+    #if DEBUG
+        /// Debug builds only: items are kept as files in this directory instead of the keychain (unsigned Mac builds, unit tests).
+        let fileStore: DevelopmentSecretStore?
+    #endif
 
     public init(service: String = "com.nextcloud.photos") {
         self.service = service
+        #if DEBUG
+            #if os(macOS)
+                fileStore = Self.useDevelopmentStore ? DevelopmentSecretStore(directory: DevelopmentSecretStore.defaultDirectory) : nil
+            #else
+                fileStore = nil
+            #endif
+        #endif
     }
+
+    #if DEBUG
+        /// A store that never touches the keychain: one file per item in `directory`.
+        init(service: String, fileStore directory: URL) {
+            self.service = service
+            self.fileStore = DevelopmentSecretStore(directory: directory)
+        }
+    #endif
 
     public enum KeychainError: Error {
         case status(OSStatus)
@@ -34,9 +53,9 @@ public struct Keychain: Sendable {
     }
 
     public func set(_ data: Data, for key: String) throws {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore {
-                try DevelopmentSecretStore.set(data, for: "\(service).\(key)")
+        #if DEBUG
+            if let fileStore {
+                try fileStore.set(data, for: "\(service).\(key)")
                 return
             }
         #endif
@@ -53,8 +72,8 @@ public struct Keychain: Sendable {
     }
 
     public func data(for key: String) -> Data? {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore { return DevelopmentSecretStore.data(for: "\(service).\(key)") }
+        #if DEBUG
+            if let fileStore { return fileStore.data(for: "\(service).\(key)") }
         #endif
         for dataProtection in [true, false] {
             var query = baseQuery(key, dataProtection: dataProtection)
@@ -72,9 +91,9 @@ public struct Keychain: Sendable {
     }
 
     public func delete(_ key: String) {
-        #if DEBUG && os(macOS)
-            if Self.useDevelopmentStore {
-                DevelopmentSecretStore.delete("\(service).\(key)")
+        #if DEBUG
+            if let fileStore {
+                fileStore.delete("\(service).\(key)")
                 return
             }
         #endif
@@ -86,8 +105,15 @@ public struct Keychain: Sendable {
     // MARK: Conventions
 
     public static func passwordKey(_ account: String) -> String { "password:\(account)" }
-    public static func clientCertificateKey(_ account: String) -> String { "client-certificate:\(account)" }
-    public static func clientCertificatePasswordKey(_ account: String) -> String { "client-certificate-password:\(account)" }
+    public static func clientCertificateKey(_ host: String) -> String { "client-certificate:\(host)" }
+    public static func clientCertificatePasswordKey(_ host: String) -> String { "client-certificate-password:\(host)" }
+    public static func pushPrivateKeyKey(_ account: String) -> String { "push-private-key:\(account)" }
+    public static func pushRegistrationKey(_ account: String) -> String { "push-registration:\(account)" }
+
+    /// Every item that belongs to one account alone. Client certificates are per host and handled by `AccountPurge`.
+    public static func accountKeys(_ account: String) -> [String] {
+        [passwordKey(account), pushPrivateKeyKey(account), pushRegistrationKey(account)]
+    }
 }
 
 #if DEBUG && os(macOS)
@@ -107,24 +133,29 @@ public struct Keychain: Sendable {
             return status == errSecMissingEntitlement
         }()
     }
+#endif
 
-    /// Development-only secret store (one file per key in the app's sandbox container).
-    enum DevelopmentSecretStore {
-        static var directory: URL {
+#if DEBUG
+    /// Development-only secret store (one file per key in a directory).
+    struct DevelopmentSecretStore: Sendable {
+        let directory: URL
+
+        /// In the app's sandbox container.
+        static var defaultDirectory: URL {
             FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "DevelopmentSecrets")
         }
 
-        static func file(_ key: String) -> URL {
+        func file(_ key: String) -> URL {
             directory.appending(path: Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_"))
         }
 
-        static func set(_ data: Data, for key: String) throws {
+        func set(_ data: Data, for key: String) throws {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try data.write(to: file(key), options: .atomic)
         }
 
-        static func data(for key: String) -> Data? { try? Data(contentsOf: file(key)) }
+        func data(for key: String) -> Data? { try? Data(contentsOf: file(key)) }
 
-        static func delete(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
+        func delete(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
     }
 #endif

@@ -156,6 +156,20 @@ public actor Outbox {
             })
     }
 
+    /// Stops the worker and waits until it has stopped; an interrupted operation stays pending (account switch, removal).
+    /// The retry timer and the network monitor are stopped too, so nothing kicks the outbox again by itself. An explicit
+    /// `kick()` or `enqueue` afterwards starts it again.
+    public func shutdown() async {
+        stopNetworkMonitoring()
+        wakeUp?.cancel()
+        wakeUp = nil
+        worker?.cancel()
+        await worker?.value
+        // The worker may have scheduled a retry before it saw the cancellation.
+        wakeUp?.cancel()
+        wakeUp = nil
+    }
+
     public func failedOperations() throws -> [FailedOperation] {
         try database.writer.read { db in
             try Row.fetchAll(db, sql: "SELECT id, payload, lastError FROM operation WHERE state = 'failed' ORDER BY id").compactMap { row in
@@ -186,7 +200,7 @@ public actor Outbox {
         defer { worker = nil }
         wakeUp?.cancel()
         wakeUp = nil
-        while true {
+        while !Task.isCancelled {
             let next: Next
             do {
                 next = try nextOperation()
@@ -214,6 +228,8 @@ public actor Outbox {
             do {
                 try await execute(operation)
                 try? await database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE id = ?", arguments: [id]) }
+            } catch where Task.isCancelled {
+                return  // shut down: the operation stays pending
             } catch let error as NetworkError where error.isTransient {
                 // Back off and stop: later operations wait behind this one until it is retried (timer, network change).
                 let date = Date().addingTimeInterval(retryDelay(attempts))

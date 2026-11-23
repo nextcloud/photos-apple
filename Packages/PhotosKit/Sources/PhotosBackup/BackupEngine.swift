@@ -84,6 +84,8 @@ public actor BackupEngine {
     private var lowPower: Bool
     /// Set while a run waits for better conditions; cleared when it resumes or the user pauses.
     private var resume: Resume?
+    /// Set by `shutdown()`: the account is going away, nothing may start again.
+    private var isShutDown = false
     var metadataEditing = false
 
     struct Resume {
@@ -167,7 +169,7 @@ public actor BackupEngine {
 
     /// Continues a waiting run as soon as the network and power state allow it again.
     private func conditionsChanged(byEvent: Bool) {
-        guard var waiting = resume, running == nil else { return }
+        guard !isShutDown, var waiting = resume, running == nil else { return }
         if byEvent, waiting.needsChange {
             waiting.needsChange = false
             resume = waiting
@@ -190,6 +192,7 @@ public actor BackupEngine {
     ///
     /// - Parameter retryFailed: also retry resources that failed and would still wait for their next attempt.
     public func run(_ settings: BackupSettings, dryRun: Bool = false, retryFailed: Bool = false) async {
+        guard !isShutDown else { return }
         if let running {
             await running.value
             return
@@ -206,6 +209,18 @@ public actor BackupEngine {
     public func cancel() {
         resume = nil
         running?.cancel()
+    }
+
+    /// Stops for good and waits until nothing runs any more (account removal): a running pass is cancelled, a waiting one
+    /// is forgotten, and the engine no longer reacts to network or power changes. A later `run` does nothing.
+    public func shutdown() async {
+        isShutDown = true
+        monitor = nil
+        resume = nil
+        running?.cancel()
+        await running?.value
+        // The cancelled pass may have ended in a wait (connection lost at the same moment).
+        resume = nil
     }
 
     private func perform(_ settings: BackupSettings, dryRun: Bool, retryFailed: Bool) async {
