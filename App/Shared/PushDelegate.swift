@@ -9,14 +9,6 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
     static let shared = NotificationRouter()
     @MainActor var app: AppModel?
 
-    @MainActor func requestAuthorizationAndRegister(_ register: @escaping @MainActor () -> Void) {
-        UNUserNotificationCenter.current().delegate = self
-        Task {
-            let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])) ?? false
-            if granted { register() }
-        }
-    }
-
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions
     {
