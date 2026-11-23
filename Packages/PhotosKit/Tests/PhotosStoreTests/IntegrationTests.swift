@@ -87,7 +87,9 @@ struct IntegrationSyncTests {
             // The MIME type comes from the extension; the content does not matter for the index.
             _ = try await api.dav.put(api.connection.filesURL(path), data: Data([0xFF, 0xD8, 0xFF, 0xD9]))
             let database = try AccountDatabase.temporary()
-            let engine = SyncEngine(api: api, database: database, features: features)
+            // Moves and deletes only show up in a reconciliation, which the app runs at most every 10 minutes unless
+            // asked to; here every sync may reconcile.
+            let engine = SyncEngine(api: api, database: database, features: features, reconcileInterval: 0)
             let library = LibraryStore(database: database)
             await engine.sync()
             let fileId = try #require(
