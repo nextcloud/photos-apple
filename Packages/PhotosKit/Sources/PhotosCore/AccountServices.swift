@@ -48,8 +48,10 @@ public final class AccountServices: Sendable {
         self.database = try AccountDatabase(url: layout.database(account.id))
         self.library = LibraryStore(database: database)
         self.collections = CollectionStore(database: database)
-        self.sync = SyncEngine(api: api, database: database, features: features)
-        self.outbox = Outbox(api: api, database: database)
+        let sync = SyncEngine(api: api, database: database, features: features)
+        self.sync = sync
+        // Failed for good or discarded: the rows the operation had changed come back from the server.
+        self.outbox = Outbox(api: api, database: database, restore: { _ = try? await sync.restoreRows() })
         let cache = PreviewCache(directory: layout.previews(account.id))
         let originals = OriginalStore(directory: layout.originals(account.id), dav: dav)
         let images = ImagePipeline(

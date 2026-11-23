@@ -38,7 +38,9 @@ extension SessionModel {
 
     public func saveSmartAlbum(_ album: SmartAlbum) async {
         if features.userConfig.smartAlbums != nil,
-            (try? await setUserConfig(.smartAlbums, { $0.smartAlbums = ($0.smartAlbums ?? []) + [album] })) != nil
+            (try? await updateServerSmartAlbums({ list in
+                if let index = list.firstIndex(where: { $0.id == album.id }) { list[index] = album } else { list.append(album) }
+            })) != nil
         {
             return
         }
@@ -48,10 +50,23 @@ extension SessionModel {
 
     public func deleteSmartAlbum(_ album: SmartAlbum) async {
         if features.userConfig.smartAlbums?.contains(where: { $0.id == album.id }) == true {
-            try? await setUserConfig(.smartAlbums) { $0.smartAlbums?.removeAll { $0.id == album.id } }
+            try? await updateServerSmartAlbums { list in list.removeAll { $0.id == album.id } }
             return
         }
         let local = ((try? services?.collections.smartAlbums()) ?? []).filter(\.isLocal).map(\.0).filter { $0.id != album.id }
         try? services?.collections.replaceSmartAlbums(local, isLocal: true)
+    }
+
+    /// Changes the smart album list on the server.
+    ///
+    /// The server keeps the list as one value and the cached copy can be an hour old: the list is read again right
+    /// before writing and the change (add, replace or remove one album, by id) is applied to that, so albums saved on
+    /// another device in the meantime are not overwritten.
+    func updateServerSmartAlbums(_ change: (inout [SmartAlbum]) -> Void) async throws {
+        guard let services else { throw NetworkError.unauthorized }
+        var albums = try await services.api.userConfig().smartAlbums ?? features.userConfig.smartAlbums ?? []
+        change(&albums)
+        let merged = albums
+        try await setUserConfig(.smartAlbums) { $0.smartAlbums = merged }
     }
 }

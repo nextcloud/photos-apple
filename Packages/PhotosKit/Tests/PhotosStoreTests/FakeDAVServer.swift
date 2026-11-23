@@ -59,6 +59,8 @@ final class FakeDAVServer: Sendable {
     let state = Mutex(State())
     /// Runs before a request is answered; can suspend to hold a request back.
     let gate = Mutex<(@Sendable (Request) async -> Void)?>(nil)
+    /// Answers a request with this status instead of handling it (a locked file, a refused delete).
+    let statusOverride = Mutex<(@Sendable (Request) -> Int?)?>(nil)
     /// Runs after a response was computed (the response does not include what it changes).
     let afterResponse = Mutex<(@Sendable (Request, inout State) -> Void)?>(nil)
 
@@ -153,8 +155,10 @@ final class FakeDAVServer: Sendable {
         state.withLock { $0.requests.append(request) }
         if let gate = gate.withLock({ $0 }) { await gate(request) }
         let after = afterResponse.withLock { $0 }
+        let forcedStatus = statusOverride.withLock { $0 }?(request)
         return state.withLock { state in
             if state.offline { return .failure(.notConnectedToInternet) }
+            if let forcedStatus { return .http(status: forcedStatus, body: "") }
             let response = respond(to: request, headers: headers, state: &state)
             after?(request, &state)
             return response

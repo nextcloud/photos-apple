@@ -120,7 +120,7 @@ extension PhotosAPI {
     public func videoRendition(fileId: FileID, etag: String) async throws -> URL {
         let url = connection.url("index.php/apps/photos/api/v1/video/\(fileId)", query: [URLQueryItem(name: "etag", value: etag)])
         let (file, _) = try await dav.download(url)
-        let target = file.deletingLastPathComponent().appending(path: "\(fileId)-\(etag).mp4")
+        let target = file.deletingLastPathComponent().appending(path: "\(fileId)-\(CacheFileName.etag(etag)).mp4")
         try? FileManager.default.removeItem(at: target)
         try FileManager.default.moveItem(at: file, to: target)
         return target

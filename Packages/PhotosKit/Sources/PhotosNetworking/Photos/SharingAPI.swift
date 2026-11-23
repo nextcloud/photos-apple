@@ -46,10 +46,32 @@ extension PhotosAPI {
         return entries.filter { $0.id != connection.userId }.map { Sharee(id: $0.id, label: $0.label, isGroup: $0.source == "groups") }
     }
 
-    /// Sets the full collaborator list of an own album and returns the album re-read from the server (with the link token).
+    /// Changes the collaborators of an own album to `collaborators` and returns the album re-read from the server (with
+    /// the link token).
+    ///
+    /// The server only takes the whole list. `album.collaborators` is the list the user started from, which may be
+    /// old: the album is read again right before writing, and only what the user added or removed is applied to the
+    /// list the server has now, so a collaborator someone added elsewhere in the meantime is not dropped.
     public func setCollaborators(_ collaborators: [Collaborator], of album: Album, extended: Bool) async throws -> Album? {
-        try await updateAlbum(album, collaborators: collaborators)
+        let current = try await self.album(album, extended: extended)?.collaborators ?? album.collaborators
+        let merged = Self.mergeCollaborators(base: album.collaborators, desired: collaborators, current: current)
+        try await updateAlbum(album, collaborators: merged)
         return try await self.album(album, extended: extended)
+    }
+
+    /// Applies the difference between `base` and `desired` to `current`. Collaborators are the same when type and id
+    /// match; an album has at most one public link, whose id (the token) only the server knows.
+    static func mergeCollaborators(base: [Collaborator], desired: [Collaborator], current: [Collaborator]) -> [Collaborator] {
+        func key(_ collaborator: Collaborator) -> String {
+            collaborator.type == .publicLink ? "link" : "\(collaborator.type.rawValue):\(collaborator.id)"
+        }
+        let baseKeys = Set(base.map(key))
+        let desiredKeys = Set(desired.map(key))
+        let currentKeys = Set(current.map(key))
+        let removed = baseKeys.subtracting(desiredKeys)
+        var merged = current.filter { !removed.contains(key($0)) }
+        merged += desired.filter { !baseKeys.contains(key($0)) && !currentKeys.contains(key($0)) }
+        return merged
     }
 
     // MARK: Comments

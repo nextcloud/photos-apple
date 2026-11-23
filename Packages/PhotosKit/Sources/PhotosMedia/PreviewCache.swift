@@ -55,7 +55,7 @@ public final class PreviewCache: @unchecked Sendable {
     public var memoryLimitBytes: Int { memory.totalCostLimit }
 
     static func key(fileId: FileID, etag: String, bucket: Int) -> String {
-        "\(fileId)-\(etag.isEmpty ? "0" : etag)-\(bucket)"
+        "\(fileId)-\(etag.isEmpty ? "0" : CacheFileName.etag(etag))-\(bucket)"
     }
 
     func fileURL(key: String) -> URL {
