@@ -1,0 +1,123 @@
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: MIT
+
+import Foundation
+import PhotosModel
+
+/// A screen pushed on top of a destination's root (album content, a single photo).
+public enum AppRoute: Hashable, Codable, Sendable {
+    /// `Album.id` (`"<kind>:<name>"`).
+    case album(id: String)
+    case photo(fileId: FileID)
+}
+
+/// What a `nextcloudphotos://` link opens (SPEC §4.8): a destination, an album or a photo.
+///
+/// - `nextcloudphotos://<destination>` — `library`, `albums`, `memories`, … (the raw values of the app's destinations;
+///   the web app's route names `timeline` and `thisday` are accepted too).
+/// - `nextcloudphotos://album/<name>` — one of the user's albums; `nextcloudphotos://album/shared/<name>` for a shared album.
+///   A full album id (`own:<name>`, `shared:<name>`) is accepted as well.
+/// - `nextcloudphotos://photo/<fileId>`
+public enum DeepLink: Hashable, Sendable {
+    case destination(String)
+    case album(id: String)
+    case photo(fileId: FileID)
+
+    public static let scheme = "nextcloudphotos"
+
+    /// Route names of the web app that differ from the app's destination names.
+    static let aliases = ["timeline": "library", "thisday": "onThisDay", "sharedalbums": "sharedAlbums"]
+
+    public init?(url: URL) {
+        guard url.scheme?.lowercased() == Self.scheme, let host = url.host(percentEncoded: false), !host.isEmpty else { return nil }
+        // `pathComponents` decodes percent escapes, so an album name may contain "/" as %2F.
+        let parts = url.pathComponents.filter { $0 != "/" }
+        self.init(head: host, parts: parts)
+    }
+
+    /// Parses the compact form produced by `request` (`"albums"`, `"album/own:Trip"`, `"photo/42"`), as handed around inside
+    /// the app (`AppModel.requestedDestination`).
+    public init?(request: String) {
+        let parts = request.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
+        guard let head = parts.first else { return nil }
+        self.init(head: head, parts: parts.count > 1 ? [parts[1]] : [])
+    }
+
+    private init?(head: String, parts: [String]) {
+        switch head.lowercased() {
+        case "album":
+            guard let first = parts.first else { return nil }
+            let id: String
+            if parts.count == 1 {
+                id = first.hasPrefix("own:") || first.hasPrefix("shared:") ? first : "own:\(first)"
+            } else if first == "shared" {
+                id = "shared:" + parts.dropFirst().joined(separator: "/")
+            } else {
+                id = "own:" + parts.joined(separator: "/")
+            }
+            guard id.count > id.prefix(while: { $0 != ":" }).count + 1 else { return nil }
+            self = .album(id: id)
+        case "photo":
+            guard parts.count == 1, let fileId = FileID(parts[0]), fileId > 0 else { return nil }
+            self = .photo(fileId: fileId)
+        default:
+            guard parts.isEmpty else { return nil }
+            self = .destination(Self.aliases[head.lowercased()] ?? head)
+        }
+    }
+
+    /// Compact form for `AppModel.requestedDestination`; `DeepLink(request:)` reads it back.
+    public var request: String {
+        switch self {
+        case .destination(let name): name
+        case .album(let id): "album/\(id)"
+        case .photo(let fileId): "photo/\(fileId)"
+        }
+    }
+}
+
+/// The part of a window's navigation that is restored with the scene: the selected destination and the album open in it.
+public struct NavigationSnapshot: Codable, Equatable, Sendable {
+    public var destination: String
+    public var routes: [AppRoute]
+
+    public init(destination: String, routes: [AppRoute] = []) {
+        self.destination = destination
+        // A single photo is not restored: the viewer needs the list it was opened from.
+        self.routes = routes.filter { if case .album = $0 { true } else { false } }
+    }
+
+    public init?(stored: String) {
+        guard !stored.isEmpty, let value = try? JSONDecoder().decode(NavigationSnapshot.self, from: Data(stored.utf8)) else { return nil }
+        self = NavigationSnapshot(destination: value.destination, routes: value.routes)
+    }
+
+    public var stored: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    }
+}
+
+/// One way to write a date or a range of dates, used wherever the app shows "when" (albums, memories, trips, search filters).
+///
+/// Foundation's interval formats follow the language while single dates follow the region, so with e.g. English and a German
+/// region the app showed "Nov 25 – 26, 2024" next to "24. Nov 2013". Here both ends always use the single-date format.
+public enum DateRangeLabel {
+    /// `end` is inclusive. Same day: "24. Nov 2013"; same year: "25. Nov – 26. Nov 2024"; else both dates in full.
+    public static func string(from start: Date, to end: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        var calendar = calendar
+        calendar.locale = locale
+        let full = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).day().month(.abbreviated).year()
+        guard end > start, !calendar.isDate(start, inSameDayAs: end) else { return start.formatted(full) }
+        let sameYear = calendar.component(.year, from: start) == calendar.component(.year, from: end)
+        let short = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).day().month(.abbreviated)
+        return "\(start.formatted(sameYear ? short : full)) – \(end.formatted(full))"
+    }
+
+    /// For a half-open range (`end` exclusive, e.g. search date filters).
+    public static func string(for range: Range<Date>, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        let last: Date = max(range.lowerBound, range.upperBound.addingTimeInterval(-1))
+        return string(from: range.lowerBound, to: last, locale: locale, calendar: calendar)
+    }
+}

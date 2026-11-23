@@ -88,7 +88,7 @@ struct InfoPanel: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(String(localized: "Info", bundle: .module))
+        .modifier(InfoPanelTitle(inInspector: inInspector))
         .toolbar {
             if !inInspector {
                 ToolbarItem(placement: .confirmationAction) {
@@ -137,5 +137,23 @@ struct InfoPanel: View {
         LabeledContent(label) {
             Text(value).textSelection(.enabled).multilineTextAlignment(.trailing)
         }
+    }
+}
+
+/// "Info" as title where the panel has a navigation bar of its own (sheets). In an inspector it has none, and the title
+/// would replace the window's ("3 selected", the album's name).
+private struct InfoPanelTitle: ViewModifier {
+    let inInspector: Bool
+
+    func body(content: Content) -> some View {
+        #if os(visionOS)
+            content.navigationTitle(String(localized: "Info", bundle: .module))
+        #else
+            if inInspector {
+                content
+            } else {
+                content.navigationTitle(String(localized: "Info", bundle: .module))
+            }
+        #endif
     }
 }

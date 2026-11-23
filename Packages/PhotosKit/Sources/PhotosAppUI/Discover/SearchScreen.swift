@@ -63,15 +63,43 @@ enum SearchEvaluator {
             + filters.dateRanges.map {
                 .dateRange(
                     start: $0.startDate, end: $0.endDateExclusive,
-                    label: ($0.startDate..<$0.endDateExclusive).formatted(.interval.day().month().year()))
+                    label: DateRangeLabel.string(for: $0.startDate..<$0.endDateExclusive))
             }
+    }
+}
+
+/// The search tab (iPhone, iPad, Vision Pro) with its own search field. On the Mac the field is in the window toolbar.
+struct SearchTab: View {
+    @State private var query = ""
+    @State private var filters: [SearchFilter] = []
+
+    var body: some View {
+        SearchScreen(query: $query, filters: $filters)
+            .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
+    }
+}
+
+extension SearchFilter {
+    var systemImage: String {
+        switch self {
+        case .place: "mappin"
+        case .person: "person"
+        case .tag: "tag"
+        case .album: "rectangle.stack"
+        case .dateRange: "calendar"
+        case .text: "textformat"
+        case .favorites: "heart"
+        case .videos: "video"
+        }
     }
 }
 
 struct SearchScreen: View {
     @Environment(SessionModel.self) private var session
-    @State private var query = ""
-    @State private var filters: [SearchFilter] = []
+    /// Text of the search field, which the caller provides.
+    @Binding var query: String
+    /// The chosen filters. On the Mac they are the tokens of the search field; elsewhere a row of chips above the results.
+    @Binding var filters: [SearchFilter]
     @State private var vocabulary = SearchSuggestions.Vocabulary()
     @State private var feed = GridFeed()
     @State private var saving = false
@@ -107,23 +135,9 @@ struct SearchScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !filters.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(filters) { filter in
-                            Button {
-                                filters.removeAll { $0 == filter }
-                            } label: {
-                                Label(filter.label, systemImage: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.bordered)
-                            .buttonBorderShape(.capsule)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 6)
-                }
-            }
+            #if !os(macOS)
+                if !filters.isEmpty { filterBar }
+            #endif
             if !query.isEmpty {
                 if query.split(separator: " ").count >= 3 {
                     Button {
@@ -143,7 +157,22 @@ struct SearchScreen: View {
                         filters.append(suggestion)
                         query = ""
                     } label: {
-                        Label(suggestion.label, systemImage: icon(suggestion))
+                        // A full-width row: what it is, and what kind of thing it is.
+                        HStack {
+                            Label(suggestion.label, systemImage: suggestion.systemImage)
+                            Spacer()
+                            Text(kind(suggestion)).font(.callout).foregroundStyle(.secondary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.inset)
+                .overlay {
+                    if suggestions.isEmpty {
+                        ContentUnavailableView(
+                            String(localized: "No suggestions", bundle: .module), systemImage: "magnifyingglass",
+                            description: Text("Try a place, an album, a date like “june 2023”, or part of a file name.", bundle: .module))
                     }
                 }
             } else if filters.isEmpty {
@@ -169,10 +198,13 @@ struct SearchScreen: View {
                     } label: {
                         Label(String(localized: "Save as smart album", bundle: .module), systemImage: "plus.rectangle.on.rectangle")
                     }
+                    .help(String(localized: "Save as smart album", bundle: .module))
                 }
+                #if os(macOS)
+                    .navigationSubtitle(feed.loaded ? String(localized: "\(feed.items.count) results", bundle: .module) : "")
+                #endif
             }
         }
-        .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
         .task(id: query) { await updateSuggestions() }
@@ -189,6 +221,32 @@ struct SearchScreen: View {
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         }
+    }
+
+    /// The active filters (click one to remove it) and the number of results.
+    var filterBar: some View {
+        HStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    ForEach(filters) { filter in
+                        Button {
+                            filters.removeAll { $0 == filter }
+                        } label: {
+                            Label(filter.label, systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel(Text("Remove filter \(filter.label)", bundle: .module))
+                    }
+                }
+            }
+            if query.isEmpty && feed.loaded {
+                Text("\(feed.items.count) results", bundle: .module)
+                    .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 
     /// Natural-language search (SPEC SR-4).
@@ -212,16 +270,17 @@ struct SearchScreen: View {
         }
     }
 
-    func icon(_ filter: SearchFilter) -> String {
+    /// What kind of filter a suggestion is, shown at the end of its row.
+    func kind(_ filter: SearchFilter) -> String {
         switch filter {
-        case .place: "mappin"
-        case .person: "person"
-        case .tag: "tag"
-        case .album: "rectangle.stack"
-        case .dateRange: "calendar"
-        case .text: "textformat"
-        case .favorites: "heart"
-        case .videos: "video"
+        case .place: String(localized: "Place", bundle: .module)
+        case .person: String(localized: "Person", bundle: .module)
+        case .tag: String(localized: "Tag", bundle: .module)
+        case .album: String(localized: "Album", bundle: .module)
+        case .dateRange: String(localized: "Date", bundle: .module)
+        case .text: String(localized: "Name or caption", bundle: .module)
+        case .favorites: String(localized: "Favorites", bundle: .module)
+        case .videos: String(localized: "Videos", bundle: .module)
         }
     }
 

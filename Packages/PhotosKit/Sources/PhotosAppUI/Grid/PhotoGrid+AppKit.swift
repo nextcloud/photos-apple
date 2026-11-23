@@ -482,6 +482,7 @@
             let targets = Array(ids)
             let menu = NSMenu()
             for action in callbacks.menu(targets) {
+                if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
                 let item = MenuActionItem(title: action.title, handler: { action.handler(targets) })
                 item.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: nil)
                 menu.addItem(item)

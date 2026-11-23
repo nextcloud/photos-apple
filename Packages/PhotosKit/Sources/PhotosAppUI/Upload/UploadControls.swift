@@ -64,8 +64,10 @@ struct UploadMenu: View {
                 Label(String(localized: "Upload files…", bundle: .module), systemImage: "folder")
             }
         } label: {
-            Label(String(localized: "Upload", bundle: .module), systemImage: "square.and.arrow.up.on.square")
+            // Not an arrow out of a box: that is "Share" on Apple platforms, and the Share button sits next to this one.
+            Label(String(localized: "Upload", bundle: .module), systemImage: "icloud.and.arrow.up")
         }
+        .help(String(localized: "Upload", bundle: .module))
         .photosPicker(
             isPresented: $showingPicker, selection: $pickerItems, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current
         )
@@ -89,6 +91,18 @@ struct UploadMenu: View {
     }
 }
 
+/// What the timeline toolbar shows on which platform.
+enum TimelineToolbar {
+    /// The All / Photos / Videos / Favorites menu duplicates sidebar rows; it is only offered where there is no sidebar.
+    static func showsMediaKindPicker(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
+        #if os(iOS)
+            sizeClass == .compact
+        #else
+            false
+        #endif
+    }
+}
+
 /// Shows upload progress; tap for details.
 struct TransfersIndicator: View {
     @Environment(SessionModel.self) private var session
@@ -107,11 +121,13 @@ struct TransfersIndicator: View {
                         .frame(width: 28, height: 28)
                         .accessibilityLabel(Text("Uploading \(queue.activeCount) items", bundle: .module))
                 } else {
-                    Image(
-                        systemName: queue.transfers.contains { if case .failed = $0.state { true } else { false } }
-                            ? "exclamationmark.icloud" : "checkmark.icloud")
+                    let failed: Bool = queue.transfers.contains { if case .failed = $0.state { true } else { false } }
+                    Image(systemName: failed ? "exclamationmark.icloud" : "checkmark.icloud")
+                        .accessibilityLabel(
+                            failed ? Text("Some uploads failed", bundle: .module) : Text("Uploads finished", bundle: .module))
                 }
             }
+            .help(String(localized: "Uploads", bundle: .module))
             .popover(isPresented: $showing) {
                 TransfersList().frame(minWidth: 320, minHeight: 240)
             }

@@ -24,6 +24,8 @@ struct GridMenuAction: Identifiable {
     var title: String
     var systemImage: String
     var isDestructive = false
+    /// A separator goes before this action in menus.
+    var startsGroup = false
     var handler: @MainActor ([FileID]) -> Void
 }
 

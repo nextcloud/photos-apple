@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import LocalAuthentication
 import PhotosCore
 import PhotosModel
+import PhotosNetworking
 import PhotosStore
 import SwiftUI
 
@@ -12,7 +14,7 @@ public struct SettingsView: View {
     @Environment(SessionModel.self) private var session
     @State private var addingAccount = false
     @State private var removeAccount: Account?
-    @State private var newFolder = ""
+    @State private var pickingFolder = false
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
@@ -63,18 +65,9 @@ public struct SettingsView: View {
 
             if shows(.general) {
                 Section {
-                    LabeledContent(String(localized: "Timeline folders", bundle: .module)) {
-                        Text(session.features.userConfig.photosSourceFolders.joined(separator: ", "))
-                    }
-                    HStack {
-                        TextField(String(localized: "Add folder, e.g. /Camera", bundle: .module), text: $newFolder)
-                            .autocorrectionDisabled()
-                        Button(String(localized: "Add", bundle: .module)) { addFolder() }
-                            .disabled(!newFolder.hasPrefix("/"))
-                    }
                     ForEach(session.features.userConfig.photosSourceFolders, id: \.self) { folder in
                         HStack {
-                            Text(folder)
+                            Label(folder, systemImage: "folder")
                             Spacer()
                             Button(role: .destructive) {
                                 removeFolder(folder)
@@ -83,8 +76,19 @@ public struct SettingsView: View {
                             }
                             .buttonStyle(.borderless)
                             .disabled(session.features.userConfig.photosSourceFolders.count <= 1)
+                            .accessibilityLabel(Text("Remove \(folder)", bundle: .module))
+                            .help(String(localized: "Remove \(folder)", bundle: .module))
                         }
                     }
+                    // A picker over the server's folders, not a path to type.
+                    Button(String(localized: "Add Folder…", bundle: .module)) { pickingFolder = true }
+                    if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
+                } header: {
+                    Text("Timeline folders", bundle: .module)
+                } footer: {
+                    Text("Photos and videos in these folders of your Nextcloud appear in the library.", bundle: .module)
+                }
+                Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
                     Toggle(
                         String(localized: "Square tiles", bundle: .module),
@@ -97,7 +101,6 @@ public struct SettingsView: View {
                                     }
                                 }
                             }))
-                    if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
                 } header: {
                     Text("Library", bundle: .module)
                 } footer: {
@@ -129,7 +132,7 @@ public struct SettingsView: View {
 
             if shows(.general) {
                 Section {
-                    Toggle(String(localized: "Lock with Face ID or passcode", bundle: .module), isOn: $appLock)
+                    Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
                             Text("Immediately", bundle: .module).tag(0.0)
@@ -141,7 +144,7 @@ public struct SettingsView: View {
                 } header: {
                     Text("Privacy", bundle: .module)
                 } footer: {
-                    Text("Archived photos always need Face ID or your passcode.", bundle: .module)
+                    Text(DeviceLockWording.current.archiveNote)
                 }
             }
 
@@ -207,10 +210,17 @@ public struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(String(localized: "Settings", bundle: .module))
+        .navigationTitle(title)
         #if os(macOS)
-            .frame(minWidth: 460, idealWidth: 520, minHeight: 360)
+            // As tall as its content (up to a limit, then it scrolls): the Settings window follows the selected tab.
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(width: MacSettingsLayout.width)
+            .frame(maxHeight: MacSettingsLayout.maxHeight)
+            .fixedSize(horizontal: false, vertical: true)
         #endif
+        .sheet(isPresented: $pickingFolder) {
+            ServerFolderPicker(excluded: session.features.userConfig.photosSourceFolders) { folder in addFolder(folder) }
+        }
         .task {
             cacheSize = session.services?.images.cache.totalSize() ?? 0
             pins = (try? await session.offline?.pins()) ?? []
@@ -249,9 +259,19 @@ public struct SettingsView: View {
         }
     }
 
-    func addFolder() {
-        let folder = newFolder.trimmingCharacters(in: .whitespaces)
-        newFolder = ""
+    /// The Mac's Settings window is titled after the selected tab; elsewhere this is the Settings screen.
+    var title: String {
+        switch page {
+        case .all: String(localized: "Settings", bundle: .module)
+        case .general: String(localized: "General", bundle: .module)
+        case .accounts: String(localized: "Accounts", bundle: .module)
+        case .storage: String(localized: "Storage", bundle: .module)
+        case .server: String(localized: "Server", bundle: .module)
+        case .about: String(localized: "About", bundle: .module)
+        }
+    }
+
+    func addFolder(_ folder: String) {
         Task {
             do {
                 try await session.setUserConfig(.photosSourceFolders) { config in
@@ -300,8 +320,161 @@ struct ServerFeaturesView: View {
     }
 }
 
+/// How the device unlocks, for the wording of the app lock (Touch ID and a password on a Mac, Face ID and a passcode on an iPhone…).
+enum DeviceLockWording: Equatable {
+    case faceID, touchID, opticID
+    /// No biometry: only the passcode (iPhone, iPad, Vision Pro) or the login password (Mac).
+    case none
+
+    static var current: DeviceLockWording {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return DeviceLockWording(context.biometryType)
+    }
+
+    init(_ type: LABiometryType) {
+        switch type {
+        case .faceID: self = .faceID
+        case .touchID: self = .touchID
+        case .opticID: self = .opticID
+        default: self = .none
+        }
+    }
+
+    var toggleTitle: String {
+        #if os(macOS)
+            switch self {
+            case .touchID: String(localized: "Lock with Touch ID or password", bundle: .module)
+            default: String(localized: "Lock with your password", bundle: .module)
+            }
+        #else
+            switch self {
+            case .faceID: String(localized: "Lock with Face ID or passcode", bundle: .module)
+            case .touchID: String(localized: "Lock with Touch ID or passcode", bundle: .module)
+            case .opticID: String(localized: "Lock with Optic ID or passcode", bundle: .module)
+            case .none: String(localized: "Lock with passcode", bundle: .module)
+            }
+        #endif
+    }
+
+    var archiveNote: String {
+        #if os(macOS)
+            switch self {
+            case .touchID: String(localized: "Archived photos always need Touch ID or your password.", bundle: .module)
+            default: String(localized: "Archived photos always need your password.", bundle: .module)
+            }
+        #else
+            switch self {
+            case .faceID: String(localized: "Archived photos always need Face ID or your passcode.", bundle: .module)
+            case .touchID: String(localized: "Archived photos always need Touch ID or your passcode.", bundle: .module)
+            case .opticID: String(localized: "Archived photos always need Optic ID or your passcode.", bundle: .module)
+            case .none: String(localized: "Archived photos always need your passcode.", bundle: .module)
+            }
+        #endif
+    }
+}
+
+/// Picks a folder of the user's Nextcloud by browsing it (Settings → Timeline folders).
+struct ServerFolderPicker: View {
+    /// Folders that are already chosen; they cannot be picked again.
+    var excluded: [String] = []
+    let onPick: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var path: [String] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            ServerFolderList(folder: "/", excluded: excluded, pick: pick, cancel: { dismiss() })
+                .navigationDestination(for: String.self) { folder in
+                    ServerFolderList(folder: folder, excluded: excluded, pick: pick, cancel: { dismiss() })
+                }
+        }
+        .frame(minWidth: 420, minHeight: 440)
+    }
+
+    func pick(_ folder: String) {
+        onPick(folder)
+        dismiss()
+    }
+}
+
+/// One level of the server's folder tree.
+struct ServerFolderList: View {
+    let folder: String
+    let excluded: [String]
+    let pick: (String) -> Void
+    let cancel: () -> Void
+    @Environment(SessionModel.self) private var session
+    @State private var folders: [FolderEntry] = []
+    @State private var loaded = false
+    @State private var error: String?
+
+    var title: String {
+        folder == "/" ? String(localized: "All files", bundle: .module) : (folder as NSString).lastPathComponent
+    }
+
+    var body: some View {
+        List(folders) { entry in
+            NavigationLink(value: entry.path) {
+                Label(entry.name, systemImage: "folder")
+            }
+        }
+        .overlay {
+            if !loaded {
+                ProgressView()
+            } else if let error {
+                ContentUnavailableView(
+                    String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle",
+                    description: Text(error))
+            } else if folders.isEmpty {
+                ContentUnavailableView(String(localized: "No subfolders", bundle: .module), systemImage: "folder")
+            }
+        }
+        .navigationTitle(title)
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Label(folder, systemImage: "folder").lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .font(.callout)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.bar)
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(String(localized: "Cancel", bundle: .module)) { cancel() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(String(localized: "Add This Folder", bundle: .module)) { pick(folder) }
+                    .disabled(folder == "/" || excluded.contains(folder))
+            }
+        }
+        .task {
+            guard let services = session.services else { return }
+            do {
+                // All subfolders are offered, also those without media in them yet.
+                folders = try await services.api.folder(folder, mimeTypes: [], nomedia: []).folders
+                    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            } catch {
+                self.error = error.localizedDescription
+            }
+            loaded = true
+        }
+    }
+}
+
 #if os(macOS)
-    /// The macOS Settings window: one tab per page, like other Mac apps.
+    enum MacSettingsLayout {
+        static let width: CGFloat = 560
+        static let maxHeight: CGFloat = 640
+    }
+
+    /// The macOS Settings window: one tab per page, like other Mac apps. The window is titled after the selected tab and is
+    /// as tall as that tab's content.
     public struct MacSettingsView: View {
         @Environment(AppModel.self) private var app
 
@@ -313,7 +486,7 @@ struct ServerFeaturesView: View {
                     Tab(String(localized: "General", bundle: .module), systemImage: "gearshape") { SettingsView(page: .general) }
                     Tab(String(localized: "Accounts", bundle: .module), systemImage: "person.crop.circle") { SettingsView(page: .accounts) }
                     Tab(String(localized: "Backup", bundle: .module), systemImage: "icloud.and.arrow.up") {
-                        NavigationStack { BackupScreen() }.frame(minWidth: 460, minHeight: 420)
+                        NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
                     }
                     Tab(String(localized: "Storage", bundle: .module), systemImage: "internaldrive") { SettingsView(page: .storage) }
                     Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
@@ -322,8 +495,6 @@ struct ServerFeaturesView: View {
                     Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") { SettingsView(page: .about) }
                 }
                 .environment(session)
-                .scenePadding()
-                .frame(width: 560, height: 520)
             } else {
                 Text("Log in to Nextcloud Photos to change its settings.", bundle: .module).padding(40)
             }

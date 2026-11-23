@@ -81,7 +81,7 @@ struct MemoryCard: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(memory.title).font(.title3.bold())
-                    Text((memory.start..<max(memory.end, memory.start.addingTimeInterval(1))).formatted(.interval.day().month().year()))
+                    Text(DateRangeLabel.string(from: memory.start, to: memory.end))
                         .font(.caption)
                 }
                 .foregroundStyle(.white)

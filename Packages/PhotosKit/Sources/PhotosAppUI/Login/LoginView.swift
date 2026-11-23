@@ -50,71 +50,10 @@ public struct LoginView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                header
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Server address", bundle: .module)
-                        .font(.headline)
-                    TextField(text: $address, prompt: Text(verbatim: "cloud.example.com")) {
-                        Text("Server address", bundle: .module)
-                    }
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    #if os(iOS) || os(visionOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                    #endif
-                    .onSubmit { startLogin() }
-                    .disabled(phase != .idle)
-
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                    }
-
-                    Button {
-                        startLogin()
-                    } label: {
-                        HStack {
-                            if phase != .idle { ProgressView().controlSize(.small) }
-                            Text(phaseTitle)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || phase != .idle)
-
-                    if phase == .waitingForBrowser {
-                        Button(String(localized: "Cancel", bundle: .module), role: .cancel) { cancel() }
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                suggestions
-                qrLogin
-            }
-            .padding(24)
-            .frame(maxWidth: 480)
-            .frame(maxWidth: .infinity)
-            .alert(
-                String(localized: "This connection is not encrypted", bundle: .module),
-                isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
-                presenting: unencrypted
-            ) { pending in
-                Button(String(localized: "Log in anyway", bundle: .module), role: .destructive) {
-                    switch pending {
-                    case .address: startLogin(allowUnencrypted: true)
-                    case .link: loginWithLink(allowUnencrypted: true)
-                    }
-                }
-                Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
-            } message: { pending in
-                Text(
-                    "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
-                    bundle: .module)
+        // Centred in the window; scrolls when the window (or the screen with a keyboard) is smaller than the form.
+        GeometryReader { (proxy: GeometryProxy) in
+            ScrollView {
+                form.frame(minHeight: proxy.size.height)
             }
         }
         .alert(item: $untrusted) { untrusted in
@@ -131,6 +70,74 @@ public struct LoginView: View {
         }
     }
 
+    var form: some View {
+        VStack(spacing: 28) {
+            header
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Server address", bundle: .module)
+                    .font(.headline)
+                TextField(text: $address, prompt: Text(verbatim: "cloud.example.com")) {
+                    Text("Server address", bundle: .module)
+                }
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                #if os(iOS) || os(visionOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                #endif
+                .onSubmit { startLogin() }
+                .disabled(phase != .idle)
+
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.callout)
+                }
+
+                Button {
+                    startLogin()
+                } label: {
+                    HStack {
+                        if phase != .idle { ProgressView().controlSize(.small) }
+                        Text(phaseTitle)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || phase != .idle)
+
+                if phase == .waitingForBrowser {
+                    Button(String(localized: "Cancel", bundle: .module), role: .cancel) { cancel() }
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            suggestions
+            qrLogin
+        }
+        .padding(24)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity)
+        .alert(
+            String(localized: "This connection is not encrypted", bundle: .module),
+            isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
+            presenting: unencrypted
+        ) { pending in
+            Button(String(localized: "Log in anyway", bundle: .module), role: .destructive) {
+                switch pending {
+                case .address: startLogin(allowUnencrypted: true)
+                case .link: loginWithLink(allowUnencrypted: true)
+                }
+            }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { pending in
+            Text(
+                "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                bundle: .module)
+        }
+    }
+
     var phaseTitle: String {
         switch phase {
         case .idle: String(localized: "Log in", bundle: .module)
@@ -142,8 +149,9 @@ public struct LoginView: View {
 
     var header: some View {
         VStack(spacing: 12) {
-            NextcloudLogo()
-                .frame(width: 120, height: 60)
+            PhotosAppIcon()
+                .frame(width: 96, height: 96)
+                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 .accessibilityHidden(true)
             Text("Nextcloud Photos", bundle: .module)
                 .font(.largeTitle.bold())
@@ -151,7 +159,6 @@ public struct LoginView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 24)
     }
 
     @ViewBuilder var suggestions: some View {
