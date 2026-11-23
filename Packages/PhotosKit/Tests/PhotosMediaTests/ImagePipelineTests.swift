@@ -27,12 +27,12 @@ final class PreviewStubServer: Sendable {
     let state = Mutex(State())
     let image: Data
 
-    init() {
+    init(width: Int = 32, height: Int = 24) {
         let context = CGContext(
-            data: nil, width: 32, height: 24, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
         context.setFillColor(red: 0.2, green: 0.5, blue: 0.8, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         image = ImageDecoding.jpegData(context.makeImage()!)!
         PreviewStubProtocol.servers.withLock { $0[host] = self }
     }
@@ -304,6 +304,33 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
         await pipeline.prefetch([request(4)])
         try await Task.sleep(for: .milliseconds(30))
         #expect(server.started == [5, 4])
+    }
+
+    @Test func previewsAreDecodedAtTheRequestedSizeNotTheBucketSize() async throws {
+        let server = PreviewStubServer(width: 1024, height: 768)
+        let api = server.api
+        let pipeline = ImagePipeline(
+            api: api, cache: PreviewCache(directory: directory.appending(path: "previews")),
+            originals: OriginalStore(directory: directory.appending(path: "originals"), dav: api.dav))
+        func request(_ size: Int?) -> ImagePipeline.Request {
+            ImagePipeline.Request(fileId: 7, etag: "e7", bucket: 1024, maxPixelSize: size)
+        }
+        // A tile of 320 px gets 320 px decoded (about 300 KB instead of 3 MB), and the whole preview goes to disk.
+        let small = await pipeline.preview(request(320))
+        #expect(small?.width == 320)
+        #expect(small?.height == 240)
+        #expect(pipeline.cache.hasDiskImage(fileId: 7, etag: "e7", bucket: 1024))
+        // A larger tile is not served the small image from memory: it is decoded again from disk, not downloaded again.
+        let large = await pipeline.preview(request(nil))
+        #expect(large?.width == 1024)
+        #expect(server.started == [7])
+        // A smaller one is served from memory by the larger image, which is not replaced by a smaller decode.
+        let again = await pipeline.preview(request(320))
+        #expect(again?.width == 1024)
+        #expect(pipeline.cache.memoryImage(fileId: 7, etag: "e7", bucket: 1024, minPixelSize: 1024)?.width == 1024)
+        // A preview smaller than its bucket (a small original) counts as complete once decoded with the full limit.
+        #expect(PreviewCache.decodeLimit(2000, bucket: 1024) == 1024)
+        #expect(PreviewCache.decodeLimit(nil, bucket: 256) == 256)
     }
 
     @Test func shutdownEndsWaitersAndLoads() async throws {

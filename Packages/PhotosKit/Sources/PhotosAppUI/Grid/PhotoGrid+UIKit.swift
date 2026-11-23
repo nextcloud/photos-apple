@@ -418,22 +418,37 @@
             let actions = callbacks.menu(ids)
             guard !actions.isEmpty else { return nil }
             return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-                UIMenu(
-                    children: actions.map { action in
-                        UIAction(
-                            title: action.title, image: UIImage(systemName: action.systemImage),
-                            attributes: action.isDestructive ? .destructive : []
-                        ) { _ in action.handler(ids) }
-                    })
+                // Each group is an inline menu: UIKit draws the separators between them.
+                let groups: [UIMenuElement] = GridMenuAction.groups(actions).map { group in
+                    UIMenu(
+                        options: .displayInline,
+                        children: group.map { action in
+                            UIAction(
+                                title: action.title, image: UIImage(systemName: action.systemImage),
+                                attributes: action.isDestructive ? .destructive : []
+                            ) { _ in action.handler(ids) }
+                        })
+                }
+                return UIMenu(children: groups)
             }
         }
 
         func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+            let requests = previewRequests(at: indexPaths)
+            Task { await services.images.prefetch(requests) }
+        }
+
+        /// The items left the prefetch window (the scroll turned round): their previews are not loaded unless shown.
+        func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+            let requests = previewRequests(at: indexPaths)
+            Task { await services.images.cancelPrefetch(for: requests) }
+        }
+
+        private func previewRequests(at indexPaths: [IndexPath]) -> [ImagePipeline.Request] {
             let side = geometry.side
             let scale = previewScale
-            let requests = indexPaths.compactMap { model.item(section: $0.section, item: $0.item) }
+            return indexPaths.compactMap { model.item(section: $0.section, item: $0.item) }
                 .map { services.previewRequest(for: $0, tileSide: side, scale: scale) }
-            Task { await services.images.prefetch(requests) }
         }
     }
 
@@ -537,7 +552,7 @@
             if let best = cache.bestMemoryImage(fileId: item.fileId, etag: item.etag, upTo: 4096) {
                 setPicture(best)
                 // Large enough (for instance after zooming out): nothing to load.
-                if GridTile.covers(best, bucket: request.bucket) {
+                if GridTile.covers(best, pixels: request.decodeSize) {
                     isLoading = false
                     return
                 }

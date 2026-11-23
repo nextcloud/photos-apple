@@ -16,7 +16,8 @@ import PhotosNetworking
 /// - Loads are queued newest first (what just came on screen wins over what was requested during the fling before it),
 ///   with separate limits for loads that only decode a cached file and loads that need the server. Prefetches run only
 ///   when nothing on screen is waiting, and `cancelPrefetch(for:)` takes them back.
-/// - Decoding and downsampling happen in the load's own task, never on the main thread and never on this actor.
+/// - Previews are decoded no larger than the request asks for (`maxPixelSize`), in the load's own task, never on the main
+///   thread and never on this actor.
 public actor ImagePipeline {
     public let api: PhotosAPI
     public nonisolated let cache: PreviewCache
@@ -97,9 +98,13 @@ public actor ImagePipeline {
         public var mimeType: String
         /// DAV URL of the original, used when the server has no preview.
         public var originalURL: URL?
+        /// The preview is decoded no larger than this (long edge in pixels): a grid tile of 400 px needs the 1024 px
+        /// bucket from the server, but holding it decoded at 1024 px would cost six times the memory. Nil: the bucket.
+        public var maxPixelSize: Int?
 
         public init(
-            fileId: FileID, etag: String, bucket: Int, hasPreview: Bool = true, mimeType: String = "image/jpeg", originalURL: URL? = nil
+            fileId: FileID, etag: String, bucket: Int, hasPreview: Bool = true, mimeType: String = "image/jpeg", originalURL: URL? = nil,
+            maxPixelSize: Int? = nil
         ) {
             self.fileId = fileId
             self.etag = etag
@@ -107,16 +112,28 @@ public actor ImagePipeline {
             self.hasPreview = hasPreview
             self.mimeType = mimeType
             self.originalURL = originalURL
+            self.maxPixelSize = maxPixelSize
         }
 
-        var key: String { PreviewCache.key(fileId: fileId, etag: etag, bucket: bucket) }
+        /// The size the preview is decoded to.
+        public var decodeSize: Int { PreviewCache.decodeLimit(maxPixelSize, bucket: bucket) }
+
+        /// Loads of the same preview at different sizes are separate (each waiter gets the size it asked for).
+        var key: String {
+            let base = PreviewCache.key(fileId: fileId, etag: etag, bucket: bucket)
+            return decodeSize < bucket ? "\(base)@\(decodeSize)" : base
+        }
+
+        func memoryImage(in cache: PreviewCache) -> CGImage? {
+            cache.memoryImage(fileId: fileId, etag: etag, bucket: bucket, minPixelSize: decodeSize)
+        }
     }
 
     /// Returns a preview from memory, disk or the server; `nil` when it can't be loaded or the calling task is cancelled.
     ///
     /// Cancelling the calling task gives the load up: it stops unless another task or a prefetch still wants it.
     public func preview(_ request: Request) async -> CGImage? {
-        if let image = cache.memoryImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { return image }
+        if let image = request.memoryImage(in: cache) { return image }
         if isShutDown || Task.isCancelled { return nil }
         let key = request.key
         nextId += 1
@@ -139,7 +156,7 @@ public actor ImagePipeline {
     /// Prefetches previews without waiting. They load after everything that is being waited for.
     public func prefetch(_ requests: [Request]) {
         guard !isShutDown else { return }
-        for request in requests where cache.memoryImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) == nil {
+        for request in requests where request.memoryImage(in: cache) == nil {
             let key = request.key
             if loads[key] != nil {
                 loads[key]?.isPrefetch = true
@@ -326,7 +343,8 @@ public actor ImagePipeline {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
             dispatchPrecondition(condition: .notOnQueue(.main))
             if Task.isCancelled { return Result() }
-            if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) {
+            let size = request.maxPixelSize
+            if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
                 return Result(image: image)
             }
             if Task.isCancelled { return Result() }
@@ -334,7 +352,8 @@ public actor ImagePipeline {
             if let file = localOriginal?(request.fileId, request.etag),
                 let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)
             {
-                return Result(image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket))
+                return Result(
+                    image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size))
             }
             do {
                 let data: Data
@@ -344,7 +363,7 @@ public actor ImagePipeline {
                 } else {
                     data = try await api.preview(fileId: request.fileId, size: request.bucket, etag: request.etag)
                 }
-                if let image = cache.store(data, fileId: request.fileId, etag: request.etag, bucket: request.bucket) {
+                if let image = cache.store(data, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
                     return Result(image: image, downloaded: true)
                 }
             } catch NetworkError.notFound {
@@ -360,7 +379,9 @@ public actor ImagePipeline {
                 let file = try? await originals.original(fileId: request.fileId, etag: request.etag, url: url, maxBytes: 50 * 1024 * 1024),
                 let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)
             else { return Result() }
-            return Result(image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket), downloaded: true)
+            return Result(
+                image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
+                downloaded: true)
         }
     }
 }

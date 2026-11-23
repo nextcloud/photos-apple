@@ -103,6 +103,21 @@ import Testing
         #expect(PreviewSizing.bucket(forPixels: 286) == 1024)
     }
 
+    @Test func previewsAreDecodedAtTheTileSizeNotTheBucketSize() {
+        // A 200 pt Retina tile of a 4:3 photo needs 533 px: the 1024 bucket is fetched, decoded at 576 px.
+        let pixels = PreviewSizing.neededPixels(tileSide: 200, scale: 2, aspectRatio: 4.0 / 3)
+        let bucket = PreviewSizing.bucket(forPixels: pixels)
+        #expect(bucket == 1024)
+        #expect(PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket) == 576)
+        // A few points more or less give the same size (no new decode while a window is resized).
+        #expect(PreviewSizing.decodePixels(forPixels: 520, bucket: 1024) == 576)
+        #expect(PreviewSizing.decodePixels(forPixels: 576, bucket: 1024) == 576)
+        // Never more than the bucket, never less than one step.
+        #expect(PreviewSizing.decodePixels(forPixels: 1100, bucket: 1024) == 1024)
+        #expect(PreviewSizing.decodePixels(forPixels: 3, bucket: 64) == 64)
+        #expect(PreviewSizing.decodePixels(forPixels: .nan, bucket: 256) == 256)
+    }
+
     @Test func emptyStateOnlyAfterAFinishedFirstSync() {
         func phase(loaded: Bool = true, waits: Bool = true, running: Bool = false, synced: Bool = false, stopped: Bool = false)
             -> GridEmptyPhase

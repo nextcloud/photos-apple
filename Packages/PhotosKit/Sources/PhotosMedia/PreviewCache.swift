@@ -9,7 +9,12 @@ import PhotosModel
 /// Wraps a `CGImage` for `NSCache`.
 final class ImageBox: @unchecked Sendable {
     let image: CGImage
-    init(_ image: CGImage) { self.image = image }
+    /// The size limit it was decoded with (long edge in pixels). An image smaller than that is the whole preview.
+    let maxPixelSize: Int
+    init(_ image: CGImage, maxPixelSize: Int) {
+        self.image = image
+        self.maxPixelSize = maxPixelSize
+    }
 }
 
 /// Disk + memory cache of preview images keyed by `(fileId, etag, bucket)` (SPEC §5.5.1).
@@ -60,8 +65,14 @@ public final class PreviewCache: @unchecked Sendable {
     }
 
     /// Memory-only lookup (fast path for cell configuration).
-    public func memoryImage(fileId: FileID, etag: String, bucket: Int) -> CGImage? {
-        memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket) as NSString)?.image
+    ///
+    /// Previews are decoded no larger than they are shown (`maxPixelSize`), so the image in memory may be smaller than
+    /// its bucket: with `minPixelSize` only an image decoded with at least that limit counts.
+    public func memoryImage(fileId: FileID, etag: String, bucket: Int, minPixelSize: Int = 0) -> CGImage? {
+        guard let box = memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket) as NSString),
+            box.maxPixelSize >= min(minPixelSize, bucket)
+        else { return nil }
+        return box.image
     }
 
     /// Best image already in memory with at least `minBucket` (or any smaller one as placeholder).
@@ -72,41 +83,55 @@ public final class PreviewCache: @unchecked Sendable {
         return nil
     }
 
-    public func diskImage(fileId: FileID, etag: String, bucket: Int) -> CGImage? {
+    /// Decodes a preview from disk, downsampled to `maxPixelSize` (long edge; the whole bucket when nil).
+    public func diskImage(fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage? {
         let key = Self.key(fileId: fileId, etag: etag, bucket: bucket)
         let url = fileURL(key: key)
-        guard let image = ImageDecoding.decode(url: url, maxPixelSize: bucket) else { return nil }
+        let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
+        guard let image = ImageDecoding.decode(url: url, maxPixelSize: limit) else { return nil }
         // Touch for LRU.
         try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
-        remember(image, key: key)
+        remember(image, key: key, maxPixelSize: limit)
         return image
+    }
+
+    /// The limit a preview of `bucket` is decoded with: the requested size, never more than the bucket.
+    static func decodeLimit(_ maxPixelSize: Int?, bucket: Int) -> Int {
+        guard let maxPixelSize, maxPixelSize > 0 else { return bucket }
+        return min(maxPixelSize, bucket)
     }
 
     public func hasDiskImage(fileId: FileID, etag: String, bucket: Int) -> Bool {
         fileManager.fileExists(atPath: fileURL(key: Self.key(fileId: fileId, etag: etag, bucket: bucket)).path(percentEncoded: false))
     }
 
-    /// Stores encoded image data and returns the decoded image.
+    /// Stores encoded image data (the whole preview) and returns the image decoded to `maxPixelSize` (the bucket when nil).
     @discardableResult
-    public func store(_ data: Data, fileId: FileID, etag: String, bucket: Int) -> CGImage? {
+    public func store(_ data: Data, fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage? {
         let key = Self.key(fileId: fileId, etag: etag, bucket: bucket)
         let url = fileURL(key: key)
         try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
-        guard let image = ImageDecoding.decode(data: data, maxPixelSize: bucket) else { return nil }
-        remember(image, key: key)
+        let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
+        guard let image = ImageDecoding.decode(data: data, maxPixelSize: limit) else { return nil }
+        remember(image, key: key, maxPixelSize: limit)
         return image
     }
 
     /// Stores a locally generated image (e.g. a thumbnail of a HEIC original without server preview).
     @discardableResult
-    public func store(_ image: CGImage, fileId: FileID, etag: String, bucket: Int) -> CGImage {
-        if let data = ImageDecoding.jpegData(image) { return store(data, fileId: fileId, etag: etag, bucket: bucket) ?? image }
+    public func store(_ image: CGImage, fileId: FileID, etag: String, bucket: Int, maxPixelSize: Int? = nil) -> CGImage {
+        if let data = ImageDecoding.jpegData(image) {
+            return store(data, fileId: fileId, etag: etag, bucket: bucket, maxPixelSize: maxPixelSize) ?? image
+        }
         return image
     }
 
-    func remember(_ image: CGImage, key: String) {
-        memory.setObject(ImageBox(image), forKey: key as NSString, cost: image.bytesPerRow * image.height)
+    func remember(_ image: CGImage, key: String, maxPixelSize: Int) {
+        // A larger decode already in memory serves this size too; don't replace it with a smaller one.
+        if let existing = memory.object(forKey: key as NSString), existing.maxPixelSize > maxPixelSize { return }
+        memory.setObject(
+            ImageBox(image, maxPixelSize: maxPixelSize), forKey: key as NSString, cost: image.bytesPerRow * image.height)
     }
 
     public func clearMemory() { memory.removeAllObjects() }

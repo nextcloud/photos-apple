@@ -105,6 +105,15 @@ public enum PreviewSizing {
     public static func bucket(forPixels pixels: Double, buckets: [Int] = [64, 256, 1024, 4096], tolerance: Double = 0.9) -> Int {
         buckets.first { Double($0) >= pixels * tolerance } ?? buckets.last ?? 1024
     }
+
+    /// The size (long edge) a preview is decoded to for a tile that needs `pixels`: rounded up to a multiple of `step`,
+    /// so that resizing a window by a few points does not decode every tile again, and never more than the bucket.
+    /// A 400 px tile then holds about 1.6 MB decoded instead of the 3 MB of its 1024 px bucket.
+    public static func decodePixels(forPixels pixels: Double, bucket: Int, step: Int = 64) -> Int {
+        guard pixels.isFinite, pixels > 0, step > 0 else { return bucket }
+        let rounded = (Int(pixels.rounded(.up)) + step - 1) / step * step
+        return min(bucket, max(step, rounded))
+    }
 }
 
 /// What a grid shows when it has no items.

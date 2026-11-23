@@ -27,6 +27,16 @@ struct GridMenuAction: Identifiable {
     /// A separator goes before this action in menus.
     var startsGroup = false
     var handler: @MainActor ([FileID]) -> Void
+
+    /// The actions split where a group starts (for menus that separate groups by nesting them, as UIKit does).
+    static func groups(_ actions: [GridMenuAction]) -> [[GridMenuAction]] {
+        var groups: [[GridMenuAction]] = []
+        for action in actions {
+            if action.startsGroup || groups.isEmpty { groups.append([]) }
+            groups[groups.count - 1].append(action)
+        }
+        return groups
+    }
 }
 
 /// Callbacks from the platform grid to SwiftUI.
@@ -189,9 +199,9 @@ enum GridTile {
         return "doc"
     }
 
-    /// Whether an image already at hand is good enough for a request, so nothing has to be loaded.
-    static func covers(_ image: CGImage, bucket: Int) -> Bool {
-        Double(max(image.width, image.height)) >= Double(bucket) * 0.9
+    /// Whether an image already at hand is good enough for a request decoded to `pixels`, so nothing has to be loaded.
+    static func covers(_ image: CGImage, pixels: Int) -> Bool {
+        Double(max(image.width, image.height)) >= Double(pixels) * 0.9
     }
 }
 
@@ -202,11 +212,14 @@ extension AccountServices {
     ///   - scale: backing scale of the window or screen the tile is on.
     func previewRequest(for item: GridMedia, tileSide: Double, scale: Double) -> ImagePipeline.Request {
         let pixels = PreviewSizing.neededPixels(tileSide: tileSide, scale: scale, aspectRatio: item.aspectRatio)
+        let bucket = PreviewSizing.bucket(forPixels: pixels, buckets: PhotosAPI.previewBuckets)
         return ImagePipeline.Request(
-            fileId: item.fileId, etag: item.etag, bucket: PreviewSizing.bucket(forPixels: pixels, buckets: PhotosAPI.previewBuckets),
+            fileId: item.fileId, etag: item.etag, bucket: bucket,
             hasPreview: item.hasPreview,
             mimeType: item.mimeType,
-            originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"))
+            originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"),
+            // Decoded at the size the tile shows, not at the size of the bucket (memory stays bounded at any zoom).
+            maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
     }
 }
 
