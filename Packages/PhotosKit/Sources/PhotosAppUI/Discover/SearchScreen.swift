@@ -9,43 +9,37 @@ import SwiftUI
 
 /// Evaluates search filters on the local index (SPEC SR-2): AND between kinds, OR within a kind.
 enum SearchEvaluator {
-    @MainActor static func items(for filters: [SearchFilter], session: SessionModel) async throws -> [MediaItem] {
-        guard let services = session.services else { return [] }
-        var items = try services.library.allVisibleItems()
-        let places = filters.compactMap { if case .place(let name) = $0 { name } else { nil } }
-        if !places.isEmpty { items = items.filter { $0.place.map(places.contains) ?? false } }
-        let ranges = filters.compactMap { if case .dateRange(let start, let end, _) = $0 { (start, end) } else { nil } }
-        if !ranges.isEmpty { items = items.filter { item in ranges.contains { item.timestamp >= $0.0 && item.timestamp < $0.1 } } }
-        let texts = filters.compactMap { if case .text(let text) = $0 { text } else { nil } }
-        for text in texts {
-            items = items.filter { item in
-                [item.name, item.caption ?? "", item.place ?? "", item.directory].contains {
-                    $0.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                }
-            }
-        }
-        if filters.contains(.favorites) { items = items.filter(\.isFavorite) }
-        if filters.contains(.videos) { items = items.filter { $0.kind == .video } }
+    /// The store query for a set of filter chips. Everything the index knows is answered by one SQL query (full-text
+    /// index and indexed columns, SPEC SR-3) on a database queue; only the tag and person memberships come from the server.
+    @MainActor static func search(for filters: [SearchFilter], session: SessionModel) async throws -> LibrarySearch? {
+        guard let services = session.services else { return nil }
+        var search = LibrarySearch(filters: filters)
         let tagIds = filters.compactMap { if case .tag(let id, _) = $0 { id } else { nil } }
         if !tagIds.isEmpty {
             var allowed = Set<FileID>()
             for id in tagIds { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
+            search.memberships.append(allowed)
         }
         let people = filters.compactMap { if case .person(let name) = $0 { name } else { nil } }
         if !people.isEmpty {
             var allowed = Set<FileID>()
             let key = await session.recognizeKey()
             for name in people { allowed.formUnion(try await services.api.personPhotos(name, key: key).map(\.item.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
+            search.memberships.append(allowed)
         }
-        let albums = filters.compactMap { if case .album(let id, _) = $0 { id } else { nil } }
-        if !albums.isEmpty {
-            var allowed = Set<FileID>()
-            for id in albums { allowed.formUnion(try services.collections.albumItems(albumId: id).map(\.fileId)) }
-            items = items.filter { allowed.contains($0.fileId) }
-        }
-        return items
+        return search
+    }
+
+    /// Search results as grid rows.
+    @MainActor static func gridItems(for filters: [SearchFilter], session: SessionModel) async throws -> [GridMedia] {
+        guard let services = session.services, let search = try await search(for: filters, session: session) else { return [] }
+        return try await services.library.search(search)
+    }
+
+    /// Search results as full items (smart albums).
+    @MainActor static func items(for filters: [SearchFilter], session: SessionModel) async throws -> [MediaItem] {
+        guard let services = session.services, let search = try await search(for: filters, session: session) else { return [] }
+        return try await services.library.searchItems(search)
     }
 
     /// Filters that can be stored in a smart album (`AlbumFilters`: places, dates, names, tags).
@@ -85,9 +79,30 @@ struct SearchScreen: View {
     @AppStorage("gridColumns") private var columns = GridColumns.default
     @State private var asking = false
     @State private var askError: String?
+    /// Suggestions for the typed text, computed after a pause in typing and off the main thread.
+    @State private var matches: [SearchFilter] = []
 
-    var suggestions: [SearchFilter] {
-        SearchSuggestions.suggestions(for: query, vocabulary: vocabulary).filter { !filters.contains($0) }
+    var suggestions: [SearchFilter] { matches.filter { !filters.contains($0) } }
+
+    /// How long typing must pause before suggestions are computed.
+    static let typingPause: Duration = .milliseconds(120)
+
+    nonisolated static func suggestions(for query: String, vocabulary: SearchSuggestions.Vocabulary) async -> [SearchFilter] {
+        SearchSuggestions.suggestions(for: query, vocabulary: vocabulary)
+    }
+
+    func updateSuggestions() async {
+        let typed = query
+        if typed.isEmpty {
+            matches = []
+            return
+        }
+        // The first suggestions come at once; while they are on screen, further typing is debounced.
+        if !matches.isEmpty { try? await Task.sleep(for: Self.typingPause) }
+        guard !Task.isCancelled else { return }
+        let result = await Self.suggestions(for: typed, vocabulary: vocabulary)
+        guard !Task.isCancelled else { return }
+        matches = result
     }
 
     var body: some View {
@@ -160,9 +175,12 @@ struct SearchScreen: View {
         .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
+        .task(id: query) { await updateSuggestions() }
         .task(id: filters) {
-            guard !filters.isEmpty, let items = try? await SearchEvaluator.items(for: filters, session: session) else { return }
-            feed.apply(items.map(GridMedia.init), flat: false)
+            guard !filters.isEmpty, let items = try? await SearchEvaluator.gridItems(for: filters, session: session) else { return }
+            // A newer set of filters is already being evaluated.
+            guard !Task.isCancelled else { return }
+            feed.apply(items, flat: false)
         }
         .alert(String(localized: "Save as smart album", bundle: .module), isPresented: $saving) {
             TextField(String(localized: "Name", bundle: .module), text: $smartName)
@@ -209,8 +227,7 @@ struct SearchScreen: View {
 
     func loadVocabulary() async {
         guard let services = session.services else { return }
-        let items = (try? services.library.allVisibleItems()) ?? []
-        var places = Set(items.compactMap(\.place))
+        var places = Set((try? await services.library.placeNames()) ?? [])
         places.formUnion(((try? services.collections.albums(.own)) ?? []).map(\.location).filter { !$0.isEmpty })
         let albums = (((try? services.collections.albums(.own)) ?? []) + ((try? services.collections.albums(.shared)) ?? [])).map {
             ($0.id, $0.title)
