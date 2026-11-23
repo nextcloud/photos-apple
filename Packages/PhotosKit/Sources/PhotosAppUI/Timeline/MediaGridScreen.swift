@@ -22,6 +22,8 @@ struct MediaGridScreen<Accessory: View>: View {
     var waitsForFirstSync = false
     /// The one helpful action of the empty state (SPEC §6.3), e.g. "Try again" for a list that could not be loaded.
     var emptyAction: GridEmptyAction? = nil
+    /// The title stays while items are selected; the screen shows the count itself (`GridSelectionState.Key`).
+    var keepsTitleWhileSelecting = false
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -54,7 +56,8 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var body: some View {
         content
-            .navigationTitle(isSelecting ? selectionTitle : title)
+            .navigationTitle(isSelecting && !keepsTitleWhileSelecting ? selectionTitle : title)
+            .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -153,7 +156,8 @@ struct MediaGridScreen<Accessory: View>: View {
                         #endif
                     },
                     columnsChanged: { columns = $0 },
-                    cancelSelection: { endSelection() }
+                    cancelSelection: { endSelection() },
+                    beginSelection: { isSelecting = true }
                 )
             )
             .ignoresSafeArea(edges: .bottom)

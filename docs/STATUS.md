@@ -69,6 +69,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   Sectioning runs off the main actor, bursts of database updates are coalesced, header texts are formatted for visible headers
   only (100 000 items: sections in ~9 ms, whole model ~45 ms in a debug build, see `GridModelTests`). macOS ✅ (run), iOS 🟡 (compiles,
   not run).
+- The parts of the grid that do not depend on the platform (what an update means, section layout, the item kept in place
+  across a relayout, prefetch requests, tile badges and preview loading) are shared by the AppKit and the UIKit grid
+  (`Grid/GridCore.swift`) ✅ unit-tested; the Mac grid was compared before and after the extraction (zoom, resize, scrubber, selection).
+- iPhone/iPad grid 🟡 (compiled for iOS and visionOS, not run): pull to refresh (a refresh control on the collection view, driven
+  by the screen's `.refreshable`; it ends when the sync or reload has returned), a two-finger drag starts the selection mode,
+  the context menu of a photo shows a large preview (a tap opens it), tiles can be dragged into other apps on iPad (the original
+  is downloaded on drop), selection mark in the bottom trailing corner, hover effect under the pointer. The logic behind them
+  (single-flight refresh, what a drag carries, mark and preview sizes) ✅ unit-tested.
 - Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
   were only exercised through accessibility, not with a real pointer).
 - Skeleton grid during the first load and the first sync ✅; the empty state only after a completed sync.
@@ -124,6 +132,12 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 Albums and shared albums ✅, collaborators 🟡 (sharee search not exercised), public links ✅, public album viewer ✅, quick share 🟡,
 comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share extension 🟡, drag and drop 🟡, offline albums 🟡
 (originals download on Wi-Fi only by default — Settings → Storage; the folder is excluded from device backups).
+- "Add photos" to an album uses the library's grid in selection mode: day headers, zoom, date scrubber, drag and ⇧/⌘ selection,
+  a search field (local search index: name, place, caption, folder), the count of picked photos; picks survive a changed
+  search. macOS ✅ (run: search, selection, add), iOS 🟡 (compiled, not run).
+- Album toolbar: the album keeps its title while photos are selected, the count is the subtitle (visionOS: the title). The
+  album options menu hides while selecting on iPhone and iPad and has its own symbol on the Mac; at compact width the
+  album's actions are one menu. macOS ✅ (run), iOS 🟡 (compiled, layout rule unit-tested, not run).
 - Uploads repeat a request after a timeout, a lost connection, a 5xx or a 429/503 with a short `Retry-After` (4 attempts,
   1/2/4 s). A chunked upload that still fails keeps its upload folder (named after destination, size, chunk size and
   checksum); the next attempt lists the chunks and continues with the first missing one ✅ unit-tested against a stub

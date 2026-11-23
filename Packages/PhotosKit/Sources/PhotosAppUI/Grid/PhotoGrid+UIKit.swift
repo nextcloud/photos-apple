@@ -26,33 +26,40 @@
         }
 
         func updateUIViewController(_ controller: PhotoGridController, context: Context) {
+            var callbacks = callbacks
+            // `.refreshable` on a screen only reaches SwiftUI's own scroll views; the collection view gets the action
+            // from the environment and shows a refresh control of its own for it.
+            if callbacks.refresh == nil, let refresh = context.environment.refresh {
+                callbacks.refresh = { await refresh() }
+            }
             controller.callbacks = callbacks
             controller.update(update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders)
         }
     }
 
     final class PhotoGridController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate,
-        UICollectionViewDataSourcePrefetching
+        UICollectionViewDataSourcePrefetching, UICollectionViewDragDelegate
     {
         let services: AccountServices
-        var callbacks: GridCallbacks?
+        var callbacks: GridCallbacks? {
+            didSet { updateRefreshControl() }
+        }
+        private let refreshRunner = GridRefreshRunner()
+        /// A two-finger drag over the tiles is selecting right now.
+        private var multiSelectInteraction = false
         private var collectionView: UICollectionView!
-        private(set) var model = GridModel.empty
-        private var revision = -1
-        private var zoomStep = GridColumns.default
-        private var showsHeaders = true
+        /// Model, zoom, anchor and layout bookkeeping, shared with the AppKit grid.
+        private let core: GridCore
         private var isSelecting = false
         private var pinchHandled = false
-        private let headerTexts = GridHeaderTexts()
-        /// Item to keep in place across a relayout caused by a new width (rotation, split view).
-        private var resizeAnchor: FileID?
-        /// Item a restore is still under way for.
-        private var pendingAnchor: FileID?
-        private var laidOutColumns = 0
-        private var laidOutSide = 0.0
+
+        var model: GridModel { core.model }
+        private var zoomStep: Int { core.zoomStep }
+        private var headerMetrics: GridHeaderMetrics { core.headerMetrics }
 
         init(services: AccountServices) {
             self.services = services
+            core = GridCore(services: services, headerMetrics: Self.currentHeaderMetrics)
             super.init(nibName: nil, bundle: nil)
         }
 
@@ -66,6 +73,10 @@
             collectionView.dataSource = self
             collectionView.delegate = self
             collectionView.prefetchDataSource = self
+            // iPad: tiles can be dragged into other apps (the default leaves drags off on iPhone).
+            collectionView.dragDelegate = self
+            // A short album can be pulled down to refresh as well.
+            collectionView.alwaysBounceVertical = true
             collectionView.allowsSelection = true
             collectionView.allowsMultipleSelectionDuringEditing = true
             // Hardware keyboard: arrow keys move the focus, Return opens the focused tile.
@@ -82,92 +93,89 @@
 
             // Header heights are absolute and follow the text size.
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: PhotoGridController, _: UITraitCollection) in
+                controller.core.headerMetrics = Self.currentHeaderMetrics
                 controller.collectionView.collectionViewLayout.invalidateLayout()
             }
             registerForTraitChanges([UITraitDisplayScale.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.refreshVisibleTiles()
             }
+            updateRefreshControl()
+        }
+
+        // MARK: Pull to refresh
+
+        /// The refresh control is there while the screen offers a refresh (`GridCallbacks.refresh`).
+        private func updateRefreshControl() {
+            guard isViewLoaded else { return }
+            let wanted = callbacks?.refresh != nil
+            if wanted, collectionView.refreshControl == nil {
+                let control = UIRefreshControl()
+                control.addTarget(self, action: #selector(handleRefresh(_:)), for: .valueChanged)
+                collectionView.refreshControl = control
+            } else if !wanted, collectionView.refreshControl != nil, !refreshRunner.isRunning {
+                collectionView.refreshControl = nil
+            }
+        }
+
+        /// Pulled: the control spins until the screen's refresh (a sync, an album reload) has returned.
+        @objc private func handleRefresh(_ control: UIRefreshControl) {
+            guard let refresh = callbacks?.refresh else {
+                control.endRefreshing()
+                return
+            }
+            refreshRunner.run(refresh) { [weak self, weak control] in
+                control?.endRefreshing()
+                self?.updateRefreshControl()
+            }
         }
 
         // MARK: Geometry
 
+        /// Width the tiles are laid out in.
+        private var gridWidth: Double { Double(collectionView?.bounds.width ?? view.bounds.width) }
+
         /// Columns and tile side for the current width and zoom.
-        var geometry: GridGeometry {
-            GridColumns.geometry(width: Double(collectionView?.bounds.width ?? view.bounds.width), step: zoomStep)
-        }
+        var geometry: GridGeometry { core.geometry(width: gridWidth) }
 
         /// Scale for preview requests, capped at 2 (SPEC §5.5.1): a 3× preview of every tile costs more memory and
         /// traffic than it shows.
         private var previewScale: Double { Double(min(view.traitCollection.displayScale, 2)) }
 
-        private var headersShown: Bool { showsHeaders && model.hasHeaders }
+        private var headersShown: Bool { core.headersShown }
 
-        private var headerMetrics: GridHeaderMetrics {
+        /// Header heights for the current text size.
+        private static var currentHeaderMetrics: GridHeaderMetrics {
             GridHeaderMetrics(
                 titleHeight: Double(SectionHeader.titleFont.lineHeight.rounded(.up)),
                 subtitleHeight: Double(SectionHeader.subtitleFont.lineHeight.rounded(.up)))
         }
 
-        private func headerHeight(section: Int, metrics: GridHeaderMetrics? = nil) -> Double {
-            guard headersShown, let section = model.sections[safe: section] else { return 0 }
-            return (metrics ?? headerMetrics).height(for: section)
-        }
+        private func headerHeight(section: Int) -> Double { core.headerHeight(section: section) }
 
         func makeLayout() -> UICollectionViewLayout {
             UICollectionViewCompositionalLayout { [weak self] sectionIndex, environment in
-                self?.layoutSection(sectionIndex, width: environment.container.effectiveContentSize.width)
+                self?.core.sectionMetrics(sectionIndex, width: Double(environment.container.effectiveContentSize.width), wholePoints: false)
+                    .layoutSection(headerKind: UICollectionView.elementKindSectionHeader)
             }
-        }
-
-        private func layoutSection(_ sectionIndex: Int, width: CGFloat) -> NSCollectionLayoutSection {
-            let geometry = GridColumns.geometry(width: Double(width), step: zoomStep)
-            let spacing = CGFloat(geometry.spacing)
-            let side = CGFloat(geometry.side)
-            let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(side), heightDimension: .absolute(side)))
-            let group = NSCollectionLayoutGroup.horizontal(
-                layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(side)), repeatingSubitem: item,
-                count: geometry.columns)
-            group.interItemSpacing = .fixed(spacing)
-            let section = NSCollectionLayoutSection(group: group)
-            section.interGroupSpacing = spacing
-            let height = headerHeight(section: sectionIndex)
-            if height > 0 {
-                let header = NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(CGFloat(height))),
-                    elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
-                header.pinToVisibleBounds = true
-                section.boundarySupplementaryItems = [header]
-            }
-            return section
         }
 
         // MARK: Updates
 
         func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, isSelecting: Bool, showsHeaders: Bool) {
             loadViewIfNeeded()
-            let layoutChanged = zoomStep != self.zoomStep || showsHeaders != self.showsHeaders
-            var change = GridModel.Change.none
-            if update.revision != revision {
-                // A change is relative to the revision before it; after skipped revisions everything is reloaded.
-                change = update.revision == revision + 1 ? update.change : .structure
-                revision = update.revision
-            }
-            self.zoomStep = zoomStep
-            self.showsHeaders = showsHeaders
-
-            if layoutChanged || change == .structure {
+            let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders)
+            if plan.relayouts {
                 let anchor = anchorItem()
-                model = update.model
-                headerTexts.reset()
+                core.show(update.model, relayout: true)
                 let relayout: () -> Void = { [self] in
-                    if change == .structure {
+                    if plan.reloads {
                         collectionView.reloadData()
                     } else {
                         collectionView.collectionViewLayout.invalidateLayout()
                     }
                     restore(anchor)
                 }
-                if layoutChanged, view.window != nil, !UIAccessibility.isReduceMotionEnabled {
+                if plan.layoutChanged, view.window != nil, !UIAccessibility.isReduceMotionEnabled {
                     // Zoom: a short cross-fade between the two layouts.
                     UIView.transition(with: collectionView, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) {
                         relayout()
@@ -175,18 +183,23 @@
                 } else {
                     relayout()
                 }
-                noteLayout()
+                core.noteLayout(width: gridWidth)
                 refreshVisibleTiles()
-            } else if case .content(let ids) = change {
-                model = update.model
+            } else if case .content(let ids) = plan.change {
+                core.show(update.model, relayout: false)
                 refreshVisibleTiles(only: ids)
             }
-            if isSelecting != self.isSelecting {
-                self.isSelecting = isSelecting
-                collectionView.isEditing = isSelecting
-                collectionView.allowsMultipleSelection = isSelecting
+            // While a two-finger drag selects, SwiftUI may not have heard of the selection mode yet: it stays on.
+            if isSelecting != self.isSelecting, isSelecting || !multiSelectInteraction {
+                setSelecting(isSelecting)
             }
             syncSelection(selection)
+        }
+
+        private func setSelecting(_ selecting: Bool) {
+            isSelecting = selecting
+            collectionView.isEditing = selecting
+            collectionView.allowsMultipleSelection = selecting
         }
 
         /// Reconfigures the cells on screen: badges, and a preview that fits the current tile size. A cell keeps the
@@ -226,13 +239,9 @@
             Set((collectionView.indexPathsForSelectedItems ?? []).compactMap { fileId(at: $0) })
         }
 
-        func fileId(at indexPath: IndexPath) -> FileID? {
-            model.item(section: indexPath.section, item: indexPath.item)?.fileId
-        }
+        func fileId(at indexPath: IndexPath) -> FileID? { core.fileId(at: indexPath) }
 
-        private func indexPath(for id: FileID) -> IndexPath? {
-            model.position(of: id).map { IndexPath(item: $0.item, section: $0.section) }
-        }
+        private func indexPath(for id: FileID) -> IndexPath? { core.indexPath(for: id) }
 
         // MARK: Scroll position
 
@@ -241,34 +250,21 @@
         /// The first item below the pinned header, unless the grid is scrolled to the top (then it stays there).
         /// Taken from the layout, not from the cells on screen, which lag behind right after a relayout.
         private func anchorItem() -> FileID? {
-            if let pendingAnchor { return pendingAnchor }
-            guard isViewLoaded, !model.isEmpty, collectionView.contentOffset.y > -topInset + 1 else { return nil }
+            guard isViewLoaded else { return nil }
             let top = collectionView.contentOffset.y + topInset
-            let metrics = headerMetrics
-            let strip = CGRect(x: 0, y: top, width: collectionView.bounds.width, height: CGFloat(geometry.side) + 100)
-            var best: IndexPath?
-            for attributes in collectionView.collectionViewLayout.layoutAttributesForElements(in: strip) ?? []
-            where attributes.representedElementCategory == .cell {
-                let indexPath = attributes.indexPath
-                guard attributes.frame.maxY > top + CGFloat(headerHeight(section: indexPath.section, metrics: metrics)) + 1 else {
-                    continue
+            let isAtTop = collectionView.contentOffset.y <= -topInset + 1
+            return core.anchorItem(isAtTop: isAtTop, top: Double(top)) { [self] in
+                let strip = CGRect(x: 0, y: top, width: collectionView.bounds.width, height: CGFloat(geometry.side) + 100)
+                return (collectionView.collectionViewLayout.layoutAttributesForElements(in: strip) ?? []).compactMap { attributes in
+                    guard attributes.representedElementCategory == .cell else { return nil }
+                    let indexPath = attributes.indexPath
+                    return GridAnchor.Candidate(section: indexPath.section, item: indexPath.item, maxY: Double(attributes.frame.maxY))
                 }
-                if best.map({ indexPath < $0 }) ?? true { best = indexPath }
             }
-            return best.flatMap { fileId(at: $0) }
         }
 
         private func restore(_ anchor: FileID?) {
-            guard let anchor else { return }
-            pendingAnchor = anchor
-            restoreNow(anchor)
-            // Once more when the layout pass is through. Until then the anchor stays the same, whatever else is relaid
-            // out in between.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.pendingAnchor == anchor else { return }
-                self.restoreNow(anchor)
-                self.pendingAnchor = nil
-            }
+            core.restore(anchor) { [weak self] anchor in self?.restoreNow(anchor) }
         }
 
         private func restoreNow(_ anchor: FileID) {
@@ -276,30 +272,25 @@
             collectionView.layoutIfNeeded()
             guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
             let contentHeight = max(collectionView.contentSize.height, collectionView.collectionViewLayout.collectionViewContentSize.height)
-            let maxY = max(contentHeight + collectionView.adjustedContentInset.bottom - collectionView.bounds.height, -topInset)
-            let y = frame.minY - CGFloat(headerHeight(section: indexPath.section)) - topInset
-            collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: min(max(y, -topInset), maxY)), animated: false)
+            let offset = GridAnchor.offset(
+                documentY: Double(frame.minY) - headerHeight(section: indexPath.section), topInset: Double(topInset),
+                contentHeight: Double(contentHeight), bottomInset: Double(collectionView.adjustedContentInset.bottom),
+                viewportHeight: Double(collectionView.bounds.height))
+            collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: CGFloat(offset)), animated: false)
         }
 
         override func viewWillLayoutSubviews() {
             super.viewWillLayoutSubviews()
             // The collection view still has its old width here.
-            if collectionView.bounds.width != view.bounds.width, resizeAnchor == nil { resizeAnchor = anchorItem() }
+            if collectionView.bounds.width != view.bounds.width, core.resizeAnchor == nil { core.resizeAnchor = anchorItem() }
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            let geometry = geometry
-            if geometry.columns != laidOutColumns, laidOutColumns != 0 { restore(resizeAnchor) }
-            resizeAnchor = nil
-            if geometry.side != laidOutSide { refreshVisibleTiles() }
-            noteLayout()
-        }
-
-        private func noteLayout() {
-            let geometry = geometry
-            laidOutColumns = geometry.columns
-            laidOutSide = geometry.side
+            if core.columnsChanged(width: gridWidth) { restore(core.resizeAnchor) }
+            core.resizeAnchor = nil
+            if core.sideChanged(width: gridWidth) { refreshVisibleTiles() }
+            core.noteLayout(width: gridWidth)
         }
 
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
@@ -361,7 +352,7 @@
                     ofKind: kind, withReuseIdentifier: SectionHeader.reuseIdentifier, for: indexPath)
                 as! SectionHeader
             if let section = model.sections[safe: indexPath.section] {
-                header.configure(headerTexts.text(for: section), metrics: headerMetrics)
+                header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
             }
             return header
         }
@@ -406,8 +397,18 @@
             true
         }
 
+        /// A two-finger drag over the tiles starts the selection mode (as in Photos and Files): UIKit only selects
+        /// while the collection view is editing, and the screen has to show its selection bar.
         func collectionView(_ collectionView: UICollectionView, didBeginMultipleSelectionInteractionAt indexPath: IndexPath) {
-            if !isSelecting { callbacks?.selectionChanged(currentSelection()) }
+            multiSelectInteraction = true
+            guard !isSelecting else { return }
+            setSelecting(true)
+            callbacks?.beginSelection()
+        }
+
+        func collectionViewDidEndMultipleSelectionInteraction(_ collectionView: UICollectionView) {
+            multiSelectInteraction = false
+            callbacks?.selectionChanged(currentSelection())
         }
 
         func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint)
@@ -417,7 +418,16 @@
             guard !ids.isEmpty, let callbacks else { return nil }
             let actions = callbacks.menu(ids)
             guard !actions.isEmpty else { return nil }
-            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            // One photo: a large preview above the menu. Several (a selection): UIKit shows the tiles themselves.
+            var identifier: NSNumber?
+            var preview: UIContextMenuContentPreviewProvider?
+            if ids.count == 1, let item = model[ids[0]] {
+                identifier = NSNumber(value: item.fileId)
+                let services = services
+                let shown = (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.picture
+                preview = { GridMenuPreviewController(item: item, services: services, placeholder: shown) }
+            }
+            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { _ in
                 // Each group is an inline menu: UIKit draws the separators between them.
                 let groups: [UIMenuElement] = GridMenuAction.groups(actions).map { group in
                     UIMenu(
@@ -433,6 +443,45 @@
             }
         }
 
+        /// A tap on the menu's preview opens the photo.
+        func collectionView(
+            _ collectionView: UICollectionView, willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+            animator: any UIContextMenuInteractionCommitAnimating
+        ) {
+            guard !isSelecting, let id = (configuration.identifier as? NSNumber)?.int64Value else { return }
+            animator.preferredCommitStyle = .dismiss
+            animator.addCompletion { [weak self] in self?.callbacks?.open(id) }
+        }
+
+        // MARK: Drag out (iPad: Files, Notes, Mail…): the original is downloaded when it is dropped.
+
+        func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: any UIDragSession, at indexPath: IndexPath)
+            -> [UIDragItem]
+        {
+            guard let id = fileId(at: indexPath) else { return [] }
+            let model = model
+            let ids = GridDrag.ids(dragged: id, selection: currentSelection(), isSelecting: isSelecting) { id in
+                model.position(of: id).flatMap { model.flatIndex(section: $0.section, item: $0.item) }
+            }
+            return ids.compactMap { dragItem(for: $0) }
+        }
+
+        /// A tap on another tile during a drag adds it.
+        func collectionView(
+            _ collectionView: UICollectionView, itemsForAddingTo session: any UIDragSession, at indexPath: IndexPath, point: CGPoint
+        ) -> [UIDragItem] {
+            guard let id = fileId(at: indexPath), !session.items.contains(where: { ($0.localObject as? NSNumber)?.int64Value == id })
+            else { return [] }
+            return [dragItem(for: id)].compactMap { $0 }
+        }
+
+        private func dragItem(for id: FileID) -> UIDragItem? {
+            guard let item = model[id] else { return nil }
+            let dragItem = UIDragItem(itemProvider: GridDrag.itemProvider(for: item, services: services))
+            dragItem.localObject = NSNumber(value: id)
+            return dragItem
+        }
+
         func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
             let requests = previewRequests(at: indexPaths)
             Task { await services.images.prefetch(requests) }
@@ -445,10 +494,7 @@
         }
 
         private func previewRequests(at indexPaths: [IndexPath]) -> [ImagePipeline.Request] {
-            let side = geometry.side
-            let scale = previewScale
-            return indexPaths.compactMap { model.item(section: $0.section, item: $0.item) }
-                .map { services.previewRequest(for: $0, tileSide: side, scale: scale) }
+            core.previewRequests(at: indexPaths, width: gridWidth, scale: previewScale)
         }
     }
 
@@ -462,12 +508,9 @@
         private let liveIcon = UIImageView(image: UIImage(systemName: "livephoto"))
         private let checkmark = UIImageView()
         private let gradient = CAGradientLayer()
-        private(set) var fileId: FileID?
-        private var request: ImagePipeline.Request?
-        /// A real picture (not just the BlurHash) is shown.
-        private var hasPicture = false
-        private var isLoading = false
-        private var task: Task<Void, Never>?
+        /// Loads the preview and says what to draw; shared with the AppKit grid.
+        private let tilePicture = GridTilePicture()
+        var fileId: FileID? { tilePicture.fileId }
         private var menuActions: (() -> [GridMenuAction])?
 
         override init(frame: CGRect) {
@@ -489,7 +532,15 @@
                 icon.contentMode = .scaleAspectFit
             }
             checkmark.contentMode = .scaleAspectFit
+            // The empty circle is white on the photo: a soft shadow keeps it visible on bright pictures.
+            checkmark.layer.shadowColor = UIColor.black.cgColor
+            checkmark.layer.shadowOpacity = 0.35
+            checkmark.layer.shadowRadius = 1.5
+            checkmark.layer.shadowOffset = .zero
             [durationLabel, videoIcon, favoriteIcon, liveIcon, checkmark].forEach { contentView.addSubview($0) }
+            // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
+            hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
+            tilePicture.show = { [weak self] display in self?.show(display) }
             isAccessibilityElement = true
             // Double-tap (VoiceOver), Switch Control and Voice Control activate the cell like a tap: it opens the photo.
             accessibilityTraits = [.image, .button]
@@ -504,8 +555,16 @@
             let glyph = min(max(bounds.width * 0.34, 14), 44)
             placeholderIcon.frame = CGRect(x: (bounds.width - glyph) / 2, y: (bounds.height - glyph) / 2, width: glyph, height: glyph)
             gradient.frame = CGRect(x: 0, y: bounds.height * 0.6, width: bounds.width, height: bounds.height * 0.4)
+            // The selection mark sits in the bottom trailing corner, as in Apple Photos; duration and video badge
+            // move left of it.
+            let mark = CGFloat(GridTile.checkmarkSide(tileSide: Double(bounds.width)))
+            checkmark.frame = CGRect(x: bounds.width - mark - 4, y: bounds.height - mark - 4, width: mark, height: mark)
+            let markShown = !checkmark.isHidden
+            let trailingBadges = GridTile.showsTrailingBadges(tileSide: Double(bounds.width), checkmarkShown: markShown)
+            durationLabel.alpha = trailingBadges ? 1 : 0
+            videoIcon.alpha = trailingBadges ? 1 : 0
             durationLabel.sizeToFit()
-            var right = bounds.width - 4
+            var right = markShown ? checkmark.frame.minX - 4 : bounds.width - 4
             if !durationLabel.isHidden {
                 durationLabel.frame.origin = CGPoint(
                     x: right - durationLabel.bounds.width, y: bounds.height - durationLabel.bounds.height - 3)
@@ -514,84 +573,75 @@
             videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 4, y: bounds.height - 16, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: 4, width: 16, height: 16)
-            checkmark.frame = CGRect(x: bounds.width - 26, y: 4, width: 22, height: 22)
         }
 
-        override var isSelected: Bool {
-            didSet { updateSelection() }
+        /// The picture the tile shows right now (first picture of the context menu's preview).
+        var picture: UIImage? { tilePicture.hasPicture ? imageView.image : nil }
+
+        /// Called by UIKit whenever the cell is selected or deselected and when the collection view starts or stops
+        /// editing (the selection mode), also for cells that are not on screen yet.
+        override func updateConfiguration(using state: UICellConfigurationState) {
+            super.updateConfiguration(using: state)
+            updateSelection(editing: state.isEditing, selected: state.isSelected)
         }
 
-        func updateSelection() {
-            let editing = (superview as? UICollectionView)?.isEditing ?? false
-            checkmark.isHidden = !(editing || isSelected)
-            checkmark.image = UIImage(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-            checkmark.tintColor = isSelected ? .tintColor : .white
-            imageView.alpha = isSelected ? 0.75 : 1
-            if isSelected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+        func updateSelection(editing: Bool, selected: Bool) {
+            let wasHidden = checkmark.isHidden
+            checkmark.isHidden = !(editing || selected)
+            checkmark.image =
+                selected
+                ? UIImage(
+                    systemName: "checkmark.circle.fill",
+                    withConfiguration: UIImage.SymbolConfiguration(paletteColors: [.white, .tintColor]))
+                : UIImage(systemName: "circle")
+            // Selected: a white tick on the accent colour (the view's inherited tint). Not selected: a white ring.
+            checkmark.tintColor = selected ? nil : .white
+            imageView.alpha = selected ? 0.75 : 1
+            if selected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+            // The badges make room for the mark.
+            if wasHidden != checkmark.isHidden { setNeedsLayout() }
         }
 
         /// Shows `item`. Called again for the same item when its badges, the zoom or the screen scale change: the
         /// picture then stays until a sharper one has loaded (no flash).
         func configure(item: GridMedia, owner: PhotoGridController, tileSide: Double, scale: Double) {
             let services = owner.services
-            let request = services.previewRequest(for: item, tileSide: tileSide, scale: scale)
-            let sameItem = fileId == item.fileId && self.request?.etag == item.etag
-            fileId = item.fileId
             updateBadges(item, owner: owner)
-            updateSelection()
-            if sameItem, request == self.request, hasPicture || isLoading { return }
-            task?.cancel()
-            self.request = request
-            if !sameItem {
-                hasPicture = false
-                imageView.image = nil
-                placeholderIcon.isHidden = true
-            }
-            let cache = services.images.cache
-            if let best = cache.bestMemoryImage(fileId: item.fileId, etag: item.etag, upTo: 4096) {
-                setPicture(best)
-                // Large enough (for instance after zooming out): nothing to load.
-                if GridTile.covers(best, pixels: request.decodeSize) {
-                    isLoading = false
-                    return
-                }
-            } else if !hasPicture, let blur = BlurHashCache.image(item.blurhash) {
-                imageView.image = UIImage(cgImage: blur)
-            }
-            isLoading = true
-            task = Task { [weak self] in
-                let image = await services.images.preview(request)
-                guard !Task.isCancelled, let self, self.request == request else { return }
-                self.isLoading = false
-                if let image {
-                    self.setPicture(image)
-                } else if !self.hasPicture {
-                    // No preview to be had (no server preview, broken or unsupported file): say what it is.
-                    self.placeholderIcon.image = UIImage(systemName: GridTile.placeholderSymbol(for: item))
-                    self.placeholderIcon.isHidden = false
-                }
-            }
+            setNeedsUpdateConfiguration()
+            tilePicture.configure(
+                item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale),
+                source: GridTilePicture.Source(services: services))
         }
 
-        private func setPicture(_ image: CGImage) {
-            imageView.image = UIImage(cgImage: image)
-            hasPicture = true
-            placeholderIcon.isHidden = true
+        private func show(_ display: GridTilePicture.Display) {
+            switch display {
+            case .clear:
+                imageView.image = nil
+                placeholderIcon.isHidden = true
+            case .blur(let image):
+                imageView.image = UIImage(cgImage: image)
+            case .picture(let image):
+                imageView.image = UIImage(cgImage: image)
+                placeholderIcon.isHidden = true
+            case .placeholder(let symbol):
+                placeholderIcon.image = UIImage(systemName: symbol)
+                placeholderIcon.isHidden = false
+            }
         }
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridController) {
-            let duration = GridTile.durationText(for: item)
-            durationLabel.text = duration
-            durationLabel.isHidden = duration == nil
-            videoIcon.isHidden = item.kind != .video
-            favoriteIcon.isHidden = !item.isFavorite
-            liveIcon.isHidden = !item.isLivePhoto
-            gradient.isHidden = !GridTile.showsBottomShade(for: item)
+            let badges = GridTileBadges(item: item)
+            durationLabel.text = badges.duration
+            durationLabel.isHidden = badges.duration == nil
+            videoIcon.isHidden = !badges.showsVideo
+            favoriteIcon.isHidden = !badges.showsFavorite
+            liveIcon.isHidden = !badges.showsLivePhoto
+            gradient.isHidden = !badges.showsShade
             let increased = UIAccessibility.isDarkerSystemColorsEnabled || UIAccessibility.isReduceTransparencyEnabled
             gradient.colors = [
                 UIColor.clear.cgColor, UIColor.black.withAlphaComponent(GridTile.shadeOpacity(increased: increased)).cgColor,
             ]
-            accessibilityLabel = GridTile.accessibilityLabel(for: item)
+            accessibilityLabel = badges.accessibilityLabel
             let id = item.fileId
             menuActions = { [weak owner] in owner?.menuActions(for: id) ?? [] }
             setNeedsLayout()
@@ -613,14 +663,49 @@
 
         override func prepareForReuse() {
             super.prepareForReuse()
+            tilePicture.reset()
+        }
+    }
+
+    /// The large picture above a tile's context menu: what the tile shows at once, then the 1024 px preview.
+    final class GridMenuPreviewController: UIViewController {
+        private let item: GridMedia
+        private let services: AccountServices
+        private let imageView = UIImageView()
+        private var task: Task<Void, Never>?
+
+        init(item: GridMedia, services: AccountServices, placeholder: UIImage?) {
+            self.item = item
+            self.services = services
+            super.init(nibName: nil, bundle: nil)
+            imageView.image = placeholder
+            preferredContentSize = GridTile.previewSize(aspectRatio: item.aspectRatio)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .secondarySystemBackground
+            imageView.frame = view.bounds
+            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            // Fills the preview, which has the photo's shape: nothing is cut off unless the stored size was wrong.
+            imageView.contentMode = .scaleAspectFill
+            imageView.clipsToBounds = true
+            view.addSubview(imageView)
+            let request = services.menuPreviewRequest(for: item)
+            let services = services
+            task = Task { [weak self] in
+                guard let image = await services.images.preview(request), !Task.isCancelled, let self else { return }
+                self.imageView.image = UIImage(cgImage: image)
+                // The index does not know the size of every file: the picture itself does.
+                self.preferredContentSize = GridTile.previewSize(aspectRatio: Double(image.width) / Double(max(image.height, 1)))
+            }
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
             task?.cancel()
-            task = nil
-            fileId = nil
-            request = nil
-            hasPicture = false
-            isLoading = false
-            imageView.image = nil
-            placeholderIcon.isHidden = true
         }
     }
 

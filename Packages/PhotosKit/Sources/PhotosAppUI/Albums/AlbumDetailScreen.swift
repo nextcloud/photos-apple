@@ -23,6 +23,9 @@ struct AlbumDetailScreen: View {
     @State private var newName = ""
     @State private var renaming = false
     @State private var showingNotes = false
+    /// Selection in the grid (reported by `MediaGridScreen`).
+    @State private var gridSelection = GridSelectionState()
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(albumId: String, initial: Album) {
         self.albumId = albumId
@@ -47,13 +50,19 @@ struct AlbumDetailScreen: View {
             emptyTitle: String(localized: "This album is empty", bundle: .module),
             emptyMessage: isOwn ? String(localized: "Add photos from your library.", bundle: .module) : "",
             columns: $columns,
-            extraActions: extraActions
+            extraActions: extraActions,
+            keepsTitleWhileSelecting: AlbumToolbar.keepsTitleWhileSelecting
         ) {
             albumMenu
         }
+        // While selecting, the album keeps its name and the count takes the subtitle's place. visionOS has no
+        // subtitle: there the count replaces the title, as on the other grid screens.
         #if !os(visionOS)
-            .navigationSubtitle(AlbumDetails.summary(of: album))
+            .navigationSubtitle(gridSelection.isSelecting ? gridSelection.title : AlbumDetails.summary(of: album))
         #endif
+        .onPreferenceChange(GridSelectionState.Key.self) { state in
+            gridSelection = state
+        }
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
@@ -141,90 +150,135 @@ struct AlbumDetailScreen: View {
             ? String(localized: "Delete “\(album.title)”?", bundle: .module) : String(localized: "Leave “\(album.title)”?", bundle: .module)
     }
 
+    var toolbarLayout: AlbumToolbar.Layout {
+        AlbumToolbar.layout(isCompact: sizeClass == .compact, isSelecting: gridSelection.isSelecting)
+    }
+
+    /// The album's toolbar items. Regular width: buttons and the options menu. Compact width (iPhone, a narrow iPad
+    /// window): one menu, so the bar does not truncate. While selecting, the options menu makes way for the
+    /// selection's own "More" menu (on the Mac it stays and has its own symbol).
     @ViewBuilder var albumMenu: some View {
-        if AlbumDetails.hasNotes(album, isOffline: isOffline) {
-            // Description, collaborators and offline state: in a popover, so nothing sits between the toolbar and the grid.
-            Button {
-                showingNotes = true
+        switch toolbarLayout {
+        case .hidden:
+            EmptyView()
+        case .singleMenu:
+            Menu {
+                if AlbumDetails.hasNotes(album, isOffline: isOffline) { aboutButton }
+                if isOwn {
+                    addPhotosButton
+                    shareAlbumButton
+                }
+                Divider()
+                optionsItems
             } label: {
-                Label(String(localized: "About this album", bundle: .module), systemImage: "info.circle")
+                Label(String(localized: "Album options", bundle: .module), systemImage: AlbumToolbar.optionsSymbol)
             }
-            .help(String(localized: "About this album", bundle: .module))
             .popover(isPresented: $showingNotes) {
                 AlbumNotes(album: album, isOffline: isOffline)
             }
-        }
-        if isOwn {
-            Button {
-                sheet = .addPhotos
-            } label: {
-                Label(String(localized: "Add photos", bundle: .module), systemImage: "plus")
-            }
-            .help(String(localized: "Add photos", bundle: .module))
-            Button {
-                sheet = .share
-            } label: {
-                Label(String(localized: "Share album", bundle: .module), systemImage: "person.crop.circle.badge.plus")
-            }
-            .help(String(localized: "Share album", bundle: .module))
-        }
-        Menu {
-            if let link = session.publicLink(of: album) {
-                ShareLink(item: link) { Label(String(localized: "Share link", bundle: .module), systemImage: "link") }
-            }
-            if session.features.has(.albumComments) && album.serverAlbumId != nil {
-                Button {
-                    sheet = .comments
-                } label: {
-                    Label(String(localized: "Comments", bundle: .module), systemImage: "bubble.left.and.bubble.right")
-                }
-            }
-            Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
-                Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)
-                Text("Newest first", bundle: .module).tag(AlbumPhotosSortOrder.newest)
-            }
-            Button {
-                Task {
-                    if isOffline {
-                        try? await session.offline?.unpin(album: album)
-                    } else {
-                        try? await session.offline?.pin(album: album)
+        case .buttons(let showsOptions):
+            if AlbumDetails.hasNotes(album, isOffline: isOffline) {
+                // Description, collaborators and offline state: in a popover, so nothing sits between the toolbar and the grid.
+                aboutButton
+                    .help(String(localized: "About this album", bundle: .module))
+                    .popover(isPresented: $showingNotes) {
+                        AlbumNotes(album: album, isOffline: isOffline)
                     }
-                    isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
-                }
-            } label: {
-                Label(
-                    isOffline
-                        ? String(localized: "Remove offline copy", bundle: .module)
-                        : String(localized: "Make available offline", bundle: .module),
-                    systemImage: isOffline ? "icloud.slash" : "arrow.down.circle")
             }
             if isOwn {
-                Divider()
-                Button {
-                    sheet = .edit
-                } label: {
-                    Label(String(localized: "Edit details", bundle: .module), systemImage: "pencil")
-                }
-                Button {
-                    newName = album.name
-                    renaming = true
-                } label: {
-                    Label(String(localized: "Rename", bundle: .module), systemImage: "character.cursor.ibeam")
-                }
+                addPhotosButton
+                    .help(String(localized: "Add photos", bundle: .module))
+                shareAlbumButton
+                    .help(String(localized: "Share album", bundle: .module))
             }
-            Divider()
-            Button(role: .destructive) {
-                confirmDelete = true
+            if showsOptions {
+                Menu {
+                    optionsItems
+                } label: {
+                    Label(String(localized: "Album options", bundle: .module), systemImage: AlbumToolbar.optionsSymbol)
+                }
+                .help(String(localized: "Album options", bundle: .module))
+            }
+        }
+    }
+
+    var aboutButton: some View {
+        Button {
+            showingNotes = true
+        } label: {
+            Label(String(localized: "About this album", bundle: .module), systemImage: "info.circle")
+        }
+    }
+
+    var addPhotosButton: some View {
+        Button {
+            sheet = .addPhotos
+        } label: {
+            Label(String(localized: "Add photos", bundle: .module), systemImage: "plus")
+        }
+    }
+
+    var shareAlbumButton: some View {
+        Button {
+            sheet = .share
+        } label: {
+            Label(String(localized: "Share album", bundle: .module), systemImage: "person.crop.circle.badge.plus")
+        }
+    }
+
+    @ViewBuilder var optionsItems: some View {
+        if let link = session.publicLink(of: album) {
+            ShareLink(item: link) { Label(String(localized: "Share link", bundle: .module), systemImage: "link") }
+        }
+        if session.features.has(.albumComments) && album.serverAlbumId != nil {
+            Button {
+                sheet = .comments
             } label: {
-                Label(
-                    isOwn ? String(localized: "Delete album", bundle: .module) : String(localized: "Leave album", bundle: .module),
-                    systemImage: isOwn ? "trash" : "rectangle.portrait.and.arrow.right")
+                Label(String(localized: "Comments", bundle: .module), systemImage: "bubble.left.and.bubble.right")
+            }
+        }
+        Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
+            Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)
+            Text("Newest first", bundle: .module).tag(AlbumPhotosSortOrder.newest)
+        }
+        Button {
+            Task {
+                if isOffline {
+                    try? await session.offline?.unpin(album: album)
+                } else {
+                    try? await session.offline?.pin(album: album)
+                }
+                isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
             }
         } label: {
-            Label(String(localized: "Album options", bundle: .module), systemImage: "ellipsis.circle")
+            Label(
+                isOffline
+                    ? String(localized: "Remove offline copy", bundle: .module)
+                    : String(localized: "Make available offline", bundle: .module),
+                systemImage: isOffline ? "icloud.slash" : "arrow.down.circle")
         }
-        .help(String(localized: "Album options", bundle: .module))
+        if isOwn {
+            Divider()
+            Button {
+                sheet = .edit
+            } label: {
+                Label(String(localized: "Edit details", bundle: .module), systemImage: "pencil")
+            }
+            Button {
+                newName = album.name
+                renaming = true
+            } label: {
+                Label(String(localized: "Rename", bundle: .module), systemImage: "character.cursor.ibeam")
+            }
+        }
+        Divider()
+        Button(role: .destructive) {
+            confirmDelete = true
+        } label: {
+            Label(
+                isOwn ? String(localized: "Delete album", bundle: .module) : String(localized: "Leave album", bundle: .module),
+                systemImage: isOwn ? "trash" : "rectangle.portrait.and.arrow.right")
+        }
     }
 
     func extraActions(_ items: [MediaItem]) -> [GridMenuAction] {
@@ -257,6 +311,47 @@ struct AlbumDetailScreen: View {
                 })
         }
         return actions
+    }
+}
+
+/// How the album's actions share the toolbar with the grid's selection actions.
+enum AlbumToolbar {
+    enum Layout: Equatable {
+        /// About, Add photos and Share album as buttons, the rest in the options menu (if shown).
+        case buttons(showsOptions: Bool)
+        /// Everything in one menu.
+        case singleMenu
+        /// No album actions.
+        case hidden
+    }
+
+    /// The Mac selects with a plain click and its toolbar has room: the album's actions stay, and the options menu
+    /// differs from the selection's "More" menu by its symbol. Elsewhere selecting is a mode: the options menu goes
+    /// (at compact width that is the one menu holding everything), and "More" is the only "…".
+    static func layout(isCompact: Bool, isSelecting: Bool, isMac: Bool = AlbumToolbar.isMac) -> Layout {
+        if isMac { return .buttons(showsOptions: true) }
+        if isCompact { return isSelecting ? .hidden : .singleMenu }
+        return .buttons(showsOptions: !isSelecting)
+    }
+
+    static var isMac: Bool {
+        #if os(macOS)
+            true
+        #else
+            false
+        #endif
+    }
+
+    /// The selection's "More" menu is `ellipsis.circle`; on the Mac both menus can be in the toolbar at once.
+    static var optionsSymbol: String { isMac ? "rectangle.stack" : "ellipsis.circle" }
+
+    /// Whether the album's title stays while selecting (the count is the subtitle then); visionOS has no subtitle.
+    static var keepsTitleWhileSelecting: Bool {
+        #if os(visionOS)
+            false
+        #else
+            true
+        #endif
     }
 }
 
