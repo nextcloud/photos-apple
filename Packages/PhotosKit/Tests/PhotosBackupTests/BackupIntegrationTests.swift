@@ -26,7 +26,8 @@ struct BackupIntegrationTests {
         let photo = try #require(page.items.first { $0.capturedAt != nil && $0.width != nil && BackupNaming.number(in: $0.name) != nil })
         let captured = try #require(photo.capturedAt)
 
-        let remote = PhotosBackupRemote(api: api, library: LibraryStore(database: try .temporary()))
+        let database = try AccountDatabase.temporary()
+        let remote = PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database)
         let candidates = try await remote.candidates(from: captured.addingTimeInterval(-2), to: captured.addingTimeInterval(2))
         #expect(candidates.contains { $0.fileId == photo.fileId })
 

@@ -100,7 +100,7 @@ public actor BackupEngine {
 
     public init(api: PhotosAPI, database: AccountDatabase, accountId: AccountID) {
         self.init(
-            library: PhotoLibrarySource(), remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database)),
+            library: PhotoLibrarySource(), remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database),
             database: database, accountId: accountId, systemConditions: true)
     }
 
@@ -244,6 +244,7 @@ public actor BackupEngine {
                 publish(toUpload.isEmpty ? .upToDate : .idle)
                 return
             }
+            await remote.removeStaleUploads()
             let waiting = try await upload(toUpload, settings: settings)
             status.lastRun = now()
             try refreshCounts()

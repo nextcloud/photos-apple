@@ -72,6 +72,7 @@ final class FakeRemote: BackupRemote {
         var uploadErrors: [String: NetworkError] = [:]
         var searchErrors: [NetworkError] = []
         var nextFileId: Int64 = 100
+        var cleanups = 0
     }
 
     let state = Mutex(State())
@@ -104,6 +105,10 @@ final class FakeRemote: BackupRemote {
                     capturedAt: capturedAt, modifiedAt: capturedAt))
             return UploadedFile(fileId: state.nextFileId, path: path, etag: nil)
         }
+    }
+
+    func removeStaleUploads() async {
+        state.withLock { $0.cleanups += 1 }
     }
 
     func linkLivePhoto(imagePath: String, imageFileId: FileID, videoPath: String, videoFileId: FileID) async throws {
@@ -183,6 +188,15 @@ final class StatusLog: Sendable {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return false
+    }
+
+    @Test func leftoversOfInterruptedUploadsAreCleanedUpWhenThereIsSomethingToUpload() async throws {
+        addPhotos(["0001"])
+        await engine.run(settings)
+        #expect(remote.state.withLock { $0.cleanups } == 1)
+        // Nothing to upload: no extra request.
+        await engine.run(settings)
+        #expect(remote.state.withLock { $0.cleanups } == 1)
     }
 
     // MARK: Skip complete assets (review point 18)
@@ -598,6 +612,22 @@ final class StatusLog: Sendable {
 }
 
 // MARK: - Policy
+
+@Suite struct BackupUploadFoldersTests {
+    @Test func foldersAreRememberedInTheAccountDatabase() throws {
+        let database = try AccountDatabase.temporary()
+        let folders = BackupUploadFolders(database: database)
+        #expect(folders.entries().isEmpty)
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        folders.touch("photos-a", at: date)
+        folders.touch("photos-b", at: date + 10)
+        folders.touch("photos-a", at: date + 20)
+        // Another instance on the same database sees them.
+        #expect(BackupUploadFolders(database: database).entries() == ["photos-a": date + 20, "photos-b": date + 10])
+        folders.remove("photos-a")
+        #expect(folders.entries() == ["photos-b": date + 10])
+    }
+}
 
 @Suite struct BackupPolicyTests {
     func entry(_ state: BackupItemState, attempts: Int = 0, modified: Double? = 100, updated: Double = 1000, fingerprint: String? = nil)

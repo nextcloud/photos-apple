@@ -35,7 +35,13 @@ public final class HTTPClient: Sendable {
         return configuration
     }
 
+    /// Sends a request; one with a `retry` policy is sent again after a transient failure.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        guard let retry = request.retry else { return try await sendOnce(request) }
+        return try await retry.run { try await self.sendOnce(request) }
+    }
+
+    private func sendOnce(_ request: HTTPRequest) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.data(for: request.urlRequest)
             return Self.makeResponse(response, data: data)
@@ -58,8 +64,13 @@ public final class HTTPClient: Sendable {
         }
     }
 
-    /// Uploads a file from disk.
+    /// Uploads a file from disk; with a `retry` policy the whole file is sent again after a transient failure.
     public func upload(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
+        guard let retry = request.retry else { return try await uploadOnce(request, fromFile: file) }
+        return try await retry.run { try await self.uploadOnce(request, fromFile: file) }
+    }
+
+    private func uploadOnce(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.upload(for: request.urlRequest, fromFile: file)
             return Self.makeResponse(response, data: data)
