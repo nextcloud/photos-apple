@@ -14,13 +14,13 @@
       }
     },
     "NSFaceIDUsageDescription" : {
-      "comment" : "Privacy - Face ID Usage Description",
+      "comment" : "Privacy - Face ID Usage Description. Shown under the system's question whether the app may use Face ID (iPhone, iPad) or Optic ID (Apple Vision Pro); \"this\" is that feature. Do not name Face ID here: the same text is in the Mac app.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Nextcloud Photos uses Face ID to protect the app and your archived photos."
+            "value" : "Nextcloud Photos uses this to unlock the app and your archived photos."
           }
         }
       }

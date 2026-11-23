@@ -82,7 +82,10 @@ targets:
         NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
         NSCameraUsageDescription: Nextcloud Photos uses the camera to scan a login QR code.
-        NSFaceIDUsageDescription: Nextcloud Photos uses Face ID to protect the app and your archived photos.
+        # One text for every platform: Info.plist values cannot vary by device (a string catalog's device variations end
+        # up in InfoPlist.stringsdict, which the system does not read for Info.plist keys), and the Mac must not say
+        # Face ID. The system's own question already names Face ID or Optic ID.
+        NSFaceIDUsageDescription: Nextcloud Photos uses this to unlock the app and your archived photos.
         NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
         NSAppTransportSecurity:
           # Nextcloud servers are self-hosted and their address is typed in by the user: plain http (home networks) and
