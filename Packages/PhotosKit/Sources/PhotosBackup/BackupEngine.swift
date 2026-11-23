@@ -59,6 +59,28 @@ public struct BackupStatus: Sendable, Equatable {
         }
     }
 
+    /// The phase for the log (Settings › Export diagnostics): its name and numbers only. File names, pause reasons and
+    /// error messages are left out; they can contain names of the user's files, account and server.
+    public var phaseLogDescription: String {
+        switch phase {
+        case .idle: isInterrupted ? "idle (interrupted)" : "idle"
+        case .notAuthorized: "not authorized"
+        case .scanning: "scanning"
+        case .reconciling(_, let total): "reconciling \(total) items"
+        case .uploading(_, let total, _): "uploading \(total) items"
+        case .paused: "paused"
+        case .upToDate: "up to date"
+        case .incomplete(let failed): "incomplete, \(failed) failed"
+        case .failed: blocker.map { "failed (\($0))" } ?? "failed"
+        }
+    }
+
+    /// Counts for the log line at the end of a pass.
+    public var countsLogDescription: String {
+        "uploaded this pass \(uploadedThisPass), pending \(pending), failed \(failed), skipped \(skipped)"
+            + (isLimitedAccess ? ", limited access" : "")
+    }
+
     /// Problems that stop the whole backup, not just one file.
     public enum Blocker: Sendable, Equatable {
         /// The account's quota is used up (507).
@@ -235,7 +257,25 @@ public actor BackupEngine {
 
     private func publish(_ phase: BackupStatus.Phase) {
         status.phase = phase
+        logTransition()
         statusHandler?(status)
+    }
+
+    /// What the last log line said about the phase: progress within a phase is not logged, a change of phase is.
+    private var loggedPhase: String?
+
+    private func logTransition() {
+        let description = status.phaseLogDescription
+        guard description != loggedPhase else { return }
+        loggedPhase = description
+        switch status.phase {
+        case .upToDate, .incomplete, .failed, .paused, .notAuthorized:
+            logger.notice("backup: \(description, privacy: .public); \(self.status.countsLogDescription, privacy: .public)")
+        case .idle where status.isInterrupted:
+            logger.notice("backup: \(description, privacy: .public); \(self.status.countsLogDescription, privacy: .public)")
+        default:
+            logger.info("backup: \(description, privacy: .public)")
+        }
     }
 
     // MARK: Conditions
@@ -285,6 +325,7 @@ public actor BackupEngine {
             return
         }
         resume = nil
+        logger.notice("backup: conditions allow it again, the waiting pass resumes")
         Task { await self.run(waiting.settings) }
     }
 
@@ -292,6 +333,8 @@ public actor BackupEngine {
         _ reason: BackupPause, settings: BackupSettings, videosOnly: Bool = false, needsChange: Bool = false, needsICloud: Bool = false
     ) {
         resume = Resume(settings: settings, videosOnly: videosOnly, needsChange: needsChange, needsICloud: needsICloud)
+        let scope = videosOnly ? ", videos only" : ""
+        logger.notice("backup: waiting (\(String(describing: reason), privacy: .public)\(scope, privacy: .public))")
         publish(.paused(reason.message))
     }
 
@@ -318,6 +361,7 @@ public actor BackupEngine {
 
     /// The user's pause: the run stops and does not continue by itself. Uploads the system works on are taken back.
     public func cancel() {
+        if running != nil || resume != nil { logger.notice("backup: paused by the user") }
         resume = nil
         running?.cancel()
         cancelBackgroundUploads()
@@ -330,6 +374,7 @@ public actor BackupEngine {
     /// Uploads that were handed to the system go on; that is what they are for.
     public func interrupt() {
         guard let running else { return }
+        logger.notice("backup: interrupted by the system")
         interrupting = true
         running.cancel()
     }
@@ -337,6 +382,7 @@ public actor BackupEngine {
     /// Stops for good and waits until nothing runs any more (account removal): a running pass is cancelled, a waiting one
     /// is forgotten, and the engine no longer reacts to network or power changes. A later `run` does nothing.
     public func shutdown() async {
+        logger.notice("backup: shut down (account removed)")
         isShutDown = true
         monitor = nil
         resume = nil
@@ -356,6 +402,10 @@ public actor BackupEngine {
         status.blocker = nil
         status.isInterrupted = false
         status.uploadedThisPass = 0
+        // Logged again for every pass, even when it ends as the last one did.
+        loggedPhase = nil
+        let kind = (dryRun ? " (dry run: Files does the backup)" : "") + (retryFailed ? ", retrying failed items" : "")
+        logger.notice("backup: pass starts\(kind, privacy: .public)")
         guard library.isAuthorized else {
             publish(.notAuthorized)
             return

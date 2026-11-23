@@ -50,7 +50,8 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
   stopping as "cancelled". The HTTP/2 case (several requests on one refused connection) is only unit-tested.
 - Diagnostics ✅ (Mac app): Settings › Server › "Export diagnostics…" writes the app's log entries of this run (at most
   the last 48 hours; the system only gives an app the log of its running process), app, system and server versions and
-  the detected features into a text file — save panel on the Mac, share sheet elsewhere (🟡 not run). Account names,
+  the detected features into a text file (backup passes and their phase changes are logged too: names and
+  counts only) — save panel on the Mac, share sheet elsewhere (🟡 not run). Account names,
   addresses, paths, file names and tokens are removed (unit-tested). ⬜ The rotating log file of SPEC §4.5 (logs across launches).
 
 ## M1 Browse and view — mostly ✅

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import OSLog
 import Observation
 import Photos
 import PhotosBackup
@@ -52,6 +53,21 @@ public enum BackupOutcome: Sendable, Equatable {
         case .idle, .scanning, .reconciling, .uploading:
             // What this pass uploaded, not the ledger's count of everything that was ever uploaded.
             self = .finished(uploaded: status.uploadedThisPass, remaining: status.pending, failed: status.failed)
+        }
+    }
+
+    /// The outcome for the log: its name and counts, no messages (they can name the account or the server).
+    public var logName: String {
+        switch self {
+        case .upToDate: "up to date"
+        case .finished(let uploaded, let remaining, let failed): "finished: uploaded \(uploaded), remaining \(remaining), failed \(failed)"
+        case .paused: "paused"
+        case .failed: "failed"
+        case .blocked(let blocker): "blocked (\(blocker))"
+        case .notAuthorized: "not authorized"
+        case .unavailable: "unavailable"
+        case .interrupted(let uploaded): "interrupted after \(uploaded) uploads"
+        case .skipped(let count): "up to date, \(count) skipped"
         }
     }
 
@@ -150,6 +166,9 @@ public final class BackupModel {
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored let settingsFile: URL
+    /// State changes of the backup, for Settings › Export diagnostics. No account names, servers or paths in public
+    /// strings; the engine logs its phases under the same category.
+    @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "backup")
 
     init(settingsFile: URL = AppPaths.layout.backupSettingsFile) {
         self.settingsFile = settingsFile
@@ -189,7 +208,10 @@ public final class BackupModel {
     /// account has the record of what it was. Without an engine (the account is signed out) the report is dropped; the
     /// record is then found stale by the next pass and the file is looked up on the server.
     func backgroundUploadFinished(_ event: BackgroundUploadEvent) async {
-        guard let engine = await configuredEngine() else { return }
+        guard let engine = await configuredEngine() else {
+            logger.notice("backup: an upload the system finished is dropped, the backup account is not available")
+            return
+        }
         await engine.backgroundUploadFinished(event)
     }
 
@@ -218,7 +240,9 @@ public final class BackupModel {
     }
 
     public func update(_ change: (inout BackupSettings) -> Void) {
+        let wasEnabled = settings.isEnabled
         change(&settings)
+        if settings.isEnabled != wasEnabled { logger.notice("backup: turned \(self.settings.isEnabled ? "on" : "off", privacy: .public)") }
         try? settings.save(to: settingsFile)
         guard let engine else { return }
         let settings = settings
@@ -245,6 +269,7 @@ public final class BackupModel {
     /// Turns backup on for the active account and runs the first pass.
     public func enable(mode: BackupSettings.FilesAppMode) async {
         guard let session = app?.session else { return }
+        logger.notice("backup: set up, Files app mode \(String(describing: mode), privacy: .public)")
         update {
             $0.accountId = session.account.id
             $0.filesAppMode = mode
@@ -272,6 +297,7 @@ public final class BackupModel {
         }
         guard let engine = await configuredEngine() else {
             let reason = unavailableReason
+            logger.notice("backup: paused, the backup account is signed out or cannot be opened")
             status.phase = .paused(reason)
             return .unavailable(reason)
         }
@@ -283,7 +309,9 @@ public final class BackupModel {
         runningPasses -= 1
         let final = box.value
         if self.engine === engine { status = final }
-        return BackupOutcome(status: final)
+        let outcome = BackupOutcome(status: final)
+        logger.info("backup: pass returned \(outcome.logName, privacy: .public)")
+        return outcome
     }
 
     /// Why no engine is available: the backup account is signed out or cannot be opened.
@@ -306,6 +334,7 @@ public final class BackupModel {
     /// Continues a pass the system interrupted. Called when the app becomes active.
     public func resumeIfInterrupted() async {
         guard settings.isEnabled, status.isInterrupted, !isPassRunning else { return }
+        logger.notice("backup: the interrupted pass resumes")
         await runNow()
     }
 
@@ -402,6 +431,7 @@ public final class BackupModel {
     /// more. Backup options that belong to it are forgotten (`AccountPurge` deletes the file).
     func accountWillBeRemoved(_ id: AccountID) async {
         if settings.accountId == id {
+            logger.notice("backup: the backup account is removed, its backup options are forgotten")
             debounce?.cancel()
             forgetSettings()
         }
@@ -420,6 +450,7 @@ public final class BackupModel {
     /// The account's app password stopped working: its backup cannot continue until the user logs in again.
     func accountSignedOut(_ id: AccountID) {
         guard engineServices?.account.id == id || ownServices?.account.id == id else { return }
+        logger.notice("backup: stopped, the backup account was signed out")
         dropEngine()
         ownServices = nil
         if settings.isEnabled { status.phase = .paused(unavailableReason) }
@@ -437,6 +468,7 @@ public final class BackupModel {
 
     func libraryChanged() {
         guard settings.isEnabled else { return }
+        logger.debug("backup: the photo library changed, a pass follows")
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))

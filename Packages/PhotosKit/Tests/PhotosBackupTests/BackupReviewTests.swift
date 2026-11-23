@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import OSLog
 import Photos
 import Synchronization
 import Testing
@@ -100,6 +101,39 @@ import Testing
         #expect(status.phase == .upToDate)
         #expect(status.failed == 0)
         #expect(status.lastFailure == nil)
+    }
+
+    /// The phases end up in the log (Settings › Export diagnostics) without file names, reasons or messages.
+    @Test func phaseChangesAreLoggedWithoutNames() async throws {
+        var status = BackupStatus()
+        status.phase = .uploading(done: 1, total: 3, current: "IMG_secret.HEIC")
+        #expect(status.phaseLogDescription == "uploading 3 items")
+        status.phase = .paused("log in to alice on cloud.example.com again")
+        #expect(status.phaseLogDescription == "paused")
+        status.phase = .failed("cloud.example.com refused")
+        status.blocker = .insufficientStorage
+        #expect(status.phaseLogDescription == "failed (insufficientStorage)")
+        status.phase = .idle
+        status.isInterrupted = true
+        #expect(status.phaseLogDescription == "idle (interrupted)")
+
+        let started = Date().addingTimeInterval(-1)
+        addPhotos(["0101", "0102"])
+        remote.state.withLock { $0.uploadErrors["IMG_0101.heic"] = .http(status: 415, message: nil) }
+        let engine = await makeEngine()
+        await engine.run(settings)
+        #expect(self.status.phase == .incomplete(failed: 1))
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let predicate = NSPredicate(format: "subsystem == %@ AND category == %@", "com.nextcloud.photos", "backup")
+        let messages: [String] = try store.getEntries(matching: predicate).compactMap { entry in
+            (entry as? OSLogEntryLog).flatMap { $0.date >= started ? $0.composedMessage : nil }
+        }
+        #expect(messages.contains("backup: pass starts"))
+        #expect(messages.contains("backup: scanning"))
+        #expect(messages.contains { $0.hasPrefix("backup: incomplete, 1 failed; uploaded this pass 1") })
+        // The state lines never carry a file name. (The per-file error line has it as private data, which a test process
+        // can read; the diagnostics export removes file names from it, see DiagnosticsTests.)
+        #expect(!messages.contains { $0.hasPrefix("backup: ") && $0.contains("IMG_") })
     }
 
     @Test func whatThePassLeavesBehind() {
