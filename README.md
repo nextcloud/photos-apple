@@ -84,5 +84,5 @@ Lint with `xcrun swift-format lint --strict --configuration .swift-format` on th
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). The app links [NextcloudKit](https://github.com/nextcloud/NextcloudKit) (GPL-3.0-or-later with App Store
-exception), so the distributed app is also subject to its terms. The Nextcloud name and logo are trademarks of Nextcloud GmbH.
+MIT, see [LICENSE](LICENSE). The only third-party dependency is [GRDB](https://github.com/groue/GRDB.swift) (MIT).
+The Nextcloud name and logo are trademarks of Nextcloud GmbH.
