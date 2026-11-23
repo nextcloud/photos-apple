@@ -41,9 +41,15 @@ struct MediaViewer: View {
         _current = State(initialValue: startId)
     }
 
+    /// The row of the current photo, observed so the favourite heart (and the value the next toggle sends) follows
+    /// changes made here or elsewhere — whatever screen opened the viewer.
+    @State private var observedItem: MediaItem?
+
     var currentItem: MediaItem? {
-        guard let current, let services = session.services else { return nil }
-        return try? services.library.item(current)
+        guard let current else { return nil }
+        // Right after paging, until the observation of the new photo has delivered its first value.
+        if let observedItem, observedItem.fileId == current { return observedItem }
+        return try? session.services?.library.item(current)
     }
 
     /// The paging scroll view. Its pages are as large as the scroll view, so whenever that changes size (sidebar,
@@ -113,6 +119,12 @@ struct MediaViewer: View {
                 .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
             #endif
             .toolbar { toolbar }
+            .task(id: current) {
+                guard let current, let library = session.services?.library else { return }
+                do {
+                    for try await item in library.observeItem(current) { observedItem = item }
+                } catch {}
+            }
             .navigationTitle(currentItem.map { $0.timestamp.formatted(date: .abbreviated, time: .shortened) } ?? "")
             .onKeyPress(keys: [.leftArrow, .rightArrow, .escape, .space]) { press in
                 guard press.modifiers.isDisjoint(with: [.command, .control, .option]), let key = Self.viewerKey(press.key) else {
@@ -450,7 +462,11 @@ struct ViewerPage: View {
         .accessibilityAction(named: Text("Info", bundle: .module)) { actions.showInfo() }
         .accessibilityAction(named: Text("Delete", bundle: .module)) { actions.delete() }
         .task(id: fileId) {
-            item = try? session.services?.library.item(fileId)
+            // Observed, so the VoiceOver favourite action and description follow a toggle.
+            guard let library = session.services?.library else { return }
+            do {
+                for try await value in library.observeItem(fileId) { item = value }
+            } catch {}
         }
         .task(id: PeopleRequest(fileId: fileId, wanted: isCurrent && voiceOver)) {
             guard isCurrent, voiceOver, item?.kind == .image, let path = item?.path, session.features.has(.recognize),

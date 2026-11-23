@@ -462,6 +462,18 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// Live updates of one item (index or collection-only), e.g. the photo shown in the viewer: its favourite heart
+    /// follows a toggle, and the next toggle sends the opposite value.
+    public func observeItem(_ fileId: FileID) -> AsyncThrowingStream<MediaItem?, any Error> {
+        ValueObservation.tracking { db -> MediaItem? in
+            if let item = try MediaItem.fetchOne(db, key: fileId) { return item }
+            return try CollectionMediaRecord.fetchOne(db, key: fileId)?.item
+        }
+        .removeDuplicates()
+        .values(in: database.writer)
+        .stream()
+    }
+
     public func items(_ fileIds: [FileID]) throws -> [FileID: MediaItem] {
         try database.writer.read { db in try Self.items(db, fileIds) }
     }

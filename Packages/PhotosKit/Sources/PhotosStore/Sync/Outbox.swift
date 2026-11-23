@@ -327,6 +327,11 @@ public actor Outbox {
         switch operation {
         case .favorite(let fileId, _, let value):
             try db.execute(sql: "UPDATE media SET isFavorite = ? WHERE fileId = ?", arguments: [value, fileId])
+            // Photos of albums shared with the user are only in `collectionMedia`.
+            if var record = try CollectionMediaRecord.fetchOne(db, key: fileId) {
+                record.item.isFavorite = value
+                try record.update(db)
+            }
         case .delete(let fileId, _):
             try db.execute(sql: "DELETE FROM media WHERE fileId = ?", arguments: [fileId])
             try db.execute(sql: "DELETE FROM albumItem WHERE fileId = ?", arguments: [fileId])

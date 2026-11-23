@@ -3,6 +3,7 @@
 
 import Foundation
 import GRDB
+import Synchronization
 import Testing
 
 @testable import PhotosModel
@@ -35,6 +36,30 @@ import Testing
 
     func attempts() throws -> [Int] {
         try database.writer.read { db in try Int.fetchAll(db, sql: "SELECT attempts FROM operation ORDER BY id") }
+    }
+
+    /// The viewer observes the row of the photo shown: a favourite toggle must reach it, also for a photo that is
+    /// only in `collectionMedia` (an album shared with the user), so the heart flips and the next toggle sends the
+    /// opposite value.
+    @Test func favouriteToggleReachesTheObservedItem() async throws {
+        let shared = MediaItem(fileId: 77, path: "/Shared/c.jpg", mimeType: "image/jpeg", etag: "e77")
+        try await database.writer.write { db in try CollectionMediaRecord(fileId: 77, item: shared).insert(db) }
+        let outbox = outbox(retryDelay: 3600)
+        server.setOffline(true)
+
+        for id in [FileID(1), 77] {
+            let seen = Mutex<[Bool]>([])
+            let observation = Task {
+                for try await item in library.observeItem(id) { seen.withLock { $0.append(item?.isFavorite ?? false) } }
+            }
+            defer { observation.cancel() }
+            #expect(await eventually { seen.withLock { $0 } == [false] })
+            try await outbox.enqueue([.favorite(fileId: id, path: "/x.jpg", value: true)])
+            #expect(await eventually(timeout: 2) { seen.withLock { $0 } == [false, true] }, "file \(id)")
+            #expect(try library.item(id)?.isFavorite == true)
+            try await outbox.enqueue([.favorite(fileId: id, path: "/x.jpg", value: false)])
+            #expect(await eventually(timeout: 2) { seen.withLock { $0 } == [false, true, false] }, "file \(id)")
+        }
     }
 
     @Test func operationInBackoffIsNotOvertaken() async throws {
