@@ -228,7 +228,7 @@ public actor Outbox {
             do {
                 try await execute(operation)
                 try? await database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE id = ?", arguments: [id]) }
-            } catch where Task.isCancelled {
+            } catch  where Task.isCancelled {
                 return  // shut down: the operation stays pending
             } catch let error as NetworkError where error.isTransient {
                 // Back off and stop: later operations wait behind this one until it is retried (timer, network change).

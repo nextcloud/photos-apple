@@ -227,7 +227,8 @@ public struct LoginView: View {
                 // The server may name another address for itself than the one that was typed.
                 if !allowUnencrypted, LoginService.isUnencrypted(credentials.serverURL) {
                     error = String(
-                        localized: "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that.",
+                        localized:
+                            "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that.",
                         bundle: .module)
                     return
                 }

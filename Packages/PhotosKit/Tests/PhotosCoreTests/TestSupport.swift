@@ -190,7 +190,8 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             registry[host] ?? registry.values.first { body.contains($0.host) }
         }
         let (status, data) = server?.respond(to: recorded) ?? (404, Data())
-        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        let response = HTTPURLResponse(
+            url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)

@@ -47,7 +47,11 @@ final class FakeRangeServer: Sendable {
     func collect(_ source: MediaByteSource, offset: Int64, length: Int64?) async throws -> (Data, [MediaByteSource.Info]) {
         var data = Data()
         var infos: [MediaByteSource.Info] = []
-        try await source.read(offset: offset, length: length) { infos.append($0) } onData: { data.append($0) }
+        try await source.read(offset: offset, length: length) {
+            infos.append($0)
+        } onData: {
+            data.append($0)
+        }
         return (data, infos)
     }
 
@@ -148,7 +152,9 @@ final class FakeRangeServer: Sendable {
     }
 
     @Test func contentTypeIsAUniformTypeIdentifier() {
-        #expect(StreamingAssetLoader.contentType(serverMime: "application/octet-stream", libraryMime: "video/quicktime") == "com.apple.quicktime-movie")
+        #expect(
+            StreamingAssetLoader.contentType(serverMime: "application/octet-stream", libraryMime: "video/quicktime")
+                == "com.apple.quicktime-movie")
         #expect(StreamingAssetLoader.contentType(serverMime: "video/mp4", libraryMime: nil) == "public.mpeg-4")
         #expect(StreamingAssetLoader.contentType(serverMime: nil, libraryMime: nil) == nil)
     }

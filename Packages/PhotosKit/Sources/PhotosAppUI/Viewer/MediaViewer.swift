@@ -73,69 +73,70 @@ struct MediaViewer: View {
 
     var body: some View {
         pager
-        // The black backdrop always fills the window; the pages only do so on iPhone. On the Mac and iPad they
-        // stay inside the safe area, so nothing hides under the sidebar, the toolbar or the info inspector.
-        .modifier(ViewerPageArea())
-        .background(Color.black.ignoresSafeArea())
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.width
-        } action: { width in
-            pagerWidth = width
-        }
-        .onContinuousHover { phase in
-            hoverEdge = Self.edge(under: phase, width: pagerWidth)
-        }
-        .overlay { stepButtons }
-        .onTapGesture {
-            focused = true
-            withAnimation { chromeHidden.toggle() }
-        }
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focused)
-        .onAppear { focused = true }
-        .onChange(of: showingInfo) { _, showing in
-            if !showing { focused = true }
-        }
-        #if os(iOS)
-            .statusBarHidden(chromeHidden)
-            .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
-        #endif
-        .toolbar { toolbar }
-        .navigationTitle(currentItem.map { $0.timestamp.formatted(date: .abbreviated, time: .shortened) } ?? "")
-        .onKeyPress(keys: [.leftArrow, .rightArrow, .escape, .space]) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]), let key = Self.viewerKey(press.key) else {
-                return .ignored
+            // The black backdrop always fills the window; the pages only do so on iPhone. On the Mac and iPad they
+            // stay inside the safe area, so nothing hides under the sidebar, the toolbar or the info inspector.
+            .modifier(ViewerPageArea())
+            .background(Color.black.ignoresSafeArea())
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                pagerWidth = width
             }
-            perform(key)
-            return .handled
-        }
-        #if os(macOS)
-            // Escape also has to work while the info inspector (or anything else in the window) has the focus.
-            .background {
-                Button(String(localized: "Close", bundle: .module)) { dismiss() }
+            .onContinuousHover { phase in
+                hoverEdge = Self.edge(under: phase, width: pagerWidth)
+            }
+            .overlay { stepButtons }
+            .onTapGesture {
+                focused = true
+                withAnimation { chromeHidden.toggle() }
+            }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused)
+            .onAppear { focused = true }
+            .onChange(of: showingInfo) { _, showing in
+                if !showing { focused = true }
+            }
+            #if os(iOS)
+                .statusBarHidden(chromeHidden)
+                .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
+            #endif
+            .toolbar { toolbar }
+            .navigationTitle(currentItem.map { $0.timestamp.formatted(date: .abbreviated, time: .shortened) } ?? "")
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .escape, .space]) { press in
+                guard press.modifiers.isDisjoint(with: [.command, .control, .option]), let key = Self.viewerKey(press.key) else {
+                    return .ignored
+                }
+                perform(key)
+                return .handled
+            }
+            #if os(macOS)
+                // Escape also has to work while the info inspector (or anything else in the window) has the focus.
+                .background {
+                    Button(String(localized: "Close", bundle: .module)) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .opacity(0)
                     .accessibilityHidden(true)
+                }
+            #endif
+            .infoInspector(isPresented: $showingInfo) {
+                if let item = currentItem { InfoPanel(item: item, inInspector: true) }
             }
-        #endif
-        .infoInspector(isPresented: $showingInfo) {
-            if let item = currentItem { InfoPanel(item: item, inInspector: true) }
-        }
-        .focusedSceneValue(\.gridActions, viewerActions)
-        .sheet(item: $editing) { item in EditorView(item: item) }
-        .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
-        .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
-        .confirmationDialog(String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible)
-        {
-            Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                if let item = currentItem {
-                    let next = ViewerNavigation.neighbour(in: ids, of: item.fileId)
-                    Task { await session.delete([item]) }
-                    if let next { current = next } else { dismiss() }
+            .focusedSceneValue(\.gridActions, viewerActions)
+            .sheet(item: $editing) { item in EditorView(item: item) }
+            .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
+            .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
+            .confirmationDialog(
+                String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
+            ) {
+                Button(String(localized: "Delete", bundle: .module), role: .destructive) {
+                    if let item = currentItem {
+                        let next = ViewerNavigation.neighbour(in: ids, of: item.fileId)
+                        Task { await session.delete([item]) }
+                        if let next { current = next } else { dismiss() }
+                    }
                 }
             }
-        }
     }
 
     /// Menu bar actions for the photo shown.

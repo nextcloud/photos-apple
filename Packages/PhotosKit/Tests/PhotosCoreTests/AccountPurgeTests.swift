@@ -65,7 +65,8 @@ import Testing
         // … Bob still reaches the same server with the same certificates, and keeps his data and his backup.
         #expect(sandbox.keychain.data(for: Keychain.clientCertificateKey(host)) != nil)
         #expect(sandbox.keychain.string(for: Keychain.clientCertificatePasswordKey(host)) == "p12-password")
-        #expect(FileManager.default.fileExists(atPath: sandbox.layout.certificates.appending(path: "\(host).der").path(percentEncoded: false)))
+        #expect(
+            FileManager.default.fileExists(atPath: sandbox.layout.certificates.appending(path: "\(host).der").path(percentEncoded: false)))
         #expect(FileManager.default.fileExists(atPath: sandbox.layout.database(bob.id).path(percentEncoded: false)))
         #expect(sandbox.keychain.string(for: Keychain.passwordKey(bob.id.rawValue)) == "secret")
         #expect(BackupSettings.load(from: sandbox.layout.backupSettingsFile).accountId == bob.id)
@@ -75,7 +76,8 @@ import Testing
         // The last account on the host takes the host's certificates and its backup options with it.
         #expect(sandbox.keychain.data(for: Keychain.clientCertificateKey(host)) == nil)
         #expect(sandbox.keychain.data(for: Keychain.clientCertificatePasswordKey(host)) == nil)
-        #expect(!FileManager.default.fileExists(atPath: sandbox.layout.certificates.appending(path: "\(host).der").path(percentEncoded: false)))
+        #expect(
+            !FileManager.default.fileExists(atPath: sandbox.layout.certificates.appending(path: "\(host).der").path(percentEncoded: false)))
         #expect(!FileManager.default.fileExists(atPath: sandbox.layout.backupSettingsFile.path(percentEncoded: false)))
         // A new trust store (next launch) no longer knows the certificate either.
         #expect(sandbox.files().filter { $0.hasSuffix(".der") } == ["Library/Application Support/Certificates/other.example.org.der"])
