@@ -91,9 +91,12 @@ struct BackupStatusView: View {
         Form {
             Section {
                 HStack(spacing: 14) {
-                    statusIcon(status.phase)
+                    statusIcon(status)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(statusTitle(status.phase)).font(.headline)
+                        Text(statusTitle(status)).font(.headline)
+                        if let blocker = activeBlocker(status) {
+                            Text(blockerAdvice(blocker)).font(.subheadline).foregroundStyle(.secondary)
+                        }
                         if let lastRun = status.lastRun {
                             Text("Last checked \(lastRun.formatted(.relative(presentation: .named)))", bundle: .module)
                                 .font(.caption).foregroundStyle(.secondary)
@@ -108,7 +111,10 @@ struct BackupStatusView: View {
                 LabeledContent(String(localized: "Waiting", bundle: .module), value: "\(status.pending)")
                 if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: "\(status.failed)") }
                 HStack {
-                    Button(String(localized: "Back up now", bundle: .module)) { Task { await backup.runNow() } }
+                    Button(String(localized: "Back up now", bundle: .module)) {
+                        // The user asks: items that failed are tried again now instead of after their waiting time.
+                        Task { await backup.runNow(retryFailed: true) }
+                    }
                     if isRunning(status.phase) {
                         Button(String(localized: "Pause", bundle: .module)) { backup.cancel() }
                     }
@@ -165,6 +171,57 @@ struct BackupStatusView: View {
         case .scanning, .reconciling, .uploading: true
         default: false
         }
+    }
+
+    /// What stopped the whole backup, while the status still is that failure.
+    func activeBlocker(_ status: BackupStatus) -> BackupStatus.Blocker? {
+        guard case .failed = status.phase else { return nil }
+        return status.blocker
+    }
+
+    func blockerSymbol(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage: "externaldrive.badge.exclamationmark"
+        case .unauthorized: "person.crop.circle.badge.exclamationmark"
+        case .forbidden: "lock.fill"
+        case .serverTrust: "lock.trianglebadge.exclamationmark"
+        }
+    }
+
+    func blockerTitle(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage: String(localized: "Your Nextcloud storage is full", bundle: .module)
+        case .unauthorized: String(localized: "Log in again to continue the backup", bundle: .module)
+        case .forbidden: String(localized: "The server does not allow the upload", bundle: .module)
+        case .serverTrust: String(localized: "The connection to your Nextcloud is not trusted", bundle: .module)
+        }
+    }
+
+    func blockerAdvice(_ blocker: BackupStatus.Blocker) -> String {
+        switch blocker {
+        case .insufficientStorage:
+            String(localized: "Free up space on your Nextcloud or get more storage, then back up again.", bundle: .module)
+        case .unauthorized: String(localized: "Your login on this server is no longer valid.", bundle: .module)
+        case .forbidden:
+            String(localized: "Check that you are allowed to add files to the backup folder, or choose another folder.", bundle: .module)
+        case .serverTrust:
+            String(
+                localized: "The server's certificate changed or is not trusted, or the server asks for a client certificate.",
+                bundle: .module)
+        }
+    }
+
+    @ViewBuilder func statusIcon(_ status: BackupStatus) -> some View {
+        if let blocker = activeBlocker(status) {
+            Image(systemName: blockerSymbol(blocker)).foregroundStyle(.red).font(.title)
+        } else {
+            statusIcon(status.phase)
+        }
+    }
+
+    func statusTitle(_ status: BackupStatus) -> String {
+        if let blocker = activeBlocker(status) { return blockerTitle(blocker) }
+        return statusTitle(status.phase)
     }
 
     @ViewBuilder func statusIcon(_ phase: BackupStatus.Phase) -> some View {
