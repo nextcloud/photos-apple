@@ -54,7 +54,7 @@ enum Formatters {
     }
 }
 
-/// The Nextcloud logo (three rings), drawn as a shape so it scales and needs no asset.
+/// The official Nextcloud logo (vector, from nextcloud/server), in the accent colour by default.
 public struct NextcloudLogo: View {
     var color: Color = Design.accent
 
@@ -63,19 +63,34 @@ public struct NextcloudLogo: View {
     }
 
     public var body: some View {
+        SVGShape.nextcloudLogo
+            .fill(color, style: FillStyle(eoFill: true))
+            .aspectRatio(2, contentMode: .fit)
+            .accessibilityLabel(Text(verbatim: "Nextcloud"))
+    }
+}
+
+/// The Nextcloud Photos app icon (the Photos server app's icon, white on Nextcloud blue).
+public struct PhotosAppIcon: View {
+    public init() {}
+
+    public var body: some View {
         GeometryReader { proxy in
-            let height = min(proxy.size.height, proxy.size.width / 2)
-            let big = height * 0.78
-            let small = height * 0.44
-            let line = height * 0.13
+            let side = min(proxy.size.width, proxy.size.height)
             ZStack {
-                Circle().stroke(color, lineWidth: line).frame(width: big - line, height: big - line)
-                Circle().stroke(color, lineWidth: line * 0.75).frame(width: small - line, height: small - line)
-                    .offset(x: -height * 0.72)
-                Circle().stroke(color, lineWidth: line * 0.75).frame(width: small - line, height: small - line)
-                    .offset(x: height * 0.72)
+                RoundedRectangle(cornerRadius: side * 0.225, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Design.accent, Color(red: 28 / 255, green: 175 / 255, blue: 1)], startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                SVGShape.photosIcon
+                    .fill(.white)
+                    .padding(side * 0.12)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            .frame(width: side, height: side)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityLabel(Text(verbatim: "Nextcloud Photos"))
     }
 }
