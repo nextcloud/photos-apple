@@ -92,7 +92,7 @@ public enum Memories {
             return first.key
         }
         guard let start = cluster.first?.timestamp, let end = cluster.last?.timestamp else { return "" }
-        return (start..<max(end, start.addingTimeInterval(1))).formatted(.interval.day().month().year().locale(locale))
+        return DateRangeLabel.string(from: start, to: end, locale: locale)
     }
 
     /// Year recap: the newest year with ≥ 30 photos; 60 highlights, favourites first, then evenly per month.
