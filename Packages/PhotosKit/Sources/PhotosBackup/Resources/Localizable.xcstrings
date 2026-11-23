@@ -2,25 +2,25 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Paused" : {
-
+      "comment" : "Backup status: the user paused the backup."
     },
     "Paused in Low Data Mode" : {
-
+      "comment" : "Backup status: the backup waits because the device's Low Data Mode is on. Use the name of the setting as it appears in the system's Settings."
     },
     "Paused in Low Power Mode" : {
-
+      "comment" : "Backup status: the backup waits because the device's Low Power Mode is on. Use the name of the setting as it appears in the system's Settings."
     },
     "Photo" : {
-
+      "comment" : "First word of the file name given to a backed-up photo when file names start with the kind of file, followed by date and number, e.g. \"Photo 26-05-01 12-30-00 1234.jpg\". Keep it short and usable in a file name."
     },
     "Video" : {
-
+      "comment" : "First word of the file name given to a backed-up video when file names start with the kind of file, followed by date and number, e.g. \"Video 26-05-01 12-30-00 1234.mov\". Keep it short and usable in a file name."
     },
     "Waiting for Wi-Fi" : {
-
+      "comment" : "Backup status: the backup is set to Wi-Fi only and the device is on another kind of network."
     },
     "Waiting for a network connection" : {
-
+      "comment" : "Backup status: the device is offline."
     }
   },
   "version" : "1.1"

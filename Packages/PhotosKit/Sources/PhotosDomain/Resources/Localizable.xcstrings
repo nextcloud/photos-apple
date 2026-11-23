@@ -39,16 +39,16 @@
       }
     },
     "Favorites" : {
-
+      "comment" : "Search suggestion that limits the search to favorite photos."
     },
     "Today" : {
-
+      "comment" : "Header of the group of photos taken today, in the timeline."
     },
     "Videos" : {
-
+      "comment" : "Search suggestion that limits the search to videos."
     },
     "Yesterday" : {
-
+      "comment" : "Header of the group of photos taken yesterday, in the timeline."
     }
   },
   "version" : "1.1"

@@ -2,6 +2,7 @@
   "sourceLanguage" : "en",
   "strings" : {
     "%lld items were backed up, %lld are still waiting." : {
+      "comment" : "Result of a backup run that ended before everything was uploaded, spoken or shown by the \"Back up now\" shortcut. Both numbers have plural forms.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -54,9 +55,10 @@
       }
     },
     "Backup failed: %@" : {
-
+      "comment" : "Result of a backup run that failed. %@ is the error message."
     },
     "Backup finished, but %lld items could not be uploaded." : {
+      "comment" : "Result of a backup run where some photos or videos failed to upload. %lld is their number.",
       "localizations" : {
         "en" : {
           "variations" : {
@@ -79,15 +81,16 @@
       }
     },
     "Backup finished." : {
-
+      "comment" : "Result of a backup run that uploaded everything."
     },
     "Backup is not turned on in Nextcloud Photos." : {
-
+      "comment" : "Result of the \"Back up now\" shortcut when backup is turned off in the app. \"Nextcloud Photos\" is the app's name."
     },
     "Backup is paused: %@" : {
-
+      "comment" : "Result of a backup run that is waiting. %@ is the reason, a sentence fragment such as \"Waiting for Wi-Fi\"."
     },
     "Backup is paused: log in to %@ on %@ again." : {
+      "comment" : "Result of a backup run when the account's login expired. The first %@ is the account's name, the second the server's host name.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -98,37 +101,37 @@
       }
     },
     "Backup stopped: log in to your Nextcloud again." : {
-
+      "comment" : "Result of a backup run that stopped because the login is no longer valid."
     },
     "Backup stopped: the connection to your Nextcloud is not trusted." : {
-
+      "comment" : "Result of a backup run that stopped because the server's certificate is not trusted."
     },
     "Backup stopped: the server does not allow uploads to the backup folder." : {
-
+      "comment" : "Result of a backup run that stopped because the server refused the upload (no permission)."
     },
     "Backup stopped: your Nextcloud storage is full." : {
-
+      "comment" : "Result of a backup run that stopped because the user's storage quota on the server is used up."
     },
     "Backup was interrupted. It continues the next time Nextcloud Photos is running." : {
-
+      "comment" : "Result of a backup run that the system ended early. \"Nextcloud Photos\" is the app's name."
     },
     "Cancelled" : {
-
+      "comment" : "Status of an upload or download that the user cancelled, in the list of transfers."
     },
     "Log in to back up your photos." : {
-
+      "comment" : "Result of the \"Back up now\" shortcut when no account is logged in."
     },
     "Nextcloud Photos has no access to your photos." : {
-
+      "comment" : "Result of a backup run when the user has not allowed the app to read the device's photo library. \"Nextcloud Photos\" is the app's name."
     },
     "Only your own photos can be shared by link." : {
-
+      "comment" : "Error message when the user tries to create a share link for photos that someone else shared with them."
     },
     "Shared on %@" : {
-
+      "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
     },
     "Your photos are backed up." : {
-
+      "comment" : "Result of a backup run when there was nothing left to upload."
     }
   },
   "version" : "1.1"

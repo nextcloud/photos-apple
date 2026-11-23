@@ -2,61 +2,61 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Albums" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: the user's albums."
     },
     "Back up now" : {
-
+      "comment" : "Short title of the App Shortcut that starts a backup of the device's photos, shown in Shortcuts and Spotlight."
     },
     "Back up photos to Nextcloud" : {
-
+      "comment" : "Title of the Shortcuts action that starts a backup of the device's photos."
     },
     "Backup" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: the backup screen."
     },
     "Backup is not turned on in Nextcloud Photos." : {
-
+      "comment" : "Answer of the \"Back up now\" shortcut when the user has not turned on backup in the app."
     },
     "Favorites" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: favorite photos."
     },
     "Library" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: the timeline of all photos."
     },
     "Map" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: photos on a map."
     },
     "Memories" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: automatically created memories."
     },
     "Nextcloud Photos view" : {
-
+      "comment" : "Name of the kind of thing the \"Open in Nextcloud Photos\" shortcut takes as its parameter (a view such as Library or Map). \"Nextcloud Photos\" is the app's name, do not translate it."
     },
     "On this day" : {
-
+      "comment" : "Photos taken on today's date in earlier years: name of a view that Siri and Shortcuts can open, and short title of the App Shortcut that opens it."
     },
     "Open in Nextcloud Photos" : {
-
+      "comment" : "Title of the Shortcuts action that opens a view of the app. \"Nextcloud Photos\" is the app's name, do not translate it."
     },
     "Opens a view of Nextcloud Photos, such as On this day or the map." : {
-
+      "comment" : "Description of the \"Open in Nextcloud Photos\" action in Shortcuts."
     },
     "People" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: people recognized in photos."
     },
     "Photo map" : {
-
+      "comment" : "Short title of the App Shortcut that opens the map of photos, shown in Shortcuts and Spotlight."
     },
     "Places" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: photos grouped by place."
     },
     "Search" : {
-
+      "comment" : "Name of a view of the app that Siri and Shortcuts can open: search."
     },
     "Uploads new photos of this device to your Nextcloud." : {
-
+      "comment" : "Description of the \"Back up now\" action in Shortcuts."
     },
     "View" : {
-
+      "comment" : "Label of the parameter of the \"Open in Nextcloud Photos\" shortcut action: which view of the app to open (noun)."
     }
   },
   "version" : "1.1"
