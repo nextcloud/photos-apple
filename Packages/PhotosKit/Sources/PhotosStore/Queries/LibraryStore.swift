@@ -3,6 +3,7 @@
 
 import Foundation
 import GRDB
+import PhotosDomain
 import PhotosModel
 
 /// What a timeline-like view shows.
@@ -57,6 +58,40 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
         isArchived = row["isArchived"]
     }
 
+    /// Decodes a row of `LibraryStore.gridColumns` by position. Looking fifteen columns up by name for each of 100 000
+    /// rows, and bridging every path to `NSString`, is most of the cost of a timeline query.
+    init(gridRow row: Row) {
+        fileId = row[0]
+        timestamp = Date(timeIntervalSince1970: row[1] ?? 0)
+        kind = MediaKind(rawValue: row[2]) ?? .image
+        etag = row[3]
+        isFavorite = row[4]
+        isLivePhoto = !row.hasNull(atIndex: 5)
+        hasPreview = row[6]
+        blurhash = row[7]
+        duration = row[8]
+        let width: Int? = row[9]
+        let height: Int? = row[10]
+        if let width, let height, width > 0, height > 0 { aspectRatio = Double(width) / Double(height) } else { aspectRatio = 1 }
+        name = row[11]
+        directory = Self.directory(of: row[12])
+        mimeType = row[13]
+        isArchived = row[14]
+    }
+
+    /// `(path as NSString).deletingLastPathComponent` for the paths of the index (`/folder/…/name`), without bridging.
+    static func directory(of path: String) -> String {
+        let utf8 = path.utf8
+        guard utf8.first == UInt8(ascii: "/"), utf8.last != UInt8(ascii: "/"), let slash = utf8.lastIndex(of: UInt8(ascii: "/")) else {
+            return (path as NSString).deletingLastPathComponent
+        }
+        if slash == utf8.startIndex { return "/" }
+        let directory = path[..<slash]
+        // "//" and similar: let Foundation normalise the rare odd path.
+        if directory.utf8.last == UInt8(ascii: "/") { return (path as NSString).deletingLastPathComponent }
+        return String(directory)
+    }
+
     public init(_ item: MediaItem) {
         fileId = item.fileId
         timestamp = item.timestamp
@@ -75,7 +110,157 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
     }
 }
 
+/// A row of the timeline with only what laying out, sectioning and badging the grid needs (about 40 bytes, no strings).
+/// Details of the tiles on screen come from `LibraryStore.gridMedia(_:)`.
+public struct TimelineRow: Hashable, Sendable, Identifiable {
+    public var id: FileID { fileId }
+    public var fileId: FileID
+    public var timestamp: Date
+    public var kind: MediaKind
+    public var isFavorite: Bool
+    public var isLivePhoto: Bool
+    /// Pixel size; 0 when unknown.
+    public var width: Int32
+    public var height: Int32
+    /// Video duration in seconds when known.
+    public var duration: Double?
+
+    public var aspectRatio: Double { width > 0 && height > 0 ? Double(width) / Double(height) : 1 }
+
+    public init(
+        fileId: FileID, timestamp: Date, kind: MediaKind = .image, isFavorite: Bool = false, isLivePhoto: Bool = false, width: Int32 = 0,
+        height: Int32 = 0, duration: Double? = nil
+    ) {
+        self.fileId = fileId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.isFavorite = isFavorite
+        self.isLivePhoto = isLivePhoto
+        self.width = width
+        self.height = height
+        self.duration = duration
+    }
+
+    /// Decodes a row of `LibraryStore.timelineColumns` by position.
+    init(timelineRow row: Row) {
+        fileId = row[0]
+        timestamp = Date(timeIntervalSince1970: row[1] ?? 0)
+        kind = (row[2] as String) == MediaKind.video.rawValue ? .video : .image
+        isFavorite = row[3]
+        isLivePhoto = !row.hasNull(atIndex: 4)
+        width = Int32(clamping: (row[5] as Int64?) ?? 0)
+        height = Int32(clamping: (row[6] as Int64?) ?? 0)
+        duration = row[7]
+    }
+}
+
+/// A search over the index (SPEC SR-2/SR-3): AND between the kinds of criteria, OR within places, dates and albums.
+public struct LibrarySearch: Hashable, Sendable {
+    /// Free text. Every word must occur (as a substring, ignoring case and diacritics) in the file name, place, country,
+    /// caption or folder path.
+    public var texts: [String]
+    public var places: [String]
+    public var dateRanges: [Range<Date>]
+    public var favoritesOnly: Bool
+    public var videosOnly: Bool
+    public var albumIds: [String]
+    /// Memberships that come from the server (tags, people): results must be in every set.
+    public var memberships: [Set<FileID>]
+
+    public init(
+        texts: [String] = [], places: [String] = [], dateRanges: [Range<Date>] = [], favoritesOnly: Bool = false,
+        videosOnly: Bool = false, albumIds: [String] = [], memberships: [Set<FileID>] = []
+    ) {
+        self.texts = texts
+        self.places = places
+        self.dateRanges = dateRanges
+        self.favoritesOnly = favoritesOnly
+        self.videosOnly = videosOnly
+        self.albumIds = albumIds
+        self.memberships = memberships
+    }
+
+    /// The words of the free text.
+    var terms: [String] {
+        var seen = Set<String>()
+        return texts.flatMap { $0.split(whereSeparator: \.isWhitespace).map(String.init) }.filter { seen.insert($0.lowercased()).inserted }
+    }
+}
+
+extension LibrarySearch {
+    /// The criteria of filter chips that the index answers by itself. Tags and people are memberships on the server:
+    /// fetch them and add one set per kind to `memberships`.
+    public init(filters: [SearchFilter]) {
+        self.init()
+        for filter in filters {
+            switch filter {
+            case .text(let text): texts.append(text)
+            case .place(let name): places.append(name)
+            case .dateRange(let start, let end, _): if start < end { dateRanges.append(start..<end) }
+            case .album(let id, _): albumIds.append(id)
+            case .favorites: favoritesOnly = true
+            case .videos: videosOnly = true
+            case .tag, .person: break
+            }
+        }
+    }
+}
+
+/// A rectangle on the map, in degrees.
+public struct MapRegion: Hashable, Sendable {
+    public var minLatitude: Double
+    public var maxLatitude: Double
+    public var minLongitude: Double
+    public var maxLongitude: Double
+
+    public init(minLatitude: Double, maxLatitude: Double, minLongitude: Double, maxLongitude: Double) {
+        self.minLatitude = max(-90, minLatitude)
+        self.maxLatitude = min(90, maxLatitude)
+        self.minLongitude = max(-180, minLongitude)
+        self.maxLongitude = min(180, maxLongitude)
+    }
+
+    /// The rectangle that reaches `latitudeReach` / `longitudeReach` degrees from the centre in each direction.
+    public init(centerLatitude: Double, centerLongitude: Double, latitudeReach: Double, longitudeReach: Double) {
+        self.init(
+            minLatitude: centerLatitude - latitudeReach, maxLatitude: centerLatitude + latitudeReach,
+            minLongitude: centerLongitude - longitudeReach, maxLongitude: centerLongitude + longitudeReach)
+    }
+}
+
+/// The geotagged items of one grid cell of the map, aggregated by the database.
+public struct MapCell: Hashable, Sendable, Identifiable {
+    public var id: String { "\(row)-\(column)" }
+    public var row: Int
+    public var column: Int
+    public var count: Int
+    /// The newest file of the cell and where it was taken (where the cell's marker goes).
+    public var cover: GridMedia
+    public var latitude: Double
+    public var longitude: Double
+    /// The query this cell came from; `LibraryStore.mapItems(in:)` uses it to list the cell's items.
+    public var region: MapRegion
+    public var cellLatitude: Double
+    public var cellLongitude: Double
+}
+
+/// The memories of a library (SPEC §7.12).
+public struct MemoriesSnapshot: Sendable, Equatable {
+    public var onThisDay: [Memory] = []
+    public var trips: [Memory] = []
+    public var recap: Memory?
+
+    public init(onThisDay: [Memory] = [], trips: [Memory] = [], recap: Memory? = nil) {
+        self.onThisDay = onThisDay
+        self.trips = trips
+        self.recap = recap
+    }
+}
+
 /// Read and write access to the library index.
+///
+/// The `async` queries run on a database reader queue, never on the caller's actor: views call them from `.task` without
+/// blocking the main thread. The synchronous ones are for callers that are off the main thread already (sync, widgets).
 public struct LibraryStore: Sendable {
     public let database: AccountDatabase
 
@@ -83,12 +268,25 @@ public struct LibraryStore: Sendable {
         self.database = database
     }
 
+    /// The time items are ordered by, as the expression the `media_timeline` index is built on (the generated
+    /// `timestamp` column has the same value, but SQLite would not answer a query from that index alone with it).
+    static let timestamp = "coalesce(media.capturedAt, media.modifiedAt)"
+
     static let gridColumns =
-        "media.fileId, media.timestamp, media.kind, media.etag, media.isFavorite, media.livePhotoPeer, media.hasPreview, media.blurhash, media.duration, media.width, media.height, media.name, media.path, media.mimeType, media.isArchived"
+        "media.fileId, \(timestamp) AS timestamp, media.kind, media.etag, media.isFavorite, media.livePhotoPeer, media.hasPreview, media.blurhash, media.duration, media.width, media.height, media.name, media.path, media.mimeType, media.isArchived"
+
+    /// The columns of `TimelineRow`; all of them are in the `media_timeline` index.
+    static let timelineColumns =
+        "media.fileId, \(timestamp) AS timestamp, media.kind, media.isFavorite, media.livePhotoPeer, media.width, media.height, media.duration"
+
+    /// Items that are shown at all: not the video half of a Live Photo and not archived. Written out literally (not bound)
+    /// so that SQLite can use the partial indexes declared with the same condition.
+    static let visible = "media.isLivePhotoVideo = 0 AND media.isArchived = 0"
+
+    static let displayOrder = "ORDER BY \(timestamp) DESC, media.fileId DESC"
 
     /// SQL for a filter; visible items exclude Live Photo videos and (unless asked) archived items.
-    static func sql(for filter: MediaFilter, excludedPrefixes: [String]) -> (String, StatementArguments) {
-        var joins = ""
+    static func sql(for filter: MediaFilter, excludedPrefixes: [String], columns: String = gridColumns) -> (String, StatementArguments) {
         var conditions = ["media.isLivePhotoVideo = 0"]
         var arguments: StatementArguments = []
         switch filter {
@@ -100,17 +298,16 @@ public struct LibraryStore: Sendable {
         case .place(let name):
             conditions.append("media.isArchived = 0 AND media.place = ?")
             arguments += [name]
+        // Memberships are subqueries, not joins: an item is listed once however often it is a member (a person can have
+        // two detections in one photo), without a DISTINCT over every column.
         case .album(let id):
-            joins = "JOIN albumItem ON albumItem.fileId = media.fileId"
-            conditions.append("albumItem.albumId = ?")
+            conditions.append("media.fileId IN (SELECT fileId FROM albumItem WHERE albumId = ?)")
             arguments += [id]
         case .person(let name):
-            joins = "JOIN personItem ON personItem.fileId = media.fileId"
-            conditions.append("personItem.person = ?")
+            conditions.append("media.fileId IN (SELECT fileId FROM personItem WHERE person = ?)")
             arguments += [name]
         case .tag(let id):
-            joins = "JOIN tagItem ON tagItem.fileId = media.fileId"
-            conditions.append("media.isArchived = 0 AND tagItem.tagId = ?")
+            conditions.append("media.isArchived = 0 AND media.fileId IN (SELECT fileId FROM tagItem WHERE tagId = ?)")
             arguments += [id]
         case .fileIds(let ids):
             conditions.append("media.fileId IN (\(ids.map { String($0) }.joined(separator: ",").ifEmpty("-1")))")
@@ -119,31 +316,144 @@ public struct LibraryStore: Sendable {
             conditions.append("media.path NOT LIKE ? ESCAPE '\\'")
             arguments += [Self.likePrefix(prefix)]
         }
-        let sql =
-            "SELECT DISTINCT \(gridColumns) FROM media \(joins) WHERE \(conditions.joined(separator: " AND ")) ORDER BY media.timestamp DESC, media.fileId DESC"
+        let sql = "SELECT \(columns) FROM media WHERE \(conditions.joined(separator: " AND ")) \(displayOrder)"
         return (sql, arguments)
     }
 
     static func likePrefix(_ folder: String) -> String {
         let trimmed = folder.hasSuffix("/") ? folder : folder + "/"
-        let escaped = trimmed.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(
-            of: "_", with: "\\_")
-        return escaped + "%"
+        return likeEscaped(trimmed) + "%"
     }
+
+    static func likeEscaped(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(
+            of: "_", with: "\\_")
+    }
+
+    static func fetchGrid(_ db: Database, sql: String, arguments: StatementArguments = []) throws -> [GridMedia] {
+        var result: [GridMedia] = []
+        let rows = try Row.fetchCursor(db, sql: sql, arguments: arguments)
+        while let row = try rows.next() { result.append(GridMedia(gridRow: row)) }
+        return result
+    }
+
+    static func fetchTimeline(_ db: Database, sql: String, arguments: StatementArguments = []) throws -> [TimelineRow] {
+        var result: [TimelineRow] = []
+        let rows = try Row.fetchCursor(db, sql: sql, arguments: arguments)
+        while let row = try rows.next() { result.append(TimelineRow(timelineRow: row)) }
+        return result
+    }
+
+    // MARK: Grids
 
     public func gridItems(_ filter: MediaFilter, excludedFolders: [String] = []) throws -> [GridMedia] {
         let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders)
-        return try database.writer.read { db in try GridMedia.fetchAll(db, sql: sql, arguments: arguments) }
+        return try database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
     }
 
-    /// Live updates of a grid query.
-    public func observeGrid(_ filter: MediaFilter, excludedFolders: [String] = []) -> AsyncThrowingStream<[GridMedia], any Error> {
+    /// `gridItems` without blocking the caller's actor.
+    public func fetchGridItems(_ filter: MediaFilter, excludedFolders: [String] = []) async throws -> [GridMedia] {
         let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders)
-        return ValueObservation.tracking { db in try GridMedia.fetchAll(db, sql: sql, arguments: arguments) }
+        return try await database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
+    }
+
+    /// Live updates of a grid query. Values are fetched and compared off the main thread.
+    ///
+    /// - Parameter interval: with `.zero` every committed change of the tables involved refetches at once. With an
+    ///   interval, a change after a quiet period still refetches at once, but during a burst of writes (a sync that
+    ///   stores page after page) there is at most one refetch per interval, and the last state is always delivered.
+    public func observeGrid(_ filter: MediaFilter, excludedFolders: [String] = [], coalescing interval: Duration = .zero)
+        -> AsyncThrowingStream<[GridMedia], any Error>
+    {
+        let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders)
+        if interval > .zero {
+            return observeCoalesced(sql: sql, arguments: arguments, interval: interval) { db in
+                try Self.fetchGrid(db, sql: sql, arguments: arguments)
+            }
+        }
+        return ValueObservation.tracking { db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
             .removeDuplicates()
             .values(in: database.writer)
             .stream()
     }
+
+    /// The timeline as lightweight rows, in display order (newest first). For `.all`, `.photos`, `.videos` and
+    /// `.favorites` without excluded folders this reads one index and nothing else.
+    public func timelineRows(_ filter: MediaFilter = .all, excludedFolders: [String] = []) async throws -> [TimelineRow] {
+        let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders, columns: Self.timelineColumns)
+        return try await database.writer.read { db in try Self.fetchTimeline(db, sql: sql, arguments: arguments) }
+    }
+
+    /// Live updates of the timeline as lightweight rows; cheap enough to follow a running sync (see `observeGrid` for
+    /// what `interval` does). Pair it with `gridMedia(_:)` for the tiles on screen.
+    public func observeTimeline(
+        _ filter: MediaFilter = .all, excludedFolders: [String] = [], coalescing interval: Duration = .milliseconds(300)
+    ) -> AsyncThrowingStream<[TimelineRow], any Error> {
+        let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders, columns: Self.timelineColumns)
+        return observeCoalesced(sql: sql, arguments: arguments, interval: interval) { db in
+            try Self.fetchTimeline(db, sql: sql, arguments: arguments)
+        }
+    }
+
+    /// Grid details of some items (the tiles on screen of a timeline built from `TimelineRow`).
+    public func gridMedia(_ fileIds: [FileID]) async throws -> [FileID: GridMedia] {
+        try await database.writer.read { db in try Self.gridMedia(db, fileIds) }
+    }
+
+    static func gridMedia(_ db: Database, _ fileIds: [FileID]) throws -> [FileID: GridMedia] {
+        var result: [FileID: GridMedia] = [:]
+        result.reserveCapacity(fileIds.count)
+        for chunk in fileIds.chunked(500) {
+            let sql = "SELECT \(gridColumns) FROM media WHERE media.fileId IN (\(chunk.map { String($0) }.joined(separator: ",")))"
+            for item in try fetchGrid(db, sql: sql) { result[item.fileId] = item }
+        }
+        return result
+    }
+
+    /// Observes the tables `sql` reads and refetches with `fetch` when they change, at most once per `interval` during a
+    /// burst. Equal values are not delivered twice.
+    func observeCoalesced<Value: Sendable & Equatable>(
+        sql: String, arguments: StatementArguments, interval: Duration, fetch: @escaping @Sendable (Database) throws -> Value
+    ) -> AsyncThrowingStream<Value, any Error> {
+        let writer = database.writer
+        return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            // One pending signal is enough: whatever was committed before a fetch starts is seen by that fetch.
+            let (changes, changed) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let observation = DatabaseRegionObservation(tracking: SQLRequest<Row>(sql: sql, arguments: arguments))
+            let cancellable = observation.start(
+                in: writer, onError: { error in continuation.finish(throwing: error) }, onChange: { _ in changed.yield() })
+            let task = Task {
+                do {
+                    var last = try await writer.read(fetch)
+                    var fetchedAt = ContinuousClock.now
+                    continuation.yield(last)
+                    for await _ in changes {
+                        let wait = interval - (ContinuousClock.now - fetchedAt)
+                        if wait > .zero { try await Task.sleep(for: wait) }
+                        try Task.checkCancellation()
+                        let value = try await writer.read(fetch)
+                        fetchedAt = .now
+                        if value != last {
+                            last = value
+                            continuation.yield(value)
+                        }
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                cancellable.cancel()
+                changed.finish()
+            }
+        }
+    }
+
+    // MARK: Items
 
     public func item(_ fileId: FileID) throws -> MediaItem? {
         try database.writer.read { db in
@@ -153,16 +463,28 @@ public struct LibraryStore: Sendable {
     }
 
     public func items(_ fileIds: [FileID]) throws -> [FileID: MediaItem] {
-        try database.writer.read { db in
-            var result: [FileID: MediaItem] = [:]
-            for item in try MediaItem.fetchAll(db, keys: fileIds) { result[item.fileId] = item }
-            let missing = fileIds.filter { result[$0] == nil }
-            for record in try CollectionMediaRecord.fetchAll(db, keys: missing) { result[record.fileId] = record.item }
-            return result
-        }
+        try database.writer.read { db in try Self.items(db, fileIds) }
     }
 
-    /// All visible items (used by memories, map, duplicates, search).
+    /// `items(_:)` without blocking the caller's actor.
+    public func fetchItems(_ fileIds: [FileID]) async throws -> [FileID: MediaItem] {
+        try await database.writer.read { db in try Self.items(db, fileIds) }
+    }
+
+    static func items(_ db: Database, _ fileIds: [FileID]) throws -> [FileID: MediaItem] {
+        var result: [FileID: MediaItem] = [:]
+        result.reserveCapacity(fileIds.count)
+        // In chunks: a memory or a map area can have more items than SQLite accepts bound values.
+        for chunk in fileIds.chunked(5000) {
+            for item in try MediaItem.fetchAll(db, keys: chunk) { result[item.fileId] = item }
+            let missing = chunk.filter { result[$0] == nil }
+            for record in try CollectionMediaRecord.fetchAll(db, keys: missing) { result[record.fileId] = record.item }
+        }
+        return result
+    }
+
+    /// All visible items as full rows. This is the whole table: only for work that really needs every item (duplicates,
+    /// clean-up), and never on the main thread. Search, memories and the map have their own queries.
     public func allVisibleItems() throws -> [MediaItem] {
         try database.writer.read { db in
             try MediaItem.fetchAll(db, sql: "SELECT * FROM media WHERE isLivePhotoVideo = 0 AND isArchived = 0 ORDER BY timestamp DESC")
@@ -198,17 +520,225 @@ public struct LibraryStore: Sendable {
         try database.writer.read { db in try MediaItem.fetchCount(db) }
     }
 
+    // MARK: Search
+
+    /// The conditions of a search, without the server memberships (those are applied to the rows).
+    static func searchSQL(_ search: LibrarySearch, columns: String) -> (String, StatementArguments) {
+        var conditions = [visible]
+        var arguments: StatementArguments = []
+        // Trigram tokens need three characters; shorter words are looked up by scanning the indexed text.
+        let terms = search.terms
+        let indexed = terms.filter { $0.unicodeScalars.count >= 3 }
+        if !indexed.isEmpty {
+            conditions.append("media.fileId IN (SELECT rowid FROM searchIndex WHERE searchIndex MATCH ?)")
+            arguments += [SearchIndex.matchExpression(indexed)]
+        }
+        for term in terms where term.unicodeScalars.count < 3 {
+            conditions.append("media.fileId IN (SELECT rowid FROM searchIndex WHERE text LIKE ? ESCAPE '\\')")
+            arguments += ["%" + likeEscaped(term) + "%"]
+        }
+        if !search.places.isEmpty {
+            conditions.append("media.place IN (\(search.places.map { _ in "?" }.joined(separator: ",")))")
+            for place in search.places { arguments += [place] }
+        }
+        if !search.dateRanges.isEmpty {
+            let ranges = search.dateRanges.map { _ in "(\(timestamp) >= ? AND \(timestamp) < ?)" }
+            conditions.append("(" + ranges.joined(separator: " OR ") + ")")
+            for range in search.dateRanges {
+                arguments += [range.lowerBound.timeIntervalSince1970, range.upperBound.timeIntervalSince1970]
+            }
+        }
+        if search.favoritesOnly { conditions.append("media.isFavorite = 1") }
+        if search.videosOnly { conditions.append("media.kind = 'video'") }
+        if !search.albumIds.isEmpty {
+            let marks = search.albumIds.map { _ in "?" }.joined(separator: ",")
+            conditions.append("media.fileId IN (SELECT fileId FROM albumItem WHERE albumId IN (\(marks)))")
+            for id in search.albumIds { arguments += [id] }
+        }
+        return ("SELECT \(columns) FROM media WHERE \(conditions.joined(separator: " AND ")) \(displayOrder)", arguments)
+    }
+
+    /// Search results as grid rows, newest first.
+    public func search(_ search: LibrarySearch) async throws -> [GridMedia] {
+        let (sql, arguments) = Self.searchSQL(search, columns: Self.gridColumns)
+        return try await database.writer.read { db in
+            var result: [GridMedia] = []
+            let rows = try Row.fetchCursor(db, sql: sql, arguments: arguments)
+            while let row = try rows.next() {
+                let fileId: FileID = row[0]
+                if search.memberships.allSatisfy({ $0.contains(fileId) }) { result.append(GridMedia(gridRow: row)) }
+            }
+            return result
+        }
+    }
+
+    /// Search results as full items (smart albums), newest first.
+    public func searchItems(_ search: LibrarySearch) async throws -> [MediaItem] {
+        let (sql, arguments) = Self.searchSQL(search, columns: "media.*")
+        return try await database.writer.read { db in
+            let items = try MediaItem.fetchAll(db, sql: sql, arguments: arguments)
+            return search.memberships.isEmpty ? items : items.filter { item in search.memberships.allSatisfy { $0.contains(item.fileId) } }
+        }
+    }
+
+    /// The names of the places visible items were taken at, sorted (search suggestions).
+    public func placeNames() async throws -> [String] {
+        try await database.writer.read { db in
+            try String.fetchAll(
+                db,
+                sql:
+                    "SELECT DISTINCT media.place FROM media WHERE media.place IS NOT NULL AND media.place <> '' AND \(Self.visible) ORDER BY 1"
+            )
+        }
+    }
+
+    // MARK: Memories
+
+    /// On this day, trips and the year in review, from purpose-built queries (SPEC §7.12).
+    public func memories(onlyOnThisDay: Bool = false, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current)
+        async throws -> MemoriesSnapshot
+    {
+        try await database.writer.read { db in
+            var snapshot = MemoriesSnapshot()
+            snapshot.onThisDay = Memories.onThisDay(
+                try Self.onThisDayCandidates(db, now: now, calendar: calendar), now: now, calendar: calendar)
+            guard !onlyOnThisDay else { return snapshot }
+            snapshot.trips = Memories.trips(try Self.tripCandidates(db), locale: locale)
+            snapshot.recap = Memories.yearRecap(try Self.recapCandidates(db, calendar: calendar), calendar: calendar)
+            return snapshot
+        }
+    }
+
+    static func memoryItems(_ db: Database, sql: String, arguments: StatementArguments = [], into result: inout [MemoryItem]) throws {
+        let rows = try Row.fetchCursor(db, sql: sql, arguments: arguments)
+        while let row = try rows.next() {
+            result.append(
+                MemoryItem(fileId: row[0], timestamp: Date(timeIntervalSince1970: row[1] ?? 0), isFavorite: row[2], place: row[3]))
+        }
+    }
+
+    static let inTimeRange = "\(visible) AND \(timestamp) >= ? AND \(timestamp) < ?"
+
+    /// The items inside the on-this-day windows: twenty short ranges of the timeline index.
+    static func onThisDayCandidates(_ db: Database, now: Date, calendar: Calendar) throws -> [MemoryItem] {
+        var result: [MemoryItem] = []
+        for window in Memories.onThisDayWindows(now: now, calendar: calendar) {
+            try memoryItems(
+                db, sql: "SELECT media.fileId, \(timestamp), media.isFavorite, NULL FROM media WHERE \(inTimeRange)",
+                arguments: [window.range.lowerBound.timeIntervalSince1970, window.range.upperBound.timeIntervalSince1970], into: &result)
+        }
+        return result
+    }
+
+    /// Trips are found by the gaps between consecutive items, so this reads four columns of every visible item.
+    static func tripCandidates(_ db: Database) throws -> [MemoryItem] {
+        var result: [MemoryItem] = []
+        try memoryItems(
+            db, sql: "SELECT media.fileId, \(timestamp), media.isFavorite, media.place FROM media WHERE \(visible)", into: &result)
+        return result
+    }
+
+    /// The items of the newest year that has enough photos for a recap; years are counted in the timeline index.
+    static func recapCandidates(_ db: Database, calendar: Calendar) throws -> [MemoryItem] {
+        func edge(_ direction: String) throws -> Double? {
+            try Double.fetchOne(db, sql: "SELECT \(timestamp) FROM media WHERE \(visible) ORDER BY \(timestamp) \(direction) LIMIT 1")
+        }
+        guard let newest = try edge("DESC"), let oldest = try edge("ASC") else { return [] }
+        let firstYear = calendar.component(.year, from: Date(timeIntervalSince1970: oldest))
+        var year = calendar.component(.year, from: Date(timeIntervalSince1970: newest))
+        while year >= firstYear {
+            defer { year -= 1 }
+            guard let start = calendar.date(from: DateComponents(year: year)), let end = calendar.date(from: DateComponents(year: year + 1))
+            else { continue }
+            let range: StatementArguments = [start.timeIntervalSince1970, end.timeIntervalSince1970]
+            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM media WHERE \(inTimeRange)", arguments: range) ?? 0
+            if count >= Memories.recapMinimum {
+                var result: [MemoryItem] = []
+                try memoryItems(
+                    db, sql: "SELECT media.fileId, \(timestamp), media.isFavorite, NULL FROM media WHERE \(inTimeRange)", arguments: range,
+                    into: &result)
+                return result
+            }
+        }
+        return []
+    }
+
+    // MARK: Map
+
+    static let located =
+        "\(visible) AND media.latitude IS NOT NULL AND media.longitude IS NOT NULL AND NOT (media.latitude = 0 AND media.longitude = 0)"
+
+    static let inRegion = "media.latitude >= ? AND media.latitude <= ? AND media.longitude >= ? AND media.longitude <= ?"
+
+    static func arguments(_ region: MapRegion) -> StatementArguments {
+        [region.minLatitude, region.maxLatitude, region.minLongitude, region.maxLongitude]
+    }
+
+    /// The grid cell of a coordinate, as SQL. The offsets keep the values positive, so the cast rounds down.
+    static let cellRow = "CAST((media.latitude + 90.0) / ? AS INTEGER)"
+    static let cellColumn = "CAST((media.longitude + 180.0) / ? AS INTEGER)"
+
+    /// Geotagged items of a region, aggregated into grid cells by the database (SPEC MP-1): the map never holds the
+    /// located items themselves, only one row per cell on screen.
+    public func mapCells(in region: MapRegion, cellLatitude: Double, cellLongitude: Double) async throws -> [MapCell] {
+        guard cellLatitude > 0, cellLongitude > 0 else { return [] }
+        return try await database.writer.read { db in
+            let sql = """
+                SELECT \(Self.cellRow) AS cellRow, \(Self.cellColumn) AS cellColumn, COUNT(*), MAX(media.fileId)
+                FROM media WHERE \(Self.located) AND \(Self.inRegion) GROUP BY cellRow, cellColumn
+                """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [cellLatitude, cellLongitude] + Self.arguments(region))
+            let coverIds: [FileID] = rows.map { $0[3] }
+            let covers = try Self.gridMedia(db, coverIds)
+            var coordinates: [FileID: (Double, Double)] = [:]
+            for chunk in coverIds.chunked(500) {
+                let list = chunk.map { String($0) }.joined(separator: ",")
+                for row in try Row.fetchAll(db, sql: "SELECT fileId, latitude, longitude FROM media WHERE fileId IN (\(list))") {
+                    coordinates[row[0]] = (row[1], row[2])
+                }
+            }
+            return rows.compactMap { row -> MapCell? in
+                let coverId: FileID = row[3]
+                guard let cover = covers[coverId], let coordinate = coordinates[coverId] else { return nil }
+                return MapCell(
+                    row: row[0], column: row[1], count: row[2], cover: cover, latitude: coordinate.0, longitude: coordinate.1,
+                    region: region, cellLatitude: cellLatitude, cellLongitude: cellLongitude)
+            }
+        }
+    }
+
+    /// The items of a map cell, newest first.
+    public func mapItems(in cell: MapCell) async throws -> [MediaItem] {
+        let sql =
+            "SELECT media.* FROM media WHERE \(Self.located) AND \(Self.inRegion) AND \(Self.cellRow) = ? AND \(Self.cellColumn) = ? \(Self.displayOrder)"
+        var arguments = Self.arguments(cell.region)
+        arguments += [cell.cellLatitude, cell.row, cell.cellLongitude, cell.column]
+        return try await database.writer.read { [arguments] db in try MediaItem.fetchAll(db, sql: sql, arguments: arguments) }
+    }
+
+    /// The geotagged items of a region, newest first.
+    public func mapItems(in region: MapRegion) async throws -> [MediaItem] {
+        let sql = "SELECT media.* FROM media WHERE \(Self.located) AND \(Self.inRegion) \(Self.displayOrder)"
+        return try await database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: Self.arguments(region)) }
+    }
+
+    public func mapItemCount(in region: MapRegion) async throws -> Int {
+        let sql = "SELECT COUNT(*) FROM media WHERE \(Self.located) AND \(Self.inRegion)"
+        return try await database.writer.read { db in try Int.fetchOne(db, sql: sql, arguments: Self.arguments(region)) ?? 0 }
+    }
+
     // MARK: Writes
 
-    public func upsert(_ items: [MediaItem], generation: Int? = nil) throws {
+    /// Inserts or updates index rows. Rows that are already stored exactly like this are not written again: a sync that
+    /// re-reads known items (recent uploads, the overlap of the delta window) then neither rewrites rows and indexes nor
+    /// wakes the observers of the timeline.
+    public func upsert(_ items: [MediaItem]) throws {
         guard !items.isEmpty else { return }
         try database.writer.write { db in
-            for item in items {
-                try item.upsert(db)
-                if let generation {
-                    try db.execute(sql: "UPDATE media SET syncGeneration = ? WHERE fileId = ?", arguments: [generation, item.fileId])
-                }
-                try SearchIndex.update(db, item: item)
+            for chunk in items.chunked(1000) {
+                var stored: [FileID: MediaItem] = [:]
+                for item in try MediaItem.fetchAll(db, keys: chunk.map(\.fileId)) { stored[item.fileId] = item }
+                for item in chunk where stored[item.fileId] != item { try item.upsert(db) }
             }
         }
     }
@@ -216,8 +746,7 @@ public struct LibraryStore: Sendable {
     public func delete(_ fileIds: [FileID]) throws {
         guard !fileIds.isEmpty else { return }
         try database.writer.write { db in
-            _ = try MediaItem.deleteAll(db, keys: fileIds)
-            try db.execute(sql: "DELETE FROM searchIndex WHERE fileId IN (\(fileIds.map { String($0) }.joined(separator: ",")))")
+            for chunk in fileIds.chunked(5000) { _ = try MediaItem.deleteAll(db, keys: chunk) }
         }
     }
 
@@ -241,23 +770,23 @@ public struct LibraryStore: Sendable {
 
     public func deleteAll() throws {
         try database.writer.write { db in
-            try db.execute(
-                sql: "DELETE FROM media; DELETE FROM searchIndex; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState")
+            // Without the triggers the tables are emptied in one step each instead of row by row.
+            try db.execute(sql: SearchIndex.dropSQL)
+            try db.execute(sql: "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState")
+            try db.execute(sql: SearchIndex.createSQL)
+            try db.execute(sql: SearchIndex.triggersSQL)
         }
-    }
-}
-
-enum SearchIndex {
-    static func update(_ db: Database, item: MediaItem) throws {
-        try db.execute(sql: "DELETE FROM searchIndex WHERE fileId = ?", arguments: [item.fileId])
-        let text = [item.name, item.place, item.placeCountry, item.caption, (item.directory as NSString).lastPathComponent]
-            .compactMap { $0 }.joined(separator: " ")
-        try db.execute(sql: "INSERT INTO searchIndex(fileId, text) VALUES (?, ?)", arguments: [item.fileId, text])
     }
 }
 
 extension String {
     func ifEmpty(_ replacement: String) -> String { isEmpty ? replacement : self }
+}
+
+extension Array {
+    func chunked(_ size: Int) -> [ArraySlice<Element>] {
+        stride(from: 0, to: count, by: size).map { self[$0..<Swift.min($0 + size, count)] }
+    }
 }
 
 extension AsyncValueObservation {

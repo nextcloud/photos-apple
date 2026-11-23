@@ -52,7 +52,21 @@ public final class AccountServices: Sendable {
         self.outbox = Outbox(api: api, database: database)
         let cache = PreviewCache(directory: layout.previews(account.id))
         let originals = OriginalStore(directory: layout.originals(account.id), dav: dav)
-        self.images = ImagePipeline(api: api, cache: cache, originals: originals)
+        let images = ImagePipeline(
+            api: api, cache: cache, originals: originals, pinnedFileIds: { [database] in Self.pinnedFileIds(database) })
+        self.images = images
+        // Launch: bring the caches below their limits (SPEC §5.5) before this session adds to them.
+        Task.detached(priority: .utility) { await images.trimCaches() }
+    }
+
+    /// Files that are kept for offline use; their previews survive a trim of the preview cache.
+    static func pinnedFileIds(_ database: AccountDatabase) -> Set<FileID> {
+        (try? database.writer.read { db in try Set(FileID.fetchAll(db, sql: "SELECT fileId FROM offlineFile")) }) ?? []
+    }
+
+    /// The app went to the background: trim the caches while nothing is being looked at.
+    public func didEnterBackground() {
+        Task.detached(priority: .utility) { [images] in await images.trimCaches() }
     }
 
     /// DAV URL of a user file's original.

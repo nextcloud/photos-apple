@@ -29,6 +29,7 @@ public struct RootView: View {
         .tint(Design.accent)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { app.session?.didBecomeActive() }
+            if phase == .background { app.session?.services?.didEnterBackground() }
         }
     }
 }

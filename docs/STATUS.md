@@ -39,7 +39,19 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
   buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
-- ⬜ Performance budgets (§10) not measured; no synthetic 100k performance tests yet.
+- Performance budgets (§10) 🟡: the store side is measured with a synthetic 100 000-item index
+  (`LargeLibraryPerformanceTests`, tag `performance`; skip with `PHOTOS_SKIP_PERFORMANCE=1`). On an Apple-silicon Mac, release
+  build: initial index 6.3 s (store only; was 382 s in a debug build before the search index was fixed, 15 s now in debug),
+  1000-row page 65 ms, local search 0.1–10 ms (budget 100 ms), timeline 58 ms as grid rows and 13 ms as lightweight rows,
+  map cells for 50 000 geotagged items 8–9 ms (budget 200 ms). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
+  measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet.
+- Search index: FTS5 (trigram, `rowid = fileId`), kept current by triggers on `media`, used for free-text search (SR-3) over
+  file name, place, country, caption and folder path. ⬜ Tag, person and album names are not in the index (their memberships
+  are not stored locally); tag and person filters still ask the server.
+- Preview loading: a load is cancelled when nobody waits for it any more, loads are queued newest first with a limit, prefetches
+  can be taken back (`ImagePipeline.cancelPrefetch`, 🟡 not called by the grid yet). Preview and original caches are trimmed
+  (LRU; 2 GB / 1 GB) at launch, in the background and every 2000 downloads; previews of offline files are kept; the memory
+  cache is emptied on memory pressure and smaller on iPhone. ✅ unit-tested, 🟡 not measured on a device.
 
 ## M2 Albums, sharing, upload, offline — ✅
 Albums and shared albums ✅, collaborators 🟡 (sharee search not exercised), public links ✅, public album viewer ✅, quick share 🟡,
