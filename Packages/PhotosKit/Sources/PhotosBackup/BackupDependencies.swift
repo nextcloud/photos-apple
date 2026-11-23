@@ -182,11 +182,11 @@ enum BackupPause: Sendable, Equatable {
 
     var message: String {
         switch self {
-        case .offline: String(localized: "Waiting for a network connection")
-        case .wifi: String(localized: "Waiting for Wi-Fi")
-        case .lowData: String(localized: "Paused in Low Data Mode")
-        case .lowPower: String(localized: "Paused in Low Power Mode")
-        case .user: String(localized: "Paused")
+        case .offline: String(localized: "Waiting for a network connection", bundle: .module)
+        case .wifi: String(localized: "Waiting for Wi-Fi", bundle: .module)
+        case .lowData: String(localized: "Paused in Low Data Mode", bundle: .module)
+        case .lowPower: String(localized: "Paused in Low Power Mode", bundle: .module)
+        case .user: String(localized: "Paused", bundle: .module)
         }
     }
 }

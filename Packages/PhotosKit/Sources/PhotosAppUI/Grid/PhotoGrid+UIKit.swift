@@ -480,7 +480,6 @@
             placeholderIcon.contentMode = .scaleAspectFit
             placeholderIcon.isHidden = true
             contentView.addSubview(placeholderIcon)
-            gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.45).cgColor]
             contentView.layer.addSublayer(gradient)
             durationLabel.font = .monospacedDigitSystemFont(
                 ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold)
@@ -588,6 +587,10 @@
             favoriteIcon.isHidden = !item.isFavorite
             liveIcon.isHidden = !item.isLivePhoto
             gradient.isHidden = !GridTile.showsBottomShade(for: item)
+            let increased = UIAccessibility.isDarkerSystemColorsEnabled || UIAccessibility.isReduceTransparencyEnabled
+            gradient.colors = [
+                UIColor.clear.cgColor, UIColor.black.withAlphaComponent(GridTile.shadeOpacity(increased: increased)).cgColor,
+            ]
             accessibilityLabel = GridTile.accessibilityLabel(for: item)
             let id = item.fileId
             menuActions = { [weak owner] in owner?.menuActions(for: id) ?? [] }

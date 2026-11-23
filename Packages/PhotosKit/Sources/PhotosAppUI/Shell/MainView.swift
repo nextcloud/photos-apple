@@ -482,10 +482,12 @@ struct AccountHeader: View {
                 Button {
                     app.switchTo(account.id)
                 } label: {
+                    // A name and a server: nothing to translate.
+                    let title = "\(account.displayName) – \(account.hostDisplayName)"
                     if account.id == session.account.id {
-                        Label("\(account.displayName) – \(account.hostDisplayName)", systemImage: "checkmark")
+                        Label(title, systemImage: "checkmark")
                     } else {
-                        Text("\(account.displayName) – \(account.hostDisplayName)")
+                        Text(verbatim: title)
                     }
                 }
             }
@@ -500,9 +502,14 @@ struct AccountHeader: View {
                 }
                 Spacer(minLength: 0)
             }
+            // One control, not one per logo and line of text.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                Text("Account \(session.account.displayName) on \(session.account.hostDisplayName)", bundle: .module))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .accessibilityHint(Text("Switch or add an account", bundle: .module))
         .sheet(isPresented: $addingAccount) {
             NavigationStack {
                 LoginView(isAddingAccount: true)

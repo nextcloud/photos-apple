@@ -34,6 +34,9 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var sharedLink: SharedLink?
     @State private var metadataItems: PickedItems?
     @State private var editedItem: MediaItem?
+    /// Haptic triggers (iPhone, iPad).
+    @State private var favoriteToggles = 0
+    @State private var deletions = 0
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -58,7 +61,10 @@ struct MediaGridScreen<Accessory: View>: View {
                 titleVisibility: .visible
             ) {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                    if let items = confirmDelete { Task { await session.delete(items) } }
+                    if let items = confirmDelete {
+                        deletions += 1
+                        Task { await session.delete(items) }
+                    }
                     endSelection()
                 }
             } message: {
@@ -82,6 +88,9 @@ struct MediaGridScreen<Accessory: View>: View {
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
             }
             .focusedSceneValue(\.gridActions, gridActions)
+            .selectionHaptic(selection, isActive: isSelecting)
+            .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
+            .photosHaptic(.impact(weight: .medium), trigger: deletions)
             // Zoomed out, the timeline is cut into months and years instead of days.
             .onChange(of: columns, initial: true) { _, step in
                 feed.setZoom(step: step)
@@ -208,6 +217,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 ShareMediaButton(items: items)
                     .help(String(localized: "Share", bundle: .module))
                 Button {
+                    favoriteToggles += 1
                     Task { await session.setFavorite(items, !items.allSatisfy(\.isFavorite)) }
                 } label: {
                     Label(
@@ -349,7 +359,10 @@ struct MediaGridScreen<Accessory: View>: View {
             GridMenuAction(
                 id: "favorite", title: favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart",
                 startsGroup: true
-            ) { _ in Task { await session.setFavorite(items, !allFavorite) } })
+            ) { _ in
+                favoriteToggles += 1
+                Task { await session.setFavorite(items, !allFavorite) }
+            })
         if items.contains(where: { $0.isOwnStorage && !$0.isArchived && $0.permissions.canDelete }) {
             actions.append(
                 GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { _ in

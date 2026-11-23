@@ -26,7 +26,13 @@ struct MediaViewer: View {
     @State private var pagerWidth: CGFloat = 0
     @State private var pageSize: CGSize = .zero
     @FocusState private var focused: Bool
+    /// The page VoiceOver is on; moved along when the photo is changed with a swipe up or down (adjustable action).
+    @AccessibilityFocusState private var accessibilityPage: FileID?
+    /// Haptic triggers (iPhone, iPad).
+    @State private var favoriteToggles = 0
+    @State private var deletions = 0
     @Environment(SessionModel.self) private var session
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
 
@@ -47,9 +53,14 @@ struct MediaViewer: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(ids, id: \.self) { id in
-                        ViewerPage(fileId: id, isCurrent: id == current, playbackToggle: playbackToggle)
-                            .containerRelativeFrame([.horizontal, .vertical])
-                            .id(id)
+                        ViewerPage(
+                            fileId: id, isCurrent: id == current, playbackToggle: playbackToggle,
+                            position: ids.firstIndex(of: id).map { AccessibilityText.position(index: $0, count: ids.count) } ?? "",
+                            actions: accessibilityActions
+                        )
+                        .containerRelativeFrame([.horizontal, .vertical])
+                        .accessibilityFocused($accessibilityPage, equals: id)
+                        .id(id)
                     }
                 }
                 .scrollTargetLayout()
@@ -88,7 +99,7 @@ struct MediaViewer: View {
             .overlay { stepButtons }
             .onTapGesture {
                 focused = true
-                withAnimation { chromeHidden.toggle() }
+                withAnimation(reduceMotion ? nil : .default) { chromeHidden.toggle() }
             }
             .focusable()
             .focusEffectDisabled()
@@ -132,11 +143,14 @@ struct MediaViewer: View {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
                     if let item = currentItem {
                         let next = ViewerNavigation.neighbour(in: ids, of: item.fileId)
+                        deletions += 1
                         Task { await session.delete([item]) }
                         if let next { current = next } else { dismiss() }
                     }
                 }
             }
+            .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
+            .photosHaptic(.impact(weight: .medium), trigger: deletions)
     }
 
     /// Menu bar actions for the photo shown.
@@ -145,9 +159,9 @@ struct MediaViewer: View {
         return GridActions(
             selectionCount: item == nil ? 0 : 1,
             allFavorite: item?.isFavorite ?? false,
-            toggleFavorite: { if let item { Task { await session.setFavorite([item], !item.isFavorite) } } },
+            toggleFavorite: { if let item { toggleFavorite(item) } },
             delete: { confirmDelete = true },
-            toggleInfo: { withAnimation { showingInfo.toggle() } },
+            toggleInfo: { toggleInfo() },
             addToAlbum: {},
             zoomIn: nil,
             zoomOut: nil
@@ -156,7 +170,30 @@ struct MediaViewer: View {
 
     func step(_ delta: Int) {
         guard let next = ViewerNavigation.target(in: ids, from: current, delta: delta) else { return }
-        withAnimation { current = next }
+        // Reduce Motion: the next photo replaces the current one instead of sliding in.
+        withAnimation(reduceMotion ? nil : .default) { current = next }
+    }
+
+    func toggleFavorite(_ item: MediaItem) {
+        favoriteToggles += 1
+        Task { await session.setFavorite([item], !item.isFavorite) }
+    }
+
+    func toggleInfo() {
+        withAnimation(reduceMotion ? nil : .default) { showingInfo.toggle() }
+    }
+
+    /// What VoiceOver offers on a page: swipe up/down for the next or previous photo, and the main actions in the
+    /// actions rotor (share stays a button in the toolbar: a share sheet cannot be opened without one).
+    var accessibilityActions: ViewerPage.AccessibilityActions {
+        ViewerPage.AccessibilityActions(
+            step: { delta in
+                step(delta)
+                accessibilityPage = current
+            },
+            toggleFavorite: { if let item = currentItem { toggleFavorite(item) } },
+            showInfo: { toggleInfo() },
+            delete: { if currentItem?.permissions.canDelete == true { confirmDelete = true } })
     }
 
     static func viewerKey(_ key: KeyEquivalent) -> ViewerNavigation.Key? {
@@ -215,23 +252,28 @@ struct MediaViewer: View {
         ToolbarItemGroup(placement: viewerPlacement) {
             if let item = currentItem {
                 ShareMediaButton(items: [item])
+                    .help(String(localized: "Share", bundle: .module))
                 Button {
-                    Task { await session.setFavorite([item], !item.isFavorite) }
+                    toggleFavorite(item)
                 } label: {
-                    Label(String(localized: "Favorite", bundle: .module), systemImage: item.isFavorite ? "heart.fill" : "heart")
+                    // Says what pressing it does; the filled heart shows the state.
+                    Label(Self.favoriteTitle(remove: item.isFavorite), systemImage: item.isFavorite ? "heart.fill" : "heart")
                 }
+                .help(Self.favoriteTitle(remove: item.isFavorite))
                 Button {
-                    withAnimation { showingInfo.toggle() }
+                    toggleInfo()
                 } label: {
                     Label(String(localized: "Info", bundle: .module), systemImage: "info.circle")
                 }
                 .keyboardShortcut("i", modifiers: .command)
+                .help(String(localized: "Info", bundle: .module))
                 if item.kind == .image {
                     Button {
                         editing = item
                     } label: {
                         Label(String(localized: "Edit", bundle: .module), systemImage: "slider.horizontal.3")
                     }
+                    .help(String(localized: "Edit", bundle: .module))
                 }
                 Menu {
                     if item.kind == .image {
@@ -266,14 +308,27 @@ struct MediaViewer: View {
                 } label: {
                     Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
                 }
+                .help(String(localized: "More", bundle: .module))
                 Button(role: .destructive) {
                     confirmDelete = true
                 } label: {
                     Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
                 }
+                .help(String(localized: "Delete", bundle: .module))
                 .disabled(!item.permissions.canDelete)
             }
         }
+    }
+
+    /// What the favourite button does: title case on the Mac, sentence case elsewhere.
+    static func favoriteTitle(remove: Bool) -> String {
+        remove
+            ? PlatformWording.title(
+                mac: LocalizedStringResource("Remove from Favorites", bundle: .module),
+                other: LocalizedStringResource("Remove from favorites", bundle: .module))
+            : PlatformWording.title(
+                mac: LocalizedStringResource("Add to Favorites", bundle: .module),
+                other: LocalizedStringResource("Add to favorites", bundle: .module))
     }
 
     var viewerPlacement: ToolbarItemPlacement {
@@ -313,6 +368,10 @@ private struct ViewerStepButton: View {
     let isVisible: Bool
     let isEnabled: Bool
     let action: () -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var increasedContrast: Bool { contrast == .increased || reduceTransparency }
 
     var title: String {
         delta < 0 ? String(localized: "Previous", bundle: .module) : String(localized: "Next", bundle: .module)
@@ -324,7 +383,7 @@ private struct ViewerStepButton: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.45), in: .circle)
+                .background(.black.opacity(OverlayLegibility.scrimOpacity(base: 0.45, increased: increasedContrast)), in: .circle)
                 .contentShape(.circle)
                 // Only the artwork fades: a button with zero opacity would also vanish for VoiceOver and keyboard users.
                 .opacity(isVisible && isEnabled ? 1 : 0)
@@ -340,27 +399,82 @@ private struct ViewerStepButton: View {
 
 /// One page: zoomable photo, Live Photo or video.
 struct ViewerPage: View {
+    /// The viewer's actions, offered to VoiceOver on the page.
+    struct AccessibilityActions {
+        var step: (Int) -> Void = { _ in }
+        var toggleFavorite: () -> Void = {}
+        var showInfo: () -> Void = {}
+        var delete: () -> Void = {}
+    }
+
     let fileId: FileID
     let isCurrent: Bool
     var playbackToggle = 0
+    /// "3 of 120".
+    var position = ""
+    var actions = AccessibilityActions()
     @Environment(SessionModel.self) private var session
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var item: MediaItem?
+    /// Names of the recognised people, loaded for the photo shown while VoiceOver runs.
+    @State private var people: [String] = []
 
     var body: some View {
         Group {
             if let item {
                 if item.kind == .video {
+                    // The player's own controls stay reachable inside the page.
                     VideoPage(item: item, isCurrent: isCurrent, playbackToggle: playbackToggle)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(description(of: item))
                 } else {
                     ZoomablePhoto(item: item)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(description(of: item))
+                        .accessibilityValue(position)
+                        .accessibilityAddTraits(.isImage)
+                        // Swipe up or down with VoiceOver: next or previous photo.
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: actions.step(1)
+                            case .decrement: actions.step(-1)
+                            @unknown default: break
+                            }
+                        }
                 }
             } else {
                 ProgressView().tint(.white)
             }
         }
+        .accessibilityAction(named: Text(favoriteActionTitle)) { actions.toggleFavorite() }
+        .accessibilityAction(named: Text("Info", bundle: .module)) { actions.showInfo() }
+        .accessibilityAction(named: Text("Delete", bundle: .module)) { actions.delete() }
         .task(id: fileId) {
             item = try? session.services?.library.item(fileId)
         }
+        .task(id: PeopleRequest(fileId: fileId, wanted: isCurrent && voiceOver)) {
+            guard isCurrent, voiceOver, item?.kind == .image, let path = item?.path, session.features.has(.recognize),
+                let services = session.services
+            else { return }
+            let faces = (try? await services.api.faceDetections(userPath: path)) ?? []
+            people = faces.compactMap(\.title).filter { !$0.isEmpty }
+        }
+    }
+
+    struct PeopleRequest: Hashable {
+        var fileId: FileID
+        var wanted: Bool
+    }
+
+    var favoriteActionTitle: String {
+        MediaViewer.favoriteTitle(remove: item?.isFavorite ?? false)
+    }
+
+    /// "Photo, 22 November 2026 at 14:03, Lisbon, with Anna and Ben, Favorite, A dog on the beach".
+    func description(of item: MediaItem) -> String {
+        AccessibilityText.media(
+            isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
+            place: item.place, people: people, isFavorite: item.isFavorite, caption: item.caption)
     }
 }
 
@@ -372,6 +486,7 @@ struct ZoomablePhoto: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var playingLive = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var bucket: Int { scale > 1.5 ? 4096 : 1024 }
 
@@ -415,7 +530,7 @@ struct ZoomablePhoto: View {
             including: scale > 1 ? .all : .subviews
         )
         .onTapGesture(count: 2) {
-            withAnimation(.spring) {
+            withAnimation(reduceMotion ? nil : .spring) {
                 if scale > 1 { reset() } else { scale = 2.5; lastScale = 2.5 }
             }
         }
@@ -424,7 +539,6 @@ struct ZoomablePhoto: View {
             guard item.isLivePhoto else { return }
             withAnimation { playingLive = pressing }
         }
-        .accessibilityLabel(item.caption ?? item.name)
     }
 
     func reset() {

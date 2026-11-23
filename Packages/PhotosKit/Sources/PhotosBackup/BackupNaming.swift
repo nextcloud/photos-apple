@@ -67,7 +67,7 @@ public enum BackupNaming {
                 name += Self.editedSuffix
             }
             if typePrefix {
-                name = (isVideo ? String(localized: "Video") : String(localized: "Photo")) + " " + name
+                name = (isVideo ? String(localized: "Video", bundle: .module) : String(localized: "Photo", bundle: .module)) + " " + name
             }
             return name + "." + ext
         }

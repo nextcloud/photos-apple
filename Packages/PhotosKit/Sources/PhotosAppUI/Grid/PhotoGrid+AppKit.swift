@@ -710,7 +710,11 @@
 
         override func makeBackingLayer() -> CALayer {
             let gradient = CAGradientLayer()
-            gradient.colors = [NSColor.black.withAlphaComponent(0.5).cgColor, NSColor.clear.cgColor]
+            let workspace = NSWorkspace.shared
+            let increased = workspace.accessibilityDisplayShouldIncreaseContrast || workspace.accessibilityDisplayShouldReduceTransparency
+            gradient.colors = [
+                NSColor.black.withAlphaComponent(GridTile.shadeOpacity(increased: increased)).cgColor, NSColor.clear.cgColor,
+            ]
             // Layer coordinates start at the bottom on the Mac: dark at the bottom, clear at the top.
             gradient.startPoint = CGPoint(x: 0.5, y: 0)
             gradient.endPoint = CGPoint(x: 0.5, y: 1)

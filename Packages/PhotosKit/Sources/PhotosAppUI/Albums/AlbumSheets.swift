@@ -36,10 +36,12 @@ struct PhotoPickerSheet: View {
                                 }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(GridTile.accessibilityLabel(for: item))
                         .accessibilityAddTraits(selection.contains(item.fileId) ? .isSelected : [])
                     }
                 }
             }
+            .selectionHaptic(selection, isActive: true)
             .navigationTitle(String(localized: "Add to “\(album.title)”", bundle: .module))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -111,11 +113,12 @@ struct AlbumPickerSheet: View {
                                 .clipShape(.rect(cornerRadius: 6))
                                 VStack(alignment: .leading) {
                                     Text(album.title)
-                                    Text("\(album.itemCount) items", bundle: .module).font(.caption).foregroundStyle(.secondary)
+                                    Text(AccessibilityText.items(album.itemCount)).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(AccessibilityText.album(title: album.title, itemCount: album.itemCount))
                     }
                 }
                 if items.contains(where: { !$0.isOwnStorage }) {
@@ -182,6 +185,8 @@ struct CollaboratorsSheet: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel(Text("Remove \(collaborator.label)", bundle: .module))
+                            .help(String(localized: "Remove \(collaborator.label)", bundle: .module))
                         }
                     }
                 }

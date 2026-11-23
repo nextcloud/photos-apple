@@ -31,13 +31,17 @@ struct BackupScreen: View {
 struct BackupSetupView: View {
     @Environment(SessionModel.self) private var session
     @State private var askingFiles = false
+    /// The artwork grows with the text size.
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize = 56.0
 
     var body: some View {
         let backup = session.backup
         ScrollView {
             VStack(spacing: 20) {
-                Image(systemName: "icloud.and.arrow.up").font(.system(size: 56)).foregroundStyle(.tint)
+                Image(systemName: "icloud.and.arrow.up").font(.system(size: iconSize)).foregroundStyle(.tint)
+                    .accessibilityHidden(true)
                 Text("Back up your photos to Nextcloud", bundle: .module).font(.title.bold()).multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
                 Text(BackupWording.explanation(host: session.account.hostDisplayName))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -88,7 +92,8 @@ struct BackupStatusView: View {
         Form {
             Section {
                 HStack(spacing: 14) {
-                    statusIcon(status)
+                    // The title says what the icon shows.
+                    statusIcon(status).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(statusTitle(status)).font(.headline)
                         if let blocker = activeBlocker(status) {
@@ -99,14 +104,17 @@ struct BackupStatusView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.updatesFrequently)
                 }
                 if case .uploading(let done, let total, _) = status.phase {
                     ProgressView(value: Double(done), total: Double(max(total, 1)))
+                        .accessibilityLabel(Text("Backup progress", bundle: .module))
                 }
-                LabeledContent(String(localized: "Uploaded", bundle: .module), value: "\(status.uploaded)")
-                LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: "\(status.matched)")
-                LabeledContent(String(localized: "Waiting", bundle: .module), value: "\(status.pending)")
-                if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: "\(status.failed)") }
+                LabeledContent(String(localized: "Uploaded", bundle: .module), value: status.uploaded.formatted())
+                LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: status.matched.formatted())
+                LabeledContent(String(localized: "Waiting", bundle: .module), value: status.pending.formatted())
+                if status.failed > 0 { LabeledContent(String(localized: "Failed", bundle: .module), value: status.failed.formatted()) }
                 HStack {
                     Button(String(localized: "Back up now", bundle: .module)) {
                         // The user asks: items that failed are tried again now instead of after their waiting time.
@@ -138,6 +146,7 @@ struct BackupStatusView: View {
                             Text(entry.serverPath.map { ($0 as NSString).lastPathComponent } ?? entry.resourceKind).lineLimit(1)
                             Text(detail(entry)).font(.caption).foregroundStyle(.secondary)
                         }
+                        .accessibilityElement(children: .combine)
                         Spacer()
                         if entry.state == BackupItemState.matched.rawValue {
                             Button(String(localized: "Upload anyway", bundle: .module)) { Task { await backup.forceUpload(entry) } }

@@ -24,6 +24,8 @@ struct EditorView: View {
     @State private var saving = false
     @State private var showOriginal = false
     @State private var error: String?
+    /// Width of the adjustment names; grows with the text size.
+    @ScaledMetric(relativeTo: .body) private var labelWidth = 110.0
 
     var body: some View {
         NavigationStack {
@@ -36,16 +38,22 @@ struct EditorView: View {
                         ProgressView().tint(.white)
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    showOriginal ? Text("Original photo", bundle: .module) : Text("Edited photo", bundle: .module)
+                )
+                .accessibilityAddTraits(.isImage)
                 .onLongPressGesture(minimumDuration: 0.1) {
                 } onPressingChanged: {
                     showOriginal = $0
                 }
-                Picker("", selection: $tab) {
+                Picker(String(localized: "Tools", bundle: .module), selection: $tab) {
                     Text("Adjust", bundle: .module).tag(0)
                     Text("Filters", bundle: .module).tag(1)
                     Text("Crop", bundle: .module).tag(2)
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .padding()
                 controls.frame(height: 200)
             }
@@ -130,9 +138,10 @@ struct EditorView: View {
             ScrollView(.horizontal) {
                 HStack {
                     ForEach(PhotoEdits.Filter.allCases, id: \.self) { filter in
-                        Button(filter.rawValue.capitalized) { edits.filter = filter }
+                        Button(Self.title(of: filter)) { edits.filter = filter }
                             .buttonStyle(.bordered)
                             .tint(edits.filter == filter ? .accentColor : .secondary)
+                            .accessibilityAddTraits(edits.filter == filter ? .isSelected : [])
                     }
                 }
                 .padding()
@@ -153,7 +162,7 @@ struct EditorView: View {
                             systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                     }
                     Picker(String(localized: "Aspect", bundle: .module), selection: $edits.aspect) {
-                        ForEach(PhotoEdits.Aspect.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                        ForEach(PhotoEdits.Aspect.allCases, id: \.self) { Text(Self.title(of: $0)).tag($0) }
                     }
                 }
                 slider(String(localized: "Straighten", bundle: .module), $edits.straighten, -45...45)
@@ -165,8 +174,32 @@ struct EditorView: View {
 
     func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
         HStack {
-            Text(title).frame(width: 110, alignment: .leading)
-            Slider(value: value, in: range)
+            Text(title).frame(width: labelWidth, alignment: .leading)
+                .accessibilityHidden(true)
+            Slider(value: value, in: range) { Text(title) }
+                .accessibilityValue(value.wrappedValue.formatted(.number.precision(.fractionLength(0...2))))
+        }
+    }
+
+    static func title(of filter: PhotoEdits.Filter) -> String {
+        switch filter {
+        case .none: String(localized: "None", bundle: .module, comment: "Photo filter: no filter.")
+        case .vivid: String(localized: "Vivid", bundle: .module, comment: "Photo filter.")
+        case .vividWarm: String(localized: "Vivid warm", bundle: .module, comment: "Photo filter.")
+        case .vividCool: String(localized: "Vivid cool", bundle: .module, comment: "Photo filter.")
+        case .dramatic: String(localized: "Dramatic", bundle: .module, comment: "Photo filter.")
+        case .mono: String(localized: "Mono", bundle: .module, comment: "Photo filter.")
+        case .silvertone: String(localized: "Silvertone", bundle: .module, comment: "Photo filter.")
+        case .noir: String(localized: "Noir", bundle: .module, comment: "Photo filter.")
+        }
+    }
+
+    static func title(of aspect: PhotoEdits.Aspect) -> String {
+        switch aspect {
+        case .original: String(localized: "Original", bundle: .module, comment: "Crop aspect ratio: the photo's own.")
+        case .square: String(localized: "Square", bundle: .module, comment: "Crop aspect ratio.")
+        // Ratios read the same in every language.
+        case .fourThree, .sixteenNine, .threeTwo: aspect.rawValue
         }
     }
 

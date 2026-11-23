@@ -5,6 +5,7 @@ import PhotosCore
 import PhotosDomain
 import PhotosMedia
 import PhotosModel
+import PhotosNetworking
 import PhotosStore
 import SwiftUI
 
@@ -133,6 +134,7 @@ struct AlbumsScreen: View {
 /// Cover, title and count of an album.
 struct AlbumCard: View {
     let album: Album
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -156,25 +158,47 @@ struct AlbumCard: View {
                         .padding(6)
                 }
             }
-            Text(album.title).font(.headline).lineLimit(1)
-            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            // One line in the grid; wrapped at the accessibility text sizes instead of cut off after a few letters.
+            Text(album.title).font(.headline).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     var subtitle: String {
-        var parts = [String(localized: "\(album.itemCount) items", bundle: .module)]
-        if let owner = album.ownerDisplayName ?? album.ownerId, album.kind == .shared { parts.append(owner) }
+        var parts = [AccessibilityText.items(album.itemCount)]
+        if let owner, album.kind == .shared { parts.append(owner) }
         if !album.location.isEmpty { parts.append(album.location) }
         return parts.joined(separator: " · ")
+    }
+
+    var owner: String? { album.ownerDisplayName ?? album.ownerId }
+
+    /// "Lisbon 2025, album, 28 items, shared with a link".
+    var accessibilityLabel: String {
+        let sharing: AccessibilityText.Sharing =
+            album.publicLink != nil ? .link : album.collaborators.isEmpty ? .none : .people
+        return AccessibilityText.album(
+            title: album.title, itemCount: album.itemCount, owner: album.kind == .shared ? owner : nil, location: album.location,
+            sharing: sharing)
     }
 }
 
 /// An album's cover photo; draws nothing until the preview is there, so the card's placeholder shows through.
+///
+/// The preview is requested for the cover's size in pixels, like the grid's tiles (a 170 pt cover on a 2× screen gets the
+/// 1024 preview, not the soft 256 one).
 struct AlbumCover: View {
     let fileId: FileID
     @Environment(SessionModel.self) private var session
+    @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
+    @State private var side: Double = 0
+
+    var bucket: Int {
+        PreviewSizing.coverBucket(side: side, scale: Double(displayScale), buckets: PhotosAPI.previewBuckets)
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -186,13 +210,27 @@ struct AlbumCover: View {
                     .clipped()
             }
         }
-        .task(id: fileId) {
-            guard let services = session.services else { return }
+        .onGeometryChange(for: Double.self) { proxy in
+            Double(max(proxy.size.width, proxy.size.height))
+        } action: { value in
+            side = value
+        }
+        .task(id: CoverRequest(fileId: fileId, bucket: bucket, ready: side > 0)) {
+            guard side > 0, let services = session.services else { return }
+            let bucket = bucket
+            let pixels = PreviewSizing.neededPixels(tileSide: side, scale: Double(displayScale), aspectRatio: 4.0 / 3.0)
             let request = ImagePipeline.Request(
-                fileId: fileId, etag: "", bucket: 256, hasPreview: true, mimeType: "image/jpeg", originalURL: nil)
-            if let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: "", upTo: 256) { image = cached }
+                fileId: fileId, etag: "", bucket: bucket, hasPreview: true, mimeType: "image/jpeg", originalURL: nil,
+                maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
+            if image == nil, let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: "", upTo: bucket) { image = cached }
             if let loaded = await services.images.preview(request) { image = loaded }
         }
+    }
+
+    struct CoverRequest: Hashable {
+        var fileId: FileID
+        var bucket: Int
+        var ready: Bool
     }
 }
 

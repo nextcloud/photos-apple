@@ -61,26 +61,27 @@ public enum BackupOutcome: Sendable, Equatable {
     /// One sentence for the user.
     public var message: String {
         switch self {
-        case .upToDate: String(localized: "Your photos are backed up.")
+        case .upToDate: String(localized: "Your photos are backed up.", bundle: .module)
         case .finished(let uploaded, let remaining, let failed):
             if failed > 0 {
-                String(localized: "Backup finished, but \(failed) items could not be uploaded.")
+                String(localized: "Backup finished, but \(failed) items could not be uploaded.", bundle: .module)
             } else if remaining > 0 {
-                String(localized: "\(uploaded) items were backed up, \(remaining) are still waiting.")
+                String(localized: "\(uploaded) items were backed up, \(remaining) are still waiting.", bundle: .module)
             } else {
-                String(localized: "Backup finished.")
+                String(localized: "Backup finished.", bundle: .module)
             }
-        case .paused(let reason): String(localized: "Backup is paused: \(reason)")
-        case .interrupted: String(localized: "Backup was interrupted. It continues the next time Nextcloud Photos is running.")
-        case .failed(let message): String(localized: "Backup failed: \(message)")
+        case .paused(let reason): String(localized: "Backup is paused: \(reason)", bundle: .module)
+        case .interrupted:
+            String(localized: "Backup was interrupted. It continues the next time Nextcloud Photos is running.", bundle: .module)
+        case .failed(let message): String(localized: "Backup failed: \(message)", bundle: .module)
         case .blocked(let blocker):
             switch blocker {
-            case .insufficientStorage: String(localized: "Backup stopped: your Nextcloud storage is full.")
-            case .unauthorized: String(localized: "Backup stopped: log in to your Nextcloud again.")
-            case .forbidden: String(localized: "Backup stopped: the server does not allow uploads to the backup folder.")
-            case .serverTrust: String(localized: "Backup stopped: the connection to your Nextcloud is not trusted.")
+            case .insufficientStorage: String(localized: "Backup stopped: your Nextcloud storage is full.", bundle: .module)
+            case .unauthorized: String(localized: "Backup stopped: log in to your Nextcloud again.", bundle: .module)
+            case .forbidden: String(localized: "Backup stopped: the server does not allow uploads to the backup folder.", bundle: .module)
+            case .serverTrust: String(localized: "Backup stopped: the connection to your Nextcloud is not trusted.", bundle: .module)
             }
-        case .notAuthorized: String(localized: "Nextcloud Photos has no access to your photos.")
+        case .notAuthorized: String(localized: "Nextcloud Photos has no access to your photos.", bundle: .module)
         case .unavailable(let reason): reason
         }
     }
@@ -230,7 +231,7 @@ public final class BackupModel {
     @discardableResult
     public func runNow(retryFailed: Bool = false) async -> BackupOutcome {
         guard settings.isEnabled || settings.filesAppMode == .keepFiles else {
-            return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos."))
+            return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos.", bundle: .module))
         }
         guard let engine = await configuredEngine() else {
             let reason = unavailableReason
@@ -248,8 +249,8 @@ public final class BackupModel {
 
     /// Why no engine is available: the backup account is signed out or cannot be opened.
     var unavailableReason: String {
-        guard let account else { return String(localized: "Log in to back up your photos.") }
-        return String(localized: "Backup is paused: log in to \(account.displayName) on \(account.hostDisplayName) again.")
+        guard let account else { return String(localized: "Log in to back up your photos.", bundle: .module) }
+        return String(localized: "Backup is paused: log in to \(account.displayName) on \(account.hostDisplayName) again.", bundle: .module)
     }
 
     /// The user's pause.
@@ -408,7 +409,9 @@ public final class BackupModel {
     /// Called from background tasks; returns when done or cancelled.
     @discardableResult
     public func runInBackground() async -> BackupOutcome {
-        guard settings.isEnabled else { return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos.")) }
+        guard settings.isEnabled else {
+            return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos.", bundle: .module))
+        }
         return await runNow()
     }
 }

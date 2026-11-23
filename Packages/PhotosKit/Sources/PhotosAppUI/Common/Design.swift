@@ -42,11 +42,12 @@ extension PlatformImage {
 
 /// Formatting helpers.
 enum Formatters {
+    /// "1:05", "1:02:03" in the locale's digits and separators.
     static func duration(_ seconds: Double) -> String {
         let total = Int(seconds.rounded())
+        let duration = Duration.seconds(total)
         return total >= 3600
-            ? String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
-            : String(format: "%d:%02d", total / 60, total % 60)
+            ? duration.formatted(.time(pattern: .hourMinuteSecond)) : duration.formatted(.time(pattern: .minuteSecond))
     }
 
     static func bytes(_ count: Int64) -> String {

@@ -29,7 +29,7 @@ let package = Package(
         // Value types, identifiers, feature flags. No I/O.
         .target(name: "PhotosModel", swiftSettings: swiftSettings),
         // Pure algorithms ported from the web app (grouping, stacks, memories, duplicates, search parsing).
-        .target(name: "PhotosDomain", dependencies: ["PhotosModel"], swiftSettings: swiftSettings),
+        .target(name: "PhotosDomain", dependencies: ["PhotosModel"], resources: [.process("Resources")], swiftSettings: swiftSettings),
         // HTTP, WebDAV, OCS, login, feature detection, on the app's own URLSession client.
         .target(
             name: "PhotosNetworking",
@@ -56,6 +56,7 @@ let package = Package(
                 "PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
+            resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
         // Composition root: accounts, keychain, per-account services, settings.
@@ -65,6 +66,7 @@ let package = Package(
                 "PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore", "PhotosMedia", "PhotosBackup",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
+            resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
         // Shared SwiftUI components, grid, viewer, screens.
@@ -93,6 +95,7 @@ let package = Package(
             ],
             swiftSettings: swiftSettings
         ),
+        .testTarget(name: "PhotosAppUITests", dependencies: ["PhotosAppUI"], swiftSettings: swiftSettings),
         .testTarget(
             name: "PhotosBackupTests", dependencies: ["PhotosBackup", "PhotosStore", "PhotosNetworking"], swiftSettings: swiftSettings),
     ]

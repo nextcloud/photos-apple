@@ -38,6 +38,8 @@ struct InfoPanel: View {
                                     FaceCroppedPreview(fileId: item.fileId, box: face.box).frame(width: 56, height: 56).clipShape(Circle())
                                     Text(face.title ?? "").font(.caption).lineLimit(1)
                                 }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(face.title.map { Text(verbatim: $0) } ?? Text("Unnamed person", bundle: .module))
                             }
                         }
                     }
@@ -55,9 +57,12 @@ struct InfoPanel: View {
             }
             Section(String(localized: "File", bundle: .module)) {
                 if let width = item.width, let height = item.height {
+                    let megapixels = (Double(width * height) / 1_000_000).formatted(.number.precision(.fractionLength(1)))
                     row(
                         String(localized: "Dimensions", bundle: .module),
-                        "\(width) × \(height) (\(String(format: "%.1f", Double(width * height) / 1_000_000)) MP)")
+                        String(
+                            localized: "\(width) × \(height) (\(megapixels) MP)", bundle: .module,
+                            comment: "Width × height in pixels and megapixels."))
                 }
                 row(String(localized: "Size", bundle: .module), Formatters.bytes(item.size))
                 row(String(localized: "Type", bundle: .module), MimeTypes.formatName(mimeType: item.mimeType, fileName: item.name))
@@ -115,9 +120,11 @@ struct InfoPanel: View {
         if let lens = exif["LensModel"] { rows.append((String(localized: "Lens", bundle: .module), lens)) }
         var exposure: [String] = []
         if let focal = exif["FocalLength"].flatMap(Self.rational) { exposure.append("\(Int(focal.rounded())) mm") }
-        if let aperture = exif["FNumber"].flatMap(Self.rational) { exposure.append(String(format: "ƒ/%.1f", aperture)) }
+        // Photographic notation (ƒ/2.8, 1/250 s), with the locale's decimal separator.
+        let oneDecimal: FloatingPointFormatStyle<Double> = .number.precision(.fractionLength(1))
+        if let aperture = exif["FNumber"].flatMap(Self.rational) { exposure.append("ƒ/\(aperture.formatted(oneDecimal))") }
         if let time = exif["ExposureTime"].flatMap(Self.rational) {
-            exposure.append(time >= 1 ? String(format: "%.1f s", time) : "1/\(Int((1 / time).rounded())) s")
+            exposure.append(time >= 1 ? "\(time.formatted(oneDecimal)) s" : "1/\(Int((1 / time).rounded())) s")
         }
         if let iso = exif["ISOSpeedRatings"] ?? exif["PhotographicSensitivity"] { exposure.append("ISO \(iso)") }
         if !exposure.isEmpty { rows.append((String(localized: "Exposure", bundle: .module), exposure.joined(separator: " · "))) }

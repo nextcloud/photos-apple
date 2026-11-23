@@ -34,8 +34,8 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
         case .tag(_, let name): name
         case .album(_, let title): title
         case .dateRange(_, _, let label): label
-        case .favorites: String(localized: "Favorites")
-        case .videos: String(localized: "Videos")
+        case .favorites: String(localized: "Favorites", bundle: .module)
+        case .videos: String(localized: "Videos", bundle: .module)
         }
     }
 }

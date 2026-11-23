@@ -67,9 +67,9 @@ struct PublicAlbumScreen: View {
         ScrollView {
             if let album {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(album.title).font(.largeTitle.bold())
+                    Text(album.title).font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
                     if !album.albumDescription.isEmpty { Text(album.albumDescription) }
-                    Text("\(children.count) items", bundle: .module).foregroundStyle(.secondary)
+                    Text(AccessibilityText.items(children.count)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
@@ -81,6 +81,15 @@ struct PublicAlbumScreen: View {
                         .clipped()
                         .contentShape(.rect)
                         .onTapGesture { viewing = Viewing(id: child.item.fileId) }
+                        // A tap gesture alone is invisible to VoiceOver, Voice Control and keyboard users.
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            AccessibilityText.media(
+                                isVideo: child.item.kind == .video, isLivePhoto: child.item.isLivePhoto, date: child.item.timestamp,
+                                duration: child.item.duration, place: child.item.place, isFavorite: false)
+                        )
+                        .accessibilityAddTraits([.isButton, .isImage])
+                        .accessibilityAction { viewing = Viewing(id: child.item.fileId) }
                 }
             }
             if let error {
