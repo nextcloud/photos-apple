@@ -213,7 +213,7 @@ public struct SettingsView: View {
                         destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
                     Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
                     Text(
-                        "Nextcloud Photos is free software under the MIT licence. It uses NextcloudKit (GPL-3.0-or-later) and GRDB (MIT).",
+                        "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT).",
                         bundle: .module
                     )
                     .font(.footnote)
