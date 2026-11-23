@@ -429,7 +429,7 @@ public actor OriginalStore {
     }
 
     nonisolated func localURL(fileId: FileID, etag: String, ext: String) -> URL {
-        directory.appending(path: "\(fileId)-\(etag).\(ext.isEmpty ? "bin" : ext)")
+        directory.appending(path: "\(fileId)-\(CacheFileName.etag(etag)).\(ext.isEmpty ? "bin" : ext)")
     }
 
     /// Cached local copy if present.
