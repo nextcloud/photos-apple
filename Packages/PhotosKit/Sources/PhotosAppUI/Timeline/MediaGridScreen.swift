@@ -43,6 +43,8 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Haptic triggers (iPhone, iPad).
     @State private var favoriteToggles = 0
     @State private var deletions = 0
+    /// Export… / Save to Photos, with its progress and result.
+    @State private var saver = MediaSaveModel()
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -112,20 +114,8 @@ struct MediaGridScreen<Accessory: View>: View {
                     if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
                 }
             #endif
-            #if os(iOS)
-                // The viewer's Close button, title and bottom bar are toolbar items: they need a navigation stack to
-                // show up in, which a full-screen cover does not bring along.
-                .fullScreenCover(item: $viewerStart) { start in
-                    NavigationStack {
-                        MediaViewer(ids: start.ids, startId: start.startId)
-                    }
-                    .environment(session)
-                }
-            #else
-                .navigationDestination(item: $viewerStart) { start in
-                    MediaViewer(ids: start.ids, startId: start.startId)
-                }
-            #endif
+            .mediaViewer($viewerStart)
+            .mediaSaveStatus(saver)
             .alert(
                 String(localized: "Something went wrong", bundle: .module),
                 isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
@@ -337,17 +327,7 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Saves the originals: to a folder the user picks on the Mac, to the photo library on the other platforms.
     func export(_ items: [MediaItem]) {
         guard let services = session.services else { return }
-        Task {
-            do {
-                #if os(macOS)
-                    try await MediaFileExport.exportToFolder(items, services: services)
-                #else
-                    try await MediaExport.saveToPhotoLibrary(items, services: services)
-                #endif
-            } catch {
-                actionError = error.localizedDescription
-            }
-        }
+        saver.save(items, services: services)
     }
 
     func endSelection() {

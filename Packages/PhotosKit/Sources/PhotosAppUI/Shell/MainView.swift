@@ -14,6 +14,8 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     case albums, sharedAlbums, smartAlbums, people, places, tags
     case folders, sharedWithYou, archive, recentlyDeleted, duplicates, freeSpace
     case search, backup, settings
+    /// The tab that lists the places without a tab of their own (iPhone, narrow iPad windows; SPEC §6.2).
+    case collections
 
     public var id: String { rawValue }
 
@@ -41,6 +43,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .search: LocalizedStringResource("Search", bundle: .module)
         case .backup: LocalizedStringResource("Backup", bundle: .module)
         case .settings: LocalizedStringResource("Settings", bundle: .module)
+        case .collections: LocalizedStringResource("Collections", bundle: .module)
         }
     }
 
@@ -68,6 +71,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .search: "magnifyingglass"
         case .backup: "icloud.and.arrow.up"
         case .settings: "gearshape"
+        case .collections: "square.stack"
         }
     }
 
@@ -86,7 +90,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     /// Milestone that delivers the screen (placeholders until then).
     var milestone: String? {
         switch self {
-        case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup: nil
+        case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup, .collections: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
         case .recentlyDeleted, .duplicates, .freeSpace: nil
         }
@@ -104,7 +108,7 @@ enum SidebarLayout {
     static func row(for destination: AppDestination) -> AppDestination? {
         switch destination {
         case .onThisDay: .memories
-        case .search, .settings: nil
+        case .search, .settings, .collections: nil
         #if os(macOS)
             // On the Mac, backup is a tab of the Settings window.
             case .backup: nil
@@ -129,8 +133,14 @@ struct MainView: View {
     @SceneStorage("navigation") private var storedNavigation = ""
     #if !os(macOS)
         @SceneStorage("tabCustomization") private var customization: TabViewCustomization
+        @Environment(\.horizontalSizeClass) private var sizeClass
+        /// Where the user is inside the Collections tab while another tab is shown.
+        @State private var collectionsPlace: AppDestination = .collections
+    #endif
+    #if os(iOS)
         @State private var linkedPhoto: ViewerStart?
-    #else
+    #endif
+    #if os(macOS)
         @AppStorage("sidebarUtilitiesExpanded") private var utilitiesExpanded = false
         @FocusState private var searchFocused: Bool
     #endif
@@ -148,7 +158,17 @@ struct MainView: View {
         return nil
     }
 
+    /// There is no sidebar: the tab bar has a Collections tab for the places that are sidebar rows elsewhere.
+    var usesCollectionsTab: Bool {
+        #if os(iOS)
+            CompactNavigation.usesCollectionsTab(isPhone: UIDevice.current.userInterfaceIdiom == .phone, isCompact: sizeClass == .compact)
+        #else
+            false
+        #endif
+    }
+
     func visible(_ destination: AppDestination) -> Bool {
+        if destination == .collections { return usesCollectionsTab }
         guard let feature = destination.requiredFeature else { return true }
         return session.features.has(feature)
     }
@@ -213,12 +233,12 @@ struct MainView: View {
             selection = destination
             paths[destination] = [.album(id: id)]
         case .photo(let fileId):
-            #if os(macOS)
+            #if os(iOS)
+                linkedPhoto = ViewerStart(ids: [fileId], startId: fileId)
+            #else
                 // The viewer is pushed in the window; "Back" returns to where the user was.
                 let below: [AppRoute] = (paths[selection] ?? []).filter { if case .photo = $0 { false } else { true } }
                 paths[selection] = below + [.photo(fileId: fileId)]
-            #else
-                linkedPhoto = ViewerStart(ids: [fileId], startId: fileId)
             #endif
         }
     }
@@ -334,7 +354,7 @@ struct MainView: View {
         }
     #else
         var navigation: some View {
-            TabView(selection: $selection) {
+            TabView(selection: tabSelection) {
                 Tab(value: AppDestination.library) {
                     stack(.library)
                 } label: {
@@ -342,45 +362,58 @@ struct MainView: View {
                 }
                 .customizationID(AppDestination.library.rawValue)
 
+                if usesCollectionsTab {
+                    Tab(value: AppDestination.collections) {
+                        collectionsStack
+                    } label: {
+                        Label(String(localized: AppDestination.collections.title), systemImage: AppDestination.collections.systemImage)
+                    }
+                    .customizationID(AppDestination.collections.rawValue)
+                }
+
                 Tab(value: AppDestination.search, role: .search) {
                     stack(.search)
                 } label: {
                     Label(String(localized: AppDestination.search.title), systemImage: AppDestination.search.systemImage)
                 }
 
-                TabSection {
-                    ForEach(SidebarLayout.primary.filter { $0 != .library }) { destination in
-                        tab(destination)
+                // The sidebar's rows (iPad at regular width, Vision Pro). They have no place in a tab bar; where
+                // there is only a tab bar, the Collections tab lists them instead.
+                if !usesCollectionsTab {
+                    TabSection {
+                        ForEach(SidebarLayout.primary.filter { $0 != .library }) { destination in
+                            tab(destination)
+                        }
+                    } header: {
+                        Text("Browse", bundle: .module)
                     }
-                } header: {
-                    Text("Browse", bundle: .module)
-                }
-                .defaultVisibility(.hidden, for: .tabBar)
+                    .defaultVisibility(.hidden, for: .tabBar)
 
-                TabSection {
-                    ForEach(SidebarLayout.collections.filter(visible)) { destination in
-                        tab(destination)
+                    TabSection {
+                        ForEach(SidebarLayout.collections.filter(visible)) { destination in
+                            tab(destination)
+                        }
+                    } header: {
+                        Text("Collections", bundle: .module)
                     }
-                } header: {
-                    Text("Collections", bundle: .module)
-                }
-                .defaultVisibility(.hidden, for: .tabBar)
+                    .defaultVisibility(.hidden, for: .tabBar)
 
-                TabSection {
-                    ForEach(SidebarLayout.utilities.filter(visible)) { destination in
-                        tab(destination)
+                    TabSection {
+                        ForEach(SidebarLayout.utilities.filter(visible)) { destination in
+                            tab(destination)
+                        }
+                    } header: {
+                        Text("Utilities", bundle: .module)
                     }
-                } header: {
-                    Text("Utilities", bundle: .module)
-                }
-                .defaultVisibility(.hidden, for: .tabBar)
+                    .defaultVisibility(.hidden, for: .tabBar)
 
-                Tab(value: AppDestination.backup) {
-                    stack(.backup)
-                } label: {
-                    Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
+                    Tab(value: AppDestination.backup) {
+                        stack(.backup)
+                    } label: {
+                        Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
+                    }
+                    .defaultVisibility(.hidden, for: .tabBar)
                 }
-                .defaultVisibility(.hidden, for: .tabBar)
 
                 Tab(value: AppDestination.settings) {
                     stack(.settings)
@@ -391,9 +424,16 @@ struct MainView: View {
             .tabViewStyle(.sidebarAdaptable)
             .tabViewCustomization($customization)
             .tabViewSidebarHeader { AccountHeader() }
-            .fullScreenCover(item: $linkedPhoto) { start in
-                MediaViewer(ids: start.ids, startId: start.startId).environment(session)
+            .onChange(of: selection, initial: true) { _, destination in
+                if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
             }
+            .onChange(of: usesCollectionsTab, initial: true) { _, uses in
+                // The Collections list only exists as a tab; with a sidebar its rows are there.
+                if !uses, selection == .collections { selection = .library }
+            }
+            #if os(iOS)
+                .mediaViewer($linkedPhoto)
+            #endif
         }
 
         func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {
@@ -403,6 +443,57 @@ struct MainView: View {
                 Label(String(localized: destination.title), systemImage: destination.systemImage)
             }
             .customizationID(destination.rawValue)
+        }
+
+        /// The tab that is selected while `selection` is shown: with a Collections tab, every place without a tab of
+        /// its own is inside that one.
+        var tabSelection: Binding<AppDestination> {
+            Binding(
+                get: {
+                    if usesCollectionsTab { return CompactNavigation.tab(for: selection) }
+                    return selection == .collections ? .library : selection
+                },
+                set: { tab in
+                    guard usesCollectionsTab, tab == .collections else {
+                        selection = tab
+                        return
+                    }
+                    if CompactNavigation.isInCollectionsTab(selection) {
+                        // A tap on the tab that is already shown goes back to its list.
+                        if selection != .collections { paths[selection] = nil }
+                        selection = .collections
+                    } else {
+                        // Coming from another tab: back to where the user was.
+                        selection = collectionsPlace
+                    }
+                })
+        }
+
+        /// The path of the Collections tab's stack, made from `selection` and `paths` and written back to them — so
+        /// deep links, state restoration and a change between tab bar and sidebar (iPad) all keep working with the
+        /// one navigation state.
+        var collectionsPath: Binding<[AppRoute]> {
+            Binding(
+                get: {
+                    let place: AppDestination = CompactNavigation.isInCollectionsTab(selection) ? selection : collectionsPlace
+                    return CompactNavigation.path(to: place, routes: paths[place] ?? [])
+                },
+                set: { path in
+                    guard let place = CompactNavigation.place(of: path) else { return }
+                    let shown: Bool = CompactNavigation.isInCollectionsTab(selection)
+                    let previous: AppDestination = shown ? selection : collectionsPlace
+                    // Back in the list: the place that was left starts from its root next time.
+                    if previous != place.destination { paths[previous] = nil }
+                    if place.destination != .collections { paths[place.destination] = place.routes.isEmpty ? nil : place.routes }
+                    if shown { selection = place.destination } else { collectionsPlace = place.destination }
+                })
+        }
+
+        var collectionsStack: some View {
+            NavigationStack(path: collectionsPath) {
+                CollectionsList()
+                    .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
+            }
         }
     #endif
 }
@@ -415,6 +506,11 @@ struct RouteView: View {
         switch route {
         case .album(let id): AlbumRouteScreen(albumId: id)
         case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
+        case .destination(let raw):
+            // Pushed from the Collections list (the search tab has its own stack and field).
+            if let destination = AppDestination(rawValue: raw) {
+                DestinationView(destination: destination, searchText: .constant(""), searchFilters: .constant([]))
+            }
         }
     }
 }
@@ -455,6 +551,13 @@ struct DestinationView: View {
         case .duplicates: DuplicatesScreen()
         case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
+        case .collections:
+            #if os(macOS)
+                // The Mac has the sidebar; nothing leads here.
+                EmptyView()
+            #else
+                CollectionsList()
+            #endif
         }
     }
 }

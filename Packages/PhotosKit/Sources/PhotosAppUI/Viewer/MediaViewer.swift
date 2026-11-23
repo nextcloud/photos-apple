@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
-import AVKit
 import PhotosCore
 import PhotosDomain
-import PhotosMedia
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -19,6 +17,18 @@ struct MediaViewer: View {
     @State private var editing: MediaItem?
     @State private var editingMetadata: MediaItem?
     @State private var extractingText: MediaItem?
+    @State private var addingToAlbum: MediaItem?
+    /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
+    @State private var removed: Set<FileID> = []
+    /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
+    @State private var zoomCommand: ViewerZoomCommand?
+    @State private var zoomScale: CGFloat = ViewerZoom.minimumScale
+    /// How far the page is dragged down to close the viewer (iPhone, iPad).
+    @State private var dragTranslation: CGFloat = 0
+    /// Counted up to put the current page back in place after a page was taken out.
+    @State private var realignments = 0
+    /// Save to Photos / Export…, with its progress and result.
+    @State private var saver = MediaSaveModel()
     /// Incremented to ask the current video page to play or pause (Space).
     @State private var playbackToggle = 0
     /// Edge the pointer is near, to reveal the previous/next button there.
@@ -45,6 +55,16 @@ struct MediaViewer: View {
     /// changes made here or elsewhere — whatever screen opened the viewer.
     @State private var observedItem: MediaItem?
 
+    /// The pages: the context the viewer was opened with, without what was deleted or archived here.
+    var shownIds: [FileID] {
+        removed.isEmpty ? ids : ids.filter { !removed.contains($0) }
+    }
+
+    struct PagerLayout: Hashable {
+        var size: CGSize
+        var realignments: Int
+    }
+
     var currentItem: MediaItem? {
         guard let current else { return nil }
         // Right after paging, until the observation of the new photo has delivered its first value.
@@ -58,11 +78,12 @@ struct MediaViewer: View {
         ScrollViewReader { reader in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
-                    ForEach(ids, id: \.self) { id in
+                    let pages: [FileID] = shownIds
+                    ForEach(pages, id: \.self) { id in
                         ViewerPage(
                             fileId: id, isCurrent: id == current, playbackToggle: playbackToggle,
-                            position: ids.firstIndex(of: id).map { AccessibilityText.position(index: $0, count: ids.count) } ?? "",
-                            actions: accessibilityActions
+                            position: pages.firstIndex(of: id).map { AccessibilityText.position(index: $0, count: pages.count) } ?? "",
+                            actions: accessibilityActions, zoomCommand: zoomCommand, events: pageEvents
                         )
                         .containerRelativeFrame([.horizontal, .vertical])
                         .accessibilityFocused($accessibilityPage, equals: id)
@@ -79,7 +100,7 @@ struct MediaViewer: View {
             } action: { size in
                 pageSize = size
             }
-            .task(id: pageSize) {
+            .task(id: PagerLayout(size: pageSize, realignments: realignments)) {
                 // Once right away, and once more after the sidebar or inspector animation has settled.
                 if let current { reader.scrollTo(current, anchor: .leading) }
                 try? await Task.sleep(for: .milliseconds(450))
@@ -89,11 +110,43 @@ struct MediaViewer: View {
     }
 
     var body: some View {
+        // In two parts: one long chain of modifiers takes the compiler too long to type-check.
+        page
+            .infoInspector(isPresented: $showingInfo) {
+                // Beside the photo itself: no thumbnail of it on top of the panel.
+                if let item = currentItem { InfoPanel(item: item, inInspector: true, showsPreview: false) }
+            }
+            .focusedSceneValue(\.gridActions, viewerActions)
+            .sheet(item: $editing) { item in EditorView(item: item) }
+            .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
+            .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
+            .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
+            .mediaSaveStatus(saver)
+            .confirmationDialog(
+                String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
+            ) {
+                Button(String(localized: "Delete", bundle: .module), role: .destructive) {
+                    if let item = currentItem {
+                        deletions += 1
+                        Task { await session.delete([item]) }
+                        moveOn(from: item.fileId)
+                    }
+                }
+            }
+            .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
+            .photosHaptic(.impact(weight: .medium), trigger: deletions)
+    }
+
+    /// The pager with its backdrop, bars, keyboard and focus.
+    var page: some View {
         pager
             // The black backdrop always fills the window; the pages only do so on iPhone. On the Mac and iPad they
             // stay inside the safe area, so nothing hides under the sidebar, the toolbar or the info inspector.
             .modifier(ViewerPageArea())
-            .background(Color.black.ignoresSafeArea())
+            // Dragged down to close: the page follows the finger and shrinks, the backdrop fades to what is behind.
+            .scaleEffect(ViewerSwipe.pageScale(progress: dismissProgress))
+            .offset(y: max(0, dragTranslation))
+            .background(Color.black.opacity(1 - dismissProgress).ignoresSafeArea())
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.width
             } action: { width in
@@ -103,10 +156,6 @@ struct MediaViewer: View {
                 hoverEdge = Self.edge(under: phase, width: pagerWidth)
             }
             .overlay { stepButtons }
-            .onTapGesture {
-                focused = true
-                withAnimation(reduceMotion ? nil : .default) { chromeHidden.toggle() }
-            }
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
@@ -119,6 +168,9 @@ struct MediaViewer: View {
                 .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
             #endif
             .toolbar { toolbar }
+            .onChange(of: current) { _, _ in
+                zoomScale = ViewerZoom.minimumScale
+            }
             .task(id: current) {
                 guard let current, let library = session.services?.library else { return }
                 do {
@@ -142,46 +194,114 @@ struct MediaViewer: View {
                     .accessibilityHidden(true)
                 }
             #endif
-            .infoInspector(isPresented: $showingInfo) {
-                if let item = currentItem { InfoPanel(item: item, inInspector: true) }
-            }
-            .focusedSceneValue(\.gridActions, viewerActions)
-            .sheet(item: $editing) { item in EditorView(item: item) }
-            .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
-            .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
-            .confirmationDialog(
-                String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
-            ) {
-                Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                    if let item = currentItem {
-                        let next = ViewerNavigation.neighbour(in: ids, of: item.fileId)
-                        deletions += 1
-                        Task { await session.delete([item]) }
-                        if let next { current = next } else { dismiss() }
-                    }
-                }
-            }
-            .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
-            .photosHaptic(.impact(weight: .medium), trigger: deletions)
     }
 
     /// Menu bar actions for the photo shown.
     var viewerActions: GridActions {
-        let item = currentItem
-        return GridActions(
+        let item: MediaItem? = currentItem
+        let isImage: Bool = item?.kind == .image
+        let zoomed: Bool = ViewerZoom.isZoomed(zoomScale)
+        var actions = GridActions(
             selectionCount: item == nil ? 0 : 1,
             allFavorite: item?.isFavorite ?? false,
             toggleFavorite: { if let item { toggleFavorite(item) } },
             delete: { confirmDelete = true },
             toggleInfo: { toggleInfo() },
-            addToAlbum: {},
-            zoomIn: nil,
-            zoomOut: nil
+            addToAlbum: { addingToAlbum = item },
+            zoomIn: isImage && zoomScale < ViewerZoom.maximumScale - ViewerZoom.epsilon ? { zoom(.zoomIn) } : nil,
+            zoomOut: isImage && zoomed ? { zoom(.zoomOut) } : nil
         )
+        actions.zoomToFit = isImage && zoomed ? { zoom(.fit) } : nil
+        guard let item else { return actions }
+        if isImage { actions.edit = { editing = item } }
+        if canEditMetadata(item) { actions.editDateAndLocation = { editingMetadata = item } }
+        actions.export = { save(item) }
+        if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
+        actions.shareTitle = item.name
+        return actions
+    }
+
+    func zoom(_ kind: ViewerZoomCommand.Kind) {
+        zoomCommand = ViewerZoomCommand(id: (zoomCommand?.id ?? 0) + 1, kind: kind)
+    }
+
+    func canEditMetadata(_ item: MediaItem) -> Bool {
+        session.features.has(.metadataEdit) && item.permissions.canWrite
+    }
+
+    /// Saves the original: into a folder the user picks on the Mac (as "Export…" in the grid), to the photo library elsewhere.
+    func save(_ item: MediaItem) {
+        guard let services = session.services else { return }
+        saver.save([item], services: services)
+    }
+
+    /// An archived photo leaves the place it was opened from, so the viewer moves on. Unarchiving stays: the photo
+    /// is shown again everywhere, and "Archive" in the same menu takes it back.
+    func toggleArchive(_ item: MediaItem) {
+        if item.isArchived {
+            Task { await session.unarchive([item]) }
+        } else {
+            Task { await session.archive([item]) }
+            moveOn(from: item.fileId)
+        }
+    }
+
+    /// The photo is gone from this context (deleted, archived): its page is taken out and the next photo shown —
+    /// the previous one after the last, and the viewer closes after the only one.
+    func moveOn(from id: FileID) {
+        guard let next = ViewerNavigation.neighbour(in: shownIds, of: id) else {
+            dismiss()
+            return
+        }
+        current = next
+        removed.insert(id)
+        realignments += 1
+    }
+
+    // MARK: Page events
+
+    var pageEvents: ViewerPage.Events {
+        ViewerPage.Events(
+            tapped: { pageTapped() },
+            scaleChanged: { scale in zoomScale = scale },
+            verticalDrag: { phase in handleSwipe(phase) })
+    }
+
+    /// A tap on a photo hides or shows the bars (iPhone, iPad); on the Mac it gives the viewer the keyboard.
+    func pageTapped() {
+        focused = true
+        #if os(iOS)
+            withAnimation(reduceMotion ? nil : .default) { chromeHidden.toggle() }
+        #endif
+    }
+
+    var dismissProgress: CGFloat {
+        ViewerSwipe.dismissProgress(translation: dragTranslation, height: pageSize.height)
+    }
+
+    /// Swipe down closes the viewer, swipe up shows the info panel (SPEC VW-1, §7.4).
+    func handleSwipe(_ phase: ViewerSwipe.Phase) {
+        switch phase {
+        case .changed(let translation):
+            dragTranslation = translation
+        case .ended(let translation, let velocity):
+            switch ViewerSwipe.outcome(translation: translation, velocity: velocity) {
+            case .dismiss:
+                // The page stays where the finger left it; the cover takes it away from there.
+                dismiss()
+            case .showInfo:
+                dragTranslation = 0
+                if !showingInfo { toggleInfo() }
+            case .none:
+                withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { dragTranslation = 0 }
+            }
+        case .cancelled:
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { dragTranslation = 0 }
+        }
     }
 
     func step(_ delta: Int) {
-        guard let next = ViewerNavigation.target(in: ids, from: current, delta: delta) else { return }
+        guard let next = ViewerNavigation.target(in: shownIds, from: current, delta: delta) else { return }
         // Reduce Motion: the next photo replaces the current one instead of sliding in.
         withAnimation(reduceMotion ? nil : .default) { current = next }
     }
@@ -205,7 +325,8 @@ struct MediaViewer: View {
             },
             toggleFavorite: { if let item = currentItem { toggleFavorite(item) } },
             showInfo: { toggleInfo() },
-            delete: { if currentItem?.permissions.canDelete == true { confirmDelete = true } })
+            delete: { if currentItem?.permissions.canDelete == true { confirmDelete = true } },
+            zoom: { kind in zoom(kind) })
     }
 
     static func viewerKey(_ key: KeyEquivalent) -> ViewerNavigation.Key? {
@@ -248,7 +369,7 @@ struct MediaViewer: View {
     }
 
     func canStep(_ delta: Int) -> Bool {
-        ViewerNavigation.canStep(in: ids, from: current, delta: delta)
+        ViewerNavigation.canStep(in: shownIds, from: current, delta: delta)
     }
 
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
@@ -288,35 +409,7 @@ struct MediaViewer: View {
                     .help(String(localized: "Edit", bundle: .module))
                 }
                 Menu {
-                    if item.kind == .image {
-                        Button {
-                            extractingText = item
-                        } label: {
-                            Label(String(localized: "Extract text", bundle: .module), systemImage: "text.viewfinder")
-                        }
-                    }
-                    if session.features.has(.metadataEdit) && item.permissions.canWrite {
-                        Button {
-                            editingMetadata = item
-                        } label: {
-                            Label(String(localized: "Edit date and location", bundle: .module), systemImage: "calendar.badge.clock")
-                        }
-                    }
-                    Button {
-                        Task { try? await MediaExport.saveToPhotoLibrary([item], services: session.services!) }
-                    } label: {
-                        Label(String(localized: "Save to device", bundle: .module), systemImage: "square.and.arrow.down")
-                    }
-                    if item.isOwnStorage && item.permissions.canDelete {
-                        Button {
-                            Task { item.isArchived ? await session.unarchive([item]) : await session.archive([item]) }
-                        } label: {
-                            Label(
-                                item.isArchived
-                                    ? String(localized: "Unarchive", bundle: .module) : String(localized: "Archive", bundle: .module),
-                                systemImage: "archivebox")
-                        }
-                    }
+                    moreActions(item)
                 } label: {
                     Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
                 }
@@ -328,6 +421,50 @@ struct MediaViewer: View {
                 }
                 .help(String(localized: "Delete", bundle: .module))
                 .disabled(!item.permissions.canDelete)
+            }
+        }
+    }
+
+    /// The More menu: add to album, save · extract text, edit date and location · archive.
+    @ViewBuilder func moreActions(_ item: MediaItem) -> some View {
+        let albumTitle: String = PlatformWording.title(
+            mac: LocalizedStringResource("Add to Album…", bundle: .module),
+            other: LocalizedStringResource("Add to album…", bundle: .module))
+        Button {
+            addingToAlbum = item
+        } label: {
+            Label(albumTitle, systemImage: "rectangle.stack.badge.plus")
+        }
+        Button {
+            save(item)
+        } label: {
+            Label(PhotosCommands.exportTitle, systemImage: "square.and.arrow.down")
+        }
+        .disabled(saver.isRunning)
+        Divider()
+        if item.kind == .image {
+            Button {
+                extractingText = item
+            } label: {
+                Label(String(localized: "Extract text", bundle: .module), systemImage: "text.viewfinder")
+            }
+        }
+        if canEditMetadata(item) {
+            Button {
+                editingMetadata = item
+            } label: {
+                Label(String(localized: "Edit date and location", bundle: .module), systemImage: "calendar.badge.clock")
+            }
+        }
+        if item.isOwnStorage && item.permissions.canDelete {
+            Divider()
+            Button {
+                toggleArchive(item)
+            } label: {
+                Label(
+                    item.isArchived
+                        ? String(localized: "Unarchive", bundle: .module) : String(localized: "Archive", bundle: .module),
+                    systemImage: item.isArchived ? "tray.and.arrow.up" : "archivebox")
             }
         }
     }
@@ -409,6 +546,23 @@ private struct ViewerStepButton: View {
     }
 }
 
+/// Zoom In / Zoom Out / Zoom to Fit in the actions menu of assistive technologies (photos only).
+private struct ZoomAccessibilityActions: ViewModifier {
+    let isPhoto: Bool
+    let zoom: (ViewerZoomCommand.Kind) -> Void
+
+    func body(content: Content) -> some View {
+        if isPhoto {
+            content
+                .accessibilityAction(named: Text("Zoom In", bundle: .module)) { zoom(.zoomIn) }
+                .accessibilityAction(named: Text("Zoom Out", bundle: .module)) { zoom(.zoomOut) }
+                .accessibilityAction(named: Text("Zoom to Fit", bundle: .module)) { zoom(.fit) }
+        } else {
+            content
+        }
+    }
+}
+
 /// One page: zoomable photo, Live Photo or video.
 struct ViewerPage: View {
     /// The viewer's actions, offered to VoiceOver on the page.
@@ -417,6 +571,16 @@ struct ViewerPage: View {
         var toggleFavorite: () -> Void = {}
         var showInfo: () -> Void = {}
         var delete: () -> Void = {}
+        var zoom: (ViewerZoomCommand.Kind) -> Void = { _ in }
+    }
+
+    /// What the page tells the viewer. Taps are reported by photo pages only: a video page leaves every touch to
+    /// the system player, whose controls must not sit under a gesture of the viewer.
+    @MainActor
+    struct Events {
+        var tapped: () -> Void = {}
+        var scaleChanged: (CGFloat) -> Void = { _ in }
+        var verticalDrag: (ViewerSwipe.Phase) -> Void = { _ in }
     }
 
     let fileId: FileID
@@ -425,6 +589,8 @@ struct ViewerPage: View {
     /// "3 of 120".
     var position = ""
     var actions = AccessibilityActions()
+    var zoomCommand: ViewerZoomCommand?
+    var events = Events()
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var item: MediaItem?
@@ -436,15 +602,23 @@ struct ViewerPage: View {
             if let item {
                 if item.kind == .video {
                     // The player's own controls stay reachable inside the page.
-                    VideoPage(item: item, isCurrent: isCurrent, playbackToggle: playbackToggle)
+                    VideoPage(item: item, isCurrent: isCurrent, playbackToggle: playbackToggle, verticalDrag: events.verticalDrag)
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel(description(of: item))
                 } else {
-                    ZoomablePhoto(item: item)
+                    ZoomablePhoto(item: item, isCurrent: isCurrent, command: zoomCommand, events: photoEvents)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(description(of: item))
                         .accessibilityValue(position)
                         .accessibilityAddTraits(.isImage)
+                        // The zoom gestures of VoiceOver and other assistive technologies.
+                        .accessibilityZoomAction { action in
+                            switch action.direction {
+                            case .zoomIn: actions.zoom(.zoomIn)
+                            case .zoomOut: actions.zoom(.zoomOut)
+                            @unknown default: break
+                            }
+                        }
                         // Swipe up or down with VoiceOver: next or previous photo.
                         .accessibilityAdjustableAction { direction in
                             switch direction {
@@ -461,6 +635,7 @@ struct ViewerPage: View {
         .accessibilityAction(named: Text(favoriteActionTitle)) { actions.toggleFavorite() }
         .accessibilityAction(named: Text("Info", bundle: .module)) { actions.showInfo() }
         .accessibilityAction(named: Text("Delete", bundle: .module)) { actions.delete() }
+        .modifier(ZoomAccessibilityActions(isPhoto: item?.kind == .image, zoom: actions.zoom))
         .task(id: fileId) {
             // Observed, so the VoiceOver favourite action and description follow a toggle.
             guard let library = session.services?.library else { return }
@@ -477,6 +652,16 @@ struct ViewerPage: View {
         }
     }
 
+    var photoEvents: ZoomSurfaceEvents {
+        let isCurrent: Bool = isCurrent
+        let events: Events = events
+        return ZoomSurfaceEvents(
+            // A page that is paged away goes back to the fitted size; that is not the scale of the photo shown.
+            scaleChanged: { scale in if isCurrent { events.scaleChanged(scale) } },
+            tapped: events.tapped,
+            verticalDrag: { phase in if isCurrent { events.verticalDrag(phase) } })
+    }
+
     struct PeopleRequest: Hashable {
         var fileId: FileID
         var wanted: Bool
@@ -491,245 +676,6 @@ struct ViewerPage: View {
         AccessibilityText.media(
             isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
             place: item.place, people: people, isFavorite: item.isFavorite, caption: item.caption)
-    }
-}
-
-/// Pinch / double-tap zoom with progressive resolution (SPEC §5.5.2).
-struct ZoomablePhoto: View {
-    let item: MediaItem
-    @State private var scale: CGFloat = 1
-    @State private var lastScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
-    @State private var playingLive = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var bucket: Int { scale > 1.5 ? 4096 : 1024 }
-
-    var body: some View {
-        ZStack {
-            PreviewImage(item: item, bucket: bucket, contentMode: .fit)
-                .scaleEffect(scale)
-                .offset(offset)
-            if playingLive, item.livePhotoPeer != nil {
-                LivePhotoMotion(item: item)
-                    .scaleEffect(scale)
-                    .transition(.opacity)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if item.isLivePhoto {
-                Label(String(localized: "Live", bundle: .module), systemImage: "livephoto")
-                    .font(.caption.weight(.semibold))
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: .capsule)
-                    .padding(.top, 60)
-                    .padding(.leading, 12)
-            }
-        }
-        .contentShape(.rect)
-        .gesture(
-            MagnifyGesture()
-                .onChanged { value in scale = max(1, min(8, lastScale * value.magnification)) }
-                .onEnded { _ in
-                    lastScale = scale
-                    if scale <= 1 { reset() }
-                }
-        )
-        .simultaneousGesture(
-            DragGesture()
-                .onChanged { value in
-                    guard scale > 1 else { return }
-                    offset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height)
-                }
-                .onEnded { _ in lastOffset = offset },
-            including: scale > 1 ? .all : .subviews
-        )
-        .onTapGesture(count: 2) {
-            withAnimation(reduceMotion ? nil : .spring) {
-                if scale > 1 { reset() } else { scale = 2.5; lastScale = 2.5 }
-            }
-        }
-        .onLongPressGesture(minimumDuration: 0.3) {
-        } onPressingChanged: { pressing in
-            guard item.isLivePhoto else { return }
-            withAnimation { playingLive = pressing }
-        }
-    }
-
-    func reset() {
-        scale = 1
-        lastScale = 1
-        offset = .zero
-        lastOffset = .zero
-    }
-}
-
-/// Plays the motion part of a Live Photo while pressed.
-struct LivePhotoMotion: View {
-    let item: MediaItem
-    @Environment(SessionModel.self) private var session
-    @State private var video: PlayableVideo?
-
-    var body: some View {
-        Group {
-            if let player = video?.player {
-                PlayerSurface(player: player, showsControls: false)
-                    .disabled(true)
-                    .onAppear { player.play() }
-            } else {
-                Color.clear
-            }
-        }
-        .task {
-            guard let peer = item.livePhotoPeer, let services = session.services else { return }
-            // The motion part is a hidden sibling file; without its row fall back to a QuickTime stream.
-            let motion = try? services.library.item(peer)
-            video = try? await PlayableVideo.load(
-                fileId: peer, etag: motion?.etag, name: motion?.name ?? "live.mov", mimeType: motion?.mimeType ?? "video/quicktime",
-                originalURL: motion.map { services.originalURL(for: $0) }, services: services, offline: session.offline)
-        }
-        .onDisappear { video?.player.pause() }
-    }
-}
-
-/// The system video player.
-///
-/// On the Mac this wraps `AVPlayerView` directly: SwiftUI's `VideoPlayer` crashes there when it is the first
-/// thing to touch AVKit ("failed to demangle superclass of VideoPlayerView"), as it does in this package.
-struct PlayerSurface: View {
-    let player: AVPlayer
-    var showsControls = true
-
-    var body: some View {
-        #if os(macOS)
-            MacPlayerView(player: player, showsControls: showsControls)
-        #else
-            VideoPlayer(player: player)
-        #endif
-    }
-}
-
-#if os(macOS)
-    private struct MacPlayerView: NSViewRepresentable {
-        let player: AVPlayer
-        let showsControls: Bool
-
-        func makeNSView(context: Context) -> AVPlayerView {
-            let view = AVPlayerView()
-            view.controlsStyle = showsControls ? .floating : .none
-            view.videoGravity = .resizeAspect
-            view.player = player
-            return view
-        }
-
-        func updateNSView(_ view: AVPlayerView, context: Context) {
-            if view.player !== player { view.player = player }
-        }
-    }
-#endif
-
-/// A player together with what keeps its data flowing.
-@MainActor
-struct PlayableVideo {
-    let player: AVPlayer
-    /// Retained here: the asset's resource loader only holds its delegate weakly.
-    let loader: StreamingAssetLoader?
-
-    init(file: URL) {
-        player = AVPlayer(url: file)
-        loader = nil
-    }
-
-    init(loader: StreamingAssetLoader, fileName: String) {
-        player = AVPlayer(playerItem: AVPlayerItem(asset: loader.makeAsset(fileName: fileName)))
-        self.loader = loader
-    }
-
-    /// Prefers a local copy (offline album, already downloaded original); otherwise streams a temporary
-    /// direct-download URL through the app's own HTTP client, so certificates the user trusted and the
-    /// account's client certificate apply to video like to everything else (SPEC §5.5.3).
-    static func load(
-        fileId: FileID, etag: String?, name: String, mimeType: String, originalURL: URL?, services: AccountServices,
-        offline: OfflineManager?
-    ) async throws -> PlayableVideo {
-        if let etag {
-            if let local = offline?.localFile(fileId: fileId, etag: etag) { return PlayableVideo(file: local) }
-            if let originalURL, let cached = services.images.originals.cached(fileId: fileId, etag: etag, url: originalURL) {
-                return PlayableVideo(file: cached)
-            }
-        }
-        let url = try await services.api.directDownloadURL(fileId: fileId)
-        let source = MediaByteSource(url: url, headers: ["User-Agent": services.connection.userAgent], http: services.http)
-        return PlayableVideo(loader: StreamingAssetLoader(source: source, mimeType: mimeType), fileName: name)
-    }
-}
-
-/// Video playback from the local copy or streamed through the app's HTTP client (SPEC §5.5.3).
-struct VideoPage: View {
-    let item: MediaItem
-    let isCurrent: Bool
-    var playbackToggle = 0
-    @Environment(SessionModel.self) private var session
-    @State private var video: PlayableVideo?
-    @State private var error: String?
-
-    var player: AVPlayer? { video?.player }
-
-    var body: some View {
-        ZStack {
-            if let player {
-                PlayerSurface(player: player)
-            } else {
-                PreviewImage(item: item, bucket: 1024, contentMode: .fit)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .padding()
-                        .background(.regularMaterial, in: .rect(cornerRadius: 12))
-                } else {
-                    ProgressView().controlSize(.large).tint(.white)
-                }
-            }
-        }
-        .task(id: isCurrent) {
-            if !isCurrent {
-                player?.pause()
-                return
-            }
-            guard video == nil, let services = session.services else { return }
-            if MimeTypes.unplayableVideos.contains(item.mimeType) {
-                guard session.features.has(.videoRenditions) else {
-                    error = String(localized: "This video format can't be played on this device.", bundle: .module)
-                    return
-                }
-                // The server converts on first request (404 while converting); retry for up to 2 minutes.
-                for attempt in 0..<12 {
-                    if let file = try? await services.api.videoRendition(fileId: item.fileId, etag: item.etag) {
-                        video = PlayableVideo(file: file)
-                        player?.play()
-                        return
-                    }
-                    error = attempt == 0 ? String(localized: "Preparing video…", bundle: .module) : error
-                    try? await Task.sleep(for: .seconds(10))
-                    if Task.isCancelled { return }
-                }
-                error = String(localized: "The server could not convert this video.", bundle: .module)
-                return
-            }
-            do {
-                video = try await PlayableVideo.load(
-                    fileId: item.fileId, etag: item.etag, name: item.name, mimeType: item.mimeType,
-                    originalURL: services.originalURL(for: item), services: services, offline: session.offline)
-                player?.play()
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
-        .onChange(of: playbackToggle) {
-            guard isCurrent, let player else { return }
-            if player.timeControlStatus == .paused { player.play() } else { player.pause() }
-        }
-        .onDisappear { player?.pause() }
     }
 }
 

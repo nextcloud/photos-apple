@@ -63,6 +63,24 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the file by its id first (one small SEARCH each); a locked file (423) is retried; an operation that failed for good or
   was discarded gives the local row back. Smart albums and album collaborators are read again before they are written.
   ETags are whitelisted or hashed before they become part of a cache file name.
+- Viewer zoom (VW-1): every photo page is a real zooming scroll view (`ZoomSurface`: `UIScrollView` on iOS/visionOS,
+  `NSScrollView` with magnification on the Mac) — pinch around the fingers or the pointer, double tap / double click zooms to
+  that point, the photo cannot leave the page, two-finger scroll and mouse drag pan a zoomed photo on the Mac, View ▸ Zoom In /
+  Zoom Out / Zoom to Fit (⌘+ / ⌘− / ⌘0), the same as actions for assistive technologies. Geometry ✅ unit-tested
+  (`ViewerZoomTests`); Mac ✅ run (zoom steps, double click, centring and clamping read from the running app; **not** exercised
+  with a real trackpad: pinch, and paging with a two-finger swipe over a photo that is not zoomed); iOS 🟡 compiled, not run.
+- iPhone/iPad 🟡 (compiled, not run): swipe down closes the viewer (the page follows the finger, the backdrop fades), swipe up
+  shows the info panel; every screen opens the viewer through one modifier (`mediaViewer`), with the navigation stack its
+  toolbar needs — also from Folders, Shared with you and photo links. ⬜ Zoom transition from the tile (matched geometry).
+- Viewer actions: More ▸ Add to Album… / Export… (Save to Photos on iOS), also from the menu bar; deleting or archiving takes
+  the page out and shows the next photo ✅ Mac (delete; archive shares the code). Saving originals goes through one path for
+  grid, viewer and menu bar (`MediaSaveModel`): progress with Cancel, "Exported 3 items" / what failed; on the Mac the viewer
+  asks for a folder like the grid ✅ (panel opens; the export itself was not driven by hand) — result logic ✅ unit-tested.
+- Video page: loading, "Preparing video…" (server converts, no warning sign) and failure (what happened, reason, "Try again")
+  are separate states; a stream that fails after the player is shown ends in the failure state 🟡 (states unit-tested, not
+  provoked against a server). iOS 🟡: the player is `AVPlayerViewController` without any gesture of the viewer over it (taps
+  toggle the bars on photo pages only); not run on a device — that the scrubber does not page the viewer is expected from
+  UIKit's gesture arbitration, not verified.
 - Grid: the zoom step sets a target tile size and the column count follows from the width; days at normal zoom, months and years
   when zoomed out; the scroll position is kept across zoom and resize. Previews are requested for the tile's pixel size (aspect-fill
   aware) and upgraded when the zoom or the screen scale changes. Tiles without a preview show a file-type glyph, videos a badge.
@@ -115,7 +133,11 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 ## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
 - Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
   search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
-  iPhone/iPad/Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping 🟡 (compiled for iOS, not run).
+  iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping 🟡 (compiled for iOS, not run).
+- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`, not run): tabs Library,
+  Collections, Search, Settings. The Collections tab lists every place that is a sidebar row elsewhere (server features
+  respected) and Backup with its state, and pushes it in its own stack; the navigation state stays the selected destination
+  and its path, so deep links, state restoration and a change between tab bar and sidebar keep working.
 - Every destination has its own navigation path (`MainView.paths`); selected destination and open album are restored per
   scene (`NavigationSnapshot`) ✅ on the Mac.
 - Deep links `nextcloudphotos://<destination>`, `…/album/<name>` (`…/album/shared/<name>`), `…/photo/<fileId>` ✅ parsing unit-tested,
@@ -195,12 +217,15 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡
-Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅ (API), shared with you 🟡, On this day ✅,
+Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
 memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
 - Push: permission is asked after login or when the Notifications switch is turned on, not at first launch; the switch unregisters
   and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
   needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
   pushes reach `AppModel.handleBackgroundPush` through the app delegates (`remote-notification` background mode).
+- Folders and Shared with you show a folder's photos in the app's photo grid (selection, context menu, share, favourite,
+  delete, keyboard, viewer), subfolders in a strip above it ✅ Mac. Like the other server-loaded lists (places, tags) the grid
+  is loaded once: an item deleted there disappears after a reload.
 - ⬜ Memory player (ME-4) and "Save as album" from a memory.
 - ⬜ Map time slider; MapKit native clustering (grid clustering is used).
 - ⬜ Tag assignment UI (API exists).
