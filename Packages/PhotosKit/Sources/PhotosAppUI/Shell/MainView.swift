@@ -5,6 +5,7 @@ import PhotosCore
 import PhotosModel
 import PhotosStore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Places of the app (SPEC §6.2). Mirrors the web app's navigation incl. the "Advanced" group.
 public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendable {
@@ -107,6 +108,9 @@ struct MainView: View {
         return .library
     }
     @SceneStorage("tabCustomization") private var customization: TabViewCustomization
+    @State private var creatingAlbum = false
+    @State private var importingFiles = false
+    @State private var openingLink = false
 
     func visible(_ destination: AppDestination) -> Bool {
         guard let feature = destination.requiredFeature else { return true }
@@ -180,6 +184,25 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
         .tabViewCustomization($customization)
         .tabViewSidebarHeader { AccountHeader() }
+        .focusedSceneValue(
+            \.mainActions,
+            MainActions(
+                go: { selection = $0 },
+                newAlbum: {
+                    selection = .albums
+                    creatingAlbum = true
+                },
+                upload: { importingFiles = true },
+                openPublicLink: { openingLink = true },
+                syncNow: { Task { await session.syncNow(forceReconcile: true) } }
+            )
+        )
+        .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
+        .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
+        .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            session.transfers.upload(UploadSources.copies(of: urls))
+        }
     }
 
     func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {

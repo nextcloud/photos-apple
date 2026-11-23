@@ -10,6 +10,8 @@ import SwiftUI
 /// Photo details (SPEC §7.4), laid out as an aligned two-column list.
 struct InfoPanel: View {
     let item: MediaItem
+    /// Shown as an inspector (sidebar) rather than a sheet: no Done button.
+    var inInspector = false
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var exif: [String: String] = [:]
@@ -88,11 +90,13 @@ struct InfoPanel: View {
         .formStyle(.grouped)
         .navigationTitle(String(localized: "Info", bundle: .module))
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "Done", bundle: .module)) { dismiss() }
+            if !inInspector {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Done", bundle: .module)) { dismiss() }
+                }
             }
         }
-        .task {
+        .task(id: item.fileId) {
             guard item.kind == .image, let services = session.services else { return }
             exif = (try? await services.api.exif(userPath: item.path)) ?? [:]
             if session.features.has(.recognize) { faces = (try? await services.api.faceDetections(userPath: item.path)) ?? [] }

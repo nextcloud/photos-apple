@@ -4,6 +4,7 @@
 #if os(macOS)
     import AppKit
     import PhotosCore
+    import UniformTypeIdentifiers
     import PhotosMedia
     import PhotosModel
     import PhotosStore
@@ -40,6 +41,7 @@
         private var columns = GridColumns.default
         private var showsHeaders = true
         private var pinchAmount: CGFloat = 0
+        private lazy var promiseDelegate = FilePromiseDelegate(services: services)
 
         init(services: AccountServices) {
             self.services = services
@@ -56,6 +58,7 @@
                 SectionHeaderView.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
                 withIdentifier: SectionHeaderView.identifier)
             collectionView.owner = self
+            collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
             documentView = collectionView
             hasVerticalScroller = true
             drawsBackground = false
@@ -198,6 +201,22 @@
             return menu.items.isEmpty ? nil : menu
         }
 
+        // MARK: Drag out (Finder, Mail…): file promises download the original only when dropped.
+
+        func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool {
+            true
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (
+            any NSPasteboardWriting
+        )? {
+            guard let id = dataSource.itemIdentifier(for: indexPath), let item = items[id] else { return nil }
+            let type = UTType(mimeType: item.mimeType) ?? .data
+            let provider = NSFilePromiseProvider(fileType: type.identifier, delegate: promiseDelegate)
+            provider.userInfo = ["fileId": id, "name": item.name]
+            return provider
+        }
+
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
             callbacks?.selectionChanged(currentSelection())
         }
@@ -212,6 +231,53 @@
                 .map { services.previewRequest(for: $0, pixels: pixels) }
             Task { await services.images.prefetch(requests) }
         }
+    }
+
+    /// Writes originals for file promises (drag to Finder and other apps).
+    final class FilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate, @unchecked Sendable {
+        let services: AccountServices
+        let queue: OperationQueue = {
+            let queue = OperationQueue()
+            queue.qualityOfService = .userInitiated
+            return queue
+        }()
+
+        init(services: AccountServices) {
+            self.services = services
+        }
+
+        func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+            ((filePromiseProvider.userInfo as? [String: Any])?["name"] as? String) ?? "Photo"
+        }
+
+        func filePromiseProvider(
+            _ filePromiseProvider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping ((any Error)?) -> Void
+        ) {
+            guard let fileId = (filePromiseProvider.userInfo as? [String: Any])?["fileId"] as? FileID,
+                let item = try? services.library.item(fileId)
+            else {
+                completionHandler(CocoaError(.fileNoSuchFile))
+                return
+            }
+            let services = self.services
+            let semaphore = DispatchSemaphore(value: 0)
+            nonisolated(unsafe) var result: (any Error)?
+            Task.detached {
+                do {
+                    let original = try await services.images.originals.original(
+                        fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
+                    try? FileManager.default.removeItem(at: url)
+                    try FileManager.default.copyItem(at: original, to: url)
+                } catch {
+                    result = error
+                }
+                semaphore.signal()
+            }
+            semaphore.wait()  // runs on the promise queue, not the main thread
+            completionHandler(result)
+        }
+
+        func operationQueue(for filePromiseProvider: NSFilePromiseProvider) -> OperationQueue { queue }
     }
 
     /// Adds Return to open, ⌘+/⌘− to zoom, and per-item context menus.

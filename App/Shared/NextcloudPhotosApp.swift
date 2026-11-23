@@ -18,6 +18,9 @@ struct NextcloudPhotosApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                #if os(macOS)
+                    .frame(minWidth: 760, minHeight: 480)
+                #endif
                 #if os(iOS)
                     .onAppear {
                         AppDelegate.app = app
@@ -43,19 +46,19 @@ struct NextcloudPhotosApp: App {
         #endif
         #if os(macOS)
             .defaultSize(width: 1200, height: 800)
+            .windowToolbarStyle(.unified)
             .commands {
                 SidebarCommands()
+                ToolbarCommands()
+                InspectorCommands()
+                PhotosCommands()
             }
         #endif
 
         #if os(macOS)
             Settings {
-                if let session = app.session {
-                    SettingsView()
-                        .environment(app)
-                        .environment(session)
-                        .frame(width: 520, height: 640)
-                }
+                MacSettingsView()
+                    .environment(app)
             }
         #endif
     }

@@ -53,6 +53,25 @@ struct TimelineScreen: View {
         _mediaKind = State(initialValue: filter)
     }
 
+    #if os(macOS)
+        /// Zoom slider position: 0 shows the most columns, `maxZoomLevel` the fewest.
+        private var maxZoomLevel: Double { Double(GridColumns.options.count - 1) }
+
+        private var zoomLevel: Binding<Double> {
+            Binding<Double>(
+                get: { () -> Double in
+                    let index: Int = GridColumns.options.firstIndex(of: columns) ?? 0
+                    return Double(GridColumns.options.count - 1 - index)
+                },
+                set: { (value: Double) in
+                    let level: Int = Int(value.rounded())
+                    let index: Int = max(0, min(GridColumns.options.count - 1, GridColumns.options.count - 1 - level))
+                    columns = GridColumns.options[index]
+                }
+            )
+        }
+    #endif
+
     var title: String {
         switch filter {
         case .photos: String(localized: "Photos", bundle: .module)
@@ -73,6 +92,18 @@ struct TimelineScreen: View {
         ) {
             TransfersIndicator()
             UploadMenu()
+            #if os(macOS)
+                // Mac: zoom slider and a segmented control, like Apple Photos.
+                Slider(value: zoomLevel, in: 0...maxZoomLevel) {
+                    Text("Zoom", bundle: .module)
+                } minimumValueLabel: {
+                    Image(systemName: "square.grid.4x3.fill").imageScale(.small)
+                } maximumValueLabel: {
+                    Image(systemName: "square.grid.2x2.fill").imageScale(.small)
+                }
+                .frame(width: 140)
+                .help(String(localized: "Zoom", bundle: .module))
+            #endif
             if filter == .all {
                 Picker(selection: $mediaKind) {
                     Text("All", bundle: .module).tag(MediaFilter.all)
@@ -82,7 +113,12 @@ struct TimelineScreen: View {
                 } label: {
                     Label(String(localized: "Show", bundle: .module), systemImage: "line.3.horizontal.decrease.circle")
                 }
-                .pickerStyle(.menu)
+                #if os(macOS)
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                #else
+                    .pickerStyle(.menu)
+                #endif
             }
         }
         .task(id: mediaKind) { observe() }
