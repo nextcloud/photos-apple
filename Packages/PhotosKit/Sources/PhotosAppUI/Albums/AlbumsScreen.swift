@@ -32,6 +32,18 @@ struct AlbumsScreen: View {
 
     var body: some View {
         ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
+                ForEach(sorted) { album in
+                    NavigationLink(value: album) {
+                        AlbumCard(album: album)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+        // An overlay, not scroll content: the empty state is centred like on the other screens.
+        .overlay {
             if albums.isEmpty && loaded {
                 ContentUnavailableView {
                     Label(
@@ -48,17 +60,8 @@ struct AlbumsScreen: View {
                         Button(String(localized: "Create album", bundle: .module)) { creating = true }.buttonStyle(.borderedProminent)
                     }
                 }
-                .padding(.top, 80)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
-                    ForEach(sorted) { album in
-                        NavigationLink(value: album) {
-                            AlbumCard(album: album)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding()
+            } else if !loaded {
+                ProgressView()
             }
         }
         .navigationTitle(title)
