@@ -27,6 +27,11 @@ public final class SessionModel {
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var foregroundRefresh: UUID?
+    /// When the capabilities were last compared with `features.fingerprint` (foreground check, at most every 5 minutes).
+    @ObservationIgnored private var fingerprintCheckedAt: Date?
+    /// A detection asked for by `featureUnavailable(_:)` is running or ran recently.
+    @ObservationIgnored private var redetectRequestedAt: Date?
+    @ObservationIgnored private var detection: Task<Void, Never>?
     @ObservationIgnored private(set) var isStopped = false
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "session")
 
@@ -118,19 +123,80 @@ public final class SessionModel {
 
     // MARK: Sync
 
+    /// Detects the server's features. Calls made while a detection runs wait for it instead of starting another one
+    /// (launch and the first foreground notification both ask for one).
     public func refreshFeatures() async {
+        if let running = detection {
+            await running.value
+            return
+        }
+        let task = Task { await self.detectFeatures() }
+        detection = task
+        await task.value
+        detection = nil
+    }
+
+    private func detectFeatures() async {
         guard let services else { return }
         do {
             let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect()
             guard !isStopped else { return }  // nothing is written for a session that was switched away from or removed
-            features = detected
             featureDetectionError = nil
-            AccountServices.saveFeatures(detected, for: account.id, layout: services.layout)
-            await services.sync.updateFeatures(detected)
+            fingerprintCheckedAt = Date()
+            if detected.enabled != features.enabled || detected.fingerprint != features.fingerprint {
+                let added = detected.enabled.subtracting(features.enabled).map(\.rawValue).sorted().joined(separator: ",")
+                let removed = features.enabled.subtracting(detected.enabled).map(\.rawValue).sorted().joined(separator: ",")
+                logger.info(
+                    "server features changed (\(detected.fingerprint ?? "-", privacy: .public)): +\(added, privacy: .public) -\(removed, privacy: .public)"
+                )
+            }
+            await apply(detected)
         } catch {
+            guard !isStopped else { return }
             featureDetectionError = error.localizedDescription
             logger.error("feature detection failed: \(error.localizedDescription, privacy: .public)")
+            // Unreachable server: keep what we know. A server that answered with an error: only core features until the
+            // next detection succeeds, never APIs of a newer Photos version that may be gone.
+            if let fallback = FeatureDetector.fallback(after: error, cached: features), fallback != features {
+                await apply(fallback)
+            }
         }
+    }
+
+    private func apply(_ updated: ServerFeatures) async {
+        features = updated
+        guard let services else { return }
+        AccountServices.saveFeatures(updated, for: account.id, layout: services.layout)
+        await services.sync.updateFeatures(updated)
+    }
+
+    /// Called when an optional API turned out to be missing although detection had found it (the server's Photos app was
+    /// downgraded or disabled since): stops using it at once and detects the features again (at most every 5 minutes).
+    public func featureUnavailable(_ feature: ServerFeature) {
+        guard features.has(feature), !isStopped else { return }
+        logger.notice("server no longer offers \(feature.rawValue, privacy: .public); detecting features again")
+        let updated = features.removing([feature])
+        track { [weak self] in
+            await self?.apply(updated)
+            guard let self else { return }
+            if let last = self.redetectRequestedAt, Date().timeIntervalSince(last) < 300 { return }
+            self.redetectRequestedAt = Date()
+            await self.refreshFeatures()
+        }
+    }
+
+    /// Detects the features again when they are old (1 h) or when the capabilities show that the server changed since
+    /// (Nextcloud or Photos upgraded or downgraded; checked at most every 5 minutes).
+    func refreshFeaturesIfNeeded() async {
+        guard let services else { return }
+        if Date().timeIntervalSince(features.detectedAt) > 3600 {
+            await refreshFeatures()
+            return
+        }
+        if let checked = fingerprintCheckedAt, Date().timeIntervalSince(checked) < 300 { return }
+        fingerprintCheckedAt = Date()
+        guard let current = try? await FeatureDetector(dav: services.dav, ocs: services.ocs).currentFingerprint() else { return }
+        if current != features.fingerprint { await refreshFeatures() }
     }
 
     public func syncNow(forceReconcile: Bool = false) async {
@@ -147,7 +213,7 @@ public final class SessionModel {
         if let foregroundRefresh, tasks[foregroundRefresh] != nil { return }
         foregroundRefresh = track { [weak self] in
             guard let self else { return }
-            if Date().timeIntervalSince(self.features.detectedAt) > 3600 { await self.refreshFeatures() }
+            await self.refreshFeaturesIfNeeded()
             await self.syncNow()
         }
     }
@@ -222,7 +288,13 @@ public final class SessionModel {
         var config = features.userConfig
         change(&config)
         guard let value = config.rawValue(for: key) else { return }
-        try await services.api.setUserConfig(key, value: value)
+        do {
+            try await services.api.setUserConfig(key, value: value)
+        } catch {
+            // An extended key the server does not accept (any more): stop offering it.
+            if let feature = FeatureDetector.feature(for: key), FeatureDetector.isMissingAPI(error) { featureUnavailable(feature) }
+            throw error
+        }
         guard !isStopped else { return }
         features.userConfig = config
         AccountServices.saveFeatures(features, for: account.id, layout: services.layout)

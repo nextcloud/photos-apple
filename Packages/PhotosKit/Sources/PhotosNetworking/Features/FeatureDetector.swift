@@ -24,6 +24,7 @@ public struct FeatureDetector: Sendable {
             ServerVersion(parsing: versionString)
             ?? ServerVersion(major: capabilities["version", "major"]?.int ?? 0, minor: capabilities["version", "minor"]?.int ?? 0)
         var features = ServerFeatures(serverVersion: version)
+        features.fingerprint = Self.fingerprint(capabilities)
         let caps = capabilities["capabilities"]
         Self.applyCoreCapabilities(caps, to: &features)
 
@@ -44,6 +45,60 @@ public struct FeatureDetector: Sendable {
         if version.major >= 35 { features.enabled.insert(.metadataEdit) }
         features.detectedAt = Date()
         return features
+    }
+
+    // MARK: Change detection
+
+    /// A short summary of the capabilities that changes when the server or its Photos app is upgraded or downgraded:
+    /// the Nextcloud version and, when present, the `photos` capability's version and feature list.
+    ///
+    /// A stock Photos app has no capability, so an upgrade of Photos alone (same Nextcloud version) does not change it;
+    /// that case is caught by the hourly detection and by `SessionModel.featureUnavailable(_:)`.
+    public static func fingerprint(_ capabilities: JSONValue) -> String {
+        let version = capabilities["version", "string"]?.string ?? capabilities["version", "major"].map { "\($0)" } ?? "?"
+        guard let photos = capabilities["capabilities", "photos"], photos.isPresent else { return version }
+        let photosVersion = photos["version"]?.string ?? "?"
+        let names = (photos["features"]?.array ?? []).compactMap(\.string).sorted().joined(separator: ",")
+        return "\(version)|photos \(photosVersion)|\(names)"
+    }
+
+    /// The fingerprint of the server as it is now (one capabilities request).
+    public func currentFingerprint() async throws -> String {
+        let capabilities: JSONValue = try await ocs.request("GET", "ocs/v2.php/cloud/capabilities")
+        return Self.fingerprint(capabilities)
+    }
+
+    /// What to use after `detect()` failed: `nil` keeps the cached features (the server could not be reached, so nothing
+    /// will be called anyway, and the offline app keeps its albums and places); a server that answered with an error
+    /// keeps only what every Photos version has, so no API of a newer Photos version is used until detection succeeds.
+    public static func fallback(after error: any Error, cached: ServerFeatures) -> ServerFeatures? {
+        switch error as? NetworkError {
+        case .offline, .timedOut, .cancelled, .transport, .unauthorized, .untrustedCertificate, .clientCertificateRequired,
+            .maintenance, .rateLimited:
+            return nil
+        default:
+            if error is CancellationError { return nil }
+            return cached.coreOnly
+        }
+    }
+
+    /// Whether an error from an optional API means the server does not have that API (an older or stock Photos app):
+    /// unknown OCS routes and DAV collections answer 404, unknown config keys 400, unknown methods 405 or 501.
+    public static func isMissingAPI(_ error: any Error) -> Bool {
+        switch error as? NetworkError {
+        case .notFound, .conflict: true
+        case .http(let status, _): status == 400 || status == 501
+        default: false
+        }
+    }
+
+    /// The feature a server-side user config key belongs to, for keys only newer Photos versions accept.
+    public static func feature(for key: PhotosUserConfig.Key) -> ServerFeature? {
+        switch key {
+        case .smartAlbums, .albumsSortOrder, .albumPhotosSortOrder: .configAPI
+        case .onThisDayNotifications: .onThisDayNotifications
+        case .croppedLayout, .gridDensity, .photosLocation, .photosSourceFolders: nil
+        }
     }
 
     // MARK: Capabilities
@@ -141,19 +196,22 @@ public struct FeatureDetector: Sendable {
                 {
                     features.enabled.insert(.places)
                 }
-                // Extended album props: ask for them on the albums home's children.
-                if let albums = try? await dav.propfind(
-                    connection.davURL("photos/\(uid)/albums/"), depth: 1,
-                    properties: [DAVProp.cover, DAVProp.albumDescription, DAVProp.albumId, DAVProp.lastModified])
-                {
-                    let children = albums.dropFirst()
-                    if let album = children.first {
-                        if album.properties[DAVProp.cover] != nil { features.enabled.insert(.albumCover) }
-                        if album.properties[DAVProp.albumDescription] != nil { features.enabled.insert(.albumDescription) }
-                        if album.properties[DAVProp.albumId] != nil { features.enabled.insert(.albumComments) }
-                        if let modified = album.httpDate(DAVProp.lastModified), modified.timeIntervalSince1970 > 0 {
-                            features.enabled.insert(.albumLastModified)
-                        }
+                // Extended album props: ask for them on the children of the albums home, or of the shared albums home
+                // when the user has no album of their own (the props only exist on albums).
+                var sample: DAVResource?
+                for home in ["albums", "sharedalbums"] where sample == nil {
+                    sample = try? await dav.propfind(
+                        connection.davURL("photos/\(uid)/\(home)/"), depth: 1,
+                        properties: [DAVProp.cover, DAVProp.albumDescription, DAVProp.albumId, DAVProp.lastModified]
+                    ).dropFirst().first
+                }
+                if let album = sample {
+                    // Unsupported props come back in a 404 propstat (`DAVResource.missing`), not as an error.
+                    if album.properties[DAVProp.cover] != nil { features.enabled.insert(.albumCover) }
+                    if album.properties[DAVProp.albumDescription] != nil { features.enabled.insert(.albumDescription) }
+                    if album.properties[DAVProp.albumId] != nil { features.enabled.insert(.albumComments) }
+                    if let modified = album.httpDate(DAVProp.lastModified), modified.timeIntervalSince1970 > 0 {
+                        features.enabled.insert(.albumLastModified)
                     }
                 }
                 if features.has(.places),

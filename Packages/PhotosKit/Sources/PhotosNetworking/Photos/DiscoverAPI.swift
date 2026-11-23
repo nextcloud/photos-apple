@@ -34,10 +34,12 @@ extension PhotosAPI {
         return client
     }
 
-    /// Obtains a Recognize key: companion endpoint, else the Photos page's initial state.
-    public func fetchRecognizeKey() async throws -> String? {
+    /// Obtains a Recognize key: companion endpoint (only when the server has it), else the Photos page's initial state.
+    public func fetchRecognizeKey(companionAPI: Bool) async throws -> String? {
         struct Body: Decodable { var key: String }
-        if let body: Body = try? await ocs.request("GET", "ocs/v2.php/apps/photos/api/v1/recognize/key") { return body.key }
+        if companionAPI, let body: Body = try? await ocs.request("GET", "ocs/v2.php/apps/photos/api/v1/recognize/key") {
+            return body.key
+        }
         let state = try await InitialStateScraper.fetch(http: dav.http, connection: connection)
         return state["recognizeApiKey"]?.string
     }
