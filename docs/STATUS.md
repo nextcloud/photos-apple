@@ -56,7 +56,9 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   stop on full quota / invalid login / refused upload (`BackupStatus.blocker`), retry delays for failing files, skipping assets the
   ledger knows completely, edits and RAW files matched per rendition, Live Photo halves linked across runs.
 - 🟡 Not exercised on a device: `PHAssetResource.dataSize` for the exact-size match, the network path and Low Power Mode observers.
-- ⬜ `BackupModel` does not yet pass changed options to a waiting run (`BackupEngine.settingsChanged`) or show `BackupStatus.blocker`.
+- 🟡 `BackupModel` passes changed options to a waiting run (`BackupEngine.settingsChanged`); the Backup screen and the
+  "Back up now" intent name what blocks the backup (full storage, login, refused upload, certificate). Compiled and
+  unit-tested (outcome mapping), not looked at in the running app.
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡
