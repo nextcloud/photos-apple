@@ -66,44 +66,6 @@ public enum ServerFeature: String, Codable, CaseIterable, Sendable, Comparable {
         case .photosCapability, .configAPI, .syncFeed, .contentHash, .recognizeKeyAPI, .albumChangeTag, .mediaDuration: .companion
         }
     }
-
-    /// Human readable name for the diagnostics screen.
-    public var displayName: String {
-        switch self {
-        case .photosDAV: "Photos (WebDAV)"
-        case .places: "Places"
-        case .recognize: "Recognize (faces)"
-        case .systemtags: "Tags"
-        case .trashbin: "Trash bin"
-        case .notifications: "Notifications"
-        case .comments: "Comments"
-        case .publicLinks: "Public links"
-        case .metadataEdit: "Edit date and location"
-        case .albumCover: "Album cover"
-        case .albumDescription: "Album description"
-        case .albumComments: "Album comments"
-        case .albumLastModified: "Album last modified"
-        case .albumFilterTags: "Tag filters in albums"
-        case .placeCountry: "Places by country"
-        case .timelineDays: "Timeline day counts"
-        case .captions: "AI captions"
-        case .captionsSearchable: "Caption search"
-        case .videoRenditions: "Video conversion"
-        case .onThisDayNotifications: "On this day notifications"
-        case .unifiedSearchPhotos: "Unified search (albums, places)"
-        case .folderPreviews: "Folder previews"
-        case .taskText2Text: "Assistant: text generation"
-        case .taskOCR: "Assistant: text recognition"
-        case .taskAnalyzeImages: "Assistant: image analysis"
-        case .photosCapability: "Photos capability"
-        case .configAPI: "Photos settings API"
-        case .syncFeed: "Change feed"
-        case .contentHash: "Content hashes"
-        case .recognizeKeyAPI: "Recognize key API"
-        case .albumChangeTag: "Album change tags"
-        case .mediaDuration: "Video duration"
-        }
-    }
 }
 
 /// Everything the app learned about a server for one account.

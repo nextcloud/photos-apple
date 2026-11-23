@@ -317,7 +317,7 @@ struct ServerFeaturesView: View {
             ForEach(ServerFeature.Origin.allCases, id: \.self) { origin in
                 Section {
                     ForEach(ServerFeature.allCases.filter { $0.origin == origin }, id: \.self) { feature in
-                        LabeledContent(feature.displayName) {
+                        LabeledContent(feature.localizedName) {
                             Image(systemName: session.features.has(feature) ? "checkmark.circle.fill" : "minus.circle")
                                 .foregroundStyle(session.features.has(feature) ? .green : .secondary)
                                 .accessibilityLabel(
