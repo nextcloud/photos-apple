@@ -24,6 +24,22 @@ struct TimelineScreen: View {
         /// Zoom slider position: 0 shows the most columns, `maxZoomLevel` the fewest.
         private var maxZoomLevel: Double { Double(GridColumns.options.count - 1) }
 
+        private func zoomButton(zoomIn: Bool) -> some View {
+            let title: String =
+                zoomIn ? String(localized: "Zoom In", bundle: .module) : String(localized: "Zoom Out", bundle: .module)
+            let next: Int = GridColumns.step(columns, zoomIn: zoomIn)
+            return Button {
+                columns = next
+            } label: {
+                Label(title, systemImage: zoomIn ? "square.grid.2x2.fill" : "square.grid.4x3.fill")
+                    .labelStyle(.iconOnly)
+                    .imageScale(.small)
+            }
+            .buttonStyle(.borderless)
+            .disabled(next == columns)
+            .help(title)
+        }
+
         private var zoomLevel: Binding<Double> {
             Binding<Double>(
                 get: { () -> Double in
@@ -61,19 +77,17 @@ struct TimelineScreen: View {
             TransfersIndicator()
             UploadMenu()
             #if os(macOS)
-                // Mac: zoom slider, like Apple Photos.
+                // Mac: zoom slider between two buttons that step, like Apple Photos. Three toolbar items, not a slider
+                // with value labels or a stack: the toolbar gives every control of an item that item's label, so the
+                // end caps would both be read as "Zoom".
+                zoomButton(zoomIn: false)
                 Slider(value: zoomLevel, in: 0...maxZoomLevel) {
                     Text("Zoom", bundle: .module)
-                } minimumValueLabel: {
-                    Image(systemName: "square.grid.4x3.fill").imageScale(.small)
-                        .accessibilityLabel(Text("Smallest thumbnails", bundle: .module))
-                } maximumValueLabel: {
-                    Image(systemName: "square.grid.2x2.fill").imageScale(.small)
-                        .accessibilityLabel(Text("Largest thumbnails", bundle: .module))
                 }
-                .frame(width: 140)
+                .frame(width: 100)
                 .accessibilityLabel(Text("Zoom", bundle: .module))
                 .help(String(localized: "Zoom", bundle: .module))
+                zoomButton(zoomIn: true)
             #endif
             // Only where no sidebar offers Photos, Videos and Favorites (iPhone, narrow iPad windows).
             if filter == .all && TimelineToolbar.showsMediaKindPicker(sizeClass) {
@@ -101,7 +115,8 @@ struct TimelineScreen: View {
         let library = services.library
         let excluded = session.excludedFolders
         let kind = mediaKind
-        feed.observe({ library.observeGrid(kind, excludedFolders: excluded) }, flat: false)
+        // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.
+        feed.observe({ library.observeGrid(kind, excludedFolders: excluded, coalescing: .milliseconds(300)) }, flat: false)
     }
 
     var emptyTitle: String {

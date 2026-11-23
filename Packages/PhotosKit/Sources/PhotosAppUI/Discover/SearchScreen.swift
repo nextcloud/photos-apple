@@ -101,6 +101,9 @@ struct SearchScreen: View {
     /// The chosen filters. On the Mac they are the tokens of the search field; elsewhere a row of chips above the results.
     @Binding var filters: [SearchFilter]
     @State private var vocabulary = SearchSuggestions.Vocabulary()
+    /// Counts the steps in which the vocabulary arrives (it loads off the main thread, tags and people from the server),
+    /// so that suggestions for text typed before it was there are computed again.
+    @State private var vocabularyRevision = 0
     @State private var feed = GridFeed()
     @State private var saving = false
     @State private var smartName = ""
@@ -207,7 +210,7 @@ struct SearchScreen: View {
         }
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
-        .task(id: query) { await updateSuggestions() }
+        .task(id: SuggestionInput(query: query, vocabularyRevision: vocabularyRevision)) { await updateSuggestions() }
         .task(id: filters) {
             guard !filters.isEmpty, let items = try? await SearchEvaluator.gridItems(for: filters, session: session) else { return }
             // A newer set of filters is already being evaluated.
@@ -292,12 +295,22 @@ struct SearchScreen: View {
             ($0.id, $0.title)
         }
         vocabulary = SearchSuggestions.Vocabulary(places: places.sorted(), albums: albums)
+        vocabularyRevision += 1
         if session.features.has(.systemtags), let tags = try? await services.api.tagsInUse() {
             vocabulary.tags = tags.map { ($0.id, $0.name) }
+            vocabularyRevision += 1
         }
         if session.features.has(.recognize), let people = try? await services.api.people(key: await session.recognizeKey()) {
             vocabulary.people = people.filter { !$0.isUnnamed }.map(\.name)
+            vocabularyRevision += 1
         }
+    }
+
+    /// What the suggestions depend on. On the Mac the screen opens with the first typed letters already in the field,
+    /// before the vocabulary has loaded.
+    struct SuggestionInput: Hashable {
+        var query: String
+        var vocabularyRevision: Int
     }
 }
 
