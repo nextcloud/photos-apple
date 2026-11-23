@@ -17,6 +17,7 @@ public struct LoginView: View {
     @State private var untrusted: UntrustedCertificate?
     @State private var loginTask: Task<Void, Never>?
     @State private var pasteLink = ""
+    @State private var unencrypted: UnencryptedLogin?
     var isAddingAccount = false
 
     public init(isAddingAccount: Bool = false) {
@@ -36,6 +37,18 @@ public struct LoginView: View {
         var certificate: Data
     }
 
+    /// A login to a plain-http server that waits for the user's confirmation.
+    enum UnencryptedLogin: Equatable {
+        case address(host: String)
+        case link(host: String)
+
+        var host: String {
+            switch self {
+            case .address(let host), .link(let host): host
+            }
+        }
+    }
+
     public var body: some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -53,7 +66,7 @@ public struct LoginView: View {
                         .keyboardType(.URL)
                         .textContentType(.URL)
                     #endif
-                    .onSubmit(startLogin)
+                    .onSubmit { startLogin() }
                     .disabled(phase != .idle)
 
                     if let error {
@@ -62,7 +75,9 @@ public struct LoginView: View {
                             .font(.callout)
                     }
 
-                    Button(action: startLogin) {
+                    Button {
+                        startLogin()
+                    } label: {
                         HStack {
                             if phase != .idle { ProgressView().controlSize(.small) }
                             Text(phaseTitle)
@@ -84,6 +99,23 @@ public struct LoginView: View {
             .padding(24)
             .frame(maxWidth: 480)
             .frame(maxWidth: .infinity)
+            .alert(
+                String(localized: "This connection is not encrypted", bundle: .module),
+                isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
+                presenting: unencrypted
+            ) { pending in
+                Button(String(localized: "Log in anyway", bundle: .module), role: .destructive) {
+                    switch pending {
+                    case .address: startLogin(allowUnencrypted: true)
+                    case .link: loginWithLink(allowUnencrypted: true)
+                    }
+                }
+                Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+            } message: { pending in
+                Text(
+                    "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                    bundle: .module)
+            }
         }
         .alert(item: $untrusted) { untrusted in
             Alert(
@@ -166,9 +198,14 @@ public struct LoginView: View {
         phase = .idle
     }
 
-    func startLogin() {
+    func startLogin(allowUnencrypted: Bool = false) {
         guard phase == .idle, let serverURL = LoginService.normalizeServerAddress(address) else {
             if phase == .idle { error = String(localized: "Please enter a valid server address.", bundle: .module) }
+            return
+        }
+        if !allowUnencrypted, LoginService.isUnencrypted(serverURL) {
+            error = nil
+            unencrypted = .address(host: serverURL.host() ?? serverURL.absoluteString)
             return
         }
         error = nil
@@ -187,6 +224,13 @@ public struct LoginView: View {
                 defer { browser.cancel() }
                 let credentials = try await service.waitForGrant(flow)
                 browser.cancel()
+                // The server may name another address for itself than the one that was typed.
+                if !allowUnencrypted, LoginService.isUnencrypted(credentials.serverURL) {
+                    error = String(
+                        localized: "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that.",
+                        bundle: .module)
+                    return
+                }
                 phase = .finishing
                 try await app.addAccount(credentials)
                 if isAddingAccount { dismiss() }
@@ -203,7 +247,13 @@ public struct LoginView: View {
         }
     }
 
-    func loginWithLink() {
+    func loginWithLink(allowUnencrypted: Bool = false) {
+        let parsed = LoginService.parseLoginURL(pasteLink) ?? LoginService.parseOnetimeLoginURL(pasteLink)
+        if !allowUnencrypted, let serverURL = parsed?.serverURL, LoginService.isUnencrypted(serverURL) {
+            error = nil
+            unencrypted = .link(host: serverURL.host() ?? serverURL.absoluteString)
+            return
+        }
         let service = app.loginService()
         phase = .finishing
         error = nil
