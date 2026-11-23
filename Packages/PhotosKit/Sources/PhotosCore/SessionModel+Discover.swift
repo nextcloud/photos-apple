@@ -10,7 +10,9 @@ extension SessionModel {
     public func recognizeKey() async -> String? {
         if let key = features.validRecognizeKey() { return key }
         guard let services, features.has(.recognize) else { return nil }
-        guard let key = try? await services.api.fetchRecognizeKey(), !key.isEmpty else { return nil }
+        guard let key = try? await services.api.fetchRecognizeKey(companionAPI: features.has(.recognizeKeyAPI)), !key.isEmpty else {
+            return nil
+        }
         var updated = features
         updated.recognizeAPIKey = key
         updated.recognizeAPIKeyDate = Date()
@@ -20,7 +22,7 @@ extension SessionModel {
 
     func setFeatures(_ updated: ServerFeatures) {
         features = updated
-        AccountServices.saveFeatures(updated, for: account.id)
+        AccountServices.saveFeatures(updated, for: account.id, layout: services?.layout ?? AppPaths.layout)
     }
 }
 

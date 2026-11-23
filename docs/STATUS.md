@@ -17,11 +17,20 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 - Integration tests against a local Nextcloud 36 + Photos master server (504-item test library): feature detection, sync, albums,
   album content, places, previews, favourite/move/delete made elsewhere, album/link/upload round trip, public album access, reconciliation SEARCH, trash, tags, folders.
 - The Mac app was run against the same server (timeline, albums, places, memories).
+- Stock Photos (2026-11-23): unit tests replay responses recorded from upstream Photos master, the released Photos 8.0.0 and
+  an extended server (`PhotosStoreTests/StockServerTests.swift`, `Fixtures/`): detection, 404 propstats, sync, albums, places,
+  memories. Integration tests and the Mac app ran against stock master, Photos 8.0.0 (force-enabled on Nextcloud 36) and the
+  extended `deploy/devel-all` server; upgrading and downgrading the server's Photos app switched the extended features on and off.
 - Not available on the build Mac: iOS/visionOS simulator runtimes, signed builds (App Groups, keychain group, push), devices.
 
 ## M0 Foundation — ✅
 Login Flow v2 (✅ code; browser flow 🟡 not exercised by hand), login links ✅, untrusted certificates 🟡, client certificates 🟡,
 accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, store ✅, logging (os.Logger) ✅, CI ✅.
+- Feature detection on stock servers ✅: only core features, no extended API is called. Detection runs at launch, hourly, and
+  when the capabilities fingerprint changes (checked on foreground, at most every 5 minutes); a failed probe turns only its
+  feature off; a detection that fails with a server error keeps core features only; an extended API that answers 404/400
+  (album comments, extended config keys) is switched off at once and detection runs again. Settings → Server features groups
+  core, newer-Photos, Assistant and companion features.
 - Logout, account removal and remote wipe share one clean-up (`AccountPurge`): database, caches, offline files, app password, push
   key and registration, backup options of that account; trusted and client certificates go with the last account on their host.
   Push is unregistered before the app password is revoked. ✅ unit-tested, logout ✅ in the Mac app; remote wipe 🟡 (no server-side test).

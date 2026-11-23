@@ -129,7 +129,13 @@ public struct SettingsView: View {
                 } header: {
                     Text("Notifications", bundle: .module)
                 } footer: {
-                    Text("Notifications are delivered through Nextcloud's push service.", bundle: .module)
+                    if session.features.has(.notifications) {
+                        Text("Notifications are delivered through Nextcloud's push service.", bundle: .module)
+                    } else {
+                        Text(
+                            "Notifications are delivered through Nextcloud's push service. This server has no Notifications app, so it doesn't send any.",
+                            bundle: .module)
+                    }
                 }
             }
 
@@ -191,6 +197,10 @@ public struct SettingsView: View {
                     if let photos = session.features.photosAppVersion {
                         LabeledContent(String(localized: "Photos app", bundle: .module), value: photos)
                     }
+                    LabeledContent(
+                        String(localized: "Photos features", bundle: .module),
+                        value: session.features.hasExtendedFeatures
+                            ? String(localized: "Extended", bundle: .module) : String(localized: "Standard", bundle: .module))
                     NavigationLink(String(localized: "Server features", bundle: .module)) { ServerFeaturesView() }
                     Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
                         .disabled(session.syncStatus.isWorking)
@@ -304,18 +314,29 @@ struct ServerFeaturesView: View {
             if let error = session.featureDetectionError {
                 Section { Text(error).foregroundStyle(.red) }
             }
-            Section {
-                ForEach(ServerFeature.allCases, id: \.self) { feature in
-                    LabeledContent(feature.displayName) {
-                        Image(systemName: session.features.has(feature) ? "checkmark.circle.fill" : "minus.circle")
-                            .foregroundStyle(session.features.has(feature) ? .green : .secondary)
-                            .accessibilityLabel(
-                                session.features.has(feature)
-                                    ? Text("Available", bundle: .module) : Text("Not available", bundle: .module))
+            ForEach(ServerFeature.Origin.allCases, id: \.self) { origin in
+                Section {
+                    ForEach(ServerFeature.allCases.filter { $0.origin == origin }, id: \.self) { feature in
+                        LabeledContent(feature.displayName) {
+                            Image(systemName: session.features.has(feature) ? "checkmark.circle.fill" : "minus.circle")
+                                .foregroundStyle(session.features.has(feature) ? .green : .secondary)
+                                .accessibilityLabel(
+                                    session.features.has(feature)
+                                        ? Text("Available", bundle: .module) : Text("Not available", bundle: .module))
+                        }
+                    }
+                } header: {
+                    Text(Self.title(of: origin))
+                } footer: {
+                    if origin == .extended && !session.features.hasExtendedFeatures {
+                        Text(
+                            "This server runs the standard Photos app. Features of newer Photos versions appear here and in the app as soon as the server offers them.",
+                            bundle: .module)
+                    } else if origin == ServerFeature.Origin.allCases.last {
+                        Text(
+                            "Detected \(session.features.detectedAt.formatted(date: .abbreviated, time: .shortened)).", bundle: .module)
                     }
                 }
-            } footer: {
-                Text("Detected \(session.features.detectedAt.formatted(date: .abbreviated, time: .shortened)).", bundle: .module)
             }
             Section(String(localized: "Media types", bundle: .module)) {
                 Text(session.features.allMimeTypes.joined(separator: ", ")).font(.footnote)
@@ -324,6 +345,15 @@ struct ServerFeaturesView: View {
         .navigationTitle(String(localized: "Server features", bundle: .module))
         .toolbar {
             Button(String(localized: "Detect again", bundle: .module)) { Task { await session.refreshFeatures() } }
+        }
+    }
+
+    static func title(of origin: ServerFeature.Origin) -> String {
+        switch origin {
+        case .core: String(localized: "Nextcloud and Photos", bundle: .module)
+        case .extended: String(localized: "Newer Photos versions", bundle: .module)
+        case .assistant: String(localized: "Assistant", bundle: .module)
+        case .companion: String(localized: "Additional server APIs", bundle: .module)
         }
     }
 }

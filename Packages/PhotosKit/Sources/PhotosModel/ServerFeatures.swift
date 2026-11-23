@@ -44,6 +44,29 @@ public enum ServerFeature: String, Codable, CaseIterable, Sendable, Comparable {
 
     public static func < (lhs: ServerFeature, rhs: ServerFeature) -> Bool { lhs.rawValue < rhs.rawValue }
 
+    /// Where a feature comes from, for the diagnostics screen and for what survives a failed detection.
+    public enum Origin: Int, CaseIterable, Sendable {
+        /// Nextcloud and the Photos app as released (Photos 6–9, Nextcloud 33+).
+        case core
+        /// Newer Photos versions (the feature branches); absent on a stock server.
+        case extended
+        /// Task processing providers (Assistant).
+        case assistant
+        /// Companion APIs (`SERVER-COMPANION.md`), absent unless the server adds them.
+        case companion
+    }
+
+    public var origin: Origin {
+        switch self {
+        case .photosDAV, .places, .recognize, .systemtags, .trashbin, .notifications, .comments, .publicLinks, .metadataEdit: .core
+        case .albumCover, .albumDescription, .albumComments, .albumLastModified, .albumFilterTags, .placeCountry, .timelineDays,
+            .captions, .captionsSearchable, .videoRenditions, .onThisDayNotifications, .unifiedSearchPhotos, .folderPreviews:
+            .extended
+        case .taskText2Text, .taskOCR, .taskAnalyzeImages: .assistant
+        case .photosCapability, .configAPI, .syncFeed, .contentHash, .recognizeKeyAPI, .albumChangeTag, .mediaDuration: .companion
+        }
+    }
+
     /// Human readable name for the diagnostics screen.
     public var displayName: String {
         switch self {
@@ -101,6 +124,9 @@ public struct ServerFeatures: Codable, Hashable, Sendable {
     /// Theming colour from capabilities, `#RRGGBB`.
     public var themingColor: String?
     public var detectedAt: Date
+    /// What the capabilities said about the server when this was detected (`FeatureDetector.fingerprint`): a different
+    /// value later means the server or its Photos app was upgraded or downgraded, so the features are detected again.
+    public var fingerprint: String?
 
     public init(
         serverVersion: ServerVersion,
@@ -131,6 +157,29 @@ public struct ServerFeatures: Codable, Hashable, Sendable {
     }
 
     public func has(_ feature: ServerFeature) -> Bool { enabled.contains(feature) }
+
+    /// Whether the server offers anything beyond the released Photos app (feature branches or companion APIs).
+    public var hasExtendedFeatures: Bool { enabled.contains { $0.origin == .extended || $0.origin == .companion } }
+
+    /// The same features without the given ones (a feature the server turned out not to have after all).
+    public func removing(_ features: Set<ServerFeature>) -> ServerFeatures {
+        var copy = self
+        copy.enabled.subtract(features)
+        if !features.isDisjoint(with: [.configAPI, .photosCapability]) {
+            // Values that only an extended server keeps.
+            copy.userConfig.smartAlbums = nil
+            copy.userConfig.albumsSortOrder = nil
+            copy.userConfig.albumPhotosSortOrder = nil
+        }
+        if features.contains(.onThisDayNotifications) { copy.userConfig.onThisDayNotifications = nil }
+        return copy
+    }
+
+    /// Only what every Photos version has: used when detection failed with a server error, so the app never keeps
+    /// calling APIs of a newer Photos version that may have been removed (downgrade, app disabled, broken update).
+    public var coreOnly: ServerFeatures {
+        removing(Set(enabled.filter { $0.origin != .core }))
+    }
 
     public var allMimeTypes: [String] { imageMimeTypes + videoMimeTypes }
 

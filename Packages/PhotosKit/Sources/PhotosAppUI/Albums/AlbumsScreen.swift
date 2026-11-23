@@ -24,8 +24,14 @@ struct AlbumsScreen: View {
         kind == .shared ? String(localized: "Shared albums", bundle: .module) : String(localized: "Albums", bundle: .module)
     }
 
+    /// "Recently changed" needs real album modification times, which only newer Photos versions report; without them
+    /// the albums are sorted by the date of their photos.
+    var effectiveSortOrder: AlbumSortOrder {
+        sortOrder == .recent && !session.features.has(.albumLastModified) ? .date : sortOrder
+    }
+
     var sorted: [Album] {
-        switch sortOrder {
+        switch effectiveSortOrder {
         case .name: albums.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         case .date: albums.sorted { ($0.dateEnd ?? .distantPast) > ($1.dateEnd ?? .distantPast) }
         case .recent:
@@ -72,8 +78,13 @@ struct AlbumsScreen: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
-                    Picker(String(localized: "Sort by", bundle: .module), selection: $sortOrder) {
-                        Text("Recently changed", bundle: .module).tag(AlbumSortOrder.recent)
+                    Picker(
+                        String(localized: "Sort by", bundle: .module),
+                        selection: Binding<AlbumSortOrder>(get: { effectiveSortOrder }, set: { sortOrder = $0 })
+                    ) {
+                        if session.features.has(.albumLastModified) {
+                            Text("Recently changed", bundle: .module).tag(AlbumSortOrder.recent)
+                        }
                         Text("Name", bundle: .module).tag(AlbumSortOrder.name)
                         Text("Date of photos", bundle: .module).tag(AlbumSortOrder.date)
                     }

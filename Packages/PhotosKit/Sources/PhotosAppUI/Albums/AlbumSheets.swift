@@ -315,7 +315,18 @@ struct CommentsSheet: View {
 
     func load() async {
         guard let id = album.serverAlbumId, let services = session.services else { return }
-        do { comments = try await services.api.comments(albumId: id) } catch { self.error = error.localizedDescription }
+        do {
+            comments = try await services.api.comments(albumId: id)
+        } catch {
+            self.error = Self.message(for: error)
+            // The server's Photos app no longer has album comments (downgraded): stop offering them.
+            if FeatureDetector.isMissingAPI(error) { session.featureUnavailable(.albumComments) }
+        }
+    }
+
+    static func message(for error: any Error) -> String {
+        FeatureDetector.isMissingAPI(error)
+            ? String(localized: "Comments on albums aren't available on this server.", bundle: .module) : error.localizedDescription
     }
 
     func send() {
@@ -326,7 +337,10 @@ struct CommentsSheet: View {
             do {
                 try await services.api.postComment(albumId: id, message: text)
                 await load()
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                self.error = Self.message(for: error)
+                if FeatureDetector.isMissingAPI(error) { session.featureUnavailable(.albumComments) }
+            }
         }
     }
 
