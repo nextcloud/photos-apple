@@ -23,13 +23,27 @@ public struct BackupStatus: Sendable, Equatable {
     }
 
     public var phase: Phase = .idle
+    /// Everything this app has uploaded so far (the ledger's count).
     public var uploaded = 0
+    /// What the current or last pass uploaded.
+    public var uploadedThisPass = 0
     public var matched = 0
     public var pending = 0
     public var failed = 0
     public var lastRun: Date?
     /// Set when a run stopped because of something only the user can fix (the phase is then `.failed` with the message).
     public var blocker: Blocker?
+    /// The system took the time away from the last pass (a background task expired) before it was through. This is not
+    /// the user's pause: the phase is `.idle` and the pass is taken up again at the next opportunity.
+    public var isInterrupted = false
+
+    /// A pass is at work.
+    public var isRunning: Bool {
+        switch phase {
+        case .scanning, .reconciling, .uploading: true
+        case .idle, .notAuthorized, .paused, .upToDate, .failed: false
+        }
+    }
 
     /// Problems that stop the whole backup, not just one file.
     public enum Blocker: Sendable, Equatable {
@@ -86,6 +100,8 @@ public actor BackupEngine {
     private var resume: Resume?
     /// Set by `shutdown()`: the account is going away, nothing may start again.
     private var isShutDown = false
+    /// Set by `interrupt()` for the pass it stops.
+    private var interrupting = false
     var metadataEditing = false
 
     struct Resume {
@@ -211,6 +227,15 @@ public actor BackupEngine {
         running?.cancel()
     }
 
+    /// The system takes the time away (a background task expires, the background time runs out): the pass stops like
+    /// after the user's pause, but it is not shown as "Paused" and stays due: `BackupStatus.isInterrupted` says so, and
+    /// whoever gets time again (the next background task, the app coming to the foreground) runs a pass.
+    public func interrupt() {
+        guard let running else { return }
+        interrupting = true
+        running.cancel()
+    }
+
     /// Stops for good and waits until nothing runs any more (account removal): a running pass is cancelled, a waiting one
     /// is forgotten, and the engine no longer reacts to network or power changes. A later `run` does nothing.
     public func shutdown() async {
@@ -225,7 +250,10 @@ public actor BackupEngine {
 
     private func perform(_ settings: BackupSettings, dryRun: Bool, retryFailed: Bool) async {
         resume = nil
+        interrupting = false
         status.blocker = nil
+        status.isInterrupted = false
+        status.uploadedThisPass = 0
         guard library.isAuthorized else {
             publish(.notAuthorized)
             return
@@ -253,8 +281,16 @@ public actor BackupEngine {
             } else {
                 publish(status.pending == 0 ? .upToDate : .idle)
             }
-        } catch is CancellationError {
-            publish(.paused(BackupPause.user.message))
+        } catch where Task.isCancelled || BackupPolicy.isCancellation(error) {
+            // A request that was cancelled in the middle reports it as a network error.
+            try? refreshCounts()
+            if interrupting {
+                interrupting = false
+                status.isInterrupted = true
+                publish(.idle)
+            } else {
+                publish(.paused(BackupPause.user.message))
+            }
         } catch let error as NetworkError where Self.isConnectionLoss(error) {
             try? refreshCounts()
             if dryRun {
@@ -394,6 +430,7 @@ public actor BackupEngine {
                 let uploaded = try await remote.upload(file: exported, fileName: name, folder: folder, capturedAt: resource.createdAt)
                 try record(resource, state: .uploaded, matchedBy: .ownUpload, serverPath: uploaded.path, serverFileId: uploaded.fileId)
                 status.uploaded += 1
+                status.uploadedThisPass += 1
                 await linkLivePhoto(resource, uploaded: uploaded)
                 await remote.didUpload(uploaded, resource: resource, metadataEditing: metadataEditing)
             } catch {

@@ -8,6 +8,10 @@ import PhotosBackup
 import PhotosModel
 import Synchronization
 
+#if os(iOS)
+    import UIKit
+#endif
+
 /// How a backup pass ended, for callers that have to tell the user (the "Back up now" App Intent, background tasks).
 public enum BackupOutcome: Sendable, Equatable {
     /// Everything on this device is on the server.
@@ -24,8 +28,11 @@ public enum BackupOutcome: Sendable, Equatable {
     /// Backup could not start at all: it is turned off, or its account is signed out.
     case unavailable(String)
 
+    /// The system stopped the pass before its end (the background time ran out); it goes on at the next opportunity.
+    case interrupted(uploaded: Int)
+
     /// Derives the outcome from the engine's status after a pass.
-    public init(status: BackupStatus, uploadedBefore: Int) {
+    public init(status: BackupStatus) {
         switch status.phase {
         case .upToDate: self = .upToDate
         // A pause is the final state of a pass now: the engine keeps it until the run continues (by itself when the
@@ -34,8 +41,10 @@ public enum BackupOutcome: Sendable, Equatable {
         case .failed(let message):
             if let blocker = status.blocker { self = .blocked(blocker) } else { self = .failed(message) }
         case .notAuthorized: self = .notAuthorized
+        case .idle where status.isInterrupted: self = .interrupted(uploaded: status.uploadedThisPass)
         case .idle, .scanning, .reconciling, .uploading:
-            self = .finished(uploaded: max(0, status.uploaded - uploadedBefore), remaining: status.pending, failed: status.failed)
+            // What this pass uploaded, not the ledger's count of everything that was ever uploaded.
+            self = .finished(uploaded: status.uploadedThisPass, remaining: status.pending, failed: status.failed)
         }
     }
 
@@ -61,6 +70,7 @@ public enum BackupOutcome: Sendable, Equatable {
                 String(localized: "Backup finished.")
             }
         case .paused(let reason): String(localized: "Backup is paused: \(reason)")
+        case .interrupted: String(localized: "Backup was interrupted. It continues the next time Nextcloud Photos is running.")
         case .failed(let message): String(localized: "Backup failed: \(message)")
         case .blocked(let blocker):
             switch blocker {
@@ -116,6 +126,14 @@ public final class BackupModel {
     func attach(_ app: AppModel) {
         self.app = app
         if let id = settings.accountId, !app.accounts.contains(where: { $0.id == id }) { forgetSettings() }
+        #if os(iOS)
+            // A pass that a background task had to give up goes on as soon as the app is in front again. The model lives
+            // as long as the app, so the observer is never removed.
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                Task { @MainActor in await self?.resumeIfInterrupted() }
+            }
+        #endif
     }
 
     public var isAvailable: Bool {
@@ -193,13 +211,12 @@ public final class BackupModel {
             return .unavailable(reason)
         }
         let box = statusBox
-        let uploadedBefore = box.value.uploaded
         runningPasses += 1
         await engine.run(settings, dryRun: !settings.isEnabled, retryFailed: retryFailed)
         runningPasses -= 1
         let final = box.value
         if self.engine === engine { status = final }
-        return BackupOutcome(status: final, uploadedBefore: uploadedBefore)
+        return BackupOutcome(status: final)
     }
 
     /// Why no engine is available: the backup account is signed out or cannot be opened.
@@ -208,9 +225,26 @@ public final class BackupModel {
         return String(localized: "Backup is paused: log in to \(account.displayName) on \(account.hostDisplayName) again.")
     }
 
+    /// The user's pause.
     public func cancel() {
         Task { await engine?.cancel() }
     }
+
+    /// The system takes the time away (a background task expires). Unlike `cancel()` this is not shown as "Paused", and
+    /// the pass is taken up again by the next background task or when the app comes to the foreground.
+    public func interrupt() async {
+        await engine?.interrupt()
+    }
+
+    /// Continues a pass the system interrupted. Called when the app becomes active.
+    public func resumeIfInterrupted() async {
+        guard settings.isEnabled, status.isInterrupted, !isPassRunning else { return }
+        await runNow()
+    }
+
+    /// A pass is running: one started here, or one the engine started by itself after waiting (for Wi-Fi, for the
+    /// connection to come back), which only shows in the status it publishes.
+    var isPassRunning: Bool { runningPasses > 0 || statusBox.value.isRunning }
 
     public func entries() async -> [BackupLedgerEntry] {
         (try? await prepareEngine()?.entries()) ?? []
@@ -237,13 +271,13 @@ public final class BackupModel {
     /// Engine bound to the backup account, whichever account is active.
     func prepareEngine() -> BackupEngine? {
         guard let account, let services = services(for: account) else {
-            if runningPasses == 0 { dropEngine() }
+            if !isPassRunning { dropEngine() }
             return nil
         }
         if let engine, let engineServices {
             // Same services, or a pass is running on the previous ones for the same account: keep it.
             if engineServices === services { return engine }
-            if engineServices.account.id == account.id, runningPasses > 0 { return engine }
+            if engineServices.account.id == account.id, isPassRunning { return engine }
         }
         dropEngine()
         let engine = BackupEngine(api: services.api, database: services.database, accountId: account.id)

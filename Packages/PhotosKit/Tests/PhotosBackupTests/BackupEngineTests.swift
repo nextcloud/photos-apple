@@ -339,6 +339,63 @@ final class StatusLog: Sendable {
         #expect(remote.uploads.isEmpty)
     }
 
+    // MARK: Interrupted by the system (review point 8)
+
+    @Test func aPassTheSystemInterruptsIsNotPausedAndStaysDue() async throws {
+        addPhotos(["0001", "0002", "0003"])
+        let engine = engine
+        // The background time runs out while the second file is on its way.
+        remote.beforeUpload.withLock { $0 = { name in if name == "IMG_0002.heic" { await engine.interrupt() } } }
+        remote.state.withLock { $0.uploadErrors["IMG_0002.heic"] = .cancelled }
+        await engine.run(settings)
+        #expect(status.phase == .idle)
+        #expect(status.isInterrupted)
+        #expect(!status.isRunning)
+        #expect(status.uploadedThisPass == 1)
+        #expect(status.pending == 2)
+        // Not a failure of the file, and nothing waits for a network change.
+        #expect(try await entry("0002")?.state == BackupItemState.pending.rawValue)
+        #expect(try await entry("0002")?.attempts == 0)
+        #expect(await !engine.isWaitingToResume)
+
+        // The next pass takes it up.
+        remote.beforeUpload.withLock { $0 = nil }
+        remote.state.withLock { $0.uploadErrors = [:] }
+        await engine.run(settings)
+        #expect(remote.uploads == ["IMG_0001.heic", "IMG_0002.heic", "IMG_0003.heic"])
+        #expect(status.phase == .upToDate)
+        #expect(!status.isInterrupted)
+        #expect(status.uploadedThisPass == 2)
+        #expect(status.uploaded == 3)
+    }
+
+    @Test func interruptingWithoutARunningPassChangesNothing() async throws {
+        addPhotos(["0001"])
+        await engine.interrupt()
+        await engine.run(settings)
+        #expect(status.phase == .upToDate)
+        #expect(!status.isInterrupted)
+    }
+
+    @Test func aPauseWhileTheServerIsAskedIsNotAFailure() async throws {
+        addPhotos(["0001"])
+        // A request cancelled in the middle reports it as a network error.
+        remote.state.withLock { $0.searchErrors = [.cancelled] }
+        await engine.run(settings)
+        #expect(status.phase == .paused(BackupPause.user.message))
+        #expect(status.blocker == nil)
+    }
+
+    @Test func thePassCountsWhatItUploadedItself() async throws {
+        addPhotos(["0001", "0002"])
+        await engine.run(settings)
+        #expect(status.uploadedThisPass == 2)
+        addPhotos(["0003"])
+        await engine.run(settings)
+        #expect(status.uploadedThisPass == 1)
+        #expect(status.uploaded == 3)
+    }
+
     @Test func aLostConnectionWaitsForTheNextNetworkChange() async throws {
         addPhotos(["0001"])
         await engine.setNetwork(BackupNetwork())
