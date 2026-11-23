@@ -65,15 +65,12 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
-            .inspector(isPresented: $showingInfo) {
-                Group {
-                    if let item = infoItem ?? selectedItems.first {
-                        InfoPanel(item: item, inInspector: true)
-                    } else {
-                        ContentUnavailableView(String(localized: "No selection", bundle: .module), systemImage: "info.circle")
-                    }
+            .infoInspector(isPresented: $showingInfo) {
+                if let item = infoItem ?? selectedItems.first {
+                    InfoPanel(item: item, inInspector: true)
+                } else {
+                    ContentUnavailableView(String(localized: "No selection", bundle: .module), systemImage: "info.circle")
                 }
-                .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
             }
             .onChange(of: selection) { _, ids in
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }

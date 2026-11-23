@@ -79,3 +79,16 @@ public struct NextcloudLogo: View {
         }
     }
 }
+
+extension View {
+    /// The info panel: a trailing inspector on iOS/iPadOS and macOS, a sheet on visionOS (which has no inspector).
+    func infoInspector<Content: View>(isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
+        #if os(visionOS)
+            sheet(isPresented: isPresented) { NavigationStack { content() } }
+        #else
+            inspector(isPresented: isPresented) {
+                content().inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+            }
+        #endif
+    }
+}

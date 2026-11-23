@@ -65,11 +65,8 @@ struct MediaViewer: View {
             dismiss()
             return .handled
         }
-        .inspector(isPresented: $showingInfo) {
-            Group {
-                if let item = currentItem { InfoPanel(item: item, inInspector: true) }
-            }
-            .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+        .infoInspector(isPresented: $showingInfo) {
+            if let item = currentItem { InfoPanel(item: item, inInspector: true) }
         }
         .focusedSceneValue(\.gridActions, viewerActions)
         .sheet(item: $editing) { item in EditorView(item: item) }
