@@ -51,7 +51,9 @@ struct AlbumDetailScreen: View {
         ) {
             albumMenu
         }
-        .navigationSubtitle(AlbumDetails.summary(of: album))
+        #if !os(visionOS)
+            .navigationSubtitle(AlbumDetails.summary(of: album))
+        #endif
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
