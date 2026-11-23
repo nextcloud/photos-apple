@@ -15,3 +15,10 @@ path = ["App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"]
 precedence = "override"
 SPDX-FileCopyrightText = ["2018-2024 Google LLC", "2026 Nextcloud GmbH"]
 SPDX-License-Identifier = "Apache-2.0"
+
+# Screenshots: the app's UI (MIT) showing sample photos from Wikimedia Commons, each under its own licence, and Apple Maps data.
+[[annotations]]
+path = ["docs/screenshots/**"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 Nextcloud GmbH and Nextcloud contributors", "Wikimedia Commons contributors", "Apple Inc. and its map data providers"]
+SPDX-License-Identifier = "LicenseRef-Screenshots"

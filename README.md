@@ -6,6 +6,16 @@ It works with the [Photos](https://github.com/nextcloud/photos) app on Nextcloud
 The product and technical specification is in [docs/SPEC.md](docs/SPEC.md); optional server additions are in
 [docs/SERVER-COMPANION.md](docs/SERVER-COMPANION.md). Wire-format research notes are in [docs/reference](docs/reference).
 
+## Screenshots
+
+The Mac app, signed in to a test server with sample photos from Wikimedia Commons:
+
+![Library timeline with zoom slider and media filter](docs/screenshots/macos-timeline.jpg)
+
+| Places | Map |
+|---|---|
+| ![Places grid](docs/screenshots/macos-places.jpg) | ![Photos on a map](docs/screenshots/macos-map.jpg) |
+
 ## Build
 
 Requirements: Xcode 27, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
