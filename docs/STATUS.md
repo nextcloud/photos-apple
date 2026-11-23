@@ -9,6 +9,8 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 
 - Unit tests (`xcodebuild test -scheme PhotosKit-Package -destination platform=macOS`): parsing, request bodies, initial-state scraping,
   store, timeline sections, memories, stacks, duplicates, search suggestions, backup matcher and naming, editing, BlurHash, push key encoding.
+  `PhotosCoreTests` run the app model in a temporary container against a stubbed server: what logout and remote wipe leave on
+  disk and in the secret store, logout order, the Notifications switch, push payload handling, offline downloads, backup outcome.
 - Integration tests against a local Nextcloud 36 + Photos master server (504-item test library): feature detection, sync, albums,
   album content, places, previews, album/link/upload round trip, public album access, reconciliation SEARCH, trash, tags, folders.
 - The Mac app was run against the same server (timeline, albums, places, memories).
@@ -17,6 +19,10 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 ## M0 Foundation — ✅
 Login Flow v2 (✅ code; browser flow 🟡 not exercised by hand), login links ✅, untrusted certificates 🟡, client certificates 🟡,
 accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, store ✅, logging (os.Logger) ✅, CI ✅.
+- Logout, account removal and remote wipe share one clean-up (`AccountPurge`): database, caches, offline files, app password, push
+  key and registration, backup options of that account; trusted and client certificates go with the last account on their host.
+  Push is unregistered before the app password is revoked. ✅ unit-tested, logout ✅ in the Mac app; remote wipe 🟡 (no server-side test).
+- Logging in to an `http://` server asks for confirmation first (not for localhost) ✅.
 - ⬜ MDM / AppConfig keys (§5.1.9).
 - ⬜ QR code camera scanner (paste of login links works).
 
@@ -31,10 +37,12 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 
 ## M2 Albums, sharing, upload, offline — ✅
 Albums and shared albums ✅, collaborators 🟡 (sharee search not exercised), public links ✅, public album viewer ✅, quick share 🟡,
-comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share extension 🟡, drag and drop 🟡, offline albums 🟡.
+comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share extension 🟡, drag and drop 🟡, offline albums 🟡
+(originals download on Wi-Fi only by default — Settings → Storage; the folder is excluded from device backups).
 
 ## M3 Backup — 🟡
 Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against server), matcher ✅, engine, UI, background tasks 🟡.
+- Backup belongs to one account and keeps running for it while another account is shown (the Backup screen says which) 🟡.
 - ⬜ PhotoKit background-upload extension (iOS 27, §7.18.6).
 - ⬜ §7.18.8 remove backed-up photos from the device.
 - ⬜ Most-compatible video conversion (HEVC → H.264); images only.
@@ -43,6 +51,10 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 ## M4 Discover — 🟡
 Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅ (API), shared with you 🟡, On this day ✅,
 memories ✅, search and smart albums 🟡, archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
+- Push: permission is asked after login or when the Notifications switch is turned on, not at first launch; the switch unregisters
+  and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
+  needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5), and silent delete
+  pushes need `AppModel.handleBackgroundPush` wired into the app delegate plus the `remote-notification` background mode.
 - ⬜ Memory player (ME-4) and "Save as album" from a memory.
 - ⬜ Map time slider; MapKit native clustering (grid clustering is used).
 - ⬜ Tag assignment UI (API exists).

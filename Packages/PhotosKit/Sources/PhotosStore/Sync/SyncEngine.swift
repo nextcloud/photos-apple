@@ -102,6 +102,12 @@ public actor SyncEngine {
         running = nil
     }
 
+    /// Cancels a running sync and waits until it has stopped (account switch, removal).
+    public func shutdown() async {
+        running?.cancel()
+        await running?.value
+    }
+
     private func performSync(forceReconcile: Bool) async {
         do {
             let folderKey = scopes.joined(separator: "|")

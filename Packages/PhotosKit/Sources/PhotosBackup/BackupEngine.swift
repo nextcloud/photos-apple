@@ -109,6 +109,12 @@ public actor BackupEngine {
 
     public func cancel() { running?.cancel() }
 
+    /// Cancels a running pass and waits until it has stopped (account removal).
+    public func shutdown() async {
+        running?.cancel()
+        await running?.value
+    }
+
     private func perform(_ settings: BackupSettings, dryRun: Bool) async {
         guard PhotoLibrarySource.authorization == .authorized || PhotoLibrarySource.authorization == .limited else {
             publish(.notAuthorized)

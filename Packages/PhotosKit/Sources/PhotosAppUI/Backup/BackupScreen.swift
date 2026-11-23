@@ -116,6 +116,11 @@ struct BackupStatusView: View {
             } footer: {
                 if backup.settings.filesAppMode == .keepFiles {
                     Text("The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
+                } else if backup.isForOtherAccount, let account = backup.account {
+                    // Backup belongs to one account and keeps running while another one is shown.
+                    Text(
+                        "Backup goes to the account \(account.displayName) on \(account.hostDisplayName), not to the account you are looking at.",
+                        bundle: .module)
                 }
             }
 

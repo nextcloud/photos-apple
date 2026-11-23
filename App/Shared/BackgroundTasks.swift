@@ -57,7 +57,7 @@
             BackgroundTasks.schedule()
             Task { @MainActor in
                 NotificationRouter.shared.app = AppDelegate.app
-                NotificationRouter.shared.requestAuthorizationAndRegister { UIApplication.shared.registerForRemoteNotifications() }
+                PushNotifications.install(delegate: NotificationRouter.shared) { UIApplication.shared.registerForRemoteNotifications() }
             }
             return true
         }

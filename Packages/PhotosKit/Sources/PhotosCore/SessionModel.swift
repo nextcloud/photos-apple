@@ -19,34 +19,42 @@ public final class SessionModel {
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
     public let transfers = TransferQueue()
-    public let backup = BackupModel()
+    /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
+    public let backup: BackupModel
     public private(set) var offline: OfflineManager?
     @ObservationIgnored var albumsRefreshedAt: Date?
     @ObservationIgnored weak var app: AppModel?
-    @ObservationIgnored private var tasks: [Task<Void, Never>] = []
-    @ObservationIgnored private var unauthorizedCheckRunning = false
+    /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
+    @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var foregroundRefresh: UUID?
+    @ObservationIgnored private(set) var isStopped = false
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "session")
 
     init(app: AppModel, account: Account, password: String?) {
         self.app = app
         self.account = account
-        let cached = AccountServices.loadFeatures(account.id)
+        self.backup = app.backup
+        let cached = AccountServices.loadFeatures(account.id, layout: app.layout)
         self.features = cached ?? ServerFeatures(serverVersion: account.serverVersion ?? ServerVersion(major: 0))
         guard let password else { return }
         do {
             let id = account.id
             services = try AccountServices(
                 account: account, appPassword: password, http: app.http, features: features, userAgent: app.userAgent,
-                onUnauthorized: { [weak self] in Task { @MainActor in await self?.handleUnauthorized(id) } })
+                layout: app.layout, onUnauthorized: { [weak app] in Task { @MainActor in await app?.handleUnauthorized(id) } })
         } catch {
             logger.error("could not open account database: \(error.localizedDescription, privacy: .public)")
         }
         transfers.session = self
-        backup.session = self
         if let services {
             let offline = OfflineManager(services: services)
             self.offline = offline
-            Task { await services.images.setLocalOriginalProvider { fileId, etag in offline.localFile(fileId: fileId, etag: etag) } }
+            // Weak: the offline manager owns the services, whose image pipeline would otherwise own the manager.
+            Task { [weak offline] in
+                await services.images.setLocalOriginalProvider { [weak offline] fileId, etag in
+                    offline?.localFile(fileId: fileId, etag: etag)
+                }
+            }
         }
     }
 
@@ -56,23 +64,54 @@ public final class SessionModel {
     public var excludedFolders: [String] { features.nomediaPaths }
 
     func start() {
-        guard let services else { return }
-        tasks.append(
-            Task { [weak self] in
-                await services.sync.setStatusHandler { status in
-                    Task { @MainActor in self?.syncStatus = status }
-                }
-                await self?.refreshFeatures()
-                await self?.syncNow()
-                await services.outbox.kick()
-                await self?.offline?.syncPins()
-                if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
-            })
+        guard let services, !isStopped else { return }
+        track { [weak self] in
+            await services.sync.setStatusHandler { status in
+                Task { @MainActor in self?.syncStatus = status }
+            }
+            await self?.refreshFeatures()
+            await self?.syncNow()
+            await services.outbox.kick()
+            await self?.offline?.syncPins()
+            if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
+        }
     }
 
+    /// Runs work that belongs to this session; it is cancelled by `stop()` and awaited by `shutdown()`.
+    @discardableResult
+    private func track(_ operation: @escaping @MainActor @Sendable () async -> Void) -> UUID {
+        let id = UUID()
+        tasks[id] = Task { [weak self] in
+            await operation()
+            self?.tasks[id] = nil
+        }
+        return id
+    }
+
+    /// Number of tracked tasks still running (tests).
+    var runningTaskCount: Int { tasks.count }
+
+    /// Cancels the session's own tasks. Does not wait; `shutdown()` does.
     func stop() {
-        tasks.forEach { $0.cancel() }
-        tasks = []
+        isStopped = true
+        tasks.values.forEach { $0.cancel() }
+    }
+
+    /// Stops everything this session runs for its account and waits until it has stopped: its own tasks, manual uploads,
+    /// offline downloads, sync and the outbox worker. With `closeDatabase` (account removal) image loads are stopped too and
+    /// the database is closed, so that nothing writes into files that are about to be deleted.
+    ///
+    /// The backup is not touched: it is app-wide and keeps running for its own account.
+    func shutdown(closeDatabase: Bool = false) async {
+        stop()
+        for task in Array(tasks.values) { await task.value }
+        tasks = [:]
+        await transfers.shutdown()
+        await offline?.shutdown()
+        if let services {
+            await services.sync.setStatusHandler { _ in }
+            await services.shutdown(closeDatabase: closeDatabase)
+        }
     }
 
     // MARK: Sync
@@ -81,9 +120,10 @@ public final class SessionModel {
         guard let services else { return }
         do {
             let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect()
+            guard !isStopped else { return }  // nothing is written for a session that was switched away from or removed
             features = detected
             featureDetectionError = nil
-            AccountServices.saveFeatures(detected, for: account.id)
+            AccountServices.saveFeatures(detected, for: account.id, layout: services.layout)
             await services.sync.updateFeatures(detected)
         } catch {
             featureDetectionError = error.localizedDescription
@@ -92,7 +132,7 @@ public final class SessionModel {
     }
 
     public func syncNow(forceReconcile: Bool = false) async {
-        guard let services else { return }
+        guard let services, !isStopped else { return }
         await services.sync.sync(forceReconcile: forceReconcile)
         await services.outbox.kick()
         await refreshFailedOperations()
@@ -100,13 +140,14 @@ public final class SessionModel {
 
     /// Called when the app comes to the foreground.
     public func didBecomeActive() {
-        guard services != nil else { return }
-        tasks.append(
-            Task { [weak self] in
-                guard let self else { return }
-                if Date().timeIntervalSince(self.features.detectedAt) > 3600 { await self.refreshFeatures() }
-                await self.syncNow()
-            })
+        guard services != nil, !isStopped else { return }
+        // One foreground refresh at a time: coming to the foreground again while it runs adds nothing.
+        if let foregroundRefresh, tasks[foregroundRefresh] != nil { return }
+        foregroundRefresh = track { [weak self] in
+            guard let self else { return }
+            if Date().timeIntervalSince(self.features.detectedAt) > 3600 { await self.refreshFeatures() }
+            await self.syncNow()
+        }
     }
 
     public func refreshFailedOperations() async {
@@ -180,30 +221,10 @@ public final class SessionModel {
         change(&config)
         guard let value = config.rawValue(for: key) else { return }
         try await services.api.setUserConfig(key, value: value)
+        guard !isStopped else { return }
         features.userConfig = config
-        AccountServices.saveFeatures(features, for: account.id)
+        AccountServices.saveFeatures(features, for: account.id, layout: services.layout)
         await services.sync.updateFeatures(features)
         if key == .photosSourceFolders { await syncNow() }
-    }
-
-    // MARK: Unauthorized (SPEC §5.1.6)
-
-    func handleUnauthorized(_ id: AccountID) async {
-        guard id == account.id, !unauthorizedCheckRunning, let services, let app else { return }
-        unauthorizedCheckRunning = true
-        defer { unauthorizedCheckRunning = false }
-        let accountAPI = AccountAPI(ocs: services.ocs)
-        do {
-            _ = try await accountAPI.profile()
-            return  // credentials still valid
-        } catch NetworkError.unauthorized {
-            if (try? await accountAPI.remoteWipeRequested()) == true {
-                await app.wipe(id, api: accountAPI)
-            } else {
-                app.markSignedOut(id)
-            }
-        } catch {
-            return
-        }
     }
 }

@@ -41,7 +41,7 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
         func applicationDidFinishLaunching(_ notification: Notification) {
             Task { @MainActor in
                 NotificationRouter.shared.app = MacAppDelegate.app
-                NotificationRouter.shared.requestAuthorizationAndRegister { NSApplication.shared.registerForRemoteNotifications() }
+                PushNotifications.install(delegate: NotificationRouter.shared) { NSApplication.shared.registerForRemoteNotifications() }
             }
         }
 

@@ -18,6 +18,7 @@ public actor ImagePipeline {
     private let publicToken: String?
     /// Local originals of offline albums, used when the preview can't be loaded.
     private var localOriginal: (@Sendable (FileID, String) -> URL?)?
+    private var isShutDown = false
 
     public func setLocalOriginalProvider(_ provider: @escaping @Sendable (FileID, String) -> URL?) {
         localOriginal = provider
@@ -54,6 +55,7 @@ public actor ImagePipeline {
     /// Returns a preview from memory, disk or the server.
     public func preview(_ request: Request) async -> CGImage? {
         if let image = cache.memoryImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { return image }
+        if isShutDown { return nil }
         let key = PreviewCache.key(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
         if let task = inflight[key] { return await task.value }
         let task = Task<CGImage?, Never> { [api, cache, originals, publicToken, logger, localOriginal] in
@@ -93,6 +95,15 @@ public actor ImagePipeline {
         return image
     }
 
+    /// Cancels the loads in flight and waits for them; nothing is loaded or written to the caches afterwards (account removal).
+    public func shutdown() async {
+        isShutDown = true
+        let tasks = Array(inflight.values)
+        tasks.forEach { $0.cancel() }
+        for task in tasks { _ = await task.value }
+        await originals.shutdown()
+    }
+
     /// Prefetches previews without waiting.
     public func prefetch(_ requests: [Request]) {
         for request in requests where !cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) {
@@ -106,6 +117,7 @@ public actor OriginalStore {
     public let directory: URL
     let dav: DAVClient
     private var inflight: [String: Task<URL, any Error>] = [:]
+    private var isShutDown = false
 
     public init(directory: URL, dav: DAVClient) {
         self.directory = directory
@@ -129,6 +141,7 @@ public actor OriginalStore {
             try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: cached.path(percentEncoded: false))
             return cached
         }
+        if isShutDown { throw CancellationError() }
         let key = "\(fileId)-\(etag)"
         if let task = inflight[key] { return try await task.value }
         let target = localURL(fileId: fileId, etag: etag, ext: url.pathExtension.lowercased())
@@ -147,6 +160,14 @@ public actor OriginalStore {
         inflight[key] = task
         defer { inflight[key] = nil }
         return try await task.value
+    }
+
+    /// Cancels the downloads in flight and waits for them; nothing is downloaded afterwards.
+    public func shutdown() async {
+        isShutDown = true
+        let tasks = Array(inflight.values)
+        tasks.forEach { $0.cancel() }
+        for task in tasks { _ = try? await task.value }
     }
 
     public func trim(toBytes limit: Int64) {

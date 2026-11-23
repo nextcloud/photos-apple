@@ -70,6 +70,12 @@ public actor Outbox {
         worker = Task { await self.drain() }
     }
 
+    /// Stops the worker and waits until it has stopped; an interrupted operation stays pending (account switch, removal).
+    public func shutdown() async {
+        worker?.cancel()
+        await worker?.value
+    }
+
     public func failedOperations() throws -> [FailedOperation] {
         try database.writer.read { db in
             try Row.fetchAll(db, sql: "SELECT id, payload, lastError FROM operation WHERE state = 'failed' ORDER BY id").compactMap { row in
@@ -98,11 +104,13 @@ public actor Outbox {
 
     private func drain() async {
         defer { worker = nil }
-        while true {
+        while !Task.isCancelled {
             guard let (id, operation, attempts) = (try? nextOperation()) ?? nil else { return }
             do {
                 try await execute(operation)
                 try? await database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE id = ?", arguments: [id]) }
+            } catch where Task.isCancelled {
+                return  // shut down: the operation stays pending
             } catch let error as NetworkError where error.isTransient {
                 // Back off; stop draining until kicked again (network change, foreground, sync).
                 let delay = min(3600, pow(2, Double(attempts)) * 10)
