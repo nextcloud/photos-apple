@@ -43,7 +43,7 @@ final class FakeRangeServer: Sendable {
     }
 }
 
-@Suite struct VideoStreamingTests {
+@Suite(.timeLimit(.minutes(1))) struct VideoStreamingTests {
     func collect(_ source: MediaByteSource, offset: Int64, length: Int64?) async throws -> (Data, [MediaByteSource.Info]) {
         var data = Data()
         var infos: [MediaByteSource.Info] = []

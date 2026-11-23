@@ -11,7 +11,7 @@ import Testing
 @testable import PhotosStore
 
 /// The outbox against a stubbed DAV layer (`FakeDAVServer`).
-@Suite struct OutboxTests {
+@Suite(.timeLimit(.minutes(1))) struct OutboxTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore

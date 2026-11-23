@@ -179,7 +179,7 @@ final class StatusLog: Sendable {
 
 // MARK: - Tests
 
-@Suite struct BackupEngineTests {
+@Suite(.timeLimit(.minutes(1))) struct BackupEngineTests {
     let library = FakeLibrary()
     let remote = FakeRemote()
     let clock = Clock()

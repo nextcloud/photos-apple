@@ -96,7 +96,7 @@ import UserNotifications
 
 /// The Notifications switch, against a stubbed server and push proxy.
 @MainActor
-@Suite struct PushToggleTests {
+@Suite(.timeLimit(.minutes(1))) struct PushToggleTests {
     let sandbox = Sandbox()
     let server = StubServer()
     let pushPaths = ["notifications/api/v2/push", "/devices"]

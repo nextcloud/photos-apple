@@ -49,7 +49,7 @@ import Testing
     }
 }
 
-@Suite struct UploaderTests {
+@Suite(.timeLimit(.minutes(1))) struct UploaderTests {
     let server = UploadStubServer()
     let directory = FileManager.default.temporaryDirectory.appending(path: "UploaderTests-\(UUID().uuidString)")
 
@@ -369,7 +369,7 @@ import Testing
     }
 }
 
-@Suite struct BackgroundUploadTests {
+@Suite(.timeLimit(.minutes(1))) struct BackgroundUploadTests {
     final class Counter: Sendable {
         private let count = Mutex(0)
         var value: Int { count.withLock { $0 } }
