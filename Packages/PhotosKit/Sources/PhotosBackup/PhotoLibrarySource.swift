@@ -25,17 +25,34 @@ public struct BackupResource: Sendable, Hashable {
     public var pixelHeight: Int
     public var latitude: Double?
     public var longitude: Double?
+    /// Size of the resource's data, when PhotoKit knows it.
+    public var byteSize: Int64?
+
+    var rendition: LocalResource.Rendition {
+        switch kind {
+        case .edited, .editedVideo: .edited
+        case .raw: .raw
+        case .photo, .video, .pairedVideo: .original
+        }
+    }
+
+    var isEdit: Bool { rendition == .edited }
+
+    /// What is remembered about the uploaded data, to tell a new edit from a metadata-only change of the asset.
+    var sizeFingerprint: String? { byteSize.map { "size:\($0)" } }
 
     var local: LocalResource {
         LocalResource(
-            localIdentifier: localIdentifier, kind: mediaKind, createdAt: createdAt, originalName: originalName, pixelWidth: pixelWidth,
-            pixelHeight: pixelHeight)
+            localIdentifier: localIdentifier, kind: mediaKind, createdAt: createdAt, originalName: originalName, byteSize: byteSize,
+            pixelWidth: pixelWidth > 0 ? pixelWidth : nil, pixelHeight: pixelHeight > 0 ? pixelHeight : nil, rendition: rendition)
     }
 }
 
 /// Reads the device photo library (SPEC §7.18).
-public struct PhotoLibrarySource: Sendable {
+public struct PhotoLibrarySource: Sendable, BackupLibrary {
     public init() {}
+
+    var isAuthorized: Bool { Self.authorization == .authorized || Self.authorization == .limited }
 
     public static var authorization: PHAuthorizationStatus { PHPhotoLibrary.authorizationStatus(for: .readWrite) }
 
@@ -71,6 +88,15 @@ public struct PhotoLibrarySource: Sendable {
         return result
     }
 
+    /// Resources of the selected assets, oldest first; `needsScan` saves reading the resources of assets that are done.
+    func scan(_ settings: BackupSettings, needsScan: (String, Date?) -> Bool) -> [BackupResource] {
+        var result: [BackupResource] = []
+        for asset in assets(settings) where needsScan(asset.localIdentifier, asset.modificationDate) {
+            result.append(contentsOf: resources(of: asset, settings: settings).map(\.0))
+        }
+        return result
+    }
+
     /// Resources of an asset to upload, according to the settings.
     public func resources(of asset: PHAsset, settings: BackupSettings) -> [(BackupResource, PHAssetResource)] {
         let all = PHAssetResource.assetResources(for: asset)
@@ -87,7 +113,8 @@ public struct PhotoLibrarySource: Sendable {
                     mediaKind: [.video, .editedVideo, .pairedVideo].contains(kind) ? .video : .image, originalName: name,
                     createdAt: created,
                     modifiedAt: asset.modificationDate, pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-                    latitude: asset.location?.coordinate.latitude, longitude: asset.location?.coordinate.longitude),
+                    latitude: asset.location?.coordinate.latitude, longitude: asset.location?.coordinate.longitude,
+                    byteSize: Self.byteSize(of: resource)),
                 resource
             )
         }
@@ -125,7 +152,19 @@ public struct PhotoLibrarySource: Sendable {
         let ext =
             (editedFile as NSString).pathExtension.isEmpty ? (original as NSString).pathExtension : (editedFile as NSString).pathExtension
         if let match = base.wholeMatch(of: /([A-Z]{3})_(\d+)/) { return "\(match.1)_E\(match.2).\(ext)" }
-        return "\(base) (edited).\(ext)"
+        return "\(base)\(BackupNaming.editedSuffix).\(ext)"
+    }
+
+    /// The size of a resource's data (`PHAssetResource.dataSize`, public since the 27 SDKs, so no key-value coding of the
+    /// private `fileSize`). PhotoKit may not know it; "unknown" lets the matcher fall back to names and dimensions.
+    static func byteSize(of resource: PHAssetResource) -> Int64? {
+        validSize(resource.dataSize)
+    }
+
+    /// Only a positive number is a size.
+    static func validSize(_ size: Int?) -> Int64? {
+        guard let size, size > 0 else { return nil }
+        return Int64(size)
     }
 
     /// Writes a backup resource to a temporary file, resolving its PhotoKit resource again (those aren't Sendable).

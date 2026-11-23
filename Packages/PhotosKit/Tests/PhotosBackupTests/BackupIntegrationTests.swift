@@ -26,8 +26,8 @@ struct BackupIntegrationTests {
         let photo = try #require(page.items.first { $0.capturedAt != nil && $0.width != nil && BackupNaming.number(in: $0.name) != nil })
         let captured = try #require(photo.capturedAt)
 
-        let engine = BackupEngine(api: api, database: try .temporary(), accountId: AccountID(rawValue: "test"))
-        let candidates = try await engine.serverCandidates(from: captured.addingTimeInterval(-2), to: captured.addingTimeInterval(2))
+        let remote = PhotosBackupRemote(api: api, library: LibraryStore(database: try .temporary()))
+        let candidates = try await remote.candidates(from: captured.addingTimeInterval(-2), to: captured.addingTimeInterval(2))
         #expect(candidates.contains { $0.fileId == photo.fileId })
 
         // The device copy of that photo would be matched (same second, same dimensions, only candidate) or by its number.
