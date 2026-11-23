@@ -65,7 +65,8 @@ jobs:
           fi
 
   build:
-    runs-on: macos-26
+    # Same image as the tests: the app targets OS 27 and uses API from the 27 SDKs (e.g. `PHAssetResource.dataSize`).
+    runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:
