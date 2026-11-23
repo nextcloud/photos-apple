@@ -61,8 +61,10 @@ struct PhotoPickerSheet: View {
                 guard let services = session.services else { return }
                 existing = Set(((try? services.collections.albumItems(albumId: album.id)) ?? []).map(\.fileId))
                 // Only own files can be added to albums (the server refuses others).
-                let all = (try? services.library.gridItems(.all, excludedFolders: session.excludedFolders)) ?? []
-                let own = Set(((try? services.library.items(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
+                // Read off the main thread: this is the whole timeline, 100 000 rows in a large library.
+                let all = (try? await services.library.fetchGridItems(.all, excludedFolders: session.excludedFolders)) ?? []
+                let own = Set(
+                    ((try? await services.library.fetchItems(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
                 items = all.filter { own.contains($0.fileId) && !existing.contains($0.fileId) }
             }
         }

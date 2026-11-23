@@ -379,6 +379,54 @@ import Testing
         }
     }
 
+    // MARK: Duplicates and clean-up
+
+    @Test func duplicateAndCleanupQueriesFindWhatTheWholeLibraryFinds() async throws {
+        let (database, store, _) = try SyntheticLibrary.makeDatabase(count: 3000)
+        defer { SyntheticLibrary.remove(database) }
+        let captured = Date(timeIntervalSince1970: 1_700_000_000.25)
+        /// Same capture time and pixel size for all; only the size tells them apart (unique per id unless given).
+        func photo(_ id: FileID, _ name: String, mime: String = "image/jpeg", size: Int64? = nil, width: Int = 4000, height: Int = 3000)
+            -> MediaItem
+        {
+            MediaItem(
+                fileId: id, path: "/Extra/\(name)", mimeType: mime, size: size ?? 5000 + id, etag: "e\(id)", modifiedAt: captured,
+                capturedAt: captured, width: width, height: height)
+        }
+        try store.upsert([
+            // Two copies, and a third that differs in size only.
+            photo(1, "a.jpg", size: 1000), photo(2, "a copy.jpg", size: 1000), photo(3, "b.jpg", size: 1001),
+            // A copy in the archive does not count.
+            MediaItem(
+                fileId: 4, path: "/.archive/a.jpg", mimeType: "image/jpeg", size: 1000, modifiedAt: captured, capturedAt: captured,
+                width: 4000, height: 3000, isArchived: true),
+            // Screenshots by name (several languages and spellings) and by PNG screen size; a PNG drawing is none.
+            photo(10, "Screenshot 2024-01-01.jpg"), photo(11, "Bildschirmfoto 2024.jpg"), photo(12, "Capture d’écran.jpg"),
+            photo(13, "SCREEN_SHOT.JPG"), photo(14, "IMG_1.png", mime: "image/png", width: 1179, height: 2556),
+            photo(15, "drawing.png", mime: "image/png", width: 1000, height: 800),
+            // Screen recording and large video.
+            MediaItem(fileId: 20, path: "/Extra/Screen Recording.mov", mimeType: "video/quicktime", size: 5000, modifiedAt: captured),
+            MediaItem(fileId: 21, path: "/Extra/big.mp4", mimeType: "video/mp4", size: 200 * 1024 * 1024, modifiedAt: captured),
+        ])
+        let all = try store.allVisibleItems()
+        func sorted(_ groups: [Duplicates.Group]) -> [[FileID]] {
+            groups.map { $0.items.sorted() }.sorted { $0.lexicographicallyPrecedes($1) }
+        }
+
+        let candidates = try await store.duplicateCandidates()
+        #expect(candidates.count < all.count / 10)
+        #expect(sorted(Duplicates.groups(candidates)) == sorted(Duplicates.groups(all)))
+        #expect(sorted(Duplicates.groups(candidates)) == [[1, 2]])
+
+        let cleanup = try await store.cleanupCandidates()
+        #expect(cleanup.count < all.count)
+        #expect(Cleanup.candidates(cleanup) == Cleanup.candidates(all))
+        let found = Cleanup.candidates(cleanup).map { ($0.category, Set($0.items.map(\.fileId))) }
+        #expect(found.first { $0.0 == .screenshots }?.1 == [10, 11, 12, 13, 14])
+        #expect(found.first { $0.0 == .screenRecordings }?.1 == [20])
+        #expect(found.first { $0.0 == .largeVideos }?.1 == [21])
+    }
+
     // MARK: Memories and map
 
     @Test func memoriesFromQueriesEqualMemoriesFromTheWholeLibrary() async throws {

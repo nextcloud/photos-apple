@@ -204,9 +204,9 @@ struct DuplicateSet: Identifiable, Sendable {
     var copies: [MediaItem]
     var suggested: Duplicates.Keeper
 
-    /// Reads the library and groups it; runs off the main actor (the whole index is loaded).
+    /// Reads the possible duplicates (a store query, not the whole index) and groups them, off the main actor.
     nonisolated static func load(_ library: LibraryStore) async -> [DuplicateSet] {
-        let all = (try? library.allVisibleItems()) ?? []
+        let all = (try? await library.duplicateCandidates()) ?? []
         let byId = Dictionary(all.map { ($0.fileId, $0) }, uniquingKeysWith: { first, _ in first })
         return Duplicates.groups(all).compactMap { group in
             let copies = group.items.compactMap { byId[$0] }
@@ -364,9 +364,9 @@ struct FreeSpaceScreen: View {
     /// How many rows of a category are listed; the delete button still covers (and counts) all of them.
     static let listed = 50
 
-    /// Reads the library and classifies it; runs off the main actor (the whole index is loaded).
+    /// Reads the possible candidates (a store query, not the whole index) and classifies them, off the main actor.
     nonisolated static func load(_ library: LibraryStore) async -> [Cleanup.Candidates] {
-        Cleanup.candidates((try? library.allVisibleItems()) ?? [])
+        Cleanup.candidates((try? await library.cleanupCandidates()) ?? [])
     }
 
     static func title(_ category: Cleanup.Category) -> String {

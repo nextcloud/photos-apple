@@ -57,6 +57,11 @@ public final class AccountServices: Sendable {
         self.images = images
         // Launch: bring the caches below their limits (SPEC §5.5) before this session adds to them.
         Task.detached(priority: .utility) { await images.trimCaches() }
+        // Keep the query planner's statistics current (indexes added by a migration, a library grown by a large sync);
+        // `0x10002` is what SQLite recommends at open: bounded work, and only for tables whose statistics are stale.
+        Task.detached(priority: .utility) { [database] in
+            try? await database.writer.write { try $0.execute(sql: "PRAGMA optimize=0x10002") }
+        }
     }
 
     /// Files that are kept for offline use; their previews survive a trim of the preview cache.

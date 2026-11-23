@@ -491,6 +491,49 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// The visible items that can be exact duplicates of another (SPEC §7.15): another visible item has the same size,
+    /// capture second and pixel size. `Duplicates.groups` over these gives the same groups as over the whole library,
+    /// without loading every row.
+    public func duplicateCandidates() async throws -> [MediaItem] {
+        try await database.writer.read { db in
+            try MediaItem.fetchAll(
+                db,
+                sql: """
+                    WITH visible AS (
+                        SELECT * FROM media
+                        WHERE isLivePhotoVideo = 0 AND isArchived = 0 AND size > 0
+                            AND capturedAt IS NOT NULL AND width IS NOT NULL AND height IS NOT NULL),
+                    keys AS (
+                        SELECT size, CAST(capturedAt AS INTEGER) AS second, width, height FROM visible
+                        GROUP BY size, second, width, height HAVING COUNT(*) >= 2)
+                    SELECT visible.* FROM visible
+                    JOIN keys ON keys.size = visible.size AND keys.second = CAST(visible.capturedAt AS INTEGER)
+                        AND keys.width = visible.width AND keys.height = visible.height
+                    ORDER BY visible.timestamp DESC
+                    """)
+        }
+    }
+
+    /// The visible items that can be "Free up space" candidates (SPEC §7.15): videos, PNGs and images whose name has
+    /// the words of a screenshot. `Cleanup.candidates` over these gives the same result as over the whole library;
+    /// the exact rules (patterns, phone screen sizes, permissions) stay in `Cleanup`.
+    public func cleanupCandidates() async throws -> [MediaItem] {
+        // Wider than `Cleanup.screenshotNames` (`%` for the optional separators and the apostrophes and accents).
+        let names = ["%screen%shot%", "%bildschirmfoto%", "%capture d%cran%", "%captura de pantalla%", "%schermafbeelding%"]
+        let nameClause = names.map { _ in "name LIKE ?" }.joined(separator: " OR ")
+        let arguments = StatementArguments([MediaKind.video.rawValue, MediaKind.image.rawValue] + names)
+        return try await database.writer.read { db in
+            try MediaItem.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM media
+                    WHERE isLivePhotoVideo = 0 AND isArchived = 0
+                        AND (kind = ? OR (kind = ? AND (lower(mimeType) = 'image/png' OR \(nameClause))))
+                    ORDER BY timestamp DESC
+                    """, arguments: arguments)
+        }
+    }
+
     /// Items within ±3 days of today in each of the last 20 years (cheap SQL for widgets).
     public func onThisDayItems(now: Date = Date(), calendar: Calendar = .current, limit: Int = 200) throws -> [MediaItem] {
         var ranges: [String] = []
