@@ -562,20 +562,6 @@ struct DestinationView: View {
     }
 }
 
-/// Placeholder for screens of later milestones.
-struct MilestonePlaceholder: View {
-    let destination: AppDestination
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(String(localized: destination.title), systemImage: destination.systemImage)
-        } description: {
-            Text("This part of Nextcloud Photos is not available yet.", bundle: .module)
-        }
-        .navigationTitle(String(localized: destination.title))
-    }
-}
-
 /// Account name and server in the sidebar header, with the account switcher.
 struct AccountHeader: View {
     @Environment(AppModel.self) private var app
