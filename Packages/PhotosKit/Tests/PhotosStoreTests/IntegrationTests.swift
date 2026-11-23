@@ -71,6 +71,63 @@ struct IntegrationTests {
     }
 }
 
+/// Changes made elsewhere reach the local index. Creates and deletes its own folder and file.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+struct IntegrationSyncTests {
+    let base = IntegrationTests()
+
+    @Test func favouriteMoveAndDeleteMadeElsewhereArrive() async throws {
+        let api = base.api
+        let features = try await FeatureDetector(dav: api.dav, ocs: api.ocs).detect()
+        let root = try #require(features.userConfig.photosSourceFolders.first)
+        let folder = (root == "/" ? "" : root) + "/photos-ios-sync-test-\(Int(Date().timeIntervalSince1970))"
+        let path = folder + "/a.jpg"
+        try await api.dav.mkcol(api.connection.filesURL(folder))
+        do {
+            // The MIME type comes from the extension; the content does not matter for the index.
+            _ = try await api.dav.put(api.connection.filesURL(path), data: Data([0xFF, 0xD8, 0xFF, 0xD9]))
+            let database = try AccountDatabase.temporary()
+            let engine = SyncEngine(api: api, database: database, features: features)
+            let library = LibraryStore(database: database)
+            await engine.sync()
+            let fileId = try #require(
+                try await database.writer.read { db in
+                    try FileID.fetchOne(db, sql: "SELECT fileId FROM media WHERE path = ?", arguments: [path])
+                })
+            #expect(try library.item(fileId)?.isFavorite == false)
+
+            // A favourite set by another client changes neither the file's nor the root's ETag.
+            let rootBefore = try await api.folderETag(root)
+            let fileBefore = try await api.folderETag(path)
+            try await api.setFavorite(userPath: path, true)
+            let rootAfter = try await api.folderETag(root)
+            let fileAfter = try await api.folderETag(path)
+            print("favourite: root etag \(rootBefore ?? "-") -> \(rootAfter ?? "-"), file etag \(fileBefore ?? "-") -> \(fileAfter ?? "-")")
+            #expect(fileBefore == fileAfter)
+            await engine.sync()
+            #expect(try library.item(fileId)?.isFavorite == true)
+            try await api.setFavorite(userPath: path, false)
+            await engine.sync()
+            #expect(try library.item(fileId)?.isFavorite == false)
+
+            // Moved by another client: same file id, new path.
+            let moved = folder + "/b.jpg"
+            try await api.move(userPath: path, to: moved)
+            await engine.sync()
+            #expect(try library.item(fileId)?.path == moved)
+
+            // Deleted by another client.
+            try await api.delete(userPath: moved)
+            await engine.sync()
+            #expect(try library.item(fileId) == nil)
+        } catch {
+            try? await api.dav.delete(api.connection.filesURL(folder))
+            throw error
+        }
+        try await api.dav.delete(api.connection.filesURL(folder))
+    }
+}
+
 /// Album, link and upload round trip. Creates and deletes its own test album and file.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
 struct IntegrationWriteTests {

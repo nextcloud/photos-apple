@@ -126,7 +126,7 @@ struct TimelineScreen: View {
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
         }
-        .refreshable { await session.syncNow() }
+        .refreshable { await session.syncNow(forceReconcile: true) }
     }
 
     func observe() {

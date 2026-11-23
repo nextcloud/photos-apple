@@ -281,15 +281,15 @@ Triggered on foreground, pull-to-refresh, every 5 min while the app is open and 
 
 1. **Companion change feed** (`SERVER-COMPANION.md` §S2) if available: apply added/changed/removed since the stored `syncToken`. Done.
 2. Otherwise:
-   1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when anything below changes). Unchanged → nothing to do.
+   1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when files below are added, changed, moved or deleted — but **not** when a favourite is set or the server fills in place/caption). Read it once, before anything is fetched, and store that value only after the sync is through, so a change made while syncing is seen by the next sync. Unchanged → only the favourites check: one SEARCH for the file ids with `oc:favorite = 1`, compared with the store.
    2. Changed → SEARCH for items with `d:getlastmodified > lastDeltaSync − 10 min` **or** `nc:upload_time > lastDeltaSync − 10 min` (covers new uploads with old mtimes) → upsert.
-   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h on each delta sync, and run a full **reconciliation** (step 4) at most once a day.
-   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), compare with the store: delete what is gone, fix moved paths, re-fetch full props of changed etags. Run on Wi-Fi in a `BGProcessingTask` or when the user pulls to refresh twice.
+   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h on each sync, and run a full **reconciliation** (step 4) whenever a root ETag changed (the delta SEARCH cannot see deletes and moves), on pull-to-refresh / "Sync now", and otherwise at most once a day.
+   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due.
 3. **Collections**: album list PROPFIND is expensive on the server (every album resolves all its files). Refresh the album list when the Albums view appears if older than 10 min, after own album writes, and in background daily; refresh one album's content when it is opened. Places/tags/people: when their view appears if older than 30 min. If the companion album change tag (`SERVER-COMPANION.md` §S7) exists, use it to skip unchanged albums.
 
 #### 5.4.5 Conflict rules
 
-Server wins for everything except operations still in the outbox. A queued favorite toggle is re-applied after a sync that overwrote it. If an outbox operation fails with 403/404/409 (file gone, no permission, already in album), drop it and refresh the affected item; 409 on album add means "already there" and is a success.
+Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs operations strictly in the order they were queued; while the oldest one waits for a retry (transient error, exponential backoff up to 1 h) nothing behind it runs, and it is retried when the backoff ends or the network comes back. If an outbox operation fails with 403/404/409 (file gone, no permission, already in album), drop it and refresh the affected item; 409 on album add means "already there" and is a success.
 
 ### 5.5 Previews, originals, video
 

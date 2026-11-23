@@ -8,9 +8,10 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 ## Verified how
 
 - Unit tests (`xcodebuild test -scheme PhotosKit-Package -destination platform=macOS`): parsing, request bodies, initial-state scraping,
-  store, timeline sections, memories, stacks, duplicates, search suggestions, backup matcher and naming, editing, BlurHash, push key encoding.
+  store, sync engine and outbox against a stubbed DAV server (changes made elsewhere, deletes/moves, ETag boundary, ordering/backoff,
+  cancellation), timeline sections, memories, stacks, duplicates, search suggestions, backup matcher and naming, editing, BlurHash, push key encoding.
 - Integration tests against a local Nextcloud 36 + Photos master server (504-item test library): feature detection, sync, albums,
-  album content, places, previews, album/link/upload round trip, public album access, reconciliation SEARCH, trash, tags, folders.
+  album content, places, previews, favourite/move/delete made elsewhere, album/link/upload round trip, public album access, reconciliation SEARCH, trash, tags, folders.
 - The Mac app was run against the same server (timeline, albums, places, memories).
 - Not available on the build Mac: iOS/visionOS simulator runtimes, signed builds (App Groups, keychain group, push), devices.
 

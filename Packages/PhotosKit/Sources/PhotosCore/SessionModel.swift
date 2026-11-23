@@ -65,6 +65,7 @@ public final class SessionModel {
                 await self?.refreshFeatures()
                 await self?.syncNow()
                 await services.outbox.kick()
+                await services.outbox.startNetworkMonitoring()
                 await self?.offline?.syncPins()
                 if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
             })
@@ -73,6 +74,7 @@ public final class SessionModel {
     func stop() {
         tasks.forEach { $0.cancel() }
         tasks = []
+        if let services { Task { await services.outbox.stopNetworkMonitoring() } }
     }
 
     // MARK: Sync
