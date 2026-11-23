@@ -28,6 +28,14 @@ public enum BackupNaming {
         return String(base[range])
     }
 
+    /// Marks an edited version where the name has no `IMG_E1234` form; `BackupMatcher.isEditedName` recognises it.
+    public static let editedSuffix = " (edited)"
+
+    /// Apple's name of an edited rendition: `IMG_E1234`.
+    static func isAppleEditedName(_ originalName: String) -> Bool {
+        (originalName as NSString).deletingPathExtension.wholeMatch(of: /[A-Za-z]{3}_E\d+/) != nil
+    }
+
     /// Name of the uploaded file.
     ///
     /// - Parameters:
@@ -52,6 +60,11 @@ public enum BackupNaming {
             } else {
                 formatter.dateFormat = "yy-MM-dd HH-mm-ss"
                 name = formatter.string(from: date) + " " + number
+            }
+            // The Files-app scheme drops the `E` of `IMG_E1234`; without a marker the edit would get the original's name
+            // and could never be told apart from it again.
+            if Self.isAppleEditedName(originalName) || originalName.localizedCaseInsensitiveContains(Self.editedSuffix) {
+                name += Self.editedSuffix
             }
             if typePrefix {
                 name = (isVideo ? String(localized: "Video") : String(localized: "Photo")) + " " + name

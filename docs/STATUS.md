@@ -41,6 +41,11 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - ⬜ PhotoKit background-upload extension (iOS 27, §7.18.6).
 - ⬜ §7.18.8 remove backed-up photos from the device.
 - ⬜ Most-compatible video conversion (HEVC → H.264); images only.
+- ✅ Run state machine unit-tested with a fake library and server: pause and resume (Wi-Fi, Low Data, Low Power, lost connection),
+  stop on full quota / invalid login / refused upload (`BackupStatus.blocker`), retry delays for failing files, skipping assets the
+  ledger knows completely, edits and RAW files matched per rendition, Live Photo halves linked across runs.
+- 🟡 Not exercised on a device: `PHAssetResource.dataSize` for the exact-size match, the network path and Low Power Mode observers.
+- ⬜ `BackupModel` does not yet pass changed options to a waiting run (`BackupEngine.settingsChanged`) or show `BackupStatus.blocker`.
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡
