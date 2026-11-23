@@ -106,6 +106,20 @@ final class UploadStubServer: Sendable {
     func file(_ path: String) -> Data? { state.withLock { $0.files[path] } }
     var uploads: [String: Upload] { state.withLock { $0.uploads } }
 
+    /// Lets a file appear right after the server said its name is free (another client was faster).
+    func appear(_ path: String, content: Data, afterLookups: Int = 1) {
+        let fault = Fault(
+            matches: { $0.method == "PROPFIND" && $0.path.hasSuffix(path) }, outcome: .status(404), remaining: afterLookups,
+            afterHandling: true,
+            sideEffect: { state in
+                guard state.files[path] == nil else { return }
+                state.files[path] = content
+                state.nextFileId += 1
+                state.fileIds[path] = state.nextFileId
+            })
+        state.withLock { $0.faults.append(fault) }
+    }
+
     func fail(
         _ method: String, suffix: String = "", times: Int = 1, afterHandling: Bool = false, with outcome: Outcome,
         sideEffect: (@Sendable (inout State) -> Void)? = nil
@@ -182,6 +196,7 @@ final class UploadStubServer: Sendable {
             return Response(status: 201)
         case "PUT":
             guard state.folders.contains(parent) else { return Response(status: 409) }
+            if state.files[path] != nil, request.headers["If-None-Match"] == "*" { return Response(status: 412) }
             return Self.store(request.body, at: path, state: &state)
         case "DELETE":
             guard state.files.removeValue(forKey: path) != nil else { return Response(status: 404) }
