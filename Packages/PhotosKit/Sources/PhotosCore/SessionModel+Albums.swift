@@ -97,9 +97,11 @@ extension SessionModel {
     public func quickShare(_ items: [MediaItem]) async throws -> URL {
         guard let services else { throw NetworkError.unauthorized }
         let own = items.filter(\.isOwnStorage)
-        guard !own.isEmpty else { throw NetworkError.forbidden(message: String(localized: "Only your own photos can be shared by link.")) }
+        guard !own.isEmpty else {
+            throw NetworkError.forbidden(message: String(localized: "Only your own photos can be shared by link.", bundle: .module))
+        }
         let names = Set(((try? services.collections.albums(.own)) ?? []).map(\.name))
-        let title = String(localized: "Shared on \(Date().formatted(date: .abbreviated, time: .omitted))")
+        let title = String(localized: "Shared on \(Date().formatted(date: .abbreviated, time: .omitted))", bundle: .module)
         let album = try await services.api.quickShare(
             userPaths: own.map(\.path), existingAlbumNames: names, title: title, extended: extendedAlbums)
         try services.collections.upsertAlbum(album)

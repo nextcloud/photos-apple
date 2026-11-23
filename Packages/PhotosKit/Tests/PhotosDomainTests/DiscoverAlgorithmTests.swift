@@ -51,6 +51,29 @@ func photo(
         #expect(trips[0].items.count == 8)
     }
 
+    /// The catalog's plural variations reach the code (string catalog of the module, `bundle: .module`).
+    @Test func yearsAgoTitlesUsePluralForms() {
+        #expect(Memories.yearsAgoTitle(1) == "1 year ago")
+        #expect(Memories.yearsAgoTitle(3) == "3 years ago")
+        let memories = Memories.onThisDay([photo(1, day(2025, 11, 21))], now: day(2026, 11, 22), calendar: utcCalendar)
+        #expect(memories.map(\.title) == ["1 year ago"])
+    }
+
+    /// A trip without places is titled by its dates; the card must not show the same date again below the title
+    /// ("22. Nov 2026, 22. Nov 2026").
+    @Test func dateLineIsLeftOutWhenTheTitleIsTheDate() {
+        let locale = Locale(identifier: "de_DE")
+        let undated = (0..<8).map { photo(FileID($0), day(2026, 11, 22, 8 + $0)) }
+        let trip = Memories.trips(undated, locale: locale)[0]
+        #expect(trip.title == DateRangeLabel.string(from: trip.start, to: trip.end, locale: locale))
+        #expect(Memories.dateLine(for: trip, locale: locale) == nil)
+
+        let placed = (0..<8).map { photo(FileID($0), day(2026, 11, 22, 8 + $0), place: "Lisbon") }
+        let named = Memories.trips(placed, locale: locale)[0]
+        #expect(named.title == "Lisbon")
+        #expect(Memories.dateLine(for: named, locale: locale) == DateRangeLabel.string(from: named.start, to: named.end, locale: locale))
+    }
+
     @Test func recapPicksNewestYearWithThirtyPhotos() {
         var items: [MediaItem] = []
         for i in 0..<40 { items.append(photo(FileID(i), day(2025, 1 + i % 12, 1 + i % 28), favorite: i == 5)) }

@@ -162,6 +162,16 @@ import Testing
         return status
     }
 
+    /// The messages come from PhotosCore's string catalog, with its plural forms.
+    @Test func messagesUseTheCatalogsPluralForms() {
+        #expect(
+            BackupOutcome.finished(uploaded: 2, remaining: 0, failed: 1).message == "Backup finished, but 1 item could not be uploaded.")
+        #expect(
+            BackupOutcome.finished(uploaded: 2, remaining: 0, failed: 3).message == "Backup finished, but 3 items could not be uploaded.")
+        #expect(BackupOutcome.finished(uploaded: 1, remaining: 1, failed: 0).message == "1 item was backed up, 1 is still waiting.")
+        #expect(BackupOutcome.finished(uploaded: 5, remaining: 2, failed: 0).message == "5 items were backed up, 2 are still waiting.")
+    }
+
     @Test func outcomeFollowsTheFinalStatus() {
         #expect(BackupOutcome(status: status(.upToDate)) == .upToDate)
         #expect(BackupOutcome(status: status(.paused("Waiting for Wi-Fi"))) == .paused("Waiting for Wi-Fi"))

@@ -112,7 +112,9 @@ public enum DateRangeLabel {
         guard end > start, !calendar.isDate(start, inSameDayAs: end) else { return start.formatted(full) }
         let sameYear = calendar.component(.year, from: start) == calendar.component(.year, from: end)
         let short = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).day().month(.abbreviated)
-        return "\(start.formatted(sameYear ? short : full)) – \(end.formatted(full))"
+        let first = start.formatted(sameYear ? short : full)
+        let last = end.formatted(full)
+        return String(localized: "\(first) – \(last)", bundle: .module, comment: "A range of dates: first day – last day.")
     }
 
     /// For a half-open range (`end` exclusive, e.g. search date filters).

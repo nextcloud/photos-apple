@@ -106,6 +106,12 @@ public enum PreviewSizing {
         buckets.first { Double($0) >= pixels * tolerance } ?? buckets.last ?? 1024
     }
 
+    /// The bucket for a square cover of `side` points (album covers) whose photo's aspect ratio is not known: a 4:3
+    /// photo is assumed, so that its short edge still covers the square. A 170 pt cover on a 2× screen needs 1024.
+    public static func coverBucket(side: Double, scale: Double, buckets: [Int] = [64, 256, 1024, 4096]) -> Int {
+        bucket(forPixels: neededPixels(tileSide: side, scale: scale, aspectRatio: 4.0 / 3.0), buckets: buckets)
+    }
+
     /// The size (long edge) a preview is decoded to for a tile that needs `pixels`: rounded up to a multiple of `step`,
     /// so that resizing a window by a few points does not decode every tile again, and never more than the bucket.
     /// A 400 px tile then holds about 1.6 MB decoded instead of the 3 MB of its 1024 px bucket.

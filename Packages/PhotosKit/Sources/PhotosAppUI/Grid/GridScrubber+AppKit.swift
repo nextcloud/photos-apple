@@ -130,7 +130,9 @@
         private func reveal() {
             hideTimer?.invalidate()
             needsDisplay = true
-            if alphaValue < 1 { animator().alphaValue = 1 }
+            guard alphaValue < 1 else { return }
+            // Reduce Motion: the labels appear and go without a fade.
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { alphaValue = 1 } else { animator().alphaValue = 1 }
         }
 
         private func scheduleHide() {
@@ -139,6 +141,10 @@
             hideTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, self.hoverFraction == nil, !self.isDragging else { return }
+                    if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                        self.alphaValue = 0
+                        return
+                    }
                     NSAnimationContext.runAnimationGroup { context in
                         context.duration = 0.35
                         self.animator().alphaValue = 0
@@ -171,6 +177,9 @@
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
+            // Opaque with Increase Contrast or Reduce Transparency, so the tiles behind do not show through the labels.
+            let workspace = NSWorkspace.shared
+            let opaque = workspace.accessibilityDisplayShouldIncreaseContrast || workspace.accessibilityDisplayShouldReduceTransparency
             var lastY = -CGFloat.infinity
             for tick in ticks {
                 let tickY = y(for: tick.fraction)
@@ -181,7 +190,7 @@
                 let size = text.size()
                 let pill = NSRect(
                     x: right - size.width - 12, y: tickY - size.height / 2 - 2, width: size.width + 12, height: size.height + 4)
-                NSColor.windowBackgroundColor.withAlphaComponent(0.8).setFill()
+                NSColor.windowBackgroundColor.withAlphaComponent(opaque ? 1 : 0.8).setFill()
                 NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
                 text.draw(at: NSPoint(x: pill.minX + 6, y: pill.minY + 2))
             }

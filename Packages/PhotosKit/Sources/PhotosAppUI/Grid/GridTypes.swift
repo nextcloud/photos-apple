@@ -166,20 +166,16 @@ struct GridHeaderMetrics: Equatable, Sendable {
 
 /// What a tile shows besides its picture; the same on every platform.
 enum GridTile {
-    /// "Photo, 22 November 2026 at 14:03, Favorite".
+    /// "Video, 22 November 2026 at 14:03, 1 minute, 5 seconds, Favorite". Selection is a trait of the tile, not text.
     static func accessibilityLabel(for item: GridMedia) -> String {
-        let kind: String =
-            if item.kind == .video {
-                String(localized: "Video", bundle: .module)
-            } else if item.isLivePhoto {
-                String(localized: "Live Photo", bundle: .module)
-            } else {
-                String(localized: "Photo", bundle: .module)
-            }
-        var parts: [String] = [kind, item.timestamp.formatted(date: .long, time: .shortened)]
-        if item.kind == .video, let duration = item.duration { parts.append(Formatters.duration(duration)) }
-        if item.isFavorite { parts.append(String(localized: "Favorite", bundle: .module)) }
-        return parts.joined(separator: ", ")
+        AccessibilityText.media(
+            isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
+            isFavorite: item.isFavorite)
+    }
+
+    /// Opacity of the shade under the badges: stronger with Increase Contrast or Reduce Transparency.
+    static func shadeOpacity(increased: Bool) -> Double {
+        OverlayLegibility.scrimOpacity(base: 0.5, increased: increased)
     }
 
     /// Duration of a video, nil for photos and for videos of unknown length (those only get the video badge).

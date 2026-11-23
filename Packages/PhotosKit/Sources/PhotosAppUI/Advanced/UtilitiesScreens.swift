@@ -406,7 +406,7 @@ struct FreeSpaceScreen: View {
                         ask(category.items)
                     }
                 } header: {
-                    Text("\(Self.title(category.category)) · \(Formatters.bytes(category.totalBytes))")
+                    Text("\(Self.title(category.category)) · \(Formatters.bytes(category.totalBytes))", bundle: .module)
                 }
             }
         }

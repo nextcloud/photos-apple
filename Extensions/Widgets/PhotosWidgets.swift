@@ -56,7 +56,7 @@ enum WidgetData {
         return PhotoEntry(
             date: now, image: image,
             title: kind == "onThisDay"
-                ? (years == 1 ? String(localized: "1 year ago") : String(localized: "\(years) years ago"))
+                ? String(localized: "\(years) years ago", comment: "Widget title; plural variations in the catalog.")
                 : item.place ?? String(localized: "Favorites"),
             subtitle: item.timestamp.formatted(date: .abbreviated, time: .omitted),
             destination: kind == "onThisDay" ? "onThisDay" : "favorites")

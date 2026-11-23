@@ -1,0 +1,27 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Paused" : {
+
+    },
+    "Paused in Low Data Mode" : {
+
+    },
+    "Paused in Low Power Mode" : {
+
+    },
+    "Photo" : {
+
+    },
+    "Video" : {
+
+    },
+    "Waiting for Wi-Fi" : {
+
+    },
+    "Waiting for a network connection" : {
+
+    }
+  },
+  "version" : "1.1"
+}

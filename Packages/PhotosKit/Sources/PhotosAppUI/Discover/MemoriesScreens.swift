@@ -54,7 +54,7 @@ struct MemoriesScreen: View {
 
     func section(_ title: String, _ memories: [Memory]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title2.bold())
+            Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {
@@ -74,24 +74,54 @@ struct MemoriesScreen: View {
 
 struct MemoryCard: View {
     let memory: Memory
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// The date under the title; nil when the title already is the date (a trip without places).
+    var dateLine: String? { Memories.dateLine(for: memory) }
 
     var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                // Large text does not fit on the picture: it goes below it, and wraps.
+                VStack(alignment: .leading, spacing: 6) {
+                    cover.clipShape(.rect(cornerRadius: 14))
+                    titles
+                }
+            } else {
+                cover
+                    .overlay(alignment: .bottomLeading) {
+                        titles
+                            .foregroundStyle(.white)
+                            .shadow(radius: 4)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                    }
+                    .clipShape(.rect(cornerRadius: 14))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.memory(title: memory.title, dateLine: dateLine, itemCount: memory.items.count))
+    }
+
+    var cover: some View {
         PreviewImage(fileId: memory.cover, etag: "", bucket: 1024)
             .aspectRatio(4 / 3, contentMode: .fit)
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(memory.title).font(.title3.bold())
-                    Text(DateRangeLabel.string(from: memory.start, to: memory.end))
-                        .font(.caption)
-                }
-                .foregroundStyle(.white)
-                .shadow(radius: 4)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
-            }
-            .clipShape(.rect(cornerRadius: 14))
-            .accessibilityElement(children: .combine)
+    }
+
+    var titles: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(memory.title).font(.title3.bold())
+            if let dateLine { Text(dateLine).font(.caption) }
+        }
+    }
+
+    /// Stronger with Increase Contrast or Reduce Transparency, so the white titles stay readable on bright photos.
+    var scrimOpacity: Double {
+        OverlayLegibility.scrimOpacity(base: 0.6, increased: contrast == .increased || reduceTransparency)
     }
 }
 
@@ -104,6 +134,8 @@ struct MapScreen: View {
     @State private var region: MKCoordinateRegion?
     @State private var position: MapCameraPosition = .automatic
     @State private var selected: Selection?
+    /// Place names of the markers' covers, for VoiceOver ("Lisbon, 12 photos").
+    @State private var places: [FileID: String] = [:]
 
     /// What the sheet lists: the items of a marker or of the visible area.
     enum Selection: Identifiable, Hashable {
@@ -154,27 +186,14 @@ struct MapScreen: View {
     var body: some View {
         Map(position: $position) {
             ForEach(cells) { cell in
-                Annotation("", coordinate: CLLocationCoordinate2D(latitude: cell.latitude, longitude: cell.longitude)) {
-                    Button {
-                        selected = .cell(cell)
-                    } label: {
-                        PreviewImage(
-                            fileId: cell.cover.fileId, etag: cell.cover.etag, bucket: 256, blurhash: cell.cover.blurhash,
-                            hasPreview: cell.cover.hasPreview, mimeType: cell.cover.mimeType,
-                            path: cell.cover.directory == "/" ? "/" + cell.cover.name : cell.cover.directory + "/" + cell.cover.name
-                        )
-                        .frame(width: 52, height: 52)
-                        .clipShape(.rect(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white, lineWidth: 2))
-                        .overlay(alignment: .topTrailing) {
-                            if cell.count > 1 {
-                                Text("\(cell.count)").font(.caption2.bold()).padding(4).background(.tint, in: .capsule)
-                                    .foregroundStyle(.white).offset(x: 8, y: -8)
-                            }
-                        }
-                        .shadow(radius: 3)
-                    }
-                    .buttonStyle(.plain)
+                let label = AccessibilityText.mapMarker(place: places[cell.cover.fileId], count: cell.count, newest: cell.cover.timestamp)
+                // The title ("Lisbon, 12 photos") is drawn under the marker when there is room, and it is what VoiceOver and
+                // Voice Control get for the marker: MapKit does not pass on the button's own label, and with hidden titles
+                // the markers had no name at all.
+                Annotation(coordinate: CLLocationCoordinate2D(latitude: cell.latitude, longitude: cell.longitude)) {
+                    MapMarkerButton(cell: cell, label: label) { selected = .cell(cell) }
+                } label: {
+                    Text(label)
                 }
             }
         }
@@ -189,7 +208,7 @@ struct MapScreen: View {
         }
         .sheet(item: $selected) { selection in
             NavigationStack {
-                ItemsScreen(title: String(localized: "\(selection.count) photos", bundle: .module)) { services in
+                ItemsScreen(title: AccessibilityText.photos(selection.count)) { services in
                     switch selection {
                     case .cell(let cell): try await services.library.mapItems(in: cell)
                     case .area(let area, _): try await services.library.mapItems(in: area)
@@ -211,6 +230,11 @@ struct MapScreen: View {
         // The camera has moved on; the newer region is being loaded.
         guard !Task.isCancelled else { return }
         cells = loaded
+        var names: [FileID: String] = [:]
+        for cell in loaded {
+            if let place = (try? library.item(cell.cover.fileId))?.place, !place.isEmpty { names[cell.cover.fileId] = place }
+        }
+        places = names
     }
 
     func selectVisibleArea() async {
@@ -220,6 +244,37 @@ struct MapScreen: View {
             longitudeReach: key.longitudeDelta / 2)
         guard let count = try? await library.mapItemCount(in: area) else { return }
         selected = .area(area, count: count)
+    }
+}
+
+/// A map marker: the newest photo of a cell with the number of photos there.
+struct MapMarkerButton: View {
+    let cell: MapCell
+    /// "Lisbon, 12 photos".
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            PreviewImage(
+                fileId: cell.cover.fileId, etag: cell.cover.etag, bucket: 256, blurhash: cell.cover.blurhash,
+                hasPreview: cell.cover.hasPreview, mimeType: cell.cover.mimeType,
+                path: cell.cover.directory == "/" ? "/" + cell.cover.name : cell.cover.directory + "/" + cell.cover.name
+            )
+            .frame(width: 52, height: 52)
+            .clipShape(.rect(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white, lineWidth: 2))
+            .overlay(alignment: .topTrailing) {
+                if cell.count > 1 {
+                    Text(cell.count, format: .number).font(.caption2.bold()).padding(4).background(.tint, in: .capsule)
+                        .foregroundStyle(.white).offset(x: 8, y: -8)
+                }
+            }
+            .shadow(radius: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(label)
     }
 }
 

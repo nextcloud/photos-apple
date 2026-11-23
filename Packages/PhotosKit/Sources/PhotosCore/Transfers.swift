@@ -67,7 +67,7 @@ public final class TransferQueue {
         let abandoned = pending
         pending = []
         for (id, source, _, _) in abandoned {
-            update(id, .failed(String(localized: "Cancelled")))
+            update(id, .failed(String(localized: "Cancelled", bundle: .module)))
             Self.removeTemporaryFiles(of: source)
         }
         drainTask?.cancel()

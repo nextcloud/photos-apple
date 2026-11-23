@@ -76,6 +76,8 @@ public struct LoginView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Server address", bundle: .module)
                     .font(.headline)
+                    // The text field below carries the same label.
+                    .accessibilityHidden(true)
                 TextField(text: $address, prompt: Text(verbatim: "cloud.example.com")) {
                     Text("Server address", bundle: .module)
                 }
@@ -119,6 +121,10 @@ public struct LoginView: View {
         .padding(24)
         .frame(maxWidth: 480)
         .frame(maxWidth: .infinity)
+        // A login error appears away from the focus (VoiceOver is still on the button): read it out.
+        .onChange(of: error) { _, message in
+            if let message { AccessibilityNotification.Announcement(message).post() }
+        }
         .alert(
             String(localized: "This connection is not encrypted", bundle: .module),
             isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
@@ -155,6 +161,7 @@ public struct LoginView: View {
                 .accessibilityHidden(true)
             Text("Nextcloud Photos", bundle: .module)
                 .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
             Text("All your photos and videos, on your own Nextcloud.", bundle: .module)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -172,13 +179,18 @@ public struct LoginView: View {
                         address = entry.url
                         startLogin()
                     } label: {
-                        Label("\(entry.name ?? entry.user) – \(entry.url)", systemImage: "person.crop.circle")
+                        Label(Self.sharedAccountTitle(name: entry.name ?? entry.user, url: entry.url), systemImage: "person.crop.circle")
                     }
                     .buttonStyle(.bordered)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// A name and a server address: nothing to translate.
+    static func sharedAccountTitle(name: String, url: String) -> String {
+        "\(name) – \(url)"
     }
 
     var qrLogin: some View {

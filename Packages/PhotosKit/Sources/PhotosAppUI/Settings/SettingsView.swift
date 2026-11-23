@@ -41,13 +41,16 @@ public struct SettingsView: View {
                 Section(String(localized: "Accounts", bundle: .module)) {
                     ForEach(app.accounts) { account in
                         HStack {
+                            // Name and server are read together, then whether it is the account shown.
                             VStack(alignment: .leading) {
                                 Text(account.displayName)
                                 Text(account.hostDisplayName).font(.caption).foregroundStyle(.secondary)
                             }
+                            .accessibilityElement(children: .combine)
                             Spacer()
                             if account.id == session.account.id {
                                 Image(systemName: "checkmark").foregroundStyle(.tint)
+                                    .accessibilityLabel(Text("Current account", bundle: .module))
                             } else {
                                 Button(String(localized: "Switch", bundle: .module)) { app.switchTo(account.id) }
                             }
@@ -167,7 +170,9 @@ public struct SettingsView: View {
                         Text("Albums you make available offline appear here.", bundle: .module).foregroundStyle(.secondary)
                     }
                     ForEach(pins) { pin in
-                        LabeledContent(pin.title, value: "\(pin.fileCount) · \(Formatters.bytes(pin.bytes))")
+                        LabeledContent(
+                            pin.title,
+                            value: String(localized: "\(pin.fileCount) files · \(Formatters.bytes(pin.bytes))", bundle: .module))
                     }
                     if !pins.isEmpty {
                         Button(String(localized: "Remove all offline files", bundle: .module), role: .destructive) {
@@ -249,11 +254,11 @@ public struct SettingsView: View {
             LabeledContent(
                 String(localized: "Last sync", bundle: .module), value: last?.formatted(date: .abbreviated, time: .shortened) ?? "–")
         case .initialSync(let count):
-            LabeledContent(String(localized: "Loading library", bundle: .module), value: "\(count)")
+            LabeledContent(String(localized: "Loading library", bundle: .module), value: count.formatted())
         case .syncing:
             LabeledContent(String(localized: "Syncing", bundle: .module)) { ProgressView().controlSize(.small) }
         case .reconciling(let count):
-            LabeledContent(String(localized: "Checking library", bundle: .module), value: "\(count)")
+            LabeledContent(String(localized: "Checking library", bundle: .module), value: count.formatted())
         case .failed(let message, _):
             Text(message).foregroundStyle(.red).font(.footnote)
         }
@@ -304,6 +309,9 @@ struct ServerFeaturesView: View {
                     LabeledContent(feature.displayName) {
                         Image(systemName: session.features.has(feature) ? "checkmark.circle.fill" : "minus.circle")
                             .foregroundStyle(session.features.has(feature) ? .green : .secondary)
+                            .accessibilityLabel(
+                                session.features.has(feature)
+                                    ? Text("Available", bundle: .module) : Text("Not available", bundle: .module))
                     }
                 }
             } footer: {

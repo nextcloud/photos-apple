@@ -93,9 +93,21 @@ public enum Memories {
             let cover = members.first(where: \.isFavorite) ?? members[members.count / 2]
             return Memory(
                 id: "years-\(yearsAgo)", kind: .yearsAgo(yearsAgo),
-                title: yearsAgo == 1 ? String(localized: "1 year ago") : String(localized: "\(yearsAgo) years ago"),
+                title: yearsAgoTitle(yearsAgo),
                 start: first.timestamp, end: last.timestamp, cover: cover.fileId, items: members.map(\.fileId))
         }
+    }
+
+    /// "1 year ago", "3 years ago" (plural forms come from the string catalog).
+    public static func yearsAgoTitle(_ years: Int) -> String {
+        String(
+            localized: "\(years) years ago", bundle: .module, comment: "Title of an On this day memory; plural variations in the catalog.")
+    }
+
+    /// The date line shown under a memory's title, or nil when the title already is that date (a trip without places).
+    public static func dateLine(for memory: Memory, locale: Locale = .current, calendar: Calendar = .current) -> String? {
+        let dates = DateRangeLabel.string(from: memory.start, to: memory.end, locale: locale, calendar: calendar)
+        return dates == memory.title ? nil : dates
     }
 
     /// Trips: runs without a gap > 2 days, at least 8 photos, most recent first, titled by their places.
@@ -161,7 +173,10 @@ public enum Memories {
         chosen.sort { $0.timestamp < $1.timestamp }
         guard let first = chosen.first, let last = chosen.last else { return nil }
         return Memory(
-            id: "recap-\(year)", kind: .yearRecap(year), title: String(localized: "\(String(year)) in review"), start: first.timestamp,
+            id: "recap-\(year)", kind: .yearRecap(year),
+            title: String(
+                localized: "\(String(year)) in review", bundle: .module, comment: "Title of the year recap memory, e.g. 2025 in review."),
+            start: first.timestamp,
             end: last.timestamp,
             cover: chosen[chosen.count / 2].fileId, items: chosen.map(\.fileId))
     }

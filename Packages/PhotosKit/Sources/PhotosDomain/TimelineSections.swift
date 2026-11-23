@@ -163,9 +163,9 @@ public enum TimelineSections {
 /// Labels for day headers: "Today", "Yesterday", weekday within the last week, else a date.
 public enum DayLabel {
     public static func label(for date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return String(localized: "Today") }
+        if calendar.isDate(date, inSameDayAs: now) { return String(localized: "Today", bundle: .module) }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return String(localized: "Yesterday")
+            return String(localized: "Yesterday", bundle: .module)
         }
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 99
         if days >= 0 && days < 7 {

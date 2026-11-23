@@ -50,7 +50,7 @@ public struct ShareExtensionView: View {
                         Text("\(files.count) items", bundle: .module)
                         Picker(String(localized: "Account", bundle: .module), selection: $accountId) {
                             ForEach(registry.accounts) { account in
-                                Text("\(account.displayName) – \(account.hostDisplayName)").tag(Optional(account.id))
+                                Text(verbatim: "\(account.displayName) – \(account.hostDisplayName)").tag(Optional(account.id))
                             }
                         }
                         Picker(String(localized: "Album", bundle: .module), selection: $albumId) {

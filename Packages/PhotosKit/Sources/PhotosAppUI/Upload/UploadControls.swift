@@ -142,14 +142,18 @@ struct TransfersList: View {
         NavigationStack {
             List(session.transfers.transfers) { transfer in
                 HStack {
-                    Text(transfer.fileName).lineLimit(1)
+                    Text(verbatim: transfer.fileName).lineLimit(1)
                     Spacer()
                     switch transfer.state {
                     case .waiting: Text("Waiting", bundle: .module).foregroundStyle(.secondary)
-                    case .uploading(let value): ProgressView(value: value).frame(width: 80)
-                    case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    case .uploading(let value):
+                        ProgressView(value: value).frame(width: 80).accessibilityLabel(Text("Uploading", bundle: .module))
+                    case .done:
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            .accessibilityLabel(Text("Uploaded", bundle: .module))
                     case .failed(let message):
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red).help(message)
+                            .accessibilityLabel(Text("Failed: \(message)", bundle: .module))
                     }
                 }
             }

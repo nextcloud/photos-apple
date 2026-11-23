@@ -72,6 +72,9 @@ struct CollectionTile: View {
     var coverFileId: FileID?
     var faceBox: FaceBox?
     var circular = false
+    /// What the tile is, for VoiceOver ("place", "person", "tag").
+    var kind: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: circular ? .center : .leading, spacing: 6) {
@@ -87,10 +90,14 @@ struct CollectionTile: View {
             }
             .aspectRatio(1, contentMode: .fit)
             .clipShape(circular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: Design.coverCornerRadius)))
-            Text(title).font(.headline).lineLimit(1)
-            if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            // One line in the grid; wrapped at the accessibility text sizes instead of cut off after a few letters.
+            Text(title).font(.headline).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            if let subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AccessibilityText.collection(title: title, kind: kind, detail: subtitle))
     }
 }
 

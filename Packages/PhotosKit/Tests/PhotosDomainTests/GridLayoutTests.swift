@@ -91,6 +91,14 @@ import Testing
         #expect(bucket(700, 2, 1.5) == 4096)
     }
 
+    /// Album covers of ~170 pt looked soft with the 256 preview on a 2× screen.
+    @Test func albumCoversGetAPreviewForTheirPixelSize() {
+        #expect(PreviewSizing.coverBucket(side: 170, scale: 2) == 1024)
+        #expect(PreviewSizing.coverBucket(side: 170, scale: 1) == 256)
+        #expect(PreviewSizing.coverBucket(side: 44, scale: 2) == 256)
+        #expect(PreviewSizing.coverBucket(side: 900, scale: 3) == 4096)
+    }
+
     @Test func previewSizingEdgeCases() {
         // A panorama does not pull the next bucket: the factor is capped.
         #expect(PreviewSizing.neededPixels(tileSide: 100, scale: 2, aspectRatio: 6) == 400)
