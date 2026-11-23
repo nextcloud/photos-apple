@@ -60,7 +60,7 @@ struct InfoPanel: View {
                         "\(width) × \(height) (\(String(format: "%.1f", Double(width * height) / 1_000_000)) MP)")
                 }
                 row(String(localized: "Size", bundle: .module), Formatters.bytes(item.size))
-                row(String(localized: "Type", bundle: .module), item.mimeType)
+                row(String(localized: "Type", bundle: .module), MimeTypes.formatName(mimeType: item.mimeType, fileName: item.name))
                 row(String(localized: "Folder", bundle: .module), item.directory)
                 if let owner = item.ownerDisplayName ?? item.ownerId, !item.isOwnStorage {
                     row(String(localized: "Owner", bundle: .module), owner)

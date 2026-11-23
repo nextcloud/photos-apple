@@ -7,6 +7,23 @@ import Testing
 @testable import PhotosModel
 
 @Suite struct ModelTests {
+    @Test func formatNames() {
+        #expect(MimeTypes.formatName(mimeType: "image/jpeg", fileName: "IMG_1.jpg") == "JPEG")
+        #expect(MimeTypes.formatName(mimeType: "image/heic") == "HEIC")
+        #expect(MimeTypes.formatName(mimeType: "image/webp") == "WebP")
+        #expect(MimeTypes.formatName(mimeType: "video/quicktime", fileName: "clip.mov") == "MOV")
+        #expect(MimeTypes.formatName(mimeType: "video/mp4") == "MP4")
+        #expect(MimeTypes.formatName(mimeType: "video/x-matroska") == "MKV")
+        #expect(MimeTypes.formatName(mimeType: "image/x-dcraw", fileName: "DSC1.cr2") == "CR2")
+        #expect(MimeTypes.formatName(mimeType: "image/x-dcraw") == "RAW")
+        #expect(MimeTypes.formatName(mimeType: "IMAGE/JPEG; charset=binary") == "JPEG")
+        // Unknown types: the extension, else the subtype, else the type as it is.
+        #expect(MimeTypes.formatName(mimeType: "image/x-portable-pixmap", fileName: "a.ppm") == "PPM")
+        #expect(MimeTypes.formatName(mimeType: "image/x-icon") == "ICON")
+        #expect(MimeTypes.formatName(mimeType: "application/octet-stream") == "application/octet-stream")
+        #expect(MimeTypes.formatName(mimeType: "") == "")
+    }
+
     @Test func serverVersionParsing() {
         #expect(ServerVersion(parsing: "36.0.0 dev")?.major == 36)
         #expect(ServerVersion(parsing: "33.0.1.2")?.micro == 1)

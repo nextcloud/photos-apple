@@ -76,6 +76,12 @@ struct MediaGridScreen<Accessory: View>: View {
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
             }
             .focusedSceneValue(\.gridActions, gridActions)
+            #if DEBUG
+                // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
+                .task(id: feed.items.isEmpty) {
+                    if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
+                }
+            #endif
             #if os(iOS)
                 .fullScreenCover(item: $viewerStart) { start in
                     MediaViewer(ids: start.ids, startId: start.startId).environment(session)

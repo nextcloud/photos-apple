@@ -27,6 +27,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - ⬜ Timeline skeleton from `timelineDays` during the first sync; ⬜ date scrubber on macOS.
 - ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles.
 - ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action), ⬜ VW-5 slideshow, ⬜ VW-6 stack strip.
+- Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
+  buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
+  HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
 - ⬜ Performance budgets (§10) not measured; no synthetic 100k performance tests yet.
 
 ## M2 Albums, sharing, upload, offline — ✅
