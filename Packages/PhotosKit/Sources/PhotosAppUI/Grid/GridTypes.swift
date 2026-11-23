@@ -9,6 +9,7 @@ import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
+import UniformTypeIdentifiers
 
 #if canImport(UIKit)
     import UIKit
@@ -48,6 +49,31 @@ struct GridCallbacks {
     var columnsChanged: @MainActor (Int) -> Void
     /// Escape: leave the selection mode.
     var cancelSelection: @MainActor () -> Void = {}
+    /// The grid went into the selection mode by itself (a two-finger drag over the tiles on iPhone and iPad).
+    var beginSelection: @MainActor () -> Void = {}
+    /// Pull to refresh on iPhone and iPad; returns when the reload is through. Nil: the grid has no refresh control.
+    /// `PhotoGrid` fills it from SwiftUI's `.refreshable` when it is not set.
+    var refresh: (@MainActor () async -> Void)?
+}
+
+/// Runs one pull-to-refresh at a time and says when it is over (the refresh control spins until then).
+@MainActor
+final class GridRefreshRunner {
+    private(set) var isRunning = false
+
+    /// Starts `action` unless one is running. `finished` is called on the main actor once `action` has returned.
+    /// - Returns: false when a refresh was already under way (nothing was started, `finished` is not called).
+    @discardableResult
+    func run(_ action: @escaping @MainActor () async -> Void, finished: @escaping @MainActor () -> Void) -> Bool {
+        guard !isRunning else { return false }
+        isRunning = true
+        Task { @MainActor [weak self] in
+            await action()
+            self?.isRunning = false
+            finished()
+        }
+        return true
+    }
 }
 
 /// Zoom steps of the grid. A step is named after the number of columns it gives at the platform's reference width
@@ -199,6 +225,73 @@ enum GridTile {
     static func covers(_ image: CGImage, pixels: Int) -> Bool {
         Double(max(image.width, image.height)) >= Double(pixels) * 0.9
     }
+
+    /// Side of the selection mark in the bottom trailing corner (iPhone, iPad, Vision Pro): 22 pt, smaller on tiny tiles.
+    static func checkmarkSide(tileSide: Double) -> Double {
+        min(22, max(12, (tileSide * 0.45).rounded()))
+    }
+
+    /// Whether video badge and duration still fit beside the selection mark. They move left of it; on tiles too small
+    /// for both, the mark wins while selecting.
+    static func showsTrailingBadges(tileSide: Double, checkmarkShown: Bool) -> Bool {
+        !checkmarkShown || tileSide >= 88
+    }
+
+    /// Size of the context menu's preview: the photo's shape, `longEdge` points on its long edge (UIKit scales it down
+    /// to what fits on screen and keeps the shape).
+    static func previewSize(aspectRatio: Double, longEdge: Double = 1200) -> CGSize {
+        let ratio = aspectRatio.isFinite && aspectRatio > 0 ? min(max(aspectRatio, 0.2), 5) : 1
+        return ratio >= 1 ? CGSize(width: longEdge, height: longEdge / ratio) : CGSize(width: longEdge * ratio, height: longEdge)
+    }
+}
+
+/// Dragging photos out of the grid (iPad: into other apps; the Mac grid uses file promises for the same originals).
+enum GridDrag {
+    /// What a drag that starts on `dragged` carries: the whole selection when the tile is part of it, in the order of
+    /// the grid; else just that tile.
+    static func ids(dragged: FileID, selection: Set<FileID>, isSelecting: Bool, position: (FileID) -> Int?) -> [FileID] {
+        guard isSelecting, selection.contains(dragged), selection.count > 1 else { return [dragged] }
+        return selection.sorted { (position($0) ?? .max, $0) < (position($1) ?? .max, $1) }
+    }
+
+    /// `@unchecked Sendable`: the completion handler of `NSItemProvider.registerFileRepresentation` is not annotated,
+    /// but it is made to be called from wherever the file was produced (here: the download task).
+    private struct Completion: @unchecked Sendable {
+        let call: (URL?, Bool, (any Error)?) -> Void
+    }
+
+    /// The original of `item` as a file that is only downloaded when it is dropped somewhere.
+    static func itemProvider(for item: GridMedia, services: AccountServices) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.suggestedName = item.name
+        let type = UTType(mimeType: item.mimeType) ?? .data
+        let fileId = item.fileId
+        let name = item.name
+        provider.registerFileRepresentation(for: type, visibility: .all, openInPlace: false) { handler in
+            let completion = Completion(call: handler)
+            let progress = Progress(totalUnitCount: 1)
+            let task = Task.detached {
+                do {
+                    guard let media = try services.library.item(fileId) else { throw CocoaError(.fileNoSuchFile) }
+                    let original = try await services.images.originals.original(
+                        fileId: media.fileId, etag: media.etag, url: services.originalURL(for: media))
+                    // Under its real name for the receiving app; the system copies the file before the handler returns.
+                    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    defer { try? FileManager.default.removeItem(at: folder) }
+                    let named = folder.appending(path: name)
+                    try FileManager.default.copyItem(at: original, to: named)
+                    progress.completedUnitCount = 1
+                    completion.call(named, false, nil)
+                } catch {
+                    completion.call(nil, false, error)
+                }
+            }
+            progress.cancellationHandler = { task.cancel() }
+            return progress
+        }
+        return provider
+    }
 }
 
 /// Builds preview requests for grid tiles.
@@ -216,6 +309,13 @@ extension AccountServices {
             originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"),
             // Decoded at the size the tile shows, not at the size of the bucket (memory stays bounded at any zoom).
             maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
+    }
+
+    /// The preview a context menu shows above its actions: the 1024 px bucket, whatever the tile size.
+    func menuPreviewRequest(for item: GridMedia) -> ImagePipeline.Request {
+        ImagePipeline.Request(
+            fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: item.hasPreview, mimeType: item.mimeType,
+            originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"))
     }
 }
 

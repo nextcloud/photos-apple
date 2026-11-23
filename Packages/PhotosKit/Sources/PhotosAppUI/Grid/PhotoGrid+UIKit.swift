@@ -26,16 +26,27 @@
         }
 
         func updateUIViewController(_ controller: PhotoGridController, context: Context) {
+            var callbacks = callbacks
+            // `.refreshable` on a screen only reaches SwiftUI's own scroll views; the collection view gets the action
+            // from the environment and shows a refresh control of its own for it.
+            if callbacks.refresh == nil, let refresh = context.environment.refresh {
+                callbacks.refresh = { await refresh() }
+            }
             controller.callbacks = callbacks
             controller.update(update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders)
         }
     }
 
     final class PhotoGridController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate,
-        UICollectionViewDataSourcePrefetching
+        UICollectionViewDataSourcePrefetching, UICollectionViewDragDelegate
     {
         let services: AccountServices
-        var callbacks: GridCallbacks?
+        var callbacks: GridCallbacks? {
+            didSet { updateRefreshControl() }
+        }
+        private let refreshRunner = GridRefreshRunner()
+        /// A two-finger drag over the tiles is selecting right now.
+        private var multiSelectInteraction = false
         private var collectionView: UICollectionView!
         private(set) var model = GridModel.empty
         private var revision = -1
@@ -66,6 +77,10 @@
             collectionView.dataSource = self
             collectionView.delegate = self
             collectionView.prefetchDataSource = self
+            // iPad: tiles can be dragged into other apps (the default leaves drags off on iPhone).
+            collectionView.dragDelegate = self
+            // A short album can be pulled down to refresh as well.
+            collectionView.alwaysBounceVertical = true
             collectionView.allowsSelection = true
             collectionView.allowsMultipleSelectionDuringEditing = true
             // Hardware keyboard: arrow keys move the focus, Return opens the focused tile.
@@ -86,6 +101,34 @@
             }
             registerForTraitChanges([UITraitDisplayScale.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.refreshVisibleTiles()
+            }
+            updateRefreshControl()
+        }
+
+        // MARK: Pull to refresh
+
+        /// The refresh control is there while the screen offers a refresh (`GridCallbacks.refresh`).
+        private func updateRefreshControl() {
+            guard isViewLoaded else { return }
+            let wanted = callbacks?.refresh != nil
+            if wanted, collectionView.refreshControl == nil {
+                let control = UIRefreshControl()
+                control.addTarget(self, action: #selector(handleRefresh(_:)), for: .valueChanged)
+                collectionView.refreshControl = control
+            } else if !wanted, collectionView.refreshControl != nil, !refreshRunner.isRunning {
+                collectionView.refreshControl = nil
+            }
+        }
+
+        /// Pulled: the control spins until the screen's refresh (a sync, an album reload) has returned.
+        @objc private func handleRefresh(_ control: UIRefreshControl) {
+            guard let refresh = callbacks?.refresh else {
+                control.endRefreshing()
+                return
+            }
+            refreshRunner.run(refresh) { [weak self, weak control] in
+                control?.endRefreshing()
+                self?.updateRefreshControl()
             }
         }
 
@@ -181,12 +224,17 @@
                 model = update.model
                 refreshVisibleTiles(only: ids)
             }
-            if isSelecting != self.isSelecting {
-                self.isSelecting = isSelecting
-                collectionView.isEditing = isSelecting
-                collectionView.allowsMultipleSelection = isSelecting
+            // While a two-finger drag selects, SwiftUI may not have heard of the selection mode yet: it stays on.
+            if isSelecting != self.isSelecting, isSelecting || !multiSelectInteraction {
+                setSelecting(isSelecting)
             }
             syncSelection(selection)
+        }
+
+        private func setSelecting(_ selecting: Bool) {
+            isSelecting = selecting
+            collectionView.isEditing = selecting
+            collectionView.allowsMultipleSelection = selecting
         }
 
         /// Reconfigures the cells on screen: badges, and a preview that fits the current tile size. A cell keeps the
@@ -406,8 +454,18 @@
             true
         }
 
+        /// A two-finger drag over the tiles starts the selection mode (as in Photos and Files): UIKit only selects
+        /// while the collection view is editing, and the screen has to show its selection bar.
         func collectionView(_ collectionView: UICollectionView, didBeginMultipleSelectionInteractionAt indexPath: IndexPath) {
-            if !isSelecting { callbacks?.selectionChanged(currentSelection()) }
+            multiSelectInteraction = true
+            guard !isSelecting else { return }
+            setSelecting(true)
+            callbacks?.beginSelection()
+        }
+
+        func collectionViewDidEndMultipleSelectionInteraction(_ collectionView: UICollectionView) {
+            multiSelectInteraction = false
+            callbacks?.selectionChanged(currentSelection())
         }
 
         func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint)
@@ -417,7 +475,16 @@
             guard !ids.isEmpty, let callbacks else { return nil }
             let actions = callbacks.menu(ids)
             guard !actions.isEmpty else { return nil }
-            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            // One photo: a large preview above the menu. Several (a selection): UIKit shows the tiles themselves.
+            var identifier: NSNumber?
+            var preview: UIContextMenuContentPreviewProvider?
+            if ids.count == 1, let item = model[ids[0]] {
+                identifier = NSNumber(value: item.fileId)
+                let services = services
+                let shown = (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.picture
+                preview = { GridMenuPreviewController(item: item, services: services, placeholder: shown) }
+            }
+            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { _ in
                 // Each group is an inline menu: UIKit draws the separators between them.
                 let groups: [UIMenuElement] = GridMenuAction.groups(actions).map { group in
                     UIMenu(
@@ -431,6 +498,45 @@
                 }
                 return UIMenu(children: groups)
             }
+        }
+
+        /// A tap on the menu's preview opens the photo.
+        func collectionView(
+            _ collectionView: UICollectionView, willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+            animator: any UIContextMenuInteractionCommitAnimating
+        ) {
+            guard !isSelecting, let id = (configuration.identifier as? NSNumber)?.int64Value else { return }
+            animator.preferredCommitStyle = .dismiss
+            animator.addCompletion { [weak self] in self?.callbacks?.open(id) }
+        }
+
+        // MARK: Drag out (iPad: Files, Notes, Mail…): the original is downloaded when it is dropped.
+
+        func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: any UIDragSession, at indexPath: IndexPath)
+            -> [UIDragItem]
+        {
+            guard let id = fileId(at: indexPath) else { return [] }
+            let model = model
+            let ids = GridDrag.ids(dragged: id, selection: currentSelection(), isSelecting: isSelecting) { id in
+                model.position(of: id).flatMap { model.flatIndex(section: $0.section, item: $0.item) }
+            }
+            return ids.compactMap { dragItem(for: $0) }
+        }
+
+        /// A tap on another tile during a drag adds it.
+        func collectionView(
+            _ collectionView: UICollectionView, itemsForAddingTo session: any UIDragSession, at indexPath: IndexPath, point: CGPoint
+        ) -> [UIDragItem] {
+            guard let id = fileId(at: indexPath), !session.items.contains(where: { ($0.localObject as? NSNumber)?.int64Value == id })
+            else { return [] }
+            return [dragItem(for: id)].compactMap { $0 }
+        }
+
+        private func dragItem(for id: FileID) -> UIDragItem? {
+            guard let item = model[id] else { return nil }
+            let dragItem = UIDragItem(itemProvider: GridDrag.itemProvider(for: item, services: services))
+            dragItem.localObject = NSNumber(value: id)
+            return dragItem
         }
 
         func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
@@ -489,7 +595,14 @@
                 icon.contentMode = .scaleAspectFit
             }
             checkmark.contentMode = .scaleAspectFit
+            // The empty circle is white on the photo: a soft shadow keeps it visible on bright pictures.
+            checkmark.layer.shadowColor = UIColor.black.cgColor
+            checkmark.layer.shadowOpacity = 0.35
+            checkmark.layer.shadowRadius = 1.5
+            checkmark.layer.shadowOffset = .zero
             [durationLabel, videoIcon, favoriteIcon, liveIcon, checkmark].forEach { contentView.addSubview($0) }
+            // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
+            hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
             isAccessibilityElement = true
             // Double-tap (VoiceOver), Switch Control and Voice Control activate the cell like a tap: it opens the photo.
             accessibilityTraits = [.image, .button]
@@ -504,8 +617,16 @@
             let glyph = min(max(bounds.width * 0.34, 14), 44)
             placeholderIcon.frame = CGRect(x: (bounds.width - glyph) / 2, y: (bounds.height - glyph) / 2, width: glyph, height: glyph)
             gradient.frame = CGRect(x: 0, y: bounds.height * 0.6, width: bounds.width, height: bounds.height * 0.4)
+            // The selection mark sits in the bottom trailing corner, as in Apple Photos; duration and video badge
+            // move left of it.
+            let mark = CGFloat(GridTile.checkmarkSide(tileSide: Double(bounds.width)))
+            checkmark.frame = CGRect(x: bounds.width - mark - 4, y: bounds.height - mark - 4, width: mark, height: mark)
+            let markShown = !checkmark.isHidden
+            let trailingBadges = GridTile.showsTrailingBadges(tileSide: Double(bounds.width), checkmarkShown: markShown)
+            durationLabel.alpha = trailingBadges ? 1 : 0
+            videoIcon.alpha = trailingBadges ? 1 : 0
             durationLabel.sizeToFit()
-            var right = bounds.width - 4
+            var right = markShown ? checkmark.frame.minX - 4 : bounds.width - 4
             if !durationLabel.isHidden {
                 durationLabel.frame.origin = CGPoint(
                     x: right - durationLabel.bounds.width, y: bounds.height - durationLabel.bounds.height - 3)
@@ -514,20 +635,33 @@
             videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 4, y: bounds.height - 16, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: 4, width: 16, height: 16)
-            checkmark.frame = CGRect(x: bounds.width - 26, y: 4, width: 22, height: 22)
         }
 
-        override var isSelected: Bool {
-            didSet { updateSelection() }
+        /// The picture the tile shows right now (first picture of the context menu's preview).
+        var picture: UIImage? { hasPicture ? imageView.image : nil }
+
+        /// Called by UIKit whenever the cell is selected or deselected and when the collection view starts or stops
+        /// editing (the selection mode), also for cells that are not on screen yet.
+        override func updateConfiguration(using state: UICellConfigurationState) {
+            super.updateConfiguration(using: state)
+            updateSelection(editing: state.isEditing, selected: state.isSelected)
         }
 
-        func updateSelection() {
-            let editing = (superview as? UICollectionView)?.isEditing ?? false
-            checkmark.isHidden = !(editing || isSelected)
-            checkmark.image = UIImage(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-            checkmark.tintColor = isSelected ? .tintColor : .white
-            imageView.alpha = isSelected ? 0.75 : 1
-            if isSelected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+        func updateSelection(editing: Bool, selected: Bool) {
+            let wasHidden = checkmark.isHidden
+            checkmark.isHidden = !(editing || selected)
+            checkmark.image =
+                selected
+                ? UIImage(
+                    systemName: "checkmark.circle.fill",
+                    withConfiguration: UIImage.SymbolConfiguration(paletteColors: [.white, .tintColor]))
+                : UIImage(systemName: "circle")
+            // Selected: a white tick on the accent colour (the view's inherited tint). Not selected: a white ring.
+            checkmark.tintColor = selected ? nil : .white
+            imageView.alpha = selected ? 0.75 : 1
+            if selected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+            // The badges make room for the mark.
+            if wasHidden != checkmark.isHidden { setNeedsLayout() }
         }
 
         /// Shows `item`. Called again for the same item when its badges, the zoom or the screen scale change: the
@@ -538,7 +672,7 @@
             let sameItem = fileId == item.fileId && self.request?.etag == item.etag
             fileId = item.fileId
             updateBadges(item, owner: owner)
-            updateSelection()
+            setNeedsUpdateConfiguration()
             if sameItem, request == self.request, hasPicture || isLoading { return }
             task?.cancel()
             self.request = request
@@ -621,6 +755,48 @@
             isLoading = false
             imageView.image = nil
             placeholderIcon.isHidden = true
+        }
+    }
+
+    /// The large picture above a tile's context menu: what the tile shows at once, then the 1024 px preview.
+    final class GridMenuPreviewController: UIViewController {
+        private let item: GridMedia
+        private let services: AccountServices
+        private let imageView = UIImageView()
+        private var task: Task<Void, Never>?
+
+        init(item: GridMedia, services: AccountServices, placeholder: UIImage?) {
+            self.item = item
+            self.services = services
+            super.init(nibName: nil, bundle: nil)
+            imageView.image = placeholder
+            preferredContentSize = GridTile.previewSize(aspectRatio: item.aspectRatio)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .secondarySystemBackground
+            imageView.frame = view.bounds
+            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            // Fills the preview, which has the photo's shape: nothing is cut off unless the stored size was wrong.
+            imageView.contentMode = .scaleAspectFill
+            imageView.clipsToBounds = true
+            view.addSubview(imageView)
+            let request = services.menuPreviewRequest(for: item)
+            let services = services
+            task = Task { [weak self] in
+                guard let image = await services.images.preview(request), !Task.isCancelled, let self else { return }
+                self.imageView.image = UIImage(cgImage: image)
+                // The index does not know the size of every file: the picture itself does.
+                self.preferredContentSize = GridTile.previewSize(aspectRatio: Double(image.width) / Double(max(image.height, 1)))
+            }
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            task?.cancel()
         }
     }
 

@@ -145,7 +145,8 @@ struct MediaGridScreen<Accessory: View>: View {
                         #endif
                     },
                     columnsChanged: { columns = $0 },
-                    cancelSelection: { endSelection() }
+                    cancelSelection: { endSelection() },
+                    beginSelection: { isSelecting = true }
                 )
             )
             .ignoresSafeArea(edges: .bottom)
