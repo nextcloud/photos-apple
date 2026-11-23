@@ -4,8 +4,8 @@ Inventory for the spec of a native iOS/macOS "Nextcloud Photos" client.
 
 **Sources**
 - Integration branch `deploy/devel-all` at `1e61f4171` ("build deploy/devel-all with the round 2 features"), 120 commits over `master` = upstream `8258010a9`.
-- `deploy/devel-all` is **not** a ref in `~/aloha-work/photos`. It only exists in the separate clone `~/aloha-work/photos-wt/deploy`. Every directory under `~/aloha-work/photos-wt/` is its own clone with its own `.git`, not a git worktree. All paths below are relative to that clone, and the diffs were made with `git diff master..deploy/devel-all` / `git diff master...feat/<x>` there.
-- The `fix/ui-*` branches live only in their own clones (`photos-wt/fix-ui-*`). They reach `deploy/devel-all` through the integration branches `ui/collections`, `ui/dialogs`, `ui/memories` and `ui/timeline`. `ui/scanfix` only adds `feat(navigation): fold folders, duplicates, archive and recently deleted into an advanced entry`, which is front-end only.
+- The integration branch is not public yet; it exists in a separate clone. All paths below are relative to that clone, and the diffs were made with `git diff master..deploy/devel-all` / `git diff master...feat/<x>` there.
+- The `fix/ui-*` branches live only in their own clones. They reach `deploy/devel-all` through the integration branches `ui/collections`, `ui/dialogs`, `ui/memories` and `ui/timeline`. `ui/scanfix` only adds `feat(navigation): fold folders, duplicates, archive and recently deleted into an advanced entry`, which is front-end only.
 - App version: `appinfo/info.xml` goes from `9.0.0-dev.0` to `9.0.0-dev.1`. Only one migration is added: `Version90000Date20261122120000`, which adds the album `cover` and `description` columns.
 
 **Key finding on detection:** the Photos app has **no `ICapability`**, neither on master nor on any branch. The web front-end finds features through **initial state** (`loadState('photos', …)`), which a native client cannot read. So today a native client can only detect most features by probing (DAV propstat 404, route 404, OCS 404), and some features cannot be detected at all. §3 proposes a `photos` capability.

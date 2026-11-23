@@ -2,7 +2,12 @@
 
 Version 1.0 · 2026-11-22 · Status: ready for implementation
 
-This document specifies a new native Apple app, **Nextcloud Photos**. It is written for the engineer (human or Claude) who will build it. It records decisions that were already made with the product owner (Frank Karlitschek). **Do not re-open the decisions in §2**; if something in this spec turns out to be wrong or impossible, change the spec in the same PR that changes the behaviour and say why.
+> **This is the target, not the state.** The spec describes the app as it is meant to become; parts of it are not built yet
+> (for example the log file of §4.5, the MDM keys, the PhotoKit background-upload extension, most of the UI tests of §11).
+> What exists today, and how it was verified, is in [STATUS.md](STATUS.md). The layout of the code is in
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
+This document specifies a new native Apple app, **Nextcloud Photos**. It is written for the engineer (human or AI-assisted) who will build it. It records decisions that were already made with the product owner. **Do not re-open the decisions in §2**; if something in this spec turns out to be wrong or impossible, change the spec in the same PR that changes the behaviour and say why.
 
 ## 0. Documents in this folder
 
@@ -11,10 +16,10 @@ This document specifies a new native Apple app, **Nextcloud Photos**. It is writ
 | `SPEC.md` | This document: product, architecture, features, milestones. The source of truth. |
 | `SERVER-COMPANION.md` | Optional server-side additions to the Photos server app (nextcloud/photos) that make the client faster and more complete. The app must work without them. |
 | `reference/photos-server-api.md` | Exact wire formats of the Photos server app on upstream master (WebDAV trees, SEARCH bodies, properties, previews, faces, tags, version matrix NC33–36). **Read it before writing any networking code.** |
-| `reference/photos-extended-api.md` | The API added by ~60 unmerged feature branches (`deploy/devel-all`, running on the devel server), plus the client-side algorithms of the web app with all their constants. |
+| `reference/photos-extended-api.md` | The API added by ~60 unmerged feature branches (an integration branch that runs on the extended test server), plus the client-side algorithms of the web app with all their constants. |
 | `reference/nextcloud-ios-and-nextcloudkit.md` | How the Nextcloud Files iOS app and NextcloudKit do login, accounts, keychain, push, auto upload, previews; identifiers of the Files app. |
 
-The reference files are research notes with file:line pointers into local clones (`~/aloha-work/photos`, `~/aloha-work/photos-wt/deploy`, server core). When this spec and a reference disagree, this spec wins for *behaviour* and the reference wins for *wire format*; fix whichever is wrong.
+The reference files are research notes with file:line pointers into local clones of the Photos app, its integration branch and server core. When this spec and a reference disagree, this spec wins for *behaviour* and the reference wins for *wire format*; fix whichever is wrong.
 
 ---
 
@@ -64,7 +69,7 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 | Push | **Yes, via the Nextcloud push proxy** (same mechanism as Files/Talk). |
 | Privacy | **Optional app lock** (Face ID / Touch ID / Optic ID / passcode) and **archived ("hidden") photos always require authentication**. |
 | Delivery | **Milestones M0–M5** (§13), each shippable and testable. |
-| Test servers | **devel** (extended features) for manual/UI checks and a **local server on upstream master** (and an NC 33 container) for automated integration tests and fallbacks. |
+| Test servers | **An extended test server** (all extended features) for manual/UI checks and a **local server on upstream master** (and an NC 33 container) for automated integration tests and fallbacks. |
 
 ---
 
@@ -87,29 +92,36 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 
 ```
 photos-ios/
-  NextcloudPhotos.xcodeproj
-  App/                      # multiplatform app target (iOS, iPadOS, macOS, visionOS destinations)
-    Shared/                 # app entry, scenes, navigation, settings
-    iOS/  macOS/  visionOS/ # platform-specific scenes, commands, ornaments
+  project.yml               # XcodeGen: the Xcode project, Info.plists and build settings are generated from it
+  Config/                   # Base.xcconfig (team, bundle id, version), Local.xcconfig (git-ignored, your own signing)
+  App/
+    Shared/                 # app entry point, app delegates, background tasks, App Intents
+    Resources/              # asset catalog, string catalogs, privacy manifest
+    *.entitlements
   Extensions/
     ShareExtension/         # iOS + macOS
-    Widgets/                # iOS, macOS, visionOS (WidgetKit + AppIntents configuration)
+    Widgets/                # iOS, macOS, visionOS
     NotificationService/    # iOS + macOS, decrypts push payloads
-    BackgroundUpload/       # iOS/iPadOS PhotoKit background-upload extension (com.apple.photos.background-upload)
-  Packages/
-    PhotosModel/            # value types, IDs, feature flags; no I/O
-    PhotosNetworking/       # HTTP client, Photos DAV client, XML builders/parsers, feature detection
-    PhotosStore/            # GRDB schema, migrations, queries, sync engine, outbox
-    PhotosDomain/           # pure algorithms: grouping, stacking, bursts, memories, duplicates, cleanup, search parsing
-    PhotosMedia/            # preview cache, image pipeline, video/live-photo loading, editing pipeline
-    PhotosBackup/           # PhotoKit scanning, reconciliation, upload engine
-    PhotosCore/             # composition root: accounts, keychain, per-account services, app/session models
-    PhotosAppUI/            # shared SwiftUI components (not "PhotosUI": that name is Apple's framework), grid, viewer, design tokens
-  Tests/ (per package) + UITests/
-  LICENSE (MIT, exists)  LICENSES/  REUSE.toml  .swift-format  .github/workflows/
+  Packages/PhotosKit/       # one local Swift package; everything else is a target of it
+    Sources/
+      PhotosModel/          # value types, IDs, feature flags; no I/O
+      PhotosDomain/         # pure algorithms: grouping, stacking, memories, duplicates, cleanup, search parsing
+      PhotosNetworking/     # HTTP client, DAV/OCS clients, XML builders/parsers, login, feature detection, upload
+      PhotosStore/          # GRDB schema, migrations, queries, sync engine, outbox
+      PhotosMedia/          # preview cache, image pipeline, video/Live Photo loading, editing pipeline
+      PhotosBackup/         # PhotoKit scanning, reconciliation, upload engine
+      PhotosCore/           # composition root: accounts, keychain, per-account services, app/session models
+      PhotosAppUI/          # SwiftUI screens, grid, viewer (not "PhotosUI": that name is Apple's framework)
+    Tests/<target>Tests/    # Swift Testing, fixtures recorded from servers
+  UITests/                  # XCUITest smoke tests (need a test server)
+  scripts/                  # test server, string catalog helper
+  docs/  LICENSE  LICENSES/  REUSE.toml  .swift-format  .github/
 ```
 
-In the implementation these are targets of one local package, `Packages/PhotosKit`, and the Xcode project is generated from `project.yml` with XcodeGen. Packages depend downwards only: `PhotosAppUI → PhotosCore → PhotosBackup/PhotosMedia/PhotosStore → PhotosNetworking → PhotosModel`; `PhotosDomain` depends only on `PhotosModel` and is fully unit-testable on macOS without a server.
+Not there yet: platform folders under `App/` (the platform differences live in `PhotosAppUI`), and the PhotoKit
+background-upload extension (`Extensions/BackgroundUpload`, §7.18.6). The Xcode project is not checked in. Targets depend
+downwards only, see [ARCHITECTURE.md](ARCHITECTURE.md); `PhotosDomain` depends only on `PhotosModel` and is fully
+unit-testable on macOS without a server.
 
 ### 4.2 Targets and identifiers
 
@@ -148,7 +160,7 @@ The app never writes to the Files app's App Group: NextcloudKit (used by Files) 
 
 ### 4.5 Logging and diagnostics
 
-`os.Logger` with subsystems per package. A rotating log file in the app container (off by default, enabled in Settings → Advanced → Logging) that the user can export. Logs never contain passwords, tokens, full URLs with tokens, or file names unless "detailed logging" is on. No third-party crash or analytics SDKs.
+`os.Logger` with subsystems per package (implemented). *Not implemented yet:* a rotating log file in the app container (off by default, enabled in Settings → Advanced → Logging) that the user can export. Logs never contain passwords, tokens, full URLs with tokens, or file names unless "detailed logging" is on. No third-party crash or analytics SDKs.
 
 ### 4.6 Error handling
 
@@ -657,11 +669,11 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 ## 8. Security and privacy
 
 - Credentials only in the keychain (own access group); per-account keys for push in the keychain; never in logs, never in the database, never in App Group UserDefaults.
-- TLS everywhere; ATS exceptions only for user-approved http/self-signed hosts. Development builds may allow `http://devel` via a Debug-only ATS exception.
+- TLS everywhere; ATS exceptions only for user-approved http/self-signed hosts. *Implementation:* the exception is app-wide (`NSAllowsArbitraryLoads`), because the hosts are typed in by the user and unknown at build time; the app asks before it uses http or trusts an unknown certificate (see [PRIVACY-AND-EXPORT.md](PRIVACY-AND-EXPORT.md)).
 - App lock with LocalAuthentication (`deviceOwnerAuthentication`, so passcode fallback works); privacy cover in the app switcher when locked or while viewing the Archive; widgets and notifications never show archived content; optional "Hide photo content in notifications".
 - Remote wipe and app-password revocation (§5.1).
 - Data protection class `completeUntilFirstUserAuthentication` for databases and caches (background uploads need it); offline originals the same.
-- Privacy manifest (`PrivacyInfo.xcprivacy`) declaring required-reason APIs; no tracking, no analytics, no third-party SDKs that phone home.
+- Privacy manifest (`PrivacyInfo.xcprivacy`, one per app/extension bundle and per package target that needs one) declaring required-reason APIs; no tracking, no analytics, no third-party SDKs that phone home.
 - Public album access sends no account credentials.
 - The initial-state scraper only reads `initial-state-photos-*` inputs and discards the rest of the page.
 
@@ -692,41 +704,41 @@ Add XCTest performance tests for the store queries and domain algorithms with a 
 
 ### 11.1 Automated
 
-- **Unit tests** for every package. `PhotosDomain` gets **parity tests** that port the web app's spec cases (e.g. `src/services/memories.spec.ts`, burst/stack/day-grouping/duplicates/cleanup/search-suggestion tests in `~/aloha-work/photos-wt/deploy/src/**/*.spec.ts`) so the same input gives the same groups as the web app.
-- **XML tests**: request builders compared against golden bodies from the reference docs; parsers tested with captured responses (store fixtures under `Tests/Fixtures/<server-version>/`).
-- **Integration tests** (opt-in scheme `IntegrationTests`, needs env vars for server URL and app password; never commit credentials):
-  - **Upstream master server** — the local server-core worktree with Photos master (`~/aloha-work/photos-srv`, port 8089, see the Photos notes in `~/aloha-work/photos-tools/`) or a Docker `nextcloud` image — to verify all fallbacks (no capability, no extended props).
+- **Unit tests** for every package. `PhotosDomain` gets **parity tests** that port the web app's spec cases (e.g. `src/services/memories.spec.ts`, burst/stack/day-grouping/duplicates/cleanup/search-suggestion tests in `src/**/*.spec.ts` of the Photos integration branch) so the same input gives the same groups as the web app.
+- **XML tests**: request builders compared against golden bodies from the reference docs; parsers tested with captured responses (fixtures under `Tests/<target>/Fixtures/<server>/`).
+- **Integration tests** (opt-in through the `PHOTOS_IT_*` environment variables, see [TESTING.md](TESTING.md); never commit credentials):
+  - **Upstream master server** — a local server-core checkout with Photos master, a release archive (`scripts/test-server.sh`) or a Docker `nextcloud` image — to verify all fallbacks (no capability, no extended props).
   - **Nextcloud 33 container** (`nextcloud:33`) for the oldest supported version: login, timeline, albums, sharing, places, upload, initial-state scraping.
-  - **devel** (`http://devel`, Nextcloud 36-dev with Photos `deploy/devel-all` = all extended features; test library in the user's `Photos/Test library`, ~Wikimedia Commons photos with EXIF). Note: devel has no Recognize and no Assistant/TaskProcessing provider; test People and AI features on a server that has them (ask Frank which).
-- **UI tests** (XCUITest) on iPhone, iPad and Mac for: login (with a stub server), timeline scroll & open viewer, create album and add photos, share link, backup first run with a seeded simulator photo library (`xcrun simctl addmedia`), offline mode (network link conditioner / airplane), app lock.
+  - **The extended test server** (Nextcloud 36-dev with the Photos integration branch = all extended features; a test library of Wikimedia Commons photos with EXIF). It has no Recognize and no Assistant/TaskProcessing provider; test People and AI features on a server that has them.
+- **UI tests** (XCUITest, target `NextcloudPhotosUITests`; today three smoke tests: launch, viewer, Albums — see [TESTING.md](TESTING.md)) on iPhone, iPad and Mac. Target: login (with a stub server), timeline scroll & open viewer, create album and add photos, share link, backup first run with a seeded simulator photo library (`xcrun simctl addmedia`), offline mode (network link conditioner / airplane), app lock.
 - **Backup dedup tests**: fixtures with burst sequences, Files-style names, JPEG-converted copies, shifted EXIF times; assert no duplicate uploads and no missed uploads.
 
 - **Debug login:** Debug builds sign in without a browser when launched with `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'` (used for screenshots and UI tests).
 
 ### 11.2 Manual test plan
 
-A checklist per milestone in `docs/test-plan.md` (to be written in M0) covering all platforms, light/dark, VoiceOver, large libraries, slow network, server in maintenance, expired app password, remote wipe.
+[test-plan.md](test-plan.md): a checklist for devices covering all platforms, light/dark, VoiceOver, large libraries, slow network, server in maintenance, expired app password, remote wipe.
 
 ## 12. Engineering conventions
 
-- Repo **https://github.com/nextcloud/photos-ios** (exists, public, default branch `main`, contains only the MIT `LICENSE` as of 2026-11-22). Local clone on the Mac at `~/aloha-work/photos-ios` (**not** on the `/Volumes/frank` SMB share: git writes fail there). This spec stays in `/Volumes/frank/photos-ios` and is also copied into the repo as `docs/SPEC.md` in M0; from then on the repo copy is the one to update.
+- Repo **https://github.com/nextcloud/photos-ios** (exists, public, default branch `main`, contains only the MIT `LICENSE` as of 2026-11-22). The copy of this spec in the repo (`docs/SPEC.md`) is the one to update.
 - Work in small PRs (one feature or fix each), stacked when they depend on each other; conventional commit subjects (`feat(timeline): …`, `fix(backup): …`); DCO sign-off (`Signed-off-by`); SPDX header in every source file (`SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors`, `SPDX-License-Identifier: MIT`).
 - Deliver all work as PRs against `main`; never push to `main` directly.
-- CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Docker Nextcloud.
-- Server-side work for `SERVER-COMPANION.md` happens in the Photos server repo following its `AGENTS.md` (agents prepare local branches in `~/aloha-work/photos-wt/<name>`; Frank opens the PRs).
+- CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Nextcloud installed on the runner (macOS runners have no Docker).
+- Server-side work for `SERVER-COMPANION.md` happens in the Photos server repo following its `AGENTS.md` (one small branch per item; a maintainer opens the PRs).
 - The Photos DAV helpers live in this app; offering them upstream as a `NextcloudKit+Photos.swift` is optional and decided later (it would not add a dependency here).
 
 ## 13. Milestones
 
-Each milestone ends with: all its requirements implemented on all four platforms (unless marked), tests green, manual test plan done on devel + NC 33, a TestFlight build, and a short demo note with screenshots per platform.
+Each milestone ends with: all its requirements implemented on all four platforms (unless marked), tests green, manual test plan done on the extended test server + NC 33, a TestFlight build, and a short demo note with screenshots per platform.
 
 ### M0 — Foundation
 Repo, project, packages, CI, lint, REUSE, licence files; design tokens; Brand; login (Login Flow v2, QR, self-signed trust, client certificates), accounts (add/switch/remove with revocation, wipe), user agent, MDM keys; feature detection incl. initial-state scraper; networking layer with DAV builders/parsers; store schema & migrations; logging; empty app shell with platform navigation (tabs/sidebar), Settings skeleton.
-**Accept:** log in to devel, NC 33 and a self-signed server on iPhone, iPad, Mac, Vision Pro simulator; Settings → Advanced shows the detected server features correctly for each server.
+**Accept:** log in to the extended test server, NC 33 and a self-signed server on iPhone, iPad, Mac, Vision Pro simulator; Settings → Advanced shows the detected server features correctly for each server.
 
 ### M1 — Browse and view
 Local index (initial + incremental sync + reconciliation), timeline TL-1–TL-7 (stacks may land late in M1), grid with sections, scrubber, zoom, selection, previews & caches, viewer VW-1–VW-6 (Live Text in M5), Live Photos, video, info panel (without people/caption), favourite, delete, export/share, basic filter bar (date/place), Settings library section.
-**Accept:** 100k synthetic-index performance tests pass; the devel test library is browsable offline after the first sync; favourites/deletes made offline sync later.
+**Accept:** 100k synthetic-index performance tests pass; the test library is browsable offline after the first sync; favourites/deletes made offline sync later.
 
 ### M2 — Albums, sharing, upload, offline
 Albums AL-1–AL-8, sharing SH-1–SH-6, manual upload §7.17, share extension, drag & drop, export to device library, offline albums §7.19.
@@ -738,20 +750,20 @@ Albums AL-1–AL-8, sharing SH-1–SH-6, manual upload §7.17, share extension, 
 
 ### M4 — Discover
 Places & map, people, tags, folders & shared with you, memories & On this day, search & filters & smart albums, archive & app lock, push notifications, widgets.
-**Accept:** feature parity with the web app on devel for all these views (side-by-side checklist), graceful hiding on NC 33.
+**Accept:** feature parity with the web app on the extended test server for all these views (side-by-side checklist), graceful hiding on NC 33.
 
 ### M5 — Advanced and polish
 Editing (§7.16), metadata editing, recently deleted, duplicates, free up space, free up device space, ask your photos, extract text / Live Text / Visual Look Up, captions in UI, video renditions, App Intents/Siri/Spotlight, visionOS spatial/immersive extras, accessibility & localisation audit, App Store assets and review notes.
 **Accept:** full parity matrix (Appendix A) green; accessibility audit has no blockers; App Store submission ready.
 
-## 14. Prerequisites and open items (need Frank / Nextcloud GmbH)
+## 14. Prerequisites and open items (need Nextcloud GmbH)
 
 1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-ios) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".
 2. Provisioning profiles for the app, extensions and the two Files App Groups under team NKUJUXUJ3B.
 3. **Push proxy**: `push-notifications.nextcloud.com` must know the new app's APNs topic (bundle id) — needed before M4 push works.
 4. **Notification filtering**: either the notifications app supports an app type for this client (only `photos` notifications) or request Apple's notification filtering entitlement.
 5. App icon and App Store artwork (trademarked Nextcloud assets).
-6. A test server with Recognize and an Assistant/TaskProcessing provider (devel has neither).
+6. A test server with Recognize and an Assistant/TaskProcessing provider (the current test servers have neither).
 7. Decide which companion server APIs (`SERVER-COMPANION.md`) to build and when; S1 (capability + config read) and S4 (Recognize key) have the highest value per effort.
 
 ---

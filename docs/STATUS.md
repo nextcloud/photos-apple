@@ -10,8 +10,8 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 - Unit tests (`xcodebuild test -scheme PhotosKit-Package -destination platform=macOS`): parsing, request bodies, initial-state scraping,
   store, sync engine and outbox against a stubbed DAV server (changes made elsewhere, deletes/moves, ETag boundary, ordering/backoff,
   cancellation), timeline sections, memories, stacks, duplicates, search suggestions, backup matcher and naming, editing, BlurHash, push key encoding.
-  In CI they run on the `xcode-27` runner (macOS 27); before 2026-11-23 the CI job skipped them because `macos-26` cannot load
-  test bundles built for OS 27.
+  In CI they run on the `xcode-27` runner (macOS 27) and in an iOS 27 simulator (the simulator job was added on 2026-11-23
+  and had not run when this was written; the tests compile for the simulator).
   `PhotosCoreTests` run the app model in a temporary container against a stubbed server: what logout and remote wipe leave on
   disk and in the secret store, logout order, the Notifications switch, push payload handling, offline downloads, backup outcome.
 - Integration tests against a local Nextcloud 36 + Photos master server (504-item test library): feature detection, sync, albums,
@@ -20,7 +20,11 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 - Stock Photos (2026-11-23): unit tests replay responses recorded from upstream Photos master, the released Photos 8.0.0 and
   an extended server (`PhotosStoreTests/StockServerTests.swift`, `Fixtures/`): detection, 404 propstats, sync, albums, places,
   memories. Integration tests and the Mac app ran against stock master, Photos 8.0.0 (force-enabled on Nextcloud 36) and the
-  extended `deploy/devel-all` server; upgrading and downgrading the server's Photos app switched the extended features on and off.
+  extended test server (Photos integration branch); upgrading and downgrading the server's Photos app switched the extended features on and off.
+- A fresh Nextcloud 35.0.3 from the release archive (`scripts/test-server.sh`, 2026-11-23): the nine integration tests pass
+  when run one after the other; the nightly workflow uses the same script.
+- UI smoke tests (`UITests`, three cases) 🟡 compile for macOS and iOS, never run.
+- Nothing has run on a device; the plan for that is [test-plan.md](test-plan.md).
 - Not available on the build Mac: iOS/visionOS simulator runtimes, signed builds (App Groups, keychain group, push), devices.
 
 ## M0 Foundation — ✅
@@ -156,10 +160,17 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   (description, "3 of 120", favourite/info/delete actions, swipe up/down to step on iOS) have VoiceOver labels; Reduce Motion,
   Increase Contrast / Reduce Transparency and accessibility text sizes are handled in the viewer, scrubber, tiles and cards; iOS
   haptics for selection, favourite and delete. Checked on the Mac through the accessibility tree; iOS only compiled.
-  Server feature names in Settings › Server features come from the PhotosAppUI catalog. ⬜ Transifex setup (`.tx/config` for
-  string catalogs).
-- ⬜ App Store assets and review notes.
+  Server feature names in Settings › Server features come from the PhotosAppUI catalog. Every key of every catalog has a comment for translators.
+  ⬜ Transifex: no `.tx/config` yet, the proposed setup waits for the localization team ([LOCALIZATION.md](LOCALIZATION.md)).
+- Release readiness 🟡: privacy manifests for the app, the extensions and the package targets; push entitlement
+  (`aps-environment`); export-compliance and ATS reasoning with the App Review note ([PRIVACY-AND-EXPORT.md](PRIVACY-AND-EXPORT.md));
+  build number settable from CI; unsigned Release archives in CI and a release workflow without signing. Nothing was
+  signed, uploaded or validated by App Store Connect.
+- App icon 🟡: all Mac sizes from the one 1024 px image; ⬜ dark/tinted variants, Mac-shaped icon, visionOS layered icon
+  ([APP-ICON.md](APP-ICON.md)).
+- ⬜ App Store assets (screenshots), signing secrets in CI.
 
 ## Prerequisites from SPEC §14 still open
-App Group / keychain group provisioning, push proxy topic, notification routing in the notifications app, app icon artwork,
+App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification
+filtering entitlement, push proxy topic, notification routing in the notifications app, app icon artwork,
 a test server with Recognize and an Assistant provider.
