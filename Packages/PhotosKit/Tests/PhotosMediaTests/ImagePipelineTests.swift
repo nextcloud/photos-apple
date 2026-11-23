@@ -98,7 +98,8 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard let url = request.url, let server = Self.servers.withLock({ $0[url.host() ?? ""] }), let fileId = FileID(url.lastPathComponent)
+        guard let url = request.url, let server = Self.servers.withLock({ $0[url.host() ?? ""] }),
+            let fileId = FileID(url.lastPathComponent)
         else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return
@@ -109,7 +110,8 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(5))
             guard finish() else { return }
             server.end(fileId, cancelled: false)
-            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "image/jpeg"])!
+            let response = HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "image/jpeg"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: server.image)
             client?.urlProtocolDidFinishLoading(self)
@@ -326,7 +328,8 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
         let url = cache.fileURL(key: PreviewCache.key(fileId: fileId, etag: "e", bucket: 256))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(count: bytes).write(to: url)
-        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path(percentEncoded: false))
     }
 
     func has(_ cache: PreviewCache, _ fileId: FileID) -> Bool { cache.hasDiskImage(fileId: fileId, etag: "e", bucket: 256) }
@@ -365,7 +368,8 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
         for id in 1...3 {
             cache.store(data, fileId: FileID(id), etag: "e", bucket: 256)
             let url = cache.fileURL(key: PreviewCache.key(fileId: FileID(id), etag: "e", bucket: 256))
-            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-Double(4 - id) * 3600)], ofItemAtPath: url.path(percentEncoded: false))
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-Double(4 - id) * 3600)], ofItemAtPath: url.path(percentEncoded: false))
         }
         // 1 is the oldest file, but it was just looked at.
         cache.clearMemory()
@@ -387,7 +391,8 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
         for id in 1...4 {
             let url = originals.localURL(fileId: FileID(id), etag: "e", ext: "jpg")
             try Data(count: 2000).write(to: url)
-            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-Double(id) * 60)], ofItemAtPath: url.path(percentEncoded: false))
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-Double(id) * 60)], ofItemAtPath: url.path(percentEncoded: false))
         }
         let pipeline = ImagePipeline(api: api, cache: cache, originals: originals, pinnedFileIds: { [6] })
         await pipeline.trimCaches(limits: CacheLimits(previewBytes: 2500, originalBytes: 4000))

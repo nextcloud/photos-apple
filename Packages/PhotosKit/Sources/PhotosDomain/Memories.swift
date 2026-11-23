@@ -83,7 +83,9 @@ public enum Memories {
         var groups: [Int: [Item]] = [:]
         for item in items {
             let timestamp = item.timestamp
-            if let yearsAgo = windows.first(where: { $0.range.contains(timestamp) })?.yearsAgo { groups[yearsAgo, default: []].append(item) }
+            if let yearsAgo = windows.first(where: { $0.range.contains(timestamp) })?.yearsAgo {
+                groups[yearsAgo, default: []].append(item)
+            }
         }
         return groups.keys.sorted().compactMap { yearsAgo in
             let members = groups[yearsAgo]!.sorted { $0.timestamp < $1.timestamp }

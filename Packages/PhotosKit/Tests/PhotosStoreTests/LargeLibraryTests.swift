@@ -26,7 +26,8 @@ import Testing
 
     func plan(_ database: AccountDatabase, _ sql: String, _ arguments: StatementArguments = []) throws -> String {
         try database.writer.read { db in
-            try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN " + sql, arguments: arguments).map { $0["detail"] as String }.joined(separator: " | ")
+            try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN " + sql, arguments: arguments).map { $0["detail"] as String }.joined(
+                separator: " | ")
         }
     }
 
@@ -75,11 +76,16 @@ import Testing
         try await database.writer.write { db in
             try db.execute(sql: "INSERT INTO album(id, kind, name, title) VALUES ('own:a', 'own', 'a', 'A'), ('own:b', 'own', 'b', 'B')")
             try db.execute(
-                sql: "INSERT INTO albumItem(albumId, fileId, childName) VALUES ('own:a', 1, 'x'), ('own:a', 2, 'x'), ('own:b', 2, 'x'), ('own:b', 5, 'x')")
+                sql:
+                    "INSERT INTO albumItem(albumId, fileId, childName) VALUES ('own:a', 1, 'x'), ('own:a', 2, 'x'), ('own:b', 2, 'x'), ('own:b', 5, 'x')"
+            )
         }
         // OR within a kind, newest first.
         #expect(try await ids(store, LibrarySearch(places: ["Berlin", "Paris"])) == [3, 2, 1])
-        let ranges = [Date(timeIntervalSince1970: 100)..<Date(timeIntervalSince1970: 200), Date(timeIntervalSince1970: 400)..<Date(timeIntervalSince1970: 401)]
+        let ranges = [
+            Date(timeIntervalSince1970: 100)..<Date(timeIntervalSince1970: 200),
+            Date(timeIntervalSince1970: 400)..<Date(timeIntervalSince1970: 401),
+        ]
         #expect(try await ids(store, LibrarySearch(dateRanges: ranges)) == [4, 1])
         #expect(try await ids(store, LibrarySearch(albumIds: ["own:a", "own:b"])) == [5, 2, 1])
         // AND between kinds.
@@ -173,7 +179,8 @@ import Testing
             try await pool.write { db in
                 for item in items {
                     try item.insert(db)
-                    try db.execute(sql: "INSERT INTO searchIndex(fileId, text) VALUES (?, ?)", arguments: [item.fileId, "stale \(item.name)"])
+                    try db.execute(
+                        sql: "INSERT INTO searchIndex(fileId, text) VALUES (?, ?)", arguments: [item.fileId, "stale \(item.name)"])
                 }
                 try db.execute(sql: "INSERT INTO album(id, kind, name, title) VALUES ('own:a', 'own', 'a', 'A')")
                 try db.execute(sql: "INSERT INTO albumItem(albumId, fileId, childName, position) VALUES ('own:a', 2, 'clip.mp4', 0)")
@@ -203,7 +210,8 @@ import Testing
         let indexes = try await database.writer.read { db in
             try Set(String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('media', 'albumItem')"))
         }
-        #expect(indexes.isSuperset(of: ["media_uploadedAt", "media_timeline", "media_favorite_timestamp", "media_map", "albumItem_position"]))
+        #expect(
+            indexes.isSuperset(of: ["media_uploadedAt", "media_timeline", "media_favorite_timestamp", "media_map", "albumItem_position"]))
         // Opening it again changes nothing.
         try database.writer.close()
         let reopened = try AccountDatabase(url: url)
@@ -214,7 +222,8 @@ import Testing
     @Test func rebuiltIndexTextIsWhatTheTriggersWrite() async throws {
         // The migration fills the index with SQL; rows written afterwards go through the triggers. Both must agree.
         let url = FileManager.default.temporaryDirectory.appending(path: "photos-migration-\(UUID().uuidString).sqlite")
-        let items = SyntheticLibrary.items(0..<200, of: 200) + [item(9, 1, path: "/root.jpg"), item(8, 1, path: "/A B/c d.jpg", caption: "x")]
+        let items =
+            SyntheticLibrary.items(0..<200, of: 200) + [item(9, 1, path: "/root.jpg"), item(8, 1, path: "/A B/c d.jpg", caption: "x")]
         do {
             let pool = try DatabasePool(path: url.path(percentEncoded: false))
             try AccountDatabase.migrator.migrate(pool, upTo: "v1-backup")
@@ -284,7 +293,9 @@ import Testing
             try db.execute(sql: "INSERT INTO person(name) VALUES ('Ada')")
             // Two detections of the same person in one photo.
             try db.execute(
-                sql: "INSERT INTO personItem(person, detectionId, fileId, childName) VALUES ('Ada', 1, 1, 'a'), ('Ada', 2, 1, 'a'), ('Ada', 3, 2, 'b')")
+                sql:
+                    "INSERT INTO personItem(person, detectionId, fileId, childName) VALUES ('Ada', 1, 1, 'a'), ('Ada', 2, 1, 'a'), ('Ada', 3, 2, 'b')"
+            )
         }
         #expect(try store.gridItems(.person("Ada")).map(\.fileId) == [2, 1])
         #expect(!LibraryStore.sql(for: .all, excludedPrefixes: []).0.contains("DISTINCT"))
@@ -300,7 +311,8 @@ import Testing
         #expect(!timeline.contains("TEMP B-TREE"))
         // Favourites: found in an index that is in display order (the flag is part of the timeline index), no sort.
         let favorites = try plan(database, LibraryStore.sql(for: .favorites, excludedPrefixes: []).0)
-        #expect((favorites.contains("media_timeline") || favorites.contains("media_favorite_timestamp")) && !favorites.contains("TEMP B-TREE"))
+        #expect(
+            (favorites.contains("media_timeline") || favorites.contains("media_favorite_timestamp")) && !favorites.contains("TEMP B-TREE"))
         // Recent uploads (SyncEngine.recentUploads).
         #expect(try plan(database, "SELECT fileId FROM media WHERE uploadedAt > ? LIMIT 500", [0]).contains("media_uploadedAt"))
         // The favourites the sync compares with the server.
@@ -308,7 +320,9 @@ import Testing
         // Album content: by primary key, no scan of media.
         let album = try plan(database, LibraryStore.sql(for: .album("own:a"), excludedPrefixes: []).0, ["own:a"])
         #expect(!album.contains("SCAN media"))
-        #expect(try plan(database, "SELECT fileId FROM albumItem WHERE albumId = ? ORDER BY position", ["own:a"]).contains("albumItem_position"))
+        #expect(
+            try plan(database, "SELECT fileId FROM albumItem WHERE albumId = ? ORDER BY position", ["own:a"]).contains("albumItem_position")
+        )
         // Map cells: aggregated from the coordinate index alone.
         let cells = try plan(
             database,
@@ -316,7 +330,8 @@ import Testing
             [1, 1, 40, 50, 0, 10])
         #expect(cells.contains("COVERING INDEX media_map"))
         // Full-text search goes through the FTS index, not a scan.
-        let search = try plan(database, LibraryStore.searchSQL(LibrarySearch(texts: ["berlin"]), columns: LibraryStore.gridColumns).0, ["\"berlin\""])
+        let search = try plan(
+            database, LibraryStore.searchSQL(LibrarySearch(texts: ["berlin"]), columns: LibraryStore.gridColumns).0, ["\"berlin\""])
         #expect(search.contains("searchIndex VIRTUAL TABLE INDEX") && !search.contains("SCAN media"))
         // On this day and the counts per year: ranges of the timeline index.
         let year = try plan(database, "SELECT COUNT(*) FROM media WHERE \(LibraryStore.inTimeRange)", [0, 1])
@@ -432,7 +447,8 @@ import Testing
         // The same partition as cutting the coordinates into cells by hand.
         var expected: [String: [MediaItem]] = [:]
         for item in inside {
-            expected["\(Int(((item.latitude! + 90) / 5).rounded(.down)))-\(Int(((item.longitude! + 180) / 5).rounded(.down)))", default: []].append(item)
+            expected["\(Int(((item.latitude! + 90) / 5).rounded(.down)))-\(Int(((item.longitude! + 180) / 5).rounded(.down)))", default: []]
+                .append(item)
         }
         #expect(Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.count) }) == expected.mapValues(\.count))
         for cell in cells {
@@ -447,7 +463,10 @@ import Testing
         #expect(try await store.mapItemCount(in: region) == inside.count)
         #expect(try await store.mapItems(in: region).count == inside.count)
         // Nothing in the middle of the Pacific, and nothing without a sensible cell size.
-        #expect(try await store.mapCells(in: MapRegion(minLatitude: -10, maxLatitude: 0, minLongitude: -140, maxLongitude: -130), cellLatitude: 1, cellLongitude: 1).isEmpty)
+        #expect(
+            try await store.mapCells(
+                in: MapRegion(minLatitude: -10, maxLatitude: 0, minLongitude: -140, maxLongitude: -130), cellLatitude: 1, cellLongitude: 1
+            ).isEmpty)
         #expect(try await store.mapCells(in: region, cellLatitude: 0, cellLongitude: 5).isEmpty)
         // Places for the search suggestions.
         #expect(try await store.placeNames() == Set(try store.allVisibleItems().compactMap(\.place)).sorted())

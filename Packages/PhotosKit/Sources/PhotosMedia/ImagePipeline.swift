@@ -37,7 +37,9 @@ public actor ImagePipeline {
         /// Prefetches kept waiting; older ones are dropped beyond this.
         public var queuedPrefetches: Int
 
-        public init(network: Int = 6, local: Int = max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2)), queuedPrefetches: Int = 200) {
+        public init(
+            network: Int = 6, local: Int = max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2)), queuedPrefetches: Int = 200
+        ) {
             self.network = max(1, network)
             self.local = max(1, local)
             self.queuedPrefetches = max(0, queuedPrefetches)
@@ -256,7 +258,8 @@ public actor ImagePipeline {
 
     private func start(_ load: Load, key: String) {
         running[load.lane, default: 0] += 1
-        let work = Work(api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal)
+        let work = Work(
+            api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal)
         let request = load.request
         let id = load.id
         let lane = load.lane
@@ -323,7 +326,9 @@ public actor ImagePipeline {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
             dispatchPrecondition(condition: .notOnQueue(.main))
             if Task.isCancelled { return Result() }
-            if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { return Result(image: image) }
+            if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) {
+                return Result(image: image)
+            }
             if Task.isCancelled { return Result() }
             // Offline albums: thumbnail the downloaded original instead of hitting the network.
             if let file = localOriginal?(request.fileId, request.etag),
@@ -379,8 +384,12 @@ public struct CacheLimits: Sendable, Equatable {
     /// The limits in effect: the defaults (previews 2 GB, originals 1 GB) unless the settings say otherwise.
     public static func current(_ defaults: UserDefaults = .standard) -> CacheLimits {
         var limits = CacheLimits()
-        if let bytes = defaults.object(forKey: previewLimitKey) as? NSNumber, bytes.int64Value > 0 { limits.previewBytes = bytes.int64Value }
-        if let bytes = defaults.object(forKey: originalLimitKey) as? NSNumber, bytes.int64Value > 0 { limits.originalBytes = bytes.int64Value }
+        if let bytes = defaults.object(forKey: previewLimitKey) as? NSNumber, bytes.int64Value > 0 {
+            limits.previewBytes = bytes.int64Value
+        }
+        if let bytes = defaults.object(forKey: originalLimitKey) as? NSNumber, bytes.int64Value > 0 {
+            limits.originalBytes = bytes.int64Value
+        }
         return limits
     }
 }

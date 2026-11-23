@@ -263,7 +263,9 @@ public final class AccountDatabase: Sendable {
             // the index on the flag alone, which SQLite had to read 3 % of and then sort.
             try db.execute(sql: "DROP INDEX IF EXISTS media_favorite")
             try db.execute(
-                sql: "CREATE INDEX media_favorite_timestamp ON media(coalesce(capturedAt, modifiedAt) DESC, fileId DESC) WHERE isFavorite = 1")
+                sql:
+                    "CREATE INDEX media_favorite_timestamp ON media(coalesce(capturedAt, modifiedAt) DESC, fileId DESC) WHERE isFavorite = 1"
+            )
             // Geotagged items by coordinate: the map aggregates its cells from this index alone. Replaces the index on
             // the coordinates without the visibility flags.
             try db.execute(sql: "DROP INDEX IF EXISTS media_location")

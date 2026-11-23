@@ -113,7 +113,8 @@ struct MapScreen: View {
         var id: String {
             switch self {
             case .cell(let cell): "cell-\(cell.id)-\(cell.cover.fileId)-\(cell.count)"
-            case .area(let area, let count): "area-\(area.minLatitude)-\(area.minLongitude)-\(area.maxLatitude)-\(area.maxLongitude)-\(count)"
+            case .area(let area, let count):
+                "area-\(area.minLatitude)-\(area.minLongitude)-\(area.maxLatitude)-\(area.maxLongitude)-\(count)"
             }
         }
 
@@ -145,7 +146,8 @@ struct MapScreen: View {
     /// around it (so markers are there when the map is dragged a little).
     static func query(for key: RegionKey) -> (region: MapRegion, cellLatitude: Double, cellLongitude: Double) {
         let area = MapRegion(
-            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta, longitudeReach: key.longitudeDelta)
+            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta,
+            longitudeReach: key.longitudeDelta)
         return (area, max(key.latitudeDelta / 8, 0.0001), max(key.longitudeDelta / 8, 0.0001))
     }
 
@@ -203,7 +205,8 @@ struct MapScreen: View {
     func loadCells() async {
         guard let key = RegionKey(region), let library = session.services?.library else { return }
         let query = Self.query(for: key)
-        guard let loaded = try? await library.mapCells(in: query.region, cellLatitude: query.cellLatitude, cellLongitude: query.cellLongitude)
+        guard
+            let loaded = try? await library.mapCells(in: query.region, cellLatitude: query.cellLatitude, cellLongitude: query.cellLongitude)
         else { return }
         // The camera has moved on; the newer region is being loaded.
         guard !Task.isCancelled else { return }

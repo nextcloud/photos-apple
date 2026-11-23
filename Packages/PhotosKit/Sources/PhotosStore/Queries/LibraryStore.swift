@@ -326,7 +326,8 @@ public struct LibraryStore: Sendable {
     }
 
     static func likeEscaped(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
+        text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(
+            of: "_", with: "\\_")
     }
 
     static func fetchGrid(_ db: Database, sql: String, arguments: StatementArguments = []) throws -> [GridMedia] {
@@ -543,7 +544,9 @@ public struct LibraryStore: Sendable {
         if !search.dateRanges.isEmpty {
             let ranges = search.dateRanges.map { _ in "(\(timestamp) >= ? AND \(timestamp) < ?)" }
             conditions.append("(" + ranges.joined(separator: " OR ") + ")")
-            for range in search.dateRanges { arguments += [range.lowerBound.timeIntervalSince1970, range.upperBound.timeIntervalSince1970] }
+            for range in search.dateRanges {
+                arguments += [range.lowerBound.timeIntervalSince1970, range.upperBound.timeIntervalSince1970]
+            }
         }
         if search.favoritesOnly { conditions.append("media.isFavorite = 1") }
         if search.videosOnly { conditions.append("media.kind = 'video'") }
@@ -583,7 +586,9 @@ public struct LibraryStore: Sendable {
         try await database.writer.read { db in
             try String.fetchAll(
                 db,
-                sql: "SELECT DISTINCT media.place FROM media WHERE media.place IS NOT NULL AND media.place <> '' AND \(Self.visible) ORDER BY 1")
+                sql:
+                    "SELECT DISTINCT media.place FROM media WHERE media.place IS NOT NULL AND media.place <> '' AND \(Self.visible) ORDER BY 1"
+            )
         }
     }
 
@@ -595,7 +600,8 @@ public struct LibraryStore: Sendable {
     {
         try await database.writer.read { db in
             var snapshot = MemoriesSnapshot()
-            snapshot.onThisDay = Memories.onThisDay(try Self.onThisDayCandidates(db, now: now, calendar: calendar), now: now, calendar: calendar)
+            snapshot.onThisDay = Memories.onThisDay(
+                try Self.onThisDayCandidates(db, now: now, calendar: calendar), now: now, calendar: calendar)
             guard !onlyOnThisDay else { return snapshot }
             snapshot.trips = Memories.trips(try Self.tripCandidates(db), locale: locale)
             snapshot.recap = Memories.yearRecap(try Self.recapCandidates(db, calendar: calendar), calendar: calendar)
@@ -627,7 +633,8 @@ public struct LibraryStore: Sendable {
     /// Trips are found by the gaps between consecutive items, so this reads four columns of every visible item.
     static func tripCandidates(_ db: Database) throws -> [MemoryItem] {
         var result: [MemoryItem] = []
-        try memoryItems(db, sql: "SELECT media.fileId, \(timestamp), media.isFavorite, media.place FROM media WHERE \(visible)", into: &result)
+        try memoryItems(
+            db, sql: "SELECT media.fileId, \(timestamp), media.isFavorite, media.place FROM media WHERE \(visible)", into: &result)
         return result
     }
 

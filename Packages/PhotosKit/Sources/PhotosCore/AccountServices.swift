@@ -52,7 +52,8 @@ public final class AccountServices: Sendable {
         self.outbox = Outbox(api: api, database: database)
         let cache = PreviewCache(directory: layout.previews(account.id))
         let originals = OriginalStore(directory: layout.originals(account.id), dav: dav)
-        let images = ImagePipeline(api: api, cache: cache, originals: originals, pinnedFileIds: { [database] in Self.pinnedFileIds(database) })
+        let images = ImagePipeline(
+            api: api, cache: cache, originals: originals, pinnedFileIds: { [database] in Self.pinnedFileIds(database) })
         self.images = images
         // Launch: bring the caches below their limits (SPEC §5.5) before this session adds to them.
         Task.detached(priority: .utility) { await images.trimCaches() }

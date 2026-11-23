@@ -125,7 +125,9 @@ enum SyntheticLibrary {
 
     /// A new on-disk database in the temporary directory, filled page by page as the initial sync does.
     /// - Returns: the database, its store and the seconds each page took to upsert.
-    static func makeDatabase(count: Int, pageSize: Int = 1000) throws -> (database: AccountDatabase, library: LibraryStore, pageSeconds: [Double]) {
+    static func makeDatabase(count: Int, pageSize: Int = 1000) throws -> (
+        database: AccountDatabase, library: LibraryStore, pageSeconds: [Double]
+    ) {
         let database = try AccountDatabase.temporary()
         let library = LibraryStore(database: database)
         let seconds = try fill(library, count: count, pageSize: pageSize)

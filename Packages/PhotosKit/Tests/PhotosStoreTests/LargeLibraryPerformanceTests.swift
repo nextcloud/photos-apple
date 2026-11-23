@@ -33,7 +33,8 @@ struct LargeLibraryPerformanceTests {
 
     /// Best time of `runs` runs, in milliseconds.
     @discardableResult
-    static func measure<T>(_ label: String, runs: Int = 5, _ body: () async throws -> T) async rethrows -> (value: T, milliseconds: Double) {
+    static func measure<T>(_ label: String, runs: Int = 5, _ body: () async throws -> T) async rethrows -> (value: T, milliseconds: Double)
+    {
         var best = Double.infinity
         var value: T?
         for _ in 0..<runs {
@@ -47,7 +48,8 @@ struct LargeLibraryPerformanceTests {
 
     static func plan(_ database: AccountDatabase, _ sql: String, _ arguments: StatementArguments = []) throws -> String {
         try database.writer.read { db in
-            try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN " + sql, arguments: arguments).map { $0["detail"] as String }.joined(separator: " | ")
+            try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN " + sql, arguments: arguments).map { $0["detail"] as String }.joined(
+                separator: " | ")
         }
     }
 
@@ -67,7 +69,9 @@ struct LargeLibraryPerformanceTests {
         let firstPages = pages.prefix(tenth).reduce(0, +) / Double(tenth) * 1000
         let lastPages = pages.suffix(tenth).reduce(0, +) / Double(tenth) * 1000
         print("PERF initial index of \(count) items (store only): \(String(format: "%.2f", total)) s")
-        print("PERF upsert of a 1000-row page: \(String(format: "%.1f", firstPages)) ms into an empty index, \(String(format: "%.1f", lastPages)) ms at \(count)")
+        print(
+            "PERF upsert of a 1000-row page: \(String(format: "%.1f", firstPages)) ms into an empty index, \(String(format: "%.1f", lastPages)) ms at \(count)"
+        )
         // Budget: the whole initial sync in < 10 min; the store may use a small part of that.
         #expect(total < 120)
         // The cost of a page must not grow with the size of the index (it was a full scan of the search table per row).
@@ -102,15 +106,21 @@ struct LargeLibraryPerformanceTests {
         let entries = try await Self.measure("timeline, lightweight rows (timelineRows(.all))") { try await library.timelineRows(.all) }
         #expect(entries.value.count == grid.value.count)
         #expect(entries.milliseconds < 500)
-        print("PERF   plan: \(try Self.plan(database, LibraryStore.sql(for: .all, excludedPrefixes: [], columns: LibraryStore.timelineColumns).0))")
+        print(
+            "PERF   plan: \(try Self.plan(database, LibraryStore.sql(for: .all, excludedPrefixes: [], columns: LibraryStore.timelineColumns).0))"
+        )
         print("PERF   plan (grid rows): \(try Self.plan(database, LibraryStore.sql(for: .all, excludedPrefixes: []).0))")
         let visible = Array(grid.value[5000..<5200].map(\.fileId))
         let details = try await Self.measure("grid details of 200 tiles (gridMedia)") { try await library.gridMedia(visible) }
         #expect(details.value.count == 200)
         #expect(details.milliseconds < 50)
-        for (name, filter) in [("photos", MediaFilter.photos), ("videos", .videos), ("favourites", .favorites), ("place", .place("Berlin"))] {
+        for (name, filter) in [
+            ("photos", MediaFilter.photos), ("videos", .videos), ("favourites", .favorites), ("place", .place("Berlin")),
+        ] {
             let rows = try await Self.measure("grid rows, \(name)") { try library.gridItems(filter) }
-            print("PERF   \(rows.value.count) rows; plan: \(try Self.plan(database, LibraryStore.sql(for: filter, excludedPrefixes: []).0, filter == .place("Berlin") ? ["Berlin"] : []))")
+            print(
+                "PERF   \(rows.value.count) rows; plan: \(try Self.plan(database, LibraryStore.sql(for: filter, excludedPrefixes: []).0, filter == .place("Berlin") ? ["Berlin"] : []))"
+            )
             #expect(!rows.value.isEmpty)
             #expect(rows.milliseconds < 1500)
         }
@@ -134,7 +144,9 @@ struct LargeLibraryPerformanceTests {
             (
                 "one month",
                 LibrarySearch(dateRanges: [
-                    Date(timeIntervalSince1970: SyntheticLibrary.newest - 400 * 86_400)..<Date(timeIntervalSince1970: SyntheticLibrary.newest - 370 * 86_400)
+                    Date(
+                        timeIntervalSince1970: SyntheticLibrary.newest - 400 * 86_400)..<Date(
+                            timeIntervalSince1970: SyntheticLibrary.newest - 370 * 86_400)
                 ])
             ),
         ]
@@ -171,7 +183,8 @@ struct LargeLibraryPerformanceTests {
         #expect(memories.milliseconds < 3000)
 
         // MARK: Map (budget: clustering < 200 ms per region change, 50 000 geotagged photos)
-        let located = try await library.mapItemCount(in: MapRegion(minLatitude: -90, maxLatitude: 90, minLongitude: -180, maxLongitude: 180))
+        let located = try await library.mapItemCount(
+            in: MapRegion(minLatitude: -90, maxLatitude: 90, minLongitude: -180, maxLongitude: 180))
         print("PERF geotagged items: \(located)")
         let regions: [(String, MapRegion, Double, Double)] = [
             ("the world", MapRegion(minLatitude: -90, maxLatitude: 90, minLongitude: -180, maxLongitude: 180), 22.5, 45),
@@ -190,7 +203,8 @@ struct LargeLibraryPerformanceTests {
         // MARK: Other hot queries
         let recent = try await Self.measure("recent uploads (SyncEngine.recentUploads)") {
             try await database.writer.read { db in
-                try FileID.fetchAll(db, sql: "SELECT fileId FROM media WHERE uploadedAt > ? LIMIT 500", arguments: [SyntheticLibrary.newest + 3000])
+                try FileID.fetchAll(
+                    db, sql: "SELECT fileId FROM media WHERE uploadedAt > ? LIMIT 500", arguments: [SyntheticLibrary.newest + 3000])
             }
         }
         #expect(recent.milliseconds < 50)
