@@ -625,8 +625,10 @@
 
             static func event(for key: String, window: NSWindow?) -> NSEvent? {
                 let table: [String: (String, UInt16)] = [
-                    "left": (String(UnicodeScalar(NSLeftArrowFunctionKey)!), 123), "right": (String(UnicodeScalar(NSRightArrowFunctionKey)!), 124),
-                    "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125), "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
+                    "left": (String(UnicodeScalar(NSLeftArrowFunctionKey)!), 123),
+                    "right": (String(UnicodeScalar(NSRightArrowFunctionKey)!), 124),
+                    "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125),
+                    "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
                     "return": ("\r", 36), "space": (" ", 49), "escape": ("\u{1b}", 53),
                 ]
                 guard let (characters, code) = table[key] else { return nil }

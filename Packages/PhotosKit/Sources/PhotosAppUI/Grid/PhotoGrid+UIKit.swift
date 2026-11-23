@@ -467,7 +467,8 @@
             contentView.addSubview(placeholderIcon)
             gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.45).cgColor]
             contentView.layer.addSublayer(gradient)
-            durationLabel.font = .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold)
+            durationLabel.font = .monospacedDigitSystemFont(
+                ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold)
             durationLabel.textColor = .white
             for icon in [favoriteIcon, liveIcon, videoIcon] {
                 icon.tintColor = .white
@@ -492,7 +493,8 @@
             durationLabel.sizeToFit()
             var right = bounds.width - 4
             if !durationLabel.isHidden {
-                durationLabel.frame.origin = CGPoint(x: right - durationLabel.bounds.width, y: bounds.height - durationLabel.bounds.height - 3)
+                durationLabel.frame.origin = CGPoint(
+                    x: right - durationLabel.bounds.width, y: bounds.height - durationLabel.bounds.height - 3)
                 right = durationLabel.frame.minX - 3
             }
             videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)

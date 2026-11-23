@@ -54,7 +54,9 @@ import Testing
             let start = date(2026, month, day, 21)
             for minute in stride(from: 0, to: 9 * 60, by: 7) { stamps.append(start.addingTimeInterval(Double(minute) * 60)) }
         }
-        for _ in 0..<3000 { stamps.append(date(2020, 1, 1).addingTimeInterval(Double.random(in: 0...(7 * 365 * 86400), using: &generator))) }
+        for _ in 0..<3000 {
+            stamps.append(date(2020, 1, 1).addingTimeInterval(Double.random(in: 0...(7 * 365 * 86400), using: &generator)))
+        }
         for sorted in [true, false] {
             let input = sorted ? stamps.sorted(by: >) : stamps
             let months = TimelineSections.group(timestamps: input, calendar: calendar)

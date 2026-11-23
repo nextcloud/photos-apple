@@ -179,7 +179,8 @@
                 lastY = tickY
                 let text = NSAttributedString(string: tick.label, attributes: tickAttributes)
                 let size = text.size()
-                let pill = NSRect(x: right - size.width - 12, y: tickY - size.height / 2 - 2, width: size.width + 12, height: size.height + 4)
+                let pill = NSRect(
+                    x: right - size.width - 12, y: tickY - size.height / 2 - 2, width: size.width + 12, height: size.height + 4)
                 NSColor.windowBackgroundColor.withAlphaComponent(0.8).setFill()
                 NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
                 text.draw(at: NSPoint(x: pill.minX + 6, y: pill.minY + 2))
@@ -197,7 +198,8 @@
                 string: bubbleText,
                 attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white])
             let size = text.size()
-            var bubble = NSRect(x: right - size.width - 18, y: bubbleY - size.height / 2 - 4, width: size.width + 18, height: size.height + 8)
+            var bubble = NSRect(
+                x: right - size.width - 18, y: bubbleY - size.height / 2 - 4, width: size.width + 18, height: size.height + 8)
             bubble.origin.y = min(max(bubble.origin.y, 2), bounds.maxY - bubble.height - 2)
             NSColor.controlAccentColor.setFill()
             NSBezierPath(roundedRect: bubble, xRadius: bubble.height / 2, yRadius: bubble.height / 2).fill()
