@@ -9,6 +9,7 @@ import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
+import SwiftUI
 import UniformTypeIdentifiers
 
 #if canImport(UIKit)
@@ -54,6 +55,27 @@ struct GridCallbacks {
     /// Pull to refresh on iPhone and iPad; returns when the reload is through. Nil: the grid has no refresh control.
     /// `PhotoGrid` fills it from SwiftUI's `.refreshable` when it is not set.
     var refresh: (@MainActor () async -> Void)?
+}
+
+/// Whether a grid screen is selecting and how many items; screens around `MediaGridScreen` read it as a preference
+/// (an album keeps its title and shows the count as subtitle).
+struct GridSelectionState: Equatable, Sendable {
+    var isSelecting = false
+    var count = 0
+
+    /// "Select items" or "3 selected".
+    var title: String {
+        count == 0 ? String(localized: "Select items", bundle: .module) : String(localized: "\(count) selected", bundle: .module)
+    }
+
+    struct Key: PreferenceKey {
+        static let defaultValue = GridSelectionState()
+
+        static func reduce(value: inout GridSelectionState, nextValue: () -> GridSelectionState) {
+            let next = nextValue()
+            if next.isSelecting { value = next }
+        }
+    }
 }
 
 /// Runs one pull-to-refresh at a time and says when it is over (the refresh control spins until then).

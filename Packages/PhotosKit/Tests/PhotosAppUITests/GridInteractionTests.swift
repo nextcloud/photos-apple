@@ -86,3 +86,53 @@ import Testing
         #expect(GridTile.previewSize(aspectRatio: 40, longEdge: 1000) == CGSize(width: 1000, height: 200))
     }
 }
+
+/// "Add photos" to an album and the album's toolbar.
+@Suite struct AlbumPickerAndToolbarTests {
+    /// The search narrows the grid down; what was picked before must stay picked although the grid no longer shows it.
+    @Test func picksSurviveASearchThatHidesThem() {
+        var shown: Set<FileID> = [1, 2, 3, 4]
+        var picked: Set<FileID> = []
+        picked = PhotoPicker.merged(picked: picked, isShown: shown.contains, gridSelection: [1, 2])
+        #expect(picked == [1, 2])
+
+        // The search leaves 3 and 4: the grid shows nothing as selected and reports its (empty) selection.
+        shown = [3, 4]
+        #expect(PhotoPicker.shownSelection(picked: picked, isShown: shown.contains).isEmpty)
+        picked = PhotoPicker.merged(picked: picked, isShown: shown.contains, gridSelection: [])
+        #expect(picked == [1, 2])
+        picked = PhotoPicker.merged(picked: picked, isShown: shown.contains, gridSelection: [4])
+        #expect(picked == [1, 2, 4])
+
+        // Search cleared: everything picked is selected in the grid again, and deselecting there takes it out.
+        shown = [1, 2, 3, 4]
+        #expect(PhotoPicker.shownSelection(picked: picked, isShown: shown.contains) == [1, 2, 4])
+        picked = PhotoPicker.merged(picked: picked, isShown: shown.contains, gridSelection: [2, 4])
+        #expect(picked == [2, 4])
+    }
+
+    /// Two "…" menus side by side were the problem: while selecting only the selection's "More" may be one.
+    @Test func theAlbumOptionsMenuMakesWayForTheSelection() {
+        // iPhone: one menu for everything, gone while selecting.
+        #expect(AlbumToolbar.layout(isCompact: true, isSelecting: false, isMac: false) == .singleMenu)
+        #expect(AlbumToolbar.layout(isCompact: true, isSelecting: true, isMac: false) == .hidden)
+        // iPad: buttons, the options menu hides while selecting.
+        #expect(AlbumToolbar.layout(isCompact: false, isSelecting: false, isMac: false) == .buttons(showsOptions: true))
+        #expect(AlbumToolbar.layout(isCompact: false, isSelecting: true, isMac: false) == .buttons(showsOptions: false))
+        // Mac: a click selects, the album's actions stay reachable; the menus differ by symbol instead.
+        #expect(AlbumToolbar.layout(isCompact: false, isSelecting: true, isMac: true) == .buttons(showsOptions: true))
+        #if os(macOS)
+            #expect(AlbumToolbar.optionsSymbol != "ellipsis.circle")
+        #endif
+    }
+
+    @Test func theSelectionCountIsTheSubtitle() {
+        #expect(GridSelectionState(isSelecting: true, count: 0).title == "Select items")
+        #expect(GridSelectionState(isSelecting: true, count: 3).title == "3 selected")
+        // Of several grids below a screen, the one that is selecting counts.
+        var value = GridSelectionState.Key.defaultValue
+        GridSelectionState.Key.reduce(value: &value) { GridSelectionState(isSelecting: true, count: 2) }
+        GridSelectionState.Key.reduce(value: &value) { GridSelectionState() }
+        #expect(value == GridSelectionState(isSelecting: true, count: 2))
+    }
+}

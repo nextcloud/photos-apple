@@ -20,6 +20,8 @@ struct MediaGridScreen<Accessory: View>: View {
     var extraActions: ([MediaItem]) -> [GridMenuAction] = { _ in [] }
     /// The grid shows the synced library (timeline): "empty" is only said once a first sync has finished.
     var waitsForFirstSync = false
+    /// The title stays while items are selected; the screen shows the count itself (`GridSelectionState.Key`).
+    var keepsTitleWhileSelecting = false
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -50,7 +52,8 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var body: some View {
         content
-            .navigationTitle(isSelecting ? selectionTitle : title)
+            .navigationTitle(isSelecting && !keepsTitleWhileSelecting ? selectionTitle : title)
+            .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
