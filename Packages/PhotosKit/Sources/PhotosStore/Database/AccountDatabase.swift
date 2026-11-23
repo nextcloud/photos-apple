@@ -16,6 +16,9 @@ public final class AccountDatabase: Sendable {
         var configuration = Configuration()
         configuration.readonly = readOnly
         configuration.label = "PhotosStore"
+        // More than one connection pool can be open on an account's database: the app and its extensions share it, and
+        // the backup may run on services of its own. A writer waits for the other one instead of failing with SQLITE_BUSY.
+        configuration.busyMode = .timeout(5)
         configuration.prepareDatabase { db in
             try db.execute(sql: "PRAGMA synchronous = NORMAL")
         }
