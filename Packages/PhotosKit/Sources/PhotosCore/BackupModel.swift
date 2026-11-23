@@ -17,6 +17,8 @@ public enum BackupOutcome: Sendable, Equatable {
     /// Stopped before the end; the reason is ready to show ("Waiting for Wi-Fi").
     case paused(String)
     case failed(String)
+    /// Stopped by something only the user can fix: full storage, an expired login, a refused upload, an untrusted certificate.
+    case blocked(BackupStatus.Blocker)
     /// No access to the photo library.
     case notAuthorized
     /// Backup could not start at all: it is turned off, or its account is signed out.
@@ -26,8 +28,11 @@ public enum BackupOutcome: Sendable, Equatable {
     public init(status: BackupStatus, uploadedBefore: Int) {
         switch status.phase {
         case .upToDate: self = .upToDate
+        // A pause is the final state of a pass now: the engine keeps it until the run continues (by itself when the
+        // network or power state allows it, or with the next pass after the user's pause).
         case .paused(let reason): self = .paused(reason)
-        case .failed(let message): self = .failed(message)
+        case .failed(let message):
+            if let blocker = status.blocker { self = .blocked(blocker) } else { self = .failed(message) }
         case .notAuthorized: self = .notAuthorized
         case .idle, .scanning, .reconciling, .uploading:
             self = .finished(uploaded: max(0, status.uploaded - uploadedBefore), remaining: status.pending, failed: status.failed)
@@ -48,13 +53,22 @@ public enum BackupOutcome: Sendable, Equatable {
         switch self {
         case .upToDate: String(localized: "Your photos are backed up.")
         case .finished(let uploaded, let remaining, let failed):
-            if failed > 0 { String(localized: "Backup finished, but \(failed) items could not be uploaded.") } else if remaining > 0 {
+            if failed > 0 {
+                String(localized: "Backup finished, but \(failed) items could not be uploaded.")
+            } else if remaining > 0 {
                 String(localized: "\(uploaded) items were backed up, \(remaining) are still waiting.")
             } else {
                 String(localized: "Backup finished.")
             }
         case .paused(let reason): String(localized: "Backup is paused: \(reason)")
         case .failed(let message): String(localized: "Backup failed: \(message)")
+        case .blocked(let blocker):
+            switch blocker {
+            case .insufficientStorage: String(localized: "Backup stopped: your Nextcloud storage is full.")
+            case .unauthorized: String(localized: "Backup stopped: log in to your Nextcloud again.")
+            case .forbidden: String(localized: "Backup stopped: the server does not allow uploads to the backup folder.")
+            case .serverTrust: String(localized: "Backup stopped: the connection to your Nextcloud is not trusted.")
+            }
         case .notAuthorized: String(localized: "Nextcloud Photos has no access to your photos.")
         case .unavailable(let reason): reason
         }
@@ -131,7 +145,14 @@ public final class BackupModel {
     public func update(_ change: (inout BackupSettings) -> Void) {
         change(&settings)
         try? settings.save(to: settingsFile)
-        if !settings.isEnabled { engine?.cancelDetached() }
+        guard let engine else { return }
+        let settings = settings
+        Task {
+            if !settings.isEnabled { await engine.cancel() }
+            // A run that waits (for Wi-Fi, Low Power Mode to end …) continues with the new options, at once when the
+            // change lifts what it was waiting for.
+            await engine.settingsChanged(settings)
+        }
     }
 
     public func requestAuthorization() async {
@@ -159,8 +180,10 @@ public final class BackupModel {
     }
 
     /// Runs a backup pass now (or a dry run when Files keeps doing the backup) and reports how it ended.
+    ///
+    /// - Parameter retryFailed: also retry items that failed and would still wait for their next attempt (the user asked).
     @discardableResult
-    public func runNow() async -> BackupOutcome {
+    public func runNow(retryFailed: Bool = false) async -> BackupOutcome {
         guard settings.isEnabled || settings.filesAppMode == .keepFiles else {
             return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos."))
         }
@@ -172,7 +195,7 @@ public final class BackupModel {
         let box = statusBox
         let uploadedBefore = box.value.uploaded
         runningPasses += 1
-        await engine.run(settings, dryRun: !settings.isEnabled)
+        await engine.run(settings, dryRun: !settings.isEnabled, retryFailed: retryFailed)
         runningPasses -= 1
         let final = box.value
         if self.engine === engine { status = final }

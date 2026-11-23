@@ -31,10 +31,12 @@ import Testing
         try services.library.upsert([item])
         try services.database.writer.write { db in
             try db.execute(
-                sql: "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 11, '11-beach.jpg', 'user', ?, 1)",
+                sql:
+                    "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 11, '11-beach.jpg', 'user', ?, 1)",
                 arguments: [album.id, item.path])
             try db.execute(
-                sql: "INSERT INTO offlinePin(id, title, createdAt) VALUES (?, 'Holiday', 0)", arguments: [OfflineManager.pinId(album: album)])
+                sql: "INSERT INTO offlinePin(id, title, createdAt) VALUES (?, 'Holiday', 0)",
+                arguments: [OfflineManager.pinId(album: album)])
         }
         server.set { $0.downloads["/remote.php/dav/files/alice/Photos/beach.jpg"] = Data("original".utf8) }
         return (album, item)
@@ -164,6 +166,12 @@ import Testing
         #expect(BackupOutcome(status: status(.paused("Waiting for Wi-Fi")), uploadedBefore: 0) == .paused("Waiting for Wi-Fi"))
         #expect(BackupOutcome(status: status(.failed("Server error")), uploadedBefore: 0) == .failed("Server error"))
         #expect(BackupOutcome(status: status(.notAuthorized), uploadedBefore: 0) == .notAuthorized)
+        var full = status(.failed("Insufficient storage"))
+        full.blocker = .insufficientStorage
+        #expect(BackupOutcome(status: full, uploadedBefore: 0) == .blocked(.insufficientStorage))
+        #expect(BackupOutcome.blocked(.insufficientStorage).message.contains("storage is full"))
+        #expect(BackupOutcome.blocked(.unauthorized).message.contains("log in"))
+        #expect(!BackupOutcome.blocked(.forbidden).isComplete)
         #expect(
             BackupOutcome(status: status(.idle, uploaded: 12, pending: 3, failed: 1), uploadedBefore: 10)
                 == .finished(uploaded: 2, remaining: 3, failed: 1))
