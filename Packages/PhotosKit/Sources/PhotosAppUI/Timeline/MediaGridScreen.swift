@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -13,9 +14,12 @@ struct MediaGridScreen<Accessory: View>: View {
     var showsHeaders: Bool
     var emptyTitle: String
     var emptyMessage: String
+    /// Zoom step (`GridColumns.options`): the target tile size; the column count follows from the width.
     @Binding var columns: Int
     /// Extra actions offered for selected items (e.g. "Remove from album").
     var extraActions: ([MediaItem]) -> [GridMenuAction] = { _ in [] }
+    /// The grid shows the synced library (timeline): "empty" is only said once a first sync has finished.
+    var waitsForFirstSync = false
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -76,6 +80,10 @@ struct MediaGridScreen<Accessory: View>: View {
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
             }
             .focusedSceneValue(\.gridActions, gridActions)
+            // Zoomed out, the timeline is cut into months and years instead of days.
+            .onChange(of: columns, initial: true) { _, step in
+                feed.setZoom(step: step)
+            }
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
                 .task(id: feed.items.isEmpty) {
@@ -83,8 +91,13 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
             #endif
             #if os(iOS)
+                // The viewer's Close button, title and bottom bar are toolbar items: they need a navigation stack to
+                // show up in, which a full-screen cover does not bring along.
                 .fullScreenCover(item: $viewerStart) { start in
-                    MediaViewer(ids: start.ids, startId: start.startId).environment(session)
+                    NavigationStack {
+                        MediaViewer(ids: start.ids, startId: start.startId)
+                    }
+                    .environment(session)
                 }
             #else
                 .navigationDestination(item: $viewerStart) { start in
@@ -103,15 +116,14 @@ struct MediaGridScreen<Accessory: View>: View {
     @ViewBuilder var content: some View {
         if let services = session.services, !feed.items.isEmpty {
             PhotoGrid(
-                sections: feed.sections,
-                items: feed.byId,
-                columns: columns,
+                update: feed.update,
+                zoomStep: feed.zoomStep,
                 selection: selection,
                 isSelecting: isSelecting,
                 showsHeaders: showsHeaders,
                 services: services,
                 callbacks: GridCallbacks(
-                    open: { id in viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: id) },
+                    open: { id in viewerStart = ViewerStart(ids: feed.model.ids, startId: id) },
                     menu: { ids in menuActions(for: ids) },
                     selectionChanged: { ids in
                         selection = ids
@@ -121,12 +133,15 @@ struct MediaGridScreen<Accessory: View>: View {
                             if !ids.isEmpty { isSelecting = true }
                         #endif
                     },
-                    columnsChanged: { columns = $0 }
+                    columnsChanged: { columns = $0 },
+                    cancelSelection: { endSelection() }
                 )
             )
             .ignoresSafeArea(edges: .bottom)
         } else if session.isSignedOut {
             SignedOutView()
+        } else if emptyPhase == .loading {
+            GridSkeleton(zoomStep: columns, showsHeader: showsHeaders, caption: loadingCaption)
         } else {
             ContentUnavailableView {
                 Label(emptyTitle, systemImage: "photo.on.rectangle.angled")
@@ -136,6 +151,31 @@ struct MediaGridScreen<Accessory: View>: View {
                 if session.syncStatus.isWorking { ProgressView() }
             }
         }
+    }
+
+    /// Skeleton or empty state (SPEC §6.3): the timeline is only called empty after a first sync has finished.
+    var emptyPhase: GridEmptyPhase {
+        var firstSyncRunning = false
+        var hasSyncedBefore = false
+        var syncStopped = false
+        switch session.syncStatus {
+        case .initialSync: firstSyncRunning = true
+        case .idle(let lastSync): hasSyncedBefore = lastSync != nil
+        // Incremental sync and reconciliation only run after the first sync.
+        case .syncing, .reconciling: hasSyncedBefore = true
+        case .offline, .failed: syncStopped = true
+        }
+        return GridEmptyPhase.phase(
+            feedLoaded: feed.loaded, waitsForFirstSync: waitsForFirstSync, firstSyncRunning: firstSyncRunning,
+            hasSyncedBefore: hasSyncedBefore, syncStopped: syncStopped)
+    }
+
+    var loadingCaption: String? {
+        guard waitsForFirstSync else { return nil }
+        if case .initialSync(let count) = session.syncStatus, count > 0 {
+            return String(localized: "Loading library… \(count)", bundle: .module)
+        }
+        return String(localized: "Loading your library…", bundle: .module)
     }
 
     var selectionTitle: String {
@@ -323,6 +363,62 @@ struct MediaGridScreen<Accessory: View>: View {
                 .background(.regularMaterial, in: .capsule)
                 .padding(.bottom, 12)
         }
+    }
+}
+
+/// Placeholder tiles in the grid's own geometry while nothing is known yet (first load, first sync).
+struct GridSkeleton: View {
+    let zoomStep: Int
+    var showsHeader = true
+    var caption: String?
+    @State private var dimmed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { proxy in
+            let geometry: GridGeometry = GridColumns.geometry(width: Double(proxy.size.width), step: zoomStep)
+            let side: CGFloat = CGFloat(geometry.side)
+            let spacing: CGFloat = CGFloat(geometry.spacing)
+            let rows: Int = max(1, Int((proxy.size.height / (side + spacing)).rounded(.up)))
+            VStack(alignment: .leading, spacing: spacing) {
+                if showsHeader {
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 5).frame(width: 150, height: 20)
+                        RoundedRectangle(cornerRadius: 4).frame(width: 90, height: 11)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                }
+                ForEach(0..<rows, id: \.self) { _ in
+                    HStack(spacing: spacing) {
+                        ForEach(0..<geometry.columns, id: \.self) { _ in
+                            Rectangle().frame(width: side, height: side)
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(.quaternary)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
+        }
+        .opacity(dimmed ? 0.45 : 1)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dimmed)
+        .onAppear { dimmed = true }
+        .overlay(alignment: .bottom) {
+            if let caption {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(caption)
+                }
+                .font(.footnote)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: .capsule)
+                .padding(.bottom, 12)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caption ?? String(localized: "Loading…", bundle: .module))
     }
 }
 
