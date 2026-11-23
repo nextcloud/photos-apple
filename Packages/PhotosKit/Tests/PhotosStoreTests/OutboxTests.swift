@@ -83,6 +83,25 @@ import Testing
         #expect(try await outbox.nextRetryDate() == nil)
     }
 
+    @Test func shutdownStopsTheRetryTimer() async throws {
+        let outbox = outbox(retryDelay: 0.2)
+        server.setOffline(true)
+        try await outbox.enqueue([.favorite(fileId: 1, path: "/Photos/a.jpg", value: true)])
+        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.shutdown()
+        server.setOffline(false)
+        server.clearRequests()
+
+        // The retry would be due now; an outbox that was shut down does not wake itself up, and the operation stays pending.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(favouriteWrites.isEmpty)
+        #expect(try await outbox.pendingCount() == 1)
+
+        // It is not dead: an explicit kick runs it again.
+        await outbox.kickNow()
+        #expect(await eventually { try await outbox.pendingCount() == 0 })
+    }
+
     @Test func keepsBackingOffWhileTheErrorPersists() async throws {
         let outbox = outbox(retryDelay: 0.05)
         server.setOffline(true)

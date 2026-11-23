@@ -343,6 +343,23 @@ final class StatusLog: Sendable {
         #expect(await eventually { remote.uploads.count == 1 && status.phase == .upToDate })
     }
 
+    @Test func shutdownForgetsAWaitingRun() async throws {
+        addPhotos(["0001"])
+        var wifiOnly = settings
+        wifiOnly.wifiOnly = true
+        await engine.setNetwork(BackupNetwork(isExpensive: true))
+        await engine.run(wifiOnly)
+        #expect(await engine.isWaitingToResume)
+
+        // The account is removed: Wi-Fi coming back or a new run must not start uploads into its closed database.
+        await engine.shutdown()
+        #expect(await !engine.isWaitingToResume)
+        await engine.setNetwork(BackupNetwork(isExpensive: false))
+        await engine.run(settings)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(remote.uploads.isEmpty)
+    }
+
     @Test func changedSettingsLiftAPause() async throws {
         addPhotos(["0001"])
         var wifiOnly = settings
