@@ -7,7 +7,6 @@ import UserNotifications
 /// Shows notifications in the foreground and routes taps (SPEC §7.21).
 final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationRouter()
-    @MainActor var app: AppModel?
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions
@@ -19,7 +18,7 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
         let userInfo = response.notification.request.content.userInfo
         let destination = userInfo["photosDestination"] as? String
         await MainActor.run {
-            if let destination { self.app?.requestedDestination = destination }
+            if let destination { AppHost.model.requestedDestination = destination }
         }
     }
 }
@@ -28,17 +27,20 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
     import AppKit
 
     final class MacAppDelegate: NSObject, NSApplicationDelegate {
-        @MainActor static var app: AppModel?
-
         func applicationDidFinishLaunching(_ notification: Notification) {
-            Task { @MainActor in
-                NotificationRouter.shared.app = MacAppDelegate.app
-                PushNotifications.install(delegate: NotificationRouter.shared) { NSApplication.shared.registerForRemoteNotifications() }
-            }
+            // Creates the app model now, whether or not a window follows.
+            _ = AppHost.model
+            PushNotifications.install(delegate: NotificationRouter.shared) { NSApplication.shared.registerForRemoteNotifications() }
         }
 
         func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-            Task { @MainActor in MacAppDelegate.app?.didRegisterForPush(deviceToken: deviceToken) }
+            AppHost.model.didRegisterForPush(deviceToken: deviceToken)
+        }
+
+        /// Silent pushes withdraw notifications that were read or dismissed elsewhere (SPEC §7.21).
+        func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+            let subject = userInfo["subject"] as? String
+            Task { await AppHost.model.handleBackgroundPush(subject: subject) }
         }
     }
 #endif
