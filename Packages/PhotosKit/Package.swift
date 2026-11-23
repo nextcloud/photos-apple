@@ -23,7 +23,7 @@ let package = Package(
         .library(name: "PhotosAppUI", targets: ["PhotosAppUI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0")
     ],
     targets: [
         // Value types, identifiers, feature flags. No I/O.
