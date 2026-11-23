@@ -139,10 +139,22 @@ public actor OfflineManager {
     }
 
     public func unpin(album: Album) async throws {
-        try await database.writer.write { db in
+        // Only the files of this album are candidates, and only when the content of every album that stays pinned is
+        // known: a file is never deleted because rows are missing locally. What is left over goes with the next
+        // `syncPins()` that has checked every pinned album with the server.
+        let (files, othersKnown): (Set<FileID>, Bool) = try await database.writer.write { db in
+            let files = Set(try FileID.fetchAll(db, sql: "SELECT fileId FROM albumItem WHERE albumId = ?", arguments: [album.id]))
             try db.execute(sql: "DELETE FROM offlinePin WHERE id = ?", arguments: [Self.pinId(album: album)])
+            let unknown =
+                try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT count(*) FROM offlinePin LEFT JOIN album ON 'album:' || album.id = offlinePin.id
+                        WHERE album.contentFetchedAt IS NULL
+                        """) ?? 0
+            return (files, unknown == 0)
         }
-        try await removeUnpinnedFiles()
+        if othersKnown { try await removeUnpinnedFiles(among: files) }
     }
 
     public func isPinned(_ id: String) -> Bool {
@@ -202,9 +214,29 @@ public actor OfflineManager {
             let albumIds: [String] = try await database.writer.read { db in
                 try String.fetchAll(db, sql: "SELECT substr(id, 7) FROM offlinePin WHERE id LIKE 'album:%'")
             }
+            // Whether this pass knows from the server what every pinned album contains. Only then may files be removed:
+            // album rows that are merely missing locally (index rebuilt, album list not loaded, server not reachable)
+            // must never cost the downloaded originals.
+            var verified = true
+            var albumListRefreshed = false
             for albumId in albumIds {
-                guard let album = try services.collections.album(id: albumId) else { continue }
-                try? await services.sync.refreshAlbumContent(album)
+                var known = try services.collections.album(id: albumId)
+                if known == nil {
+                    // Not in the local list. Deleted on the server, or just not known here? The server's list decides.
+                    if !albumListRefreshed { albumListRefreshed = (try? await services.sync.refreshAlbums()) != nil }
+                    guard albumListRefreshed else {
+                        verified = false
+                        continue
+                    }
+                    known = try services.collections.album(id: albumId)
+                }
+                guard let album = known else { continue }  // the server has no such album any more
+                do {
+                    try await services.sync.refreshAlbumContent(album)
+                } catch {
+                    if Task.isCancelled { throw error }
+                    verified = false
+                }
                 let items = try services.collections.albumItems(albumId: albumId)
                 let map = try services.library.items(items.map(\.fileId))
                 for info in items {
@@ -220,7 +252,7 @@ public actor OfflineManager {
                         ? services.connection.filesURL(path) : services.api.albumURL(album).appending(path: info.childName)
                     do {
                         let (file, _) = try await services.dav.download(url)
-                        let name = "\(item.fileId)-\(item.etag).\((item.name as NSString).pathExtension)"
+                        let name = "\(item.fileId)-\(CacheFileName.etag(item.etag)).\((item.name as NSString).pathExtension)"
                         let target = directory.appending(path: name)
                         try? FileManager.default.removeItem(at: target)
                         try FileManager.default.moveItem(at: file, to: target)
@@ -235,16 +267,18 @@ public actor OfflineManager {
                         logger.error("offline download failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
-                if isWaitingForWiFi { break }
             }
-            try await removeUnpinnedFiles()
+            if verified { try await removeUnpinnedFiles() }
         } catch {
             logger.error("offline sync failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    /// Deletes offline files that no pinned album contains any more.
-    func removeUnpinnedFiles() async throws {
+    /// Deletes offline files that no pinned album contains any more, going by the album content stored locally.
+    ///
+    /// Callers make sure that content is what the server has (see `performSync` and `unpin`).
+    /// - Parameter candidates: only these files are considered (all when nil).
+    func removeUnpinnedFiles(among candidates: Set<FileID>? = nil) async throws {
         let stale: [(Int64, String)] = try await database.writer.read { db in
             try Row.fetchAll(
                 db,
@@ -252,7 +286,7 @@ public actor OfflineManager {
                     SELECT fileId, localPath FROM offlineFile WHERE fileId NOT IN (
                       SELECT albumItem.fileId FROM albumItem JOIN offlinePin ON offlinePin.id = 'album:' || albumItem.albumId)
                     """
-            ).map { ($0["fileId"], $0["localPath"]) }
+            ).map { ($0["fileId"] as Int64, $0["localPath"] as String) }.filter { candidates?.contains($0.0) ?? true }
         }
         for (_, path) in stale { try? FileManager.default.removeItem(at: url(forStored: path)) }
         let ids = stale.map(\.0)

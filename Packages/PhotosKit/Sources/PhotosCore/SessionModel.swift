@@ -139,7 +139,8 @@ public final class SessionModel {
     private func detectFeatures() async {
         guard let services else { return }
         do {
-            let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect()
+            // The cached features go along: a detection that cannot read the Photos settings this time keeps them.
+            let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect(cached: features)
             guard !isStopped else { return }  // nothing is written for a session that was switched away from or removed
             featureDetectionError = nil
             fingerprintCheckedAt = Date()

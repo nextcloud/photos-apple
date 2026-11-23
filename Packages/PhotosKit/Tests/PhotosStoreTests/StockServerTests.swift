@@ -305,7 +305,13 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
             sourceFolders: ["/Photos"], mimeTypes: ["image/jpeg"], properties: DAVProp.mediaIndex + DAVProp.mediaIndexExtended,
             before: nil)
         #expect(page.items.count == 14)
-        #expect(page.next == nil)
+        // A short page is not the end (the server may have left entries out); the page after it is. The recorded
+        // server ignores the cursor and repeats itself, which must end the listing too.
+        let cursor = try #require(page.next)
+        let rest = try await server.api.indexPage(
+            sourceFolders: ["/Photos"], mimeTypes: ["image/jpeg"], properties: DAVProp.mediaIndex + DAVProp.mediaIndexExtended,
+            before: cursor)
+        #expect(rest.next == nil)
         // The recorded server still has `photos-place-country` in its file metadata from an earlier deployment of the
         // feature branches, and core serves any metadata key; the app only asks for it when `placeCountry` is detected.
         for item in page.items {
@@ -324,7 +330,7 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
         let server = RecordedServer("stock-master")
         let features = try await server.detector.detect()
         let database = try AccountDatabase.temporary()
-        let engine = SyncEngine(api: server.api, database: database, features: features)
+        let engine = SyncEngine(api: server.api, database: database, features: features, reconcileInterval: 0)
         let library = LibraryStore(database: database)
         let detection = server.lines.count
 

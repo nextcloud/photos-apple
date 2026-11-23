@@ -99,6 +99,13 @@ final class StubServer: Sendable {
         var unauthorized = false
         var wipeRequested = false
         var downloads: [String: Data] = [:]
+        /// Canned answers by request line ("PROPFIND /remote.php/dav/…"): status and body.
+        var responses: [String: Stub] = [:]
+    }
+
+    struct Stub: Sendable {
+        var status: Int
+        var body: String
     }
 
     let host: String
@@ -143,6 +150,7 @@ final class StubServer: Sendable {
             return state
         }
         if request.host == "push-notifications.nextcloud.com" { return (200, Data()) }
+        if let stub = state.responses[request.line] { return (stub.status, Data(stub.body.utf8)) }
         switch (request.method, request.path) {
         case ("GET", "/status.php"):
             let status =

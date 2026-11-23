@@ -30,6 +30,31 @@ public enum PendingOperation: Codable, Sendable, Hashable {
         }
     }
 
+    /// The same operation on the file at another path (the file was moved since the operation was queued).
+    func withPath(_ newPath: String) -> PendingOperation {
+        switch self {
+        case .favorite(let fileId, _, let value): .favorite(fileId: fileId, path: newPath, value: value)
+        case .delete(let fileId, _): .delete(fileId: fileId, path: newPath)
+        case .archive(let fileId, _): .archive(fileId: fileId, path: newPath)
+        case .unarchive(let fileId, _): .unarchive(fileId: fileId, path: newPath)
+        case .addToAlbum(let albumId, let albumName, let albumKind, let fileId, _):
+            .addToAlbum(albumId: albumId, albumName: albumName, albumKind: albumKind, fileId: fileId, path: newPath)
+        case .removeFromAlbum: self  // addressed by the album's child name
+        case .setMetadata(let fileId, _, let capturedAt, let latitude, let longitude, let removeLocation):
+            .setMetadata(
+                fileId: fileId, path: newPath, capturedAt: capturedAt, latitude: latitude, longitude: longitude,
+                removeLocation: removeLocation)
+        }
+    }
+
+    /// The album whose content the operation changes.
+    var album: Album? {
+        switch self {
+        case .addToAlbum(_, let name, let kind, _, _), .removeFromAlbum(_, let name, let kind, _, _): Album(kind: kind, name: name)
+        default: nil
+        }
+    }
+
     /// The file the operation changes.
     var fileId: FileID {
         switch self {
@@ -63,17 +88,27 @@ public actor Outbox {
     private var isNetworkSatisfied: Bool?
     /// Seconds to wait before the next attempt, given the number of failed attempts so far.
     let retryDelay: @Sendable (Int) -> TimeInterval
+    /// Reads the rows marked with `SyncEngine.requestRestore` from the server (`SyncEngine.restoreRows`). Without it
+    /// (or when it fails) the next sync does.
+    let restore: (@Sendable () async -> Void)?
     static let archivePrefix = "/.archive"
+    /// A locked file (423) is retried like a transient error, but not for ever: everything queued behind it waits.
+    /// With the default delays this is about 40 minutes.
+    static let maxLockedAttempts = 8
 
-    public init(api: PhotosAPI, database: AccountDatabase) {
-        self.init(api: api, database: database, retryDelay: Self.defaultRetryDelay)
+    public init(api: PhotosAPI, database: AccountDatabase, restore: (@Sendable () async -> Void)? = nil) {
+        self.init(api: api, database: database, retryDelay: Self.defaultRetryDelay, restore: restore)
     }
 
-    init(api: PhotosAPI, database: AccountDatabase, retryDelay: @escaping @Sendable (Int) -> TimeInterval) {
+    init(
+        api: PhotosAPI, database: AccountDatabase, retryDelay: @escaping @Sendable (Int) -> TimeInterval,
+        restore: (@Sendable () async -> Void)? = nil
+    ) {
         self.api = api
         self.database = database
         self.library = LibraryStore(database: database)
         self.retryDelay = retryDelay
+        self.restore = restore
     }
 
     deinit {
@@ -181,15 +216,42 @@ public actor Outbox {
         }
     }
 
+    /// Queues the failed operations again. Their optimistic changes were undone when they failed, so they are applied again.
     public func retryFailed() throws {
         try database.writer.write { db in
+            for row in try Row.fetchAll(db, sql: "SELECT payload FROM operation WHERE state = 'failed' ORDER BY id") {
+                guard let operation = try? JSONDecoder().decode(PendingOperation.self, from: Data((row["payload"] as String).utf8))
+                else { continue }
+                try Self.applyLocally(operation, db: db)
+            }
             try db.execute(sql: "UPDATE operation SET state = 'pending', attempts = 0, nextAttemptAt = NULL WHERE state = 'failed'")
         }
         kick()
     }
 
-    public func discardFailed() throws {
-        try database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE state = 'failed'") }
+    /// Drops the failed operations. What they had changed locally is read from the server again.
+    public func discardFailed() async throws {
+        let discarded: [PendingOperation] = try await database.writer.write { db in
+            let operations = try String.fetchAll(db, sql: "SELECT payload FROM operation WHERE state = 'failed'").compactMap {
+                try? JSONDecoder().decode(PendingOperation.self, from: Data($0.utf8))
+            }
+            try db.execute(sql: "DELETE FROM operation WHERE state = 'failed'")
+            try SyncEngine.requestRestore(operations.map(\.fileId), db: db)
+            return operations
+        }
+        await undoLocalChanges(of: discarded)
+    }
+
+    /// Brings back the server's state for operations that will not run: the index rows of their files and the content
+    /// of their albums. Best effort; the index rows are also restored by the next sync.
+    private func undoLocalChanges(of operations: [PendingOperation]) async {
+        guard !operations.isEmpty else { return }
+        await restore?()
+        let collections = CollectionStore(database: database)
+        for album in Set(operations.compactMap(\.album)) {
+            guard let children = try? await api.albumContent(album) else { continue }
+            try? collections.replaceAlbumContent(albumId: album.id, children: children)
+        }
     }
 
     public func pendingCount() throws -> Int {
@@ -230,7 +292,7 @@ public actor Outbox {
                 try? await database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE id = ?", arguments: [id]) }
             } catch  where Task.isCancelled {
                 return  // shut down: the operation stays pending
-            } catch let error as NetworkError where error.isTransient {
+            } catch let error as NetworkError where Self.shouldRetry(error, attempts: attempts) {
                 // Back off and stop: later operations wait behind this one until it is retried (timer, network change).
                 let date = Date().addingTimeInterval(retryDelay(attempts))
                 try? await database.writer.write { db in
@@ -244,14 +306,23 @@ public actor Outbox {
                 try? await database.writer.write { db in try db.execute(sql: "DELETE FROM operation WHERE id = ?", arguments: [id]) }
             } catch {
                 logger.error("operation \(operation.kind, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-                await mark(id, failed: error.localizedDescription)
+                await mark(id, failed: error.localizedDescription, restoring: operation.fileId)
+                // The change was shown as done and never will be: show what the server has.
+                await undoLocalChanges(of: [operation])
             }
         }
     }
 
-    private func mark(_ id: Int64, failed message: String) async {
+    /// Transient errors are retried for as long as it takes; a locked file only `maxLockedAttempts` times.
+    static func shouldRetry(_ error: NetworkError, attempts: Int) -> Bool {
+        guard error.isTransient else { return false }
+        return error != .locked || attempts + 1 < maxLockedAttempts
+    }
+
+    private func mark(_ id: Int64, failed message: String, restoring fileId: FileID? = nil) async {
         try? await database.writer.write { db in
             try db.execute(sql: "UPDATE operation SET state = 'failed', lastError = ? WHERE id = ?", arguments: [message, id])
+            if let fileId { try SyncEngine.requestRestore([fileId], db: db) }
         }
     }
 
@@ -265,7 +336,8 @@ public actor Outbox {
         }
     }
 
-    /// 404 on delete or 409 on album add mean the server already has the desired state.
+    /// 404 on delete (deleted between the lookup and the request) or 409 on album add mean the server already has the
+    /// desired state.
     static func isAlreadyDone(_ error: NetworkError, _ operation: PendingOperation) -> Bool {
         switch (operation, error) {
         case (.delete, .notFound), (.removeFromAlbum, .notFound), (.addToAlbum, .conflict): true
@@ -298,27 +370,74 @@ public actor Outbox {
         }
     }
 
+    /// Runs one operation on the server.
+    ///
+    /// The path in the payload is the one the file had when the operation was queued. By the time it runs the file may
+    /// be elsewhere (an archive queued before it, a move made on another device), and the old path may belong to a
+    /// different file. Deletes and moves therefore look the file up by its id first and act on the path the server
+    /// reports; the other operations do so when the stored path is gone.
     func execute(_ operation: PendingOperation) async throws {
         switch operation {
-        case .favorite(_, let path, let value):
-            try await api.setFavorite(userPath: path, value)
-        case .delete(_, let path):
-            try await api.delete(userPath: path)
-        case .archive(let fileId, let path):
-            let target = Self.archivePrefix + path
-            try await api.move(userPath: path, to: target)
-            try library.update(fileId) { $0.path = target }
-        case .unarchive(let fileId, let path):
-            let original = path.hasPrefix(Self.archivePrefix + "/") ? String(path.dropFirst(Self.archivePrefix.count)) : path
-            try await api.move(userPath: path, to: original)
-            try library.update(fileId) { $0.path = original }
-        case .addToAlbum(_, let name, let kind, _, let path):
-            try await api.addToAlbum(Album(kind: kind, name: name), userPath: path)
+        case .favorite(let fileId, let path, let value):
+            try await atCurrentPath(fileId, path) { try await self.api.setFavorite(userPath: $0, value) }
+        case .delete(let fileId, _):
+            // No such file any more: deleted elsewhere, which is what was asked for.
+            guard let current = try await api.currentPath(fileId: fileId) else { return }
+            try await api.delete(userPath: current)
+        case .archive(let fileId, _):
+            guard let current = try await api.currentPath(fileId: fileId) else { throw NetworkError.notFound }
+            let target = Self.isArchivePath(current) ? current : Self.archivePrefix + current
+            if target != current { try await api.move(userPath: current, to: target) }
+            try recordMove(fileId, to: target)
+        case .unarchive(let fileId, _):
+            guard let current = try await api.currentPath(fileId: fileId) else { throw NetworkError.notFound }
+            let target = Self.isArchivePath(current) ? String(current.dropFirst(Self.archivePrefix.count)) : current
+            if target != current { try await api.move(userPath: current, to: target) }
+            try recordMove(fileId, to: target)
+        case .addToAlbum(_, let name, let kind, let fileId, let path):
+            try await atCurrentPath(fileId, path) { try await self.api.addToAlbum(Album(kind: kind, name: name), userPath: $0) }
         case .removeFromAlbum(_, let name, let kind, _, let childName):
             try await api.removeFromAlbum(Album(kind: kind, name: name), childName: childName)
-        case .setMetadata(_, let path, let capturedAt, let latitude, let longitude, let removeLocation):
-            try await api.setMetadata(
-                userPath: path, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: removeLocation)
+        case .setMetadata(let fileId, let path, let capturedAt, let latitude, let longitude, let removeLocation):
+            try await atCurrentPath(fileId, path) {
+                try await self.api.setMetadata(
+                    userPath: $0, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: removeLocation)
+            }
+        }
+    }
+
+    static func isArchivePath(_ path: String) -> Bool { path.hasPrefix(archivePrefix + "/") }
+
+    /// Runs `body` with the stored path and, when the server has nothing there, once more with the path the file has now.
+    private func atCurrentPath(_ fileId: FileID, _ path: String, _ body: (String) async throws -> Void) async throws {
+        do {
+            try await body(path)
+        } catch NetworkError.notFound {
+            guard let current = try await api.currentPath(fileId: fileId), current != path else { throw NetworkError.notFound }
+            try await body(current)
+        }
+    }
+
+    /// The file is at a new path: the index row and every operation still queued for the file follow.
+    private func recordMove(_ fileId: FileID, to path: String) throws {
+        try database.writer.write { db in
+            if var item = try MediaItem.fetchOne(db, key: fileId), item.path != path {
+                item.path = path
+                try item.update(db)
+            }
+            let decoder = JSONDecoder()
+            let encoder = JSONEncoder()
+            for row in try Row.fetchAll(db, sql: "SELECT id, payload FROM operation") {
+                guard let operation = try? decoder.decode(PendingOperation.self, from: Data((row["payload"] as String).utf8)),
+                    operation.fileId == fileId
+                else { continue }
+                let moved = operation.withPath(path)
+                guard moved != operation else { continue }
+                let id: Int64 = row["id"]
+                try db.execute(
+                    sql: "UPDATE operation SET payload = ? WHERE id = ?",
+                    arguments: [String(decoding: try encoder.encode(moved), as: UTF8.self), id])
+            }
         }
     }
 

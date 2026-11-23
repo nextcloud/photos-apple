@@ -37,11 +37,24 @@ public actor SyncEngine {
     private var statusHandler: (@Sendable (SyncStatus) -> Void)?
     private var lastStatus: SyncStatus = .idle(lastSync: nil)
 
-    public init(api: PhotosAPI, database: AccountDatabase, features: ServerFeatures) {
+    /// The shortest time between two full reconciliations that nobody asked for (seconds).
+    ///
+    /// Any change below a source folder changes its ETag, and on a busy account (a phone backing up, a shared folder)
+    /// that is nearly every sync. New and changed files arrive through the delta SEARCH at once; only deletes and moves
+    /// made elsewhere need the walk through the whole library, and those can wait this long. "Sync now" and
+    /// pull-to-refresh are not held back.
+    let reconcileInterval: TimeInterval
+    public static let defaultReconcileInterval: TimeInterval = 600
+
+    public init(
+        api: PhotosAPI, database: AccountDatabase, features: ServerFeatures,
+        reconcileInterval: TimeInterval = SyncEngine.defaultReconcileInterval
+    ) {
         self.api = api
         self.library = LibraryStore(database: database)
         self.collections = CollectionStore(database: database)
         self.features = features
+        self.reconcileInterval = reconcileInterval
     }
 
     var database: AccountDatabase { library.database }
@@ -68,6 +81,12 @@ public actor SyncEngine {
         static let lastDeltaSync = "lastDeltaSync"
         static let lastReconcile = "lastReconcile"
         static let sourceFolders = "sourceFolders"
+        /// "1" while a change below a source folder still waits for its (throttled) reconciliation.
+        static let reconcileOwed = "reconcileOwed"
+        /// Set when a reconciliation would have removed a large part of the index and was not applied; the next one decides.
+        static let suspectedMassDelete = "suspectedMassDelete"
+        /// Comma-separated file ids whose rows must be read from the server again (`requestRestore`).
+        static let restoreFileIds = "restoreFileIds"
         static func rootETag(_ folder: String) -> String { "rootETag:\(folder)" }
     }
 
@@ -141,10 +160,12 @@ public actor SyncEngine {
         do {
             let folderKey = scopes.joined(separator: "|")
             if try database.syncValue(Key.sourceFolders) != folderKey {
-                // Timeline folders changed: rebuild the index.
-                try library.deleteAll()
+                // Timeline folders changed: rebuild the index. Albums and their content do not depend on the folders
+                // and stay (offline albums hang on them).
+                try library.deleteIndex()
                 try database.setSyncValue(Key.sourceFolders, folderKey)
             }
+            try await restoreRows()
             // Root ETags are read once, before anything is fetched: a change that happens while we fetch then shows
             // up as a different ETag on the next sync instead of being missed.
             let roots = try await existingRoots(scopes)
@@ -157,13 +178,17 @@ public actor SyncEngine {
                 publish(.syncing)
                 changedRoots = try await incrementalSync(roots)
             }
-            let lastReconcile = try database.syncValue(Key.lastReconcile).flatMap(Double.init) ?? 0
-            let reconcileDue = Date().timeIntervalSince1970 - lastReconcile > 24 * 3600
-            if forceReconcile || !changedRoots.isEmpty || reconcileDue {
-                // Deletes and moves do not show up in the delta SEARCH, only here.
+            let sinceReconcile = Date().timeIntervalSince1970 - (try database.syncValue(Key.lastReconcile).flatMap(Double.init) ?? 0)
+            // Deletes and moves do not show up in the delta SEARCH, only in a reconciliation: one is owed after any
+            // change below a source folder, but not more often than `reconcileInterval`.
+            let owed = try !changedRoots.isEmpty || database.syncValue(Key.reconcileOwed) == "1"
+            let confirming = try database.syncValue(Key.suspectedMassDelete) != nil
+            if forceReconcile || confirming || sinceReconcile > 24 * 3600 || (owed && sinceReconcile >= reconcileInterval) {
                 try await reconcile(folders: folders)
                 reconciled = true
             } else {
+                // Remembered before the root ETags are stored: the next syncs see no changed root any more.
+                if owed { try database.setSyncValue(Key.reconcileOwed, "1") }
                 // Favourites do not change any ETag; without a reconciliation they need their own (cheap) check.
                 try await syncFavorites(folders: folders)
             }
@@ -359,13 +384,70 @@ public actor SyncEngine {
             cursor = next
         }
         let removed = Array(Set(known.keys).subtracting(seen))
-        try library.delete(removed)
+        // A listing that lacks a large part of the library is more often a server that answered incompletely (a storage
+        // that is not mounted, a search cut short) than a real mass delete. It is not applied at once: the next sync
+        // reconciles again, and what that second listing says is applied, so a real mass delete gets through then.
+        let unconfirmed = try database.syncValue(Key.suspectedMassDelete) == nil
+        if unconfirmed, Self.isSuspiciousRemoval(removed: removed.count, known: known.count) {
+            try database.setSyncValue(Key.suspectedMassDelete, String(removed.count))
+            logger.notice("reconcile: \(removed.count) of \(known.count) items missing on the server; waiting for the next listing to confirm")
+        } else {
+            try library.delete(removed)
+            try database.setSyncValue(Key.suspectedMassDelete, nil)
+        }
         for chunk in stride(from: 0, to: toRefresh.count, by: 200).map({ Array(toRefresh[$0..<min($0 + 200, toRefresh.count)]) }) {
             try Task.checkCancellation()
             try library.upsert(try await api.items(fileIds: chunk, properties: indexProperties))
         }
         try database.setSyncValue(Key.lastReconcile, String(Date().timeIntervalSince1970))
+        try database.setSyncValue(Key.reconcileOwed, nil)
         logger.info("reconciled: \(seen.count) items, \(removed.count) removed, \(toRefresh.count) refreshed")
+    }
+
+    /// Whether removing `removed` of `known` indexed items needs a confirming second listing: more than half of an
+    /// index that is not tiny.
+    static func isSuspiciousRemoval(removed: Int, known: Int) -> Bool {
+        known > massDeleteMinimumIndex && removed * 2 > known
+    }
+
+    static let massDeleteMinimumIndex = 20
+
+    // MARK: Restoring rows
+
+    /// Marks rows whose local state is no longer backed by a queued operation (it failed for good or was discarded):
+    /// they are read from the server again by `restoreRows()`, now or at the next sync.
+    static func requestRestore(_ fileIds: some Sequence<FileID>, db: Database) throws {
+        let ids = try restoreRequests(db).union(fileIds)
+        try db.execute(
+            sql: "INSERT OR REPLACE INTO syncState(key, value) VALUES (?, ?)",
+            arguments: [Key.restoreFileIds, ids.isEmpty ? nil : ids.sorted().map(String.init).joined(separator: ",")])
+    }
+
+    static func restoreRequests(_ db: Database) throws -> Set<FileID> {
+        let value = try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: [Key.restoreFileIds]) ?? ""
+        return Set(value.split(separator: ",").compactMap { FileID($0) })
+    }
+
+    /// Reads the rows marked by `requestRestore` from the server: the optimistic change of an operation that never
+    /// reached the server is undone (a deleted photo comes back, a favourite or archive flag is what the server has).
+    /// A file the server no longer has is removed from the index. Files with operations still queued are left alone.
+    public func restoreRows() async throws {
+        let requested = try await database.writer.read { db in try Self.restoreRequests(db) }
+        guard !requested.isEmpty else { return }
+        let ids = requested.sorted()
+        let items = try await api.items(fileIds: ids, properties: indexProperties)
+        let found = Set(items.map(\.fileId))
+        try await database.writer.write { db in
+            let pending = try Outbox.pendingFileIds(db)
+            let gone = requested.subtracting(found).subtracting(pending)
+            _ = try MediaItem.deleteAll(db, keys: Array(gone))
+            // What was requested meanwhile stays requested.
+            let remaining = try Self.restoreRequests(db).subtracting(requested)
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO syncState(key, value) VALUES (?, ?)",
+                arguments: [Key.restoreFileIds, remaining.isEmpty ? nil : remaining.sorted().map(String.init).joined(separator: ",")])
+        }
+        try upsertFromServer(items)
     }
 
     // MARK: Collections

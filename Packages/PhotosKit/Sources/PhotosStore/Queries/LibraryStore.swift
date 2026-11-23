@@ -823,6 +823,17 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// Empties the timeline index and the sync state (the timeline folders changed). Albums and their content stay:
+    /// they do not depend on the folders, and offline albums are defined by them.
+    public func deleteIndex() throws {
+        try database.writer.write { db in
+            try db.execute(sql: SearchIndex.dropSQL)
+            try db.execute(sql: "DELETE FROM media; DELETE FROM syncState")
+            try db.execute(sql: SearchIndex.createSQL)
+            try db.execute(sql: SearchIndex.triggersSQL)
+        }
+    }
+
     public func deleteAll() throws {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.

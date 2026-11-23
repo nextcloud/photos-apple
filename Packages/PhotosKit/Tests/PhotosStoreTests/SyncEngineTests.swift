@@ -20,7 +20,8 @@ import Testing
         database = try AccountDatabase.temporary()
         library = LibraryStore(database: database)
         engine = SyncEngine(
-            api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36), enabled: [.captions]))
+            api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36), enabled: [.captions]),
+            reconcileInterval: 0)
         server.put(
             file(1, "/Photos/a.jpg", time: 1000), file(2, "/Photos/b.jpg", time: 2000), file(3, "/Photos/2026/c.jpg", time: 3000))
     }
@@ -42,6 +43,11 @@ import Testing
             if case .byIds(let ids) = request.kind { return ids.sorted() }
             return nil
         }
+    }
+
+    /// How often the library was walked: the first page of a walk has no cursor (the walk ends with an empty page).
+    var reconcileWalks: Int {
+        server.requests(.indexByModified).filter { !$0.body.contains("<d:lt>") && !$0.body.contains("<d:gte>") }.count
     }
 
     func ids() throws -> [FileID] { try library.gridItems(.all).map(\.fileId).sorted() }
@@ -105,7 +111,7 @@ import Testing
         await engine.sync()
         #expect(try ids() == [2, 3])
         #expect(try library.item(3)?.path == "/Photos/Trips/c.jpg")
-        #expect(server.requests(.indexByModified).count == 1)
+        #expect(reconcileWalks == 1)
     }
 
     @Test func refreshReconcilesEvenIfTheRootETagLooksUnchanged() async throws {
@@ -144,7 +150,7 @@ import Testing
         await forced.value
 
         #expect(try ids() == [2, 3])
-        #expect(server.requests(.indexByModified).count == 1)
+        #expect(reconcileWalks == 1)
     }
 
     // MARK: Boundary ETag (12)
@@ -159,7 +165,8 @@ import Testing
         let added = Mutex(false)
         server.afterResponse.withLock {
             $0 = { request, state in
-                guard request.kind == .indexByModified,
+                // The page after the last item is the walk's last look.
+                guard request.kind == .indexByModified, request.body.contains("<d:lt>"), !request.body.contains("<d:gte>"),
                     added.withLock({
                         let first = !$0; $0 = true; return first
                     })

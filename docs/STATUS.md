@@ -41,6 +41,17 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
 (macOS ✅, iOS 🟡), year index on iOS 🟡, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
+- Sync and outbox safety ✅ unit-tested against the stubbed DAV server (`PhotosStoreTests/DataLayerTests.swift`,
+  `PhotosCoreTests/DataLayerTests.swift`), 🟡 not exercised against a real server:
+  a detection that cannot read the Photos settings keeps the cached timeline folders, MIME types and `.nomedia` folders
+  (404 = no Photos app = defaults); `.nomedia` folders come from a files SEARCH when the Photos page is not read; a change
+  of the timeline folders rebuilds the index but keeps albums; offline originals are only removed when the server said
+  their album no longer contains them. Index paging ends at an empty page only; a reconciliation that would remove more
+  than half of an index of more than 20 items waits for a second listing (the next sync); a changed root ETag leads to
+  a full reconciliation at most every 10 minutes ("Sync now" and pull-to-refresh at once). Queued deletes and moves find
+  the file by its id first (one small SEARCH each); a locked file (423) is retried; an operation that failed for good or
+  was discarded gives the local row back. Smart albums and album collaborators are read again before they are written.
+  ETags are whitelisted or hashed before they become part of a cache file name.
 - Grid: the zoom step sets a target tile size and the column count follows from the width; days at normal zoom, months and years
   when zoomed out; the scroll position is kept across zoom and resize. Previews are requested for the tile's pixel size (aspect-fill
   aware) and upgraded when the zoom or the screen scale changes. Tiles without a preview show a file-type glyph, videos a badge.
