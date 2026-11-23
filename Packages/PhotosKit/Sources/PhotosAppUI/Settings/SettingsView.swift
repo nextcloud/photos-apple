@@ -18,6 +18,7 @@ public struct SettingsView: View {
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
+    @State private var reviewedCertificate: CertificateProblem?
     @AppStorage("appLockEnabled") private var appLock = false
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
     @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
@@ -53,7 +54,12 @@ public struct SettingsView: View {
                                     .accessibilityLabel(Text("Current account", bundle: .module))
                             } else {
                                 Button(String(localized: "Switch", bundle: .module)) { app.switchTo(account.id) }
+                                    .buttonStyle(.borderless)
                             }
+                            // Visible, not only in the context menu or behind a swipe. Asks before anything happens.
+                            Button(String(localized: "Log out…", bundle: .module), role: .destructive) { removeAccount = account }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel(Text("Log out \(account.displayName)", bundle: .module))
                         }
                         .contextMenu {
                             Button(String(localized: "Remove account", bundle: .module), role: .destructive) { removeAccount = account }
@@ -93,17 +99,6 @@ public struct SettingsView: View {
                 }
                 Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
-                    Toggle(
-                        String(localized: "Square tiles", bundle: .module),
-                        isOn: Binding(
-                            get: { !session.features.userConfig.croppedLayout },
-                            set: { square in
-                                Task {
-                                    do { try await session.setUserConfig(.croppedLayout) { $0.croppedLayout = !square } } catch {
-                                        configError = error.localizedDescription
-                                    }
-                                }
-                            }))
                 } header: {
                     Text("Library", bundle: .module)
                 } footer: {
@@ -205,7 +200,9 @@ public struct SettingsView: View {
                     Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
                         .disabled(session.syncStatus.isWorking)
                     syncStatusRow
+                    accountStateRows
                 }
+                DiagnosticsSection()
             }
 
             if shows(.about) {
@@ -240,9 +237,9 @@ public struct SettingsView: View {
             cacheSize = session.services?.images.cache.totalSize() ?? 0
             pins = (try? await session.offline?.pins()) ?? []
         }
-        .sheet(isPresented: $addingAccount) {
-            NavigationStack { LoginView(isAddingAccount: true) }
-                .frame(minWidth: 420, minHeight: 560)
+        .sheet(isPresented: $addingAccount) { AddAccountSheet() }
+        .certificateTrustAlert($reviewedCertificate, changed: true) { problem in
+            Task { await session.trust(problem) }
         }
         .confirmationDialog(
             String(localized: "Remove this account?", bundle: .module),
@@ -270,7 +267,32 @@ public struct SettingsView: View {
         case .reconciling(let count):
             LabeledContent(String(localized: "Checking library", bundle: .module), value: count.formatted())
         case .failed(let message, _):
-            Text(message).foregroundStyle(.red).font(.footnote)
+            LabeledContent {
+                Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
+            } label: {
+                Text("Couldn't sync", bundle: .module)
+                Text(message).foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// What is wrong with the account itself: its server's certificate changed, or its login was revoked.
+    @ViewBuilder var accountStateRows: some View {
+        if let problem = session.certificateProblem {
+            LabeledContent {
+                Button(String(localized: "Review…", bundle: .module)) { reviewedCertificate = problem }
+            } label: {
+                Label(String(localized: "The server's certificate changed", bundle: .module), systemImage: "lock.trianglebadge.exclamationmark")
+                Text("Nothing is synced until you have reviewed and trusted the new certificate.", bundle: .module)
+            }
+        }
+        if session.isSignedOut {
+            LabeledContent {
+                Button(String(localized: "Log in again", bundle: .module)) { addingAccount = true }
+            } label: {
+                Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
+                Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+            }
         }
     }
 

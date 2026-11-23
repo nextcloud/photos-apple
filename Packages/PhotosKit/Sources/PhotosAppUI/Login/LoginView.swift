@@ -6,6 +6,11 @@ import PhotosCore
 import PhotosNetworking
 import SwiftUI
 
+#if os(iOS)
+    import AVFoundation
+    import VisionKit
+#endif
+
 /// Login with Login Flow v2 (SPEC §5.1).
 public struct LoginView: View {
     @Environment(AppModel.self) private var app
@@ -14,10 +19,13 @@ public struct LoginView: View {
     @State private var address = ""
     @State private var phase: Phase = .idle
     @State private var error: String?
-    @State private var untrusted: UntrustedCertificate?
+    @State private var untrusted: CertificateProblem?
     @State private var loginTask: Task<Void, Never>?
     @State private var pasteLink = ""
     @State private var unencrypted: UnencryptedLogin?
+    /// The QR code scanner is open (iPhone, iPad).
+    @State private var scanning = false
+    @State private var scanError: String?
     var isAddingAccount = false
 
     public init(isAddingAccount: Bool = false) {
@@ -29,12 +37,6 @@ public struct LoginView: View {
         case checking
         case waitingForBrowser
         case finishing
-    }
-
-    struct UntrustedCertificate: Identifiable {
-        var id: String { host }
-        var host: String
-        var certificate: Data
     }
 
     /// A login to a plain-http server that waits for the user's confirmation.
@@ -56,17 +58,9 @@ public struct LoginView: View {
                 form.frame(minHeight: proxy.size.height)
             }
         }
-        .alert(item: $untrusted) { untrusted in
-            Alert(
-                title: Text("Untrusted certificate", bundle: .module),
-                message: Text(
-                    "The certificate of \(untrusted.host) is not trusted by this device. Only trust it if you know it belongs to your server.\n\n\(TrustStore.summary(of: untrusted.certificate))",
-                    bundle: .module),
-                primaryButton: .destructive(Text("Trust and continue", bundle: .module)) {
-                    try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
-                    startLogin()
-                },
-                secondaryButton: .cancel())
+        .certificateTrustAlert($untrusted) { untrusted in
+            try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
+            startLogin()
         }
     }
 
@@ -196,20 +190,82 @@ public struct LoginView: View {
     var qrLogin: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Paste a login link (nc://login/…) from Settings › Security › Devices & sessions on the web.", bundle: .module)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                #if os(iOS)
+                    if QRCodeScanner.isSupported {
+                        Text(
+                            "Scan the QR code shown under Settings › Security › Devices & sessions on the web, or paste the login link (nc://login/…) from there.",
+                            bundle: .module
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        Button {
+                            startScanning()
+                        } label: {
+                            Label(String(localized: "Scan QR code", bundle: .module), systemImage: "qrcode.viewfinder")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(phase != .idle)
+                        if let scanError { Text(scanError).font(.footnote).foregroundStyle(.secondary) }
+                    } else {
+                        pasteHint
+                    }
+                #else
+                    pasteHint
+                #endif
                 TextField(text: $pasteLink, prompt: Text(verbatim: "nc://login/…")) { Text("Login link", bundle: .module) }
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    #if os(iOS) || os(visionOS)
+                        .textInputAutocapitalization(.never)
+                    #endif
                 Button(String(localized: "Log in with link", bundle: .module)) { loginWithLink() }
                     .disabled(pasteLink.isEmpty || phase != .idle)
             }
             .padding(.top, 8)
         } label: {
-            Text("Log in with a QR code or link", bundle: .module)
+            Text(qrLoginTitle)
         }
+        #if os(iOS)
+            .sheet(isPresented: $scanning) {
+                QRCodeScannerSheet { link in
+                    scanning = false
+                    pasteLink = link
+                    loginWithLink()
+                }
+            }
+        #endif
     }
+
+    var pasteHint: some View {
+        Text("Paste a login link (nc://login/…) from Settings › Security › Devices & sessions on the web.", bundle: .module)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Only where there is a scanner is a QR code promised (iPhone and iPad with a camera).
+    var qrLoginTitle: String {
+        #if os(iOS)
+            if QRCodeScanner.isSupported { return String(localized: "Log in with a QR code or link", bundle: .module) }
+        #endif
+        return String(localized: "Log in with a link", bundle: .module)
+    }
+
+    #if os(iOS)
+        /// Asks for the camera when needed, then opens the scanner; without camera access the link can still be pasted.
+        func startScanning() {
+            scanError = nil
+            Task {
+                let granted: Bool = await AVCaptureDevice.requestAccess(for: .video)
+                if granted && QRCodeScanner.isAvailable {
+                    scanning = true
+                } else {
+                    scanError = String(
+                        localized: "The camera can't be used. Allow camera access in Settings, or paste the login link below.",
+                        bundle: .module)
+                }
+            }
+        }
+    #endif
 
     func cancel() {
         loginTask?.cancel()
@@ -257,7 +313,7 @@ public struct LoginView: View {
             } catch is CancellationError {
             } catch let networkError as NetworkError {
                 if case .untrustedCertificate(let host, let certificate?) = networkError {
-                    untrusted = UntrustedCertificate(host: host, certificate: certificate)
+                    untrusted = CertificateProblem(host: host, certificate: certificate)
                 } else {
                     error = networkError.localizedDescription
                 }
@@ -295,3 +351,112 @@ public struct LoginView: View {
         }
     }
 }
+
+/// The login form as a sheet (adding an account, logging in again), with a Cancel button: on the Mac a sheet has no
+/// other way out.
+struct AddAccountSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LoginView(isAddingAccount: true)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    }
+                }
+        }
+        #if os(macOS)
+            .frame(minWidth: 420, minHeight: 560)
+        #endif
+    }
+}
+
+/// Recognises the login links a QR code can carry.
+enum LoginQRCode {
+    /// The login link in a scanned code, or nil when the code is something else.
+    static func loginLink(in payload: String) -> String? {
+        let text = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard LoginService.parseLoginURL(text) != nil || LoginService.parseOnetimeLoginURL(text) != nil else { return nil }
+        return text
+    }
+}
+
+#if os(iOS)
+    /// The system's live scanner (VisionKit), limited to QR codes.
+    struct QRCodeScanner: UIViewControllerRepresentable {
+        /// Called with the text of every QR code that comes into view.
+        let onCode: @MainActor (String) -> Void
+
+        /// The device can scan at all (it has a camera and the needed hardware).
+        static var isSupported: Bool { DataScannerViewController.isSupported }
+        /// Scanning is possible right now (camera access granted, not restricted).
+        static var isAvailable: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
+
+        func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
+
+        func makeUIViewController(context: Context) -> DataScannerViewController {
+            let scanner = DataScannerViewController(
+                recognizedDataTypes: [.barcode(symbologies: [.qr])], qualityLevel: .balanced, recognizesMultipleItems: false,
+                isHighFrameRateTrackingEnabled: false, isHighlightingEnabled: true)
+            scanner.delegate = context.coordinator
+            try? scanner.startScanning()
+            return scanner
+        }
+
+        func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {}
+
+        static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {
+            scanner.stopScanning()
+        }
+
+        @MainActor final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+            let onCode: @MainActor (String) -> Void
+
+            init(onCode: @escaping @MainActor (String) -> Void) {
+                self.onCode = onCode
+            }
+
+            func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+                for item in addedItems {
+                    if case .barcode(let code) = item, let payload = code.payloadStringValue { onCode(payload) }
+                }
+            }
+        }
+    }
+
+    /// The scanner with a Cancel button; codes that are not login links are ignored, with a hint.
+    struct QRCodeScannerSheet: View {
+        let onLink: @MainActor (String) -> Void
+        @Environment(\.dismiss) private var dismiss
+        @State private var foundOtherCode = false
+
+        var body: some View {
+            NavigationStack {
+                QRCodeScanner { payload in
+                    if let link = LoginQRCode.loginLink(in: payload) { onLink(link) } else { foundOtherCode = true }
+                }
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .bottom) {
+                    Text(
+                        foundOtherCode
+                            ? String(localized: "This QR code is not a Nextcloud login code.", bundle: .module)
+                            : String(localized: "Point the camera at the QR code.", bundle: .module)
+                    )
+                    .font(.callout)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: .capsule)
+                    .padding(.bottom, 24)
+                }
+                .navigationTitle(String(localized: "Scan QR code", bundle: .module))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+#endif

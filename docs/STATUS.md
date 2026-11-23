@@ -36,7 +36,18 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
   Push is unregistered before the app password is revoked. ✅ unit-tested, logout ✅ in the Mac app; remote wipe 🟡 (no server-side test).
 - Logging in to an `http://` server asks for confirmation first (not for localhost) ✅.
 - ⬜ MDM / AppConfig keys (§5.1.9).
-- ⬜ QR code camera scanner (paste of login links works).
+- QR code login 🟡: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
+  only where it is supported; camera access is asked for first, without it the link can be pasted). Compiles for iOS, not
+  run (no simulator runtime, no device). The Mac and Vision Pro offer "Log in with a link".
+- Account state over a cached library ✅ (Mac app, against a proxy in front of the test server): the banner at the bottom of
+  every grid says "Couldn't sync" with the reason and Retry, "Signed out" with "Log in again", and "The server's certificate
+  changed" with "Review…" (the trust dialog of the login); Settings › Server shows the same. A refused certificate makes every
+  request on the connection report the certificate (`HTTPClient`, unit-tested), so the sync fails visibly instead of
+  stopping as "cancelled". The HTTP/2 case (several requests on one refused connection) is only unit-tested.
+- Diagnostics ✅ (Mac app): Settings › Server › "Export diagnostics…" writes the app's log entries of this run (at most
+  the last 48 hours; the system only gives an app the log of its running process), app, system and server versions and
+  the detected features into a text file — save panel on the Mac, share sheet elsewhere (🟡 not run). Account names,
+  addresses, paths, file names and tokens are removed (unit-tested). ⬜ The rotating log file of SPEC §4.5 (logs across launches).
 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
@@ -65,7 +76,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape 🟡 (not run).
 - ⬜ TL-6 stacks in the grid (the algorithm exists in `PhotosDomain/Stacks.swift`, not yet applied to the grid).
 - ⬜ Timeline skeleton from `timelineDays` during the first sync (a plain placeholder grid is shown instead).
-- ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles.
+- ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles; the "Square tiles" switch is gone from Settings until
+  the mode exists.
+- Undo ✅ (Mac app): favourite, archive, remove from album and delete (restored from the server's trash bin) register with
+  the window's undo manager (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
+  ("Archived 3 items · Undo"). Only for changes made in a grid; the viewer's own buttons are not undoable yet. A photo
+  restored after a delete comes back to the library, not to the albums it was in (the server drops those on delete).
+- Empty and error states have an action (SPEC §6.3): "Sync now" / "Retry" in the library, "Refresh" / "Try again" in lists
+  loaded from the server, "Clear search" for a search without results.
 - ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action), ⬜ VW-5 slideshow, ⬜ VW-6 stack strip.
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
   buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
@@ -164,7 +182,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 
 ## M4 Discover — 🟡
 Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅ (API), shared with you 🟡, On this day ✅,
-memories ✅, search and smart albums 🟡, archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
+memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
 - Push: permission is asked after login or when the Notifications switch is turned on, not at first launch; the switch unregisters
   and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
   needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
@@ -174,7 +192,7 @@ memories ✅, search and smart albums 🟡, archive and app lock 🟡, push 🟡
 - ⬜ Tag assignment UI (API exists).
 
 ## M5 Advanced — 🟡
-Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API), duplicates 🟡, free up space 🟡, extract text (server OCR or
+Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API; restore sends `Overwrite: T` — it was refused with 412 before; "Delete permanently" asks first and errors are shown; the screen itself 🟡: it is behind the device unlock, not opened in the test run), duplicates 🟡, free up space 🟡, extract text (server OCR or
 Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 🟡, video renditions 🟡, App Intents and App Shortcuts 🟡.
 - ⬜ Free-form crop (aspect presets only).
 - Free up space works on the **server** (title "Free up server space"): screenshots by file name or PNG with a phone-screen size and no

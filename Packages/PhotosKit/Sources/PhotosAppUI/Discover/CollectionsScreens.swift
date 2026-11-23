@@ -143,6 +143,7 @@ struct PersonScreen: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var merging = false
+    @State private var confirmRemove = false
     @State private var error: String?
     @State private var photos: [PersonPhoto] = []
 
@@ -178,12 +179,7 @@ struct PersonScreen: View {
                     renaming = true
                 }
                 Button(String(localized: "Merge with…", bundle: .module)) { merging = true }
-                Button(String(localized: "Remove person", bundle: .module), role: .destructive) {
-                    Task {
-                        try? await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
-                        dismiss()
-                    }
-                }
+                Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
             }
@@ -201,6 +197,20 @@ struct PersonScreen: View {
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         }
         .sheet(isPresented: $merging) { MergePersonSheet(person: person) { dismiss() } }
+        .confirmationDialog(
+            String(localized: "Remove this person?", bundle: .module), isPresented: $confirmRemove, titleVisibility: .visible
+        ) {
+            Button(String(localized: "Remove person", bundle: .module), role: .destructive) {
+                Task {
+                    do {
+                        try await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
+                        dismiss()
+                    } catch { self.error = error.localizedDescription }
+                }
+            }
+        } message: {
+            Text("The person and the assignment of their photos are removed. The photos stay in your library.", bundle: .module)
+        }
         .alert(
             String(localized: "Something went wrong", bundle: .module),
             isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })

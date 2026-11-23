@@ -200,6 +200,7 @@ public final class AppModel {
         registry.upsert(account)
         saveRegistry()
         if session?.account.id == id { session?.account = account }
+        logger.notice("account signed out: the server no longer accepts its app password")
         backup.accountSignedOut(id)
     }
 

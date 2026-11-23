@@ -53,6 +53,12 @@
         }
       }
     },
+    "Add to Favorites" : {
+
+    },
+    "Archive" : {
+
+    },
     "Backup failed: %@" : {
 
     },
@@ -143,6 +149,9 @@
     "Cancelled" : {
 
     },
+    "Delete" : {
+
+    },
     "Log in to back up your photos." : {
 
     },
@@ -155,7 +164,16 @@
     "Only your own photos can be shared by link." : {
 
     },
+    "Remove from Album" : {
+
+    },
+    "Remove from Favorites" : {
+
+    },
     "Shared on %@" : {
+
+    },
+    "Unarchive" : {
 
     },
     "Your photos are backed up." : {

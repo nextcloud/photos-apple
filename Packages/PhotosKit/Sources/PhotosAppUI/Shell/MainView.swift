@@ -298,7 +298,10 @@ struct MainView: View {
                 Label(filter.label, systemImage: filter.systemImage)
             }
             .searchFocused($searchFocused)
-            .onSubmit(of: .search) { showSearch() }
+            .onSubmit(of: .search) {
+                showSearch()
+                SearchSubmission.shared.submit()
+            }
             .onChange(of: searchText) { _, text in
                 if !text.isEmpty { showSearch() }
             }

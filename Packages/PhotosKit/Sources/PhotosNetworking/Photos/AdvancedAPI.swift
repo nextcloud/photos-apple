@@ -43,9 +43,11 @@ extension PhotosAPI {
     }
 
     public func restore(_ item: TrashedItem) async throws {
+        // `Overwrite: T` as the web client sends it: the restore folder reports every name as existing, so with
+        // `Overwrite: F` the server answers 412. Nothing is overwritten; the server renames when the place is taken.
         try await dav.move(
             connection.davURL("trashbin/\(connection.userId)/trash/\(item.trashName)"),
-            to: connection.davURL("trashbin/\(connection.userId)/restore/\(item.trashName)"))
+            to: connection.davURL("trashbin/\(connection.userId)/restore/\(item.trashName)"), overwrite: true)
     }
 
     public func deletePermanently(_ item: TrashedItem) async throws {

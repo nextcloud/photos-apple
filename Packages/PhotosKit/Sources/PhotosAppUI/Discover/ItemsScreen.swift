@@ -26,7 +26,13 @@ struct ItemsScreen<Accessory: View>: View {
             feed: feed, title: title, showsHeaders: sectioned,
             emptyTitle: error
                 ?? (feed.loaded ? String(localized: "Nothing here", bundle: .module) : String(localized: "Loading…", bundle: .module)),
-            emptyMessage: emptyMessage, columns: $columns, extraActions: extraActions, accessory: accessory
+            emptyMessage: emptyMessage, columns: $columns, extraActions: extraActions,
+            // Something that could not be loaded can be tried again; an empty list can be refreshed (SPEC §6.3).
+            emptyAction: feed.loaded
+                ? GridEmptyAction(
+                    title: error == nil ? String(localized: "Refresh", bundle: .module) : String(localized: "Try again", bundle: .module)
+                ) { Task { await reload() } } : nil,
+            accessory: accessory
         )
         .task { await reload() }
         .refreshable { await reload() }
@@ -36,6 +42,7 @@ struct ItemsScreen<Accessory: View>: View {
         guard let services = session.services else { return }
         do {
             let items = try await load(services).filter { !$0.isLivePhotoVideo }
+            error = nil
             feed.apply(await ItemsPreparation.prepare(items, library: services.library), flat: !sectioned)
         } catch {
             self.error = error.localizedDescription
