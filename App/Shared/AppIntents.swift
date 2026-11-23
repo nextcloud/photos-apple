@@ -39,11 +39,12 @@ struct BackUpNowIntent: AppIntent {
     static let description = IntentDescription("Uploads new photos of this device to your Nextcloud.")
 
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let backup = AppIntentRouter.app?.session?.backup, backup.settings.isEnabled else {
+        // The backup belongs to the app, not to the account on screen; it says itself how the pass ended.
+        guard let backup = AppIntentRouter.app?.backup, backup.settings.isEnabled else {
             return .result(dialog: "Backup is not turned on in Nextcloud Photos.")
         }
-        await backup.runNow()
-        return .result(dialog: "Backup finished.")
+        let message = await backup.runNow().message
+        return .result(dialog: IntentDialog(stringLiteral: message))
     }
 }
 
