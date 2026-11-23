@@ -17,6 +17,8 @@ import re
 import sys
 
 KEY_LINE = re.compile(r'^    ("(?:[^"\\]|\\.)*") : \{$')
+# An empty entry written on one line (`"key" : {},`), as tools other than Xcode and merges leave it.
+EMPTY_KEY_LINE = re.compile(r'^    ("(?:[^"\\]|\\.)*") : \{\}(,?)$')
 
 
 def load_comments(path):
@@ -49,6 +51,17 @@ def main():
     index = 0
     while index < len(lines):
         line = lines[index]
+        empty = EMPTY_KEY_LINE.match(line)
+        if empty:
+            key = json.loads(empty.group(1))
+            if key in strings and not strings[key].get("comment") and comments.get(key):
+                # Written the way Xcode writes an entry that only has a comment.
+                output.append("    " + empty.group(1) + " : {")
+                output.append('      "comment" : ' + quoted(comments[key]))
+                output.append("    }" + empty.group(2))
+                added += 1
+                index += 1
+                continue
         output.append(line)
         match = KEY_LINE.match(line)
         if match:

@@ -55,10 +55,10 @@
       }
     },
     "Add to Favorites" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
     },
     "Archive" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
     },
     "Backup failed: %@" : {
       "comment" : "Result of a backup run that failed. %@ is the error message."
@@ -90,6 +90,7 @@
       "comment" : "Result of a backup run that uploaded everything."
     },
     "Backup finished. %lld items that are only in iCloud were not backed up, because downloading from iCloud is turned off." : {
+      "comment" : "Result of a backup run (\"Back up now\" shortcut, background backup) when everything was uploaded except photos whose originals are only in iCloud. %lld is their number. \"Download originals from iCloud\" is an option on the Backup screen.",
       "localizations" : {
         "en" : {
           "variations" : {
@@ -129,10 +130,10 @@
       }
     },
     "Backup stopped: free up space on this Mac." : {
-
+      "comment" : "Result of a backup run on the Mac that stopped because the disk is full (each photo is copied before it is uploaded)."
     },
     "Backup stopped: free up space on this device." : {
-
+      "comment" : "Result of a backup run on iPhone or iPad that stopped because the device storage is full (each photo is copied before it is uploaded)."
     },
     "Backup stopped: log in to your Nextcloud again." : {
       "comment" : "Result of a backup run that stopped because the login is no longer valid."
@@ -153,7 +154,7 @@
       "comment" : "Status of an upload or download that the user cancelled, in the list of transfers."
     },
     "Delete" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Delete\"): photos were moved to the server's trash bin. A verb."
     },
     "Log in to back up your photos." : {
       "comment" : "Result of the \"Back up now\" shortcut when no account is logged in."
@@ -162,22 +163,22 @@
       "comment" : "Result of a backup run when the user has not allowed the app to read the device's photo library. \"Nextcloud Photos\" is the app's name."
     },
     "Only the photos you selected for Nextcloud Photos are backed up." : {
-
+      "comment" : "Added to the result of a backup run when the user gave the app access to selected photos only (limited Photos access). \"Nextcloud Photos\" is the app's name."
     },
     "Only your own photos can be shared by link." : {
       "comment" : "Error message when the user tries to create a share link for photos that someone else shared with them."
     },
     "Remove from Album" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Album\"): photos were removed from an album. Title-style capitalisation as in the menu bar."
     },
     "Remove from Favorites" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Favorites\"): photos are no longer favourites. Title-style capitalisation as in the menu bar."
     },
     "Shared on %@" : {
       "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
     },
     "Unarchive" : {
-
+      "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."
     },
     "Your photos are backed up." : {
       "comment" : "Result of a backup run when there was nothing left to upload."
