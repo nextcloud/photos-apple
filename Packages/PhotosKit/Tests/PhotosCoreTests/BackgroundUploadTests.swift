@@ -152,7 +152,9 @@ final class StubTransport: BackgroundUploading {
         var failing: Set<String> = ["c"]
         let first = await SequentialUploads.run(["a", "b", "c", "d"]) { item in
             if failing.contains(item) { throw Refused() }
-        } done: { uploaded.append($0) }
+        } done: {
+            uploaded.append($0)
+        }
         #expect(uploaded == ["a", "b"])
         #expect(first.remaining == ["c", "d"])
         #expect(first.error is Refused)
@@ -160,7 +162,9 @@ final class StubTransport: BackgroundUploading {
         // The second attempt only sends what is left.
         failing = []
         let second = await SequentialUploads.run(first.remaining) { _ in
-        } done: { uploaded.append($0) }
+        } done: {
+            uploaded.append($0)
+        }
         #expect(uploaded == ["a", "b", "c", "d"])
         #expect(second.remaining.isEmpty)
         #expect(second.error == nil)

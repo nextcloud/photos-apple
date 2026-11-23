@@ -133,7 +133,8 @@ final class FakeRemote: BackupRemote {
                 if !reserved.contains(path) {
                     guard let existing = state.files.first(where: { $0.path == path }) else {
                         state.prepared[path] = (size, capturedAt)
-                        return .put(path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
+                        return .put(
+                            path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
                     }
                     if existing.size == size { return .existing(UploadedFile(fileId: existing.fileId, path: path, etag: nil)) }
                 }

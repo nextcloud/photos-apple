@@ -255,7 +255,10 @@ final class FakeTransport: BackgroundUploading {
         // Same name and size in the destination folder, at another time (so the matcher does not find it): layer 5.
         let folder = BackupNaming.folder(base: settings.folder, subfolders: settings.subfolders, date: t0)
         remote.state.withLock {
-            $0.files = [RemoteCandidate(fileId: 7, path: "\(folder)/IMG_0001.heic", kind: .image, size: 10, capturedAt: nil, modifiedAt: t0 - 99_999)]
+            $0.files = [
+                RemoteCandidate(
+                    fileId: 7, path: "\(folder)/IMG_0001.heic", kind: .image, size: 10, capturedAt: nil, modifiedAt: t0 - 99_999)
+            ]
         }
         await engine.run(settings)
         #expect(transport.started.isEmpty)
@@ -560,7 +563,8 @@ final class FakeTransport: BackgroundUploading {
             localIdentifier: "asset-\(id)", kind: .photo, mediaKind: .image, originalName: "IMG.HEIC",
             createdAt: Date(timeIntervalSince1970: 1_790_000_000), modifiedAt: nil, pixelWidth: 1, pixelHeight: 2, latitude: 48.1,
             longitude: 11.5, byteSize: size)
-        return BackgroundUploadJob(id: id, resource: resource, path: path, size: size, startedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        return BackgroundUploadJob(
+            id: id, resource: resource, path: path, size: size, startedAt: Date(timeIntervalSince1970: 1_800_000_000))
     }
 
     func makeFile(_ name: String) throws -> URL {

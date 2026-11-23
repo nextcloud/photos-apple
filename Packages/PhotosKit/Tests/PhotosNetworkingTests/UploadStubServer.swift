@@ -169,7 +169,8 @@ final class UploadStubServer: Sendable {
         switch request.method {
         case "PROPFIND":
             if let data = state.files[path] {
-                let props = "<oc:fileid>\(state.fileIds[path] ?? 0)</oc:fileid><oc:size>\(data.count)</oc:size><d:getetag>&quot;e&quot;</d:getetag>"
+                let props =
+                    "<oc:fileid>\(state.fileIds[path] ?? 0)</oc:fileid><oc:size>\(data.count)</oc:size><d:getetag>&quot;e&quot;</d:getetag>"
                 return Self.multistatus(Self.entry(href: request.path, props: props))
             }
             guard state.folders.contains(path) else { return Response(status: 404) }

@@ -137,7 +137,8 @@ public actor BackupEngine {
     ///   Without it every upload is sent by the app itself.
     public init(api: PhotosAPI, database: AccountDatabase, accountId: AccountID, background: BackgroundUploads? = nil) {
         self.init(
-            library: PhotoLibrarySource(), remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database),
+            library: PhotoLibrarySource(),
+            remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database),
             database: database, accountId: accountId, systemConditions: true, background: background)
     }
 
@@ -317,7 +318,7 @@ public actor BackupEngine {
             } else {
                 publish(status.pending == 0 ? .upToDate : .idle)
             }
-        } catch where Task.isCancelled || BackupPolicy.isCancellation(error) {
+        } catch  where Task.isCancelled || BackupPolicy.isCancellation(error) {
             // A request that was cancelled in the middle reports it as a network error.
             try? refreshCounts()
             if interrupting {

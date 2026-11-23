@@ -33,7 +33,9 @@ import Testing
     }
 
     @Test func whatIsWorthAnotherAttempt() {
-        for error: NetworkError in [.timedOut, .offline, .transport(code: -1004, message: ""), .maintenance, .rateLimited, .http(status: 502, message: nil)] {
+        for error: NetworkError in [
+            .timedOut, .offline, .transport(code: -1004, message: ""), .maintenance, .rateLimited, .http(status: 502, message: nil),
+        ] {
             #expect(RetryPolicy.isRetryable(error), "\(error)")
         }
         for error: NetworkError in [
@@ -432,7 +434,8 @@ import Testing
         let trust = SessionDelegate(trustStore: TrustStore(directory: nil), clientCredentials: nil)
         let url = URL(string: "https://cloud.example.com/remote.php/dav/files/alice/Photos/a.jpg")!
         let http = try #require(
-            HTTPURLResponse(url: url, statusCode: 201, httpVersion: "HTTP/1.1", headerFields: ["OC-FileId": "00000123ocabc", "OC-ETag": "\"e1\""]))
+            HTTPURLResponse(
+                url: url, statusCode: 201, httpVersion: "HTTP/1.1", headerFields: ["OC-FileId": "00000123ocabc", "OC-ETag": "\"e1\""]))
         let done = BackgroundSessionDelegate.event(jobId: "1", response: http, body: Data(), error: nil, url: url, trust: trust)
         #expect(done.error == nil)
         #expect(done.response?.status == 201)
@@ -447,7 +450,8 @@ import Testing
             jobId: "3", response: nil, body: Data(), error: URLError(.networkConnectionLost), url: url, trust: trust)
         #expect(lost.error == .offline)
         #expect(lost.response == nil)
-        let cancelled = BackgroundSessionDelegate.event(jobId: "4", response: http, body: Data(), error: URLError(.cancelled), url: url, trust: trust)
+        let cancelled = BackgroundSessionDelegate.event(
+            jobId: "4", response: http, body: Data(), error: URLError(.cancelled), url: url, trust: trust)
         #expect(cancelled.error == .cancelled)
         let nothing = BackgroundSessionDelegate.event(jobId: "5", response: nil, body: Data(), error: nil, url: url, trust: trust)
         #expect(nothing.error != nil)
@@ -494,15 +498,18 @@ import Testing
         // The answer to the PUT gives the file id; a refusal is thrown.
         let uploaded = try await uploader.finish(path: path, response: HTTPResponse(status: 201, headers: ["oc-fileid": "00000042ocstub"]))
         #expect(uploaded == UploadedFile(fileId: 42, path: path, etag: nil))
-        await #expect(throws: NetworkError.insufficientStorage) { _ = try await uploader.finish(path: path, response: HTTPResponse(status: 507)) }
+        await #expect(throws: NetworkError.insufficientStorage) {
+            _ = try await uploader.finish(path: path, response: HTTPResponse(status: 507))
+        }
 
         // Once the file is there, preparing it again finds it.
         server.state.withLock { state in
             state.files[path] = Data([1, 2, 3, 4])
             state.fileIds[path] = 42
         }
-        guard case .existing(let existing) = try await uploader.prepare(
-            file: file, fileName: "a.jpg", folder: "/Photos/2026", capturedAt: captured, conflict: .skipIfSameSize)
+        guard
+            case .existing(let existing) = try await uploader.prepare(
+                file: file, fileName: "a.jpg", folder: "/Photos/2026", capturedAt: captured, conflict: .skipIfSameSize)
         else {
             Issue.record("the file is there")
             return

@@ -213,7 +213,9 @@ final class BackgroundSessionDelegate: NSObject, URLSessionDataDelegate, Sendabl
         let body = bodies.withLock { $0.removeValue(forKey: task.taskIdentifier) } ?? Data()
         // Not one of ours (no id): nothing to report.
         guard let jobId = task.taskDescription else { return }
-        continuation.yield(.finished(Self.event(jobId: jobId, response: task.response, body: body, error: error, url: task.originalRequest?.url, trust: trust)))
+        continuation.yield(
+            .finished(
+                Self.event(jobId: jobId, response: task.response, body: body, error: error, url: task.originalRequest?.url, trust: trust)))
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
