@@ -7,12 +7,14 @@ options:
     visionOS: "27.0"
   createIntermediateGroups: true
   developmentLanguage: en
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: NKUJUXUJ3B
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_EMIT_LOC_STRINGS: YES
@@ -40,7 +42,7 @@ targets:
         embed: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID)
         PRODUCT_NAME: Nextcloud Photos
         TARGETED_DEVICE_FAMILY: "1,2,7"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -51,15 +53,18 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
         ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        ENABLE_USER_SELECTED_FILES: readwrite
+        ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY: YES
       configs:
-        Debug:
-          CODE_SIGN_ENTITLEMENTS: App/NextcloudPhotos-Debug.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: App/NextcloudPhotos.entitlements
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
@@ -76,7 +81,7 @@ targets:
           # Nextcloud servers are self-hosted: http and self-signed certificates must be possible (user-approved per host).
           NSAllowsArbitraryLoads: true
         CFBundleURLTypes:
-          - CFBundleURLName: com.nextcloud.photos
+          - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
         BGTaskSchedulerPermittedIdentifiers: [com.nextcloud.photos.refresh, com.nextcloud.photos.processing]
@@ -92,20 +97,21 @@ targets:
         product: PhotosAppUI
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.share
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).share
         PRODUCT_NAME: ShareExtension
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
       configs:
-        Debug:
-          CODE_SIGN_ENTITLEMENTS: Extensions/ShareExtension/ShareExtension-Debug.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: Extensions/ShareExtension/ShareExtension.entitlements
     info:
       path: Extensions/ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -127,19 +133,20 @@ targets:
         product: PhotosCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.notification-service
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).notification-service
         PRODUCT_NAME: NotificationService
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
       configs:
-        Debug:
-          CODE_SIGN_ENTITLEMENTS: Extensions/NotificationService/NotificationService-Debug.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: Extensions/NotificationService/NotificationService.entitlements
     info:
       path: Extensions/NotificationService/Info.plist
       properties:
         CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -156,19 +163,20 @@ targets:
         product: PhotosCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nextcloud.photos.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).widgets
         PRODUCT_NAME: Widgets
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
       configs:
-        Debug:
-          CODE_SIGN_ENTITLEMENTS: Extensions/Widgets/Widgets-Debug.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: Extensions/Widgets/Widgets.entitlements
     info:
       path: Extensions/Widgets/Info.plist
       properties:
         CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
