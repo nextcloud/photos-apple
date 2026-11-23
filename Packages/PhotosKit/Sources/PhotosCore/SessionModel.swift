@@ -18,6 +18,12 @@ public final class SessionModel {
     public private(set) var syncStatus: SyncStatus = .idle(lastSync: nil)
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
+    /// The server presents a certificate the app does not trust (`SessionModel+State.swift`).
+    public internal(set) var certificateProblem: CertificateProblem?
+    /// The last undoable change, for the confirmation banner (`SessionModel+Undo.swift`).
+    public internal(set) var lastChange: ChangeNotice?
+    /// Where undoable changes are registered: the undo manager of the window that shows this session.
+    @ObservationIgnored public weak var undoManager: UndoManager?
     public let transfers = TransferQueue()
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
@@ -72,7 +78,11 @@ public final class SessionModel {
         guard let services, !isStopped else { return }
         track { [weak self] in
             await services.sync.setStatusHandler { status in
-                Task { @MainActor in self?.syncStatus = status }
+                Task { @MainActor in
+                    let previous = self?.syncStatus
+                    self?.syncStatus = status
+                    self?.syncStatusChanged(from: previous, to: status)
+                }
             }
             await self?.refreshFeatures()
             await self?.syncNow()
@@ -220,7 +230,9 @@ public final class SessionModel {
 
     public func refreshFailedOperations() async {
         guard let services else { return }
-        failedOperations = (try? await services.outbox.failedOperations()) ?? []
+        let failed = (try? await services.outbox.failedOperations()) ?? []
+        if failed.count != failedOperations.count { logger.notice("outbox: \(failed.count) failed operations") }
+        failedOperations = failed
     }
 
     public func retryFailedOperations() async {
