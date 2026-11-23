@@ -31,10 +31,12 @@ import Testing
         try services.library.upsert([item])
         try services.database.writer.write { db in
             try db.execute(
-                sql: "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 11, '11-beach.jpg', 'user', ?, 1)",
+                sql:
+                    "INSERT INTO albumItem(albumId, fileId, childName, origin, ownerPath, position) VALUES (?, 11, '11-beach.jpg', 'user', ?, 1)",
                 arguments: [album.id, item.path])
             try db.execute(
-                sql: "INSERT INTO offlinePin(id, title, createdAt) VALUES (?, 'Holiday', 0)", arguments: [OfflineManager.pinId(album: album)])
+                sql: "INSERT INTO offlinePin(id, title, createdAt) VALUES (?, 'Holiday', 0)",
+                arguments: [OfflineManager.pinId(album: album)])
         }
         server.set { $0.downloads["/remote.php/dav/files/alice/Photos/beach.jpg"] = Data("original".utf8) }
         return (album, item)

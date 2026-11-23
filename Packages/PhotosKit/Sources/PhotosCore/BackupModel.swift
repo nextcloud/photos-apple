@@ -48,7 +48,9 @@ public enum BackupOutcome: Sendable, Equatable {
         switch self {
         case .upToDate: String(localized: "Your photos are backed up.")
         case .finished(let uploaded, let remaining, let failed):
-            if failed > 0 { String(localized: "Backup finished, but \(failed) items could not be uploaded.") } else if remaining > 0 {
+            if failed > 0 {
+                String(localized: "Backup finished, but \(failed) items could not be uploaded.")
+            } else if remaining > 0 {
                 String(localized: "\(uploaded) items were backed up, \(remaining) are still waiting.")
             } else {
                 String(localized: "Backup finished.")

@@ -234,7 +234,8 @@ public final class AppModel {
         guard !account.isSignedOut, let password = keychain.string(for: Keychain.passwordKey(account.id.rawValue)) else { return nil }
         let id = account.id
         let features =
-            AccountServices.loadFeatures(id, layout: layout) ?? ServerFeatures(serverVersion: account.serverVersion ?? ServerVersion(major: 0))
+            AccountServices.loadFeatures(id, layout: layout)
+            ?? ServerFeatures(serverVersion: account.serverVersion ?? ServerVersion(major: 0))
         do {
             return try AccountServices(
                 account: account, appPassword: password, http: http, features: features, userAgent: userAgent, layout: layout,
