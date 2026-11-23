@@ -236,7 +236,86 @@ public final class AccountDatabase: Sendable {
             }
             try db.create(index: "backupAsset_state", on: "backupAsset", columns: ["state"])
         }
+        // Large libraries (SPEC §10). Additive: the media rows stay as they are; the search index is derived data and is rebuilt.
+        migrator.registerMigration("v2-large-library") { db in
+            // The first search index could only be maintained with a full scan per written row (its `fileId` column was
+            // not indexed) and was never queried. The new one is keyed by `rowid = fileId` and kept up to date by triggers,
+            // so every way of writing `media` (sync, outbox, optimistic updates) keeps it current.
+            try db.execute(sql: SearchIndex.dropSQL)
+            try db.execute(sql: SearchIndex.createSQL)
+            try db.execute(sql: "INSERT INTO searchIndex(rowid, text) SELECT fileId, \(SearchIndex.textSQL("media")) FROM media")
+            try db.execute(sql: SearchIndex.triggersSQL)
+
+            // Refresh of recent uploads on every sync (`SyncEngine.recentUploads`).
+            try db.create(index: "media_uploadedAt", on: "media", columns: ["uploadedAt"])
+            // The timeline in display order, with what a grid needs to lay out and badge its tiles: the lightweight
+            // timeline query, on-this-day and the counts per year read only this index and need no sort.
+            // SQLite only answers a query from an index alone when the query uses the indexed expression itself (not the
+            // generated `timestamp` column) and when the columns of the index's own condition are in the index too.
+            try db.execute(
+                sql: """
+                    CREATE INDEX media_timeline ON media(
+                        coalesce(capturedAt, modifiedAt) DESC, fileId DESC, kind, isFavorite, livePhotoPeer, width, height, duration,
+                        isLivePhotoVideo, isArchived)
+                    WHERE isLivePhotoVideo = 0 AND isArchived = 0
+                    """)
+            // Favourites in display order (the favourites grid, widgets, the sync's comparison with the server); replaces
+            // the index on the flag alone, which SQLite had to read 3 % of and then sort.
+            try db.execute(sql: "DROP INDEX IF EXISTS media_favorite")
+            try db.execute(
+                sql: "CREATE INDEX media_favorite_timestamp ON media(coalesce(capturedAt, modifiedAt) DESC, fileId DESC) WHERE isFavorite = 1")
+            // Geotagged items by coordinate: the map aggregates its cells from this index alone. Replaces the index on
+            // the coordinates without the visibility flags.
+            try db.execute(sql: "DROP INDEX IF EXISTS media_location")
+            try db.execute(
+                sql: "CREATE INDEX media_map ON media(latitude, longitude, isLivePhotoVideo, isArchived) WHERE latitude IS NOT NULL")
+            // Album content in album order.
+            try db.create(index: "albumItem_position", on: "albumItem", columns: ["albumId", "position"])
+        }
         return migrator
+    }
+}
+
+/// The full-text index of the library (SPEC SR-3): one row per media row, `rowid = fileId`.
+///
+/// Trigram tokens make it answer what the search field promises (SR-1): case- and diacritic-insensitive *substring*
+/// matches over file name, place, country, caption and folder path. Triggers on `media` maintain it.
+enum SearchIndex {
+    static let createSQL = "CREATE VIRTUAL TABLE searchIndex USING fts5(text, tokenize = 'trigram remove_diacritics 1', columnsize = 0)"
+
+    static let dropSQL = """
+        DROP TRIGGER IF EXISTS media_search_insert;
+        DROP TRIGGER IF EXISTS media_search_update;
+        DROP TRIGGER IF EXISTS media_search_delete;
+        DROP TABLE IF EXISTS searchIndex
+        """
+
+    /// The indexed text of a media row; `row` is `media`, `NEW` or `OLD`.
+    static func textSQL(_ row: String) -> String {
+        // The folder is the path without its last component.
+        let folder = "nullif(rtrim(rtrim(\(row).path, replace(\(row).path, '/', '')), '/'), '')"
+        return "concat_ws(' ', \(row).name, \(row).place, \(row).placeCountry, \(row).caption, \(folder))"
+    }
+
+    static let triggersSQL = """
+        CREATE TRIGGER media_search_insert AFTER INSERT ON media BEGIN
+            INSERT INTO searchIndex(rowid, text) VALUES (NEW.fileId, \(textSQL("NEW")));
+        END;
+        CREATE TRIGGER media_search_update AFTER UPDATE OF name, path, place, placeCountry, caption ON media
+        WHEN OLD.name IS NOT NEW.name OR OLD.path IS NOT NEW.path OR OLD.place IS NOT NEW.place
+            OR OLD.placeCountry IS NOT NEW.placeCountry OR OLD.caption IS NOT NEW.caption
+        BEGIN
+            DELETE FROM searchIndex WHERE rowid = NEW.fileId;
+            INSERT INTO searchIndex(rowid, text) VALUES (NEW.fileId, \(textSQL("NEW")));
+        END;
+        CREATE TRIGGER media_search_delete AFTER DELETE ON media BEGIN
+            DELETE FROM searchIndex WHERE rowid = OLD.fileId;
+        END;
+        """
+
+    /// The `MATCH` expression for search terms of at least three characters: every term must occur somewhere.
+    static func matchExpression(_ terms: [String]) -> String {
+        terms.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }.joined(separator: " AND ")
     }
 }
 
