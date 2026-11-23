@@ -93,6 +93,8 @@ struct SearchTab: View {
     var body: some View {
         SearchScreen(query: $query, filters: $filters)
             .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
+            // Return searches: the top suggestion, else the typed text.
+            .onSubmit(of: .search) { SearchSubmission.shared.submit() }
     }
 }
 
@@ -129,6 +131,11 @@ struct SearchScreen: View {
     @State private var askError: String?
     /// Suggestions for the typed text, computed after a pause in typing and off the main thread.
     @State private var matches: [SearchFilter] = []
+    /// Why the search could not be run (a tag or person filter needs the server).
+    @State private var searchError: String?
+    /// Counts "Try again", so the same filters are evaluated once more.
+    @State private var searchAttempt = 0
+    @State private var recents = RecentSearches()
 
     var suggestions: [SearchFilter] { matches.filter { !filters.contains($0) } }
 
@@ -159,58 +166,25 @@ struct SearchScreen: View {
                 if !filters.isEmpty { filterBar }
             #endif
             if !query.isEmpty {
-                if query.split(separator: " ").count >= 3 {
-                    Button {
-                        ask()
-                    } label: {
-                        Label(
-                            asking
-                                ? String(localized: "Thinking…", bundle: .module) : String(localized: "Ask: “\(query)”", bundle: .module),
-                            systemImage: "sparkles")
-                    }
-                    .disabled(asking)
-                    .padding(.top, 8)
-                }
-                if let askError { Text(askError).font(.footnote).foregroundStyle(.red) }
-                List(suggestions) { suggestion in
-                    Button {
-                        filters.append(suggestion)
-                        query = ""
-                    } label: {
-                        // A full-width row: what it is, and what kind of thing it is.
-                        HStack {
-                            Label(suggestion.label, systemImage: suggestion.systemImage)
-                            Spacer()
-                            Text(kind(suggestion)).font(.callout).foregroundStyle(.secondary)
-                        }
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .listStyle(.inset)
-                .overlay {
-                    if suggestions.isEmpty {
-                        ContentUnavailableView(
-                            String(localized: "No suggestions", bundle: .module), systemImage: "magnifyingglass",
-                            description: Text("Try a place, an album, a date like “june 2023”, or part of a file name.", bundle: .module))
-                    }
-                }
+                suggestionList
             } else if filters.isEmpty {
+                startScreen
+            } else if let searchError {
+                // The search itself failed (a tag or person filter while offline): say so instead of loading forever.
                 ContentUnavailableView {
-                    Label(String(localized: "Search your photos", bundle: .module), systemImage: "magnifyingglass")
+                    Label(String(localized: "Couldn't search", bundle: .module), systemImage: "exclamationmark.magnifyingglass")
                 } description: {
-                    Text("Places, people, tags, albums, dates like “june 2023”, or file names.", bundle: .module)
+                    Text(searchError)
                 } actions: {
-                    HStack {
-                        Button(String(localized: "Favorites", bundle: .module)) { filters.append(.favorites) }
-                        Button(String(localized: "Videos", bundle: .module)) { filters.append(.videos) }
-                    }
-                    .buttonStyle(.bordered)
+                    Button(String(localized: "Try again", bundle: .module)) { searchAttempt += 1 }
+                        .buttonStyle(.borderedProminent)
                 }
             } else {
                 MediaGridScreen(
                     feed: feed, title: String(localized: "Search", bundle: .module), showsHeaders: true,
-                    emptyTitle: String(localized: "No results", bundle: .module), emptyMessage: "", columns: $columns
+                    emptyTitle: String(localized: "No results", bundle: .module),
+                    emptyMessage: String(localized: "Nothing in your library matches these filters.", bundle: .module), columns: $columns,
+                    emptyAction: GridEmptyAction(title: String(localized: "Clear search", bundle: .module)) { filters = [] }
                 ) {
                     Button {
                         smartName = filters.map(\.label).joined(separator: ", ")
@@ -227,13 +201,12 @@ struct SearchScreen: View {
         }
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
-        .task(id: SuggestionInput(query: query, vocabularyRevision: vocabularyRevision)) { await updateSuggestions() }
-        .task(id: filters) {
-            guard !filters.isEmpty, let items = try? await SearchEvaluator.gridItems(for: filters, session: session) else { return }
-            // A newer set of filters is already being evaluated.
-            guard !Task.isCancelled else { return }
-            feed.apply(items, flat: false)
+        .task {
+            if let layout = session.services?.layout { recents = RecentSearches.load(account: session.account.id, layout: layout) }
         }
+        .task(id: SuggestionInput(query: query, vocabularyRevision: vocabularyRevision)) { await updateSuggestions() }
+        .task(id: SearchRun(filters: filters, attempt: searchAttempt)) { await runSearch() }
+        .onChange(of: SearchSubmission.shared.count) { _, _ in commit() }
         .alert(String(localized: "Save as smart album", bundle: .module), isPresented: $saving) {
             TextField(String(localized: "Name", bundle: .module), text: $smartName)
             Button(String(localized: "Save", bundle: .module)) {
@@ -241,6 +214,158 @@ struct SearchScreen: View {
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         }
+    }
+
+    /// The filters and the attempt a search run belongs to.
+    struct SearchRun: Hashable {
+        var filters: [SearchFilter]
+        var attempt: Int
+    }
+
+    /// Evaluates the filters. A failure is shown with "Try again"; a search that worked is remembered.
+    func runSearch() async {
+        guard !filters.isEmpty else {
+            searchError = nil
+            return
+        }
+        let searched = filters
+        do {
+            let items = try await SearchEvaluator.gridItems(for: searched, session: session)
+            // A newer set of filters is already being evaluated.
+            guard !Task.isCancelled else { return }
+            searchError = nil
+            feed.apply(items, flat: false)
+            remember(searched)
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled else { return }
+            searchError = error.localizedDescription
+        }
+    }
+
+    func remember(_ searched: [SearchFilter]) {
+        recents.add(searched)
+        saveRecents()
+    }
+
+    func saveRecents() {
+        guard let layout = session.services?.layout else { return }
+        recents.save(account: session.account.id, layout: layout)
+    }
+
+    /// Return in the search field: the top suggestion becomes a filter, else the typed text is searched for.
+    func commit() {
+        let typed = query
+        guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task {
+            // Not the list on screen: it may still belong to what was typed a moment ago.
+            let current = await Self.suggestions(for: typed, vocabulary: vocabulary)
+            guard query == typed, let filter = SearchCommit.filter(for: typed, suggestions: current, active: filters) else { return }
+            filters.append(filter)
+            query = ""
+        }
+    }
+
+    /// Suggestions for the typed text, with "Ask" on top where a language model can answer.
+    @ViewBuilder var suggestionList: some View {
+        if AskPhotos.isAvailable(session) {
+            Button {
+                ask()
+            } label: {
+                Label(
+                    asking ? String(localized: "Thinking…", bundle: .module) : String(localized: "Ask: “\(query)”", bundle: .module),
+                    systemImage: "sparkles")
+            }
+            .disabled(asking)
+            .padding(.top, 8)
+        }
+        if let askError { Text(askError).font(.footnote).foregroundStyle(.red) }
+        List(suggestions) { suggestion in
+            Button {
+                filters.append(suggestion)
+                query = ""
+            } label: {
+                // A full-width row: what it is, and what kind of thing it is.
+                HStack {
+                    Label(suggestion.label, systemImage: suggestion.systemImage)
+                    Spacer()
+                    Text(kind(suggestion)).font(.callout).foregroundStyle(.secondary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+        }
+        .listStyle(.inset)
+        .overlay {
+            if suggestions.isEmpty {
+                ContentUnavailableView(
+                    String(localized: "No suggestions", bundle: .module), systemImage: "magnifyingglass",
+                    description: Text("Try a place, an album, a date like “june 2023”, or part of a file name.", bundle: .module))
+            }
+        }
+    }
+
+    /// Before anything is typed: what can be searched for, or the recent searches.
+    @ViewBuilder var startScreen: some View {
+        if recents.isEmpty {
+            ContentUnavailableView {
+                Label(String(localized: "Search your photos", bundle: .module), systemImage: "magnifyingglass")
+            } description: {
+                Text("Places, people, tags, albums, dates like “june 2023”, or file names.", bundle: .module)
+            } actions: {
+                quickFilters
+            }
+        } else {
+            List {
+                Section {
+                    ForEach(recents.entries, id: \.self) { (search: [SearchFilter]) in
+                        Button {
+                            filters = search
+                        } label: {
+                            Label(RecentSearches.title(search), systemImage: "clock.arrow.circlepath")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button(String(localized: "Remove", bundle: .module), role: .destructive) { forget(search) }
+                        }
+                        .contextMenu {
+                            Button(String(localized: "Remove from recent searches", bundle: .module)) { forget(search) }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Recent searches", bundle: .module)
+                        Spacer()
+                        Button(String(localized: "Clear", bundle: .module)) {
+                            recents.clear()
+                            saveRecents()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.callout)
+                        .accessibilityLabel(Text("Clear recent searches", bundle: .module))
+                    }
+                }
+                Section {
+                    quickFilters
+                }
+            }
+            .listStyle(.inset)
+        }
+    }
+
+    var quickFilters: some View {
+        HStack {
+            Button(String(localized: "Favorites", bundle: .module)) { filters.append(.favorites) }
+            Button(String(localized: "Videos", bundle: .module)) { filters.append(.videos) }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    func forget(_ search: [SearchFilter]) {
+        recents.remove(search)
+        saveRecents()
     }
 
     /// The active filters (click one to remove it) and the number of results.
@@ -335,6 +460,8 @@ struct SearchScreen: View {
 struct SmartAlbumsScreen: View {
     @Environment(SessionModel.self) private var session
     @State private var albums: [(SmartAlbum, isLocal: Bool)] = []
+    /// The smart album waiting for the confirmation of its deletion.
+    @State private var deleting: SmartAlbum?
 
     var body: some View {
         List {
@@ -350,12 +477,11 @@ struct SmartAlbumsScreen: View {
                     }
                 }
                 .swipeActions {
-                    Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                        Task {
-                            await session.deleteSmartAlbum(album)
-                            albums = session.smartAlbums()
-                        }
-                    }
+                    Button(String(localized: "Delete", bundle: .module), role: .destructive) { deleting = album }
+                }
+                // On the Mac there is no swipe.
+                .contextMenu {
+                    Button(String(localized: "Delete…", bundle: .module), role: .destructive) { deleting = album }
                 }
             }
         }
@@ -368,5 +494,20 @@ struct SmartAlbumsScreen: View {
         }
         .navigationTitle(String(localized: "Smart albums", bundle: .module))
         .task { albums = session.smartAlbums() }
+        .confirmationDialog(
+            String(localized: "Delete the smart album “\(deleting?.name ?? "")”?", bundle: .module),
+            isPresented: Binding(get: { deleting != nil }, set: { shown in if !shown { deleting = nil } }), titleVisibility: .visible,
+            presenting: deleting
+        ) { (album: SmartAlbum) in
+            Button(String(localized: "Delete smart album", bundle: .module), role: .destructive) {
+                Task {
+                    await session.deleteSmartAlbum(album)
+                    albums = session.smartAlbums()
+                }
+            }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { _ in
+            Text("The saved search is deleted. Your photos are not affected.", bundle: .module)
+        }
     }
 }

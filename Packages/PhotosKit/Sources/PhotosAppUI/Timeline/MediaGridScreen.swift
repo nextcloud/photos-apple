@@ -20,9 +20,13 @@ struct MediaGridScreen<Accessory: View>: View {
     var extraActions: ([MediaItem]) -> [GridMenuAction] = { _ in [] }
     /// The grid shows the synced library (timeline): "empty" is only said once a first sync has finished.
     var waitsForFirstSync = false
+    /// The one helpful action of the empty state (SPEC §6.3), e.g. "Try again" for a list that could not be loaded.
+    var emptyAction: GridEmptyAction? = nil
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
+    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone.
+    @Environment(\.undoManager) private var undoManager
     @State private var selection: Set<FileID> = []
     @State private var isSelecting = false
     @State private var viewerStart: ViewerStart?
@@ -56,6 +60,10 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             .toolbar { toolbar }
             .overlay(alignment: .bottom) { statusBanner }
+            // Changes made in this window are undone by this window's Edit › Undo.
+            .onChange(of: undoManager, initial: true) { _, manager in
+                if let manager { session.undoManager = manager }
+            }
             .confirmationDialog(
                 deleteTitle, isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                 titleVisibility: .visible
@@ -63,7 +71,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
                     if let items = confirmDelete {
                         deletions += 1
-                        Task { await session.delete(items) }
+                        Task { await session.perform(.delete(items)) }
                     }
                     endSelection()
                 }
@@ -153,15 +161,37 @@ struct MediaGridScreen<Accessory: View>: View {
             SignedOutView()
         } else if emptyPhase == .loading {
             GridSkeleton(zoomStep: columns, showsHeader: showsHeaders, caption: loadingCaption)
+        } else if waitsForFirstSync, case .failed(let message, _) = session.syncStatus {
+            // The library could not be loaded: say why, and offer to try again.
+            ContentUnavailableView {
+                Label(String(localized: "Couldn't sync", bundle: .module), systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+            } description: {
+                Text(message)
+            } actions: {
+                Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
+                    .buttonStyle(.borderedProminent)
+            }
         } else {
             ContentUnavailableView {
                 Label(emptyTitle, systemImage: "photo.on.rectangle.angled")
             } description: {
                 Text(emptyMessage)
             } actions: {
-                if session.syncStatus.isWorking { ProgressView() }
+                if session.syncStatus.isWorking {
+                    ProgressView()
+                } else if let emptyAction {
+                    Button(emptyAction.title) { emptyAction.handler() }
+                } else if waitsForFirstSync {
+                    Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
+                }
             }
         }
+    }
+
+    /// Favourites or unfavourites; undoable.
+    func setFavorite(_ items: [MediaItem], _ value: Bool) {
+        favoriteToggles += 1
+        Task { await session.perform(.favorite(items, value: value)) }
     }
 
     /// Skeleton or empty state (SPEC §6.3): the timeline is only called empty after a first sync has finished.
@@ -217,8 +247,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 ShareMediaButton(items: items)
                     .help(String(localized: "Share", bundle: .module))
                 Button {
-                    favoriteToggles += 1
-                    Task { await session.setFavorite(items, !items.allSatisfy(\.isFavorite)) }
+                    setFavorite(items, !items.allSatisfy(\.isFavorite))
                 } label: {
                     Label(
                         favoriteTitle(remove: items.allSatisfy(\.isFavorite)),
@@ -268,7 +297,7 @@ struct MediaGridScreen<Accessory: View>: View {
         return GridActions(
             selectionCount: items.count,
             allFavorite: !items.isEmpty && items.allSatisfy(\.isFavorite),
-            toggleFavorite: { Task { await session.setFavorite(items, !items.allSatisfy(\.isFavorite)) } },
+            toggleFavorite: { setFavorite(items, !items.allSatisfy(\.isFavorite)) },
             delete: { confirmDelete = items.filter(\.permissions.canDelete) },
             toggleInfo: {
                 infoItem = items.first
@@ -360,13 +389,12 @@ struct MediaGridScreen<Accessory: View>: View {
                 id: "favorite", title: favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart",
                 startsGroup: true
             ) { _ in
-                favoriteToggles += 1
-                Task { await session.setFavorite(items, !allFavorite) }
+                setFavorite(items, !allFavorite)
             })
         if items.contains(where: { $0.isOwnStorage && !$0.isArchived && $0.permissions.canDelete }) {
             actions.append(
                 GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { _ in
-                    Task { await session.archive(items) }
+                    Task { await session.perform(.archive(items)) }
                     endSelection()
                 })
         }
@@ -374,7 +402,7 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "unarchive", title: String(localized: "Unarchive", bundle: .module), systemImage: "tray.and.arrow.up") {
                     _ in
-                    Task { await session.unarchive(items) }
+                    Task { await session.perform(.unarchive(items)) }
                     endSelection()
                 })
         }
@@ -408,38 +436,20 @@ struct MediaGridScreen<Accessory: View>: View {
         return actions
     }
 
-    @ViewBuilder var statusBanner: some View {
-        if !session.failedOperations.isEmpty {
-            HStack {
-                Label(
-                    String(localized: "\(session.failedOperations.count) changes couldn't be saved on the server.", bundle: .module),
-                    systemImage: "exclamationmark.icloud")
-                Spacer()
-                Button(String(localized: "Retry", bundle: .module)) { Task { await session.retryFailedOperations() } }
-                Button(String(localized: "Discard", bundle: .module), role: .destructive) {
-                    Task { await session.discardFailedOperations() }
-                }
-            }
-            .font(.callout)
-            .padding(12)
-            .background(.regularMaterial, in: .rect(cornerRadius: 12))
-            .padding()
-        } else if case .offline = session.syncStatus {
-            Label(String(localized: "Offline – showing saved photos", bundle: .module), systemImage: "wifi.slash")
-                .font(.footnote)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.regularMaterial, in: .capsule)
-                .padding(.bottom, 12)
-        } else if case .initialSync(let count) = session.syncStatus, !feed.items.isEmpty {
-            Label(String(localized: "Loading library… \(count)", bundle: .module), systemImage: "arrow.triangle.2.circlepath")
-                .font(.footnote)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.regularMaterial, in: .capsule)
-                .padding(.bottom, 12)
+    /// The confirmation of the last change ("Archived 3 items · Undo") above the account's status.
+    var statusBanner: some View {
+        VStack(spacing: 0) {
+            ChangeNoticeToast()
+            GridStatusBanner(hasItems: !feed.items.isEmpty)
         }
+        .animation(.default, value: session.lastChange?.id)
     }
+}
+
+/// The action button of a grid's empty state.
+struct GridEmptyAction {
+    var title: String
+    var handler: @MainActor () -> Void
 }
 
 /// Placeholder tiles in the grid's own geometry while nothing is known yet (first load, first sync).
@@ -549,8 +559,6 @@ struct SignedOutView: View {
             Button(String(localized: "Log in again", bundle: .module)) { relogin = true }
                 .buttonStyle(.borderedProminent)
         }
-        .sheet(isPresented: $relogin) {
-            LoginView(isAddingAccount: true)
-        }
+        .sheet(isPresented: $relogin) { AddAccountSheet() }
     }
 }
