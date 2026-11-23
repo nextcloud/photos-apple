@@ -64,7 +64,7 @@ final class FakeTransport: BackgroundUploading {
     func deactivate(_ jobId: String) { state.withLock { _ = $0.active.remove(jobId) } }
 }
 
-@Suite struct BackgroundBackupTests {
+@Suite(.timeLimit(.minutes(1))) struct BackgroundBackupTests {
     let library = FakeLibrary()
     let remote = FakeRemote()
     let transport = FakeTransport()

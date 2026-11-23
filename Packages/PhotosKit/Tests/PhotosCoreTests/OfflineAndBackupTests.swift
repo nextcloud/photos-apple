@@ -11,7 +11,7 @@ import Testing
 @testable import PhotosNetworking
 @testable import PhotosStore
 
-@Suite struct OfflineManagerTests {
+@Suite(.timeLimit(.minutes(1))) struct OfflineManagerTests {
     let sandbox = Sandbox()
     let server = StubServer()
 

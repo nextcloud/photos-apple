@@ -89,7 +89,7 @@ import Testing
 
 /// Logout, account switching and remote wipe on the app model, against a stubbed server in a temporary container.
 @MainActor
-@Suite struct AccountLifecycleTests {
+@Suite(.timeLimit(.minutes(1))) struct AccountLifecycleTests {
     let sandbox = Sandbox()
     let server = StubServer()
 

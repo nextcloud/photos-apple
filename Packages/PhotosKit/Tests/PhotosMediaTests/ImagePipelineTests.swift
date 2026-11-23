@@ -134,7 +134,7 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-@Suite struct ImagePipelineTests {
+@Suite(.timeLimit(.minutes(1))) struct ImagePipelineTests {
     let server = PreviewStubServer()
     let directory = FileManager.default.temporaryDirectory.appending(path: "pipeline-\(UUID().uuidString)")
 
@@ -347,7 +347,7 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-@Suite struct PreviewCacheTrimTests {
+@Suite(.timeLimit(.minutes(1))) struct PreviewCacheTrimTests {
     let directory = FileManager.default.temporaryDirectory.appending(path: "cache-\(UUID().uuidString)")
 
     /// Writes a cache file of `bytes` bytes that was last used `age` seconds ago.

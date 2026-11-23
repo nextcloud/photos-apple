@@ -11,7 +11,7 @@ SPDX-License-Identifier = "MIT"
 
 # The app icon is the Nextcloud Photos server app's icon (Material Symbols "image") on Nextcloud blue.
 [[annotations]]
-path = ["App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"]
+path = ["App/Resources/Assets.xcassets/AppIcon.appiconset/*.png"]
 precedence = "override"
 SPDX-FileCopyrightText = ["2018-2024 Google LLC", "2026 Nextcloud GmbH"]
 SPDX-License-Identifier = "Apache-2.0"
