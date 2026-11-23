@@ -277,11 +277,13 @@ struct FoldersScreen: View {
     var sharedWithYou = false
     @Environment(SessionModel.self) private var session
     @State private var folders: [FolderEntry] = []
-    @State private var items: [MediaItem] = []
+    /// The folder's own photos, shown by the grid the rest of the app uses: selection, context menu, share,
+    /// favourite, delete, keyboard and the viewer come with it.
+    @State private var feed = GridFeed()
     @State private var previews: [String: [FileID]] = [:]
     @State private var error: String?
     @State private var loaded = false
-    @State private var viewer: ViewerStart?
+    @AppStorage("gridColumns") private var columns = GridColumns.default
 
     var title: String {
         if path == "/" {
@@ -291,64 +293,65 @@ struct FoldersScreen: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: tileColumns, spacing: 20) {
-                ForEach(folders) { folder in
-                    NavigationLink {
-                        FoldersScreen(path: folder.path)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            FolderMosaic(fileIds: folder.previews.isEmpty ? previews[folder.path] ?? [] : folder.previews)
-                                .aspectRatio(1, contentMode: .fit)
-                                .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
-                            Label(folder.name, systemImage: "folder").font(.headline).lineLimit(1)
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(
-                            AccessibilityText.collection(
-                                title: folder.name, kind: String(localized: "folder", bundle: .module), detail: nil))
+        Group {
+            if feed.items.isEmpty {
+                // Only subfolders (or nothing yet): large tiles, as on the other collection screens.
+                ScrollView {
+                    LazyVGrid(columns: tileColumns, spacing: 20) {
+                        ForEach(folders) { folder in folderLink(folder) }
                     }
-                    .buttonStyle(.plain)
-                    .task { await loadPreviews(folder) }
+                    .padding()
+                    if let error, !folders.isEmpty { Text(error).foregroundStyle(.red).padding() }
                 }
-            }
-            .padding()
-            if !items.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 2)], spacing: 2) {
-                    ForEach(items) { item in
-                        PreviewImage(item: item, bucket: 256)
-                            .aspectRatio(1, contentMode: .fill)
-                            .clipped()
-                            .contentShape(.rect)
-                            .onTapGesture { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
-                            // A tap gesture alone is invisible to VoiceOver, Voice Control and keyboard users.
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(
-                                AccessibilityText.media(
-                                    isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp,
-                                    duration: item.duration, place: item.place, isFavorite: item.isFavorite)
-                            )
-                            .accessibilityAddTraits([.isButton, .isImage])
-                            .accessibilityAction { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
+                .overlay { status }
+                .navigationTitle(title)
+            } else {
+                // Subfolders above the photos. The grid scrolls by itself, so they are a strip that stays in place.
+                VStack(spacing: 0) {
+                    if !folders.isEmpty {
+                        FolderStrip(folders: folders) { folder in folderLink(folder, compact: true) }
+                        Divider()
+                    }
+                    MediaGridScreen(
+                        feed: feed, title: title, showsHeaders: false,
+                        emptyTitle: String(localized: "No photos in this folder", bundle: .module), emptyMessage: "", columns: $columns
+                    ) {
+                        EmptyView()
                     }
                 }
             }
-            if let error, !folders.isEmpty || !items.isEmpty { Text(error).foregroundStyle(.red).padding() }
         }
-        .overlay { status }
-        .navigationTitle(title)
         .task { await load() }
         .refreshable { await load() }
-        #if os(iOS)
-            .fullScreenCover(item: $viewer) { start in MediaViewer(ids: start.ids, startId: start.startId).environment(session) }
-        #else
-            .navigationDestination(item: $viewer) { start in MediaViewer(ids: start.ids, startId: start.startId) }
-        #endif
+    }
+
+    func folderLink(_ folder: FolderEntry, compact: Bool = false) -> some View {
+        NavigationLink {
+            FoldersScreen(path: folder.path)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                FolderMosaic(fileIds: folder.previews.isEmpty ? previews[folder.path] ?? [] : folder.previews)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
+                if compact {
+                    // Narrow tiles: the name may take two lines instead of ending after a few letters.
+                    Text(folder.name).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
+                } else {
+                    Label(folder.name, systemImage: "folder").font(.headline).lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                AccessibilityText.collection(
+                    title: folder.name, kind: String(localized: "folder", bundle: .module), detail: nil))
+        }
+        .buttonStyle(.plain)
+        .task { await loadPreviews(folder) }
     }
 
     /// Progress while loading, and a centred empty or error state instead of a blank screen.
     @ViewBuilder var status: some View {
-        if !folders.isEmpty || !items.isEmpty {
+        if !folders.isEmpty {
             EmptyView()
         } else if !loaded {
             ProgressView()
@@ -381,8 +384,9 @@ struct FoldersScreen: View {
             } else {
                 let result = try await services.api.folder(path, mimeTypes: session.features.allMimeTypes, nomedia: session.excludedFolders)
                 folders = result.folders
-                items = result.items
-                try? services.library.storeCollectionMedia(items)
+                // Stored for the viewer and the grid's actions; newest first like everywhere else.
+                let items: [MediaItem] = result.items.filter { !$0.isLivePhotoVideo }
+                feed.apply(await ItemsPreparation.prepare(items, library: services.library), flat: true)
             }
         } catch {
             self.error = error.localizedDescription
@@ -392,6 +396,30 @@ struct FoldersScreen: View {
     func loadPreviews(_ folder: FolderEntry) async {
         guard folder.previews.isEmpty, previews[folder.path] == nil, let services = session.services else { return }
         previews[folder.path] = (try? await services.api.folderPreviews(folder.path, mimeTypes: session.features.imageMimeTypes)) ?? []
+    }
+}
+
+/// Subfolders in one row above a folder's photos.
+struct FolderStrip<Tile: View>: View {
+    let folders: [FolderEntry]
+    @ViewBuilder var tile: (FolderEntry) -> Tile
+    /// The tiles grow with the text size, which their labels follow.
+    @ScaledMetric(relativeTo: .subheadline) private var side = 104.0
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(folders) { folder in
+                    tile(folder).frame(width: side)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .scrollIndicators(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Folders", bundle: .module))
     }
 }
 
