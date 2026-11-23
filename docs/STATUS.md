@@ -51,6 +51,11 @@ memories ✅, search and smart albums 🟡, archive and app lock 🟡, push 🟡
 Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API), duplicates 🟡, free up space 🟡, extract text (server OCR or
 Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 🟡, video renditions 🟡, App Intents and App Shortcuts 🟡.
 - ⬜ Free-form crop (aspect presets only).
+- Free up space works on the **server** (title "Free up server space"): screenshots by file name or PNG with a phone-screen size and no
+  location — never every PNG (`PhotosDomain/Cleanup.swift`); the confirmation names the server, all devices and trash bin vs. permanent.
+  Freeing device storage is §7.18.8 (Backup), ⬜.
+- Duplicates: suggested copy to keep (favorite, own file, oldest upload) with the reason shown, user can pick another one.
+  ⬜ Warning when a deleted copy is in an album.
 - ⬜ Spotlight indexing of albums/people/places; App Intent entities (albums, people) and search intent.
 - ⬜ visionOS spatial photos / immersive panoramas.
 - ⬜ Accessibility and localisation audit; Transifex setup.

@@ -130,4 +130,38 @@ public enum Duplicates {
         }
         .sorted { $0.wastedBytes > $1.wastedBytes }
     }
+
+    /// Why a copy is the one suggested to keep.
+    public enum KeepReason: Hashable, Sendable {
+        /// The only copy marked as favourite.
+        case favorite
+        /// The other copies are shared with the user or cannot be deleted by them; this is the user's own file.
+        case ownFile
+        /// The copy that has been on the server the longest.
+        case oldest
+        /// No difference found: the first by path.
+        case firstByPath
+    }
+
+    public struct Keeper: Hashable, Sendable {
+        public var fileId: FileID
+        public var reason: KeepReason
+    }
+
+    /// The copy suggested to keep (SPEC §7.15 "keep the best"): the favourite, else the user's own file, else the copy
+    /// that has been on the server the longest, else the first by path. The user can pick another one.
+    public static func keeper(of copies: [MediaItem]) -> Keeper? {
+        guard let first = copies.min(by: { $0.path < $1.path }) else { return nil }
+        let favorites = copies.filter(\.isFavorite)
+        if favorites.count == 1, copies.count > 1 { return Keeper(fileId: favorites[0].fileId, reason: .favorite) }
+        let pool = favorites.isEmpty ? copies : favorites
+        let own = pool.filter { $0.isOwnStorage && $0.permissions.canDelete }
+        if own.count == 1, pool.count > 1 { return Keeper(fileId: own[0].fileId, reason: .ownFile) }
+        let candidates = (own.isEmpty ? pool : own).sorted { $0.path < $1.path }
+        let dates = candidates.map { $0.uploadedAt ?? $0.modifiedAt }
+        if let oldest = dates.min(), dates.filter({ $0 == oldest }).count == 1, let index = dates.firstIndex(of: oldest) {
+            return Keeper(fileId: candidates[index].fileId, reason: .oldest)
+        }
+        return Keeper(fileId: candidates.first?.fileId ?? first.fileId, reason: .firstByPath)
+    }
 }
