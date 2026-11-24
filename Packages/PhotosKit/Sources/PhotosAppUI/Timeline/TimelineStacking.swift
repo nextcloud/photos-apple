@@ -8,18 +8,20 @@ import SwiftUI
 
 /// The library's display options that only concern this device.
 enum TimelineDisplay {
-    /// Copies of one shot (HEIC + JPEG, RAW + JPEG) are one tile in the timeline (`CopyStacks`). On by default.
+    /// Copies of one shot (HEIC + JPEG, RAW + JPEG) and bursts the camera marked are one tile in the timeline
+    /// (`TimelineStacks`). On by default.
     static let stackCopiesKey = "stackCopies"
     /// The memories strip at the top of the library. On by default.
     static let showsMemoriesKey = "showsMemoriesStrip"
 }
 
-/// Puts the copies of one shot behind one tile of the timeline (SPEC TL-6, `CopyStacks`).
+/// Puts the copies of one shot, and the frames of a burst, behind one tile of the timeline (SPEC TL-6,
+/// `TimelineStacks`).
 enum TimelineStacking {
-    /// The timeline with every stack shown as one tile, at the place of its newest copy. The tile is the copy
-    /// `CopyStacks` shows first, with `GridMedia.stack` listing all copies.
+    /// The timeline with every stack shown as one tile, at the place of its newest member. The tile is the member
+    /// `TimelineStacks` shows first, with `GridMedia.stack` listing all members.
     static func collapse(_ items: [GridMedia]) -> [GridMedia] {
-        let stacks: [[Int]] = CopyStacks.stacks(items)
+        let stacks: [[Int]] = TimelineStacks.stacks(items)
         guard !stacks.isEmpty else { return items }
         var hidden = Set<Int>()
         var tiles: [Int: GridMedia] = [:]
@@ -66,20 +68,48 @@ enum TimelineStacking {
     }
 }
 
+/// Actions on stacked tiles (SPEC TL-6): as in Apple Photos, where the RAW and JPEG of a shot are one photo and a
+/// burst is one item, deleting, favouriting, archiving, adding to an album, tagging or redating a tile does it to
+/// everything stacked behind it, so no copy is left behind as a tile of its own. What works on one file (open, info,
+/// edit, share, export) stays with the copy the tile shows.
+enum StackedSelection {
+    /// `tiles` with the members of their stacks, in order and each once: a tile's own id first, then the rest of its
+    /// stack. `stack` gives the members of a tile (empty when it is not a stack).
+    static func members(of tiles: [FileID], stack: (FileID) -> [FileID]) -> [FileID] {
+        var seen = Set<FileID>()
+        seen.reserveCapacity(tiles.count)
+        var result: [FileID] = []
+        result.reserveCapacity(tiles.count)
+        for tile in tiles {
+            if seen.insert(tile).inserted { result.append(tile) }
+            for member in stack(tile) where seen.insert(member).inserted { result.append(member) }
+        }
+        return result
+    }
+
+    /// How many of `items` are not among the selected `tiles`, i.e. stacked behind them (the confirmation says so).
+    static func hiddenCount(_ items: [FileID], tiles: [FileID]) -> Int {
+        let shown = Set(tiles)
+        return items.reduce(0) { $0 + (shown.contains($1) ? 0 : 1) }
+    }
+}
+
 /// The library's options of this device, in Settings.
 struct TimelineDisplaySection: View {
     @AppStorage(TimelineDisplay.stackCopiesKey) private var stackCopies = true
     @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
+    @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
 
     var body: some View {
         Section {
             Toggle(String(localized: "Show memories", bundle: .module), isOn: $showsMemories)
+            Toggle(String(localized: "Square tiles", bundle: .module), isOn: $squareTiles)
             Toggle(String(localized: "Stack copies of a photo", bundle: .module), isOn: $stackCopies)
         } header: {
             Text("On this device", bundle: .module)
         } footer: {
             Text(
-                "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge. Open it to see every copy.",
+                "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge, and so is a burst that the camera named as one. Open it to see every photo.",
                 bundle: .module)
         }
     }

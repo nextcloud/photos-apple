@@ -145,13 +145,15 @@ enum GridAnchor {
 /// that is kept in place, the size it was last laid out for.
 @MainActor
 final class GridCore {
-    /// Preview request for an item shown at a tile side (points) and a screen scale.
-    typealias RequestBuilder = @MainActor (_ item: GridMedia, _ tileSide: Double, _ scale: Double) -> ImagePipeline.Request
+    /// Preview request for an item shown at a tile side (points) and a screen scale, in square tiles or not.
+    typealias RequestBuilder = @MainActor (_ item: GridMedia, _ tileSide: Double, _ scale: Double, _ square: Bool) -> ImagePipeline.Request
 
     private let makeRequest: RequestBuilder
     private(set) var model = GridModel.empty
     private(set) var zoomStep = GridColumns.default
     private(set) var showsHeaders = true
+    /// Square tiles, or the whole picture fitted into each tile (`TileStyle`).
+    private(set) var squareTiles = true
     private var revision = -1
     let headerTexts = GridHeaderTexts()
     /// Header heights; they follow the text size where the platform has one.
@@ -169,8 +171,8 @@ final class GridCore {
     }
 
     convenience init(services: AccountServices, headerMetrics: GridHeaderMetrics) {
-        self.init(headerMetrics: headerMetrics) { item, tileSide, scale in
-            services.previewRequest(for: item, tileSide: tileSide, scale: scale)
+        self.init(headerMetrics: headerMetrics) { item, tileSide, scale, square in
+            services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square)
         }
     }
 
@@ -194,14 +196,19 @@ final class GridCore {
 
     // MARK: Updates
 
-    /// First half of an update: takes zoom and header visibility over and says what has to happen. The model is still
-    /// the old one, so that the anchor can be taken from what is on screen; `show(_:)` is the second half.
-    func begin(_ update: GridFeed.Update, zoomStep: Int, showsHeaders: Bool) -> GridUpdatePlan {
-        let layoutChanged = zoomStep != self.zoomStep || showsHeaders != self.showsHeaders
-        let plan = GridUpdatePlan.plan(revision: update.revision, shown: revision, change: update.change, layoutChanged: layoutChanged)
+    /// First half of an update: takes zoom, header visibility and tile style over and says what has to happen. The
+    /// model is still the old one, so that the anchor can be taken from what is on screen; `show(_:)` is the second half.
+    /// Another tile style keeps the cells (they stay squares) but every tile is configured again, also the ones the
+    /// collection view has prepared off screen: a reload.
+    func begin(_ update: GridFeed.Update, zoomStep: Int, showsHeaders: Bool, squareTiles: Bool = true) -> GridUpdatePlan {
+        let styleChanged = squareTiles != self.squareTiles
+        let layoutChanged = zoomStep != self.zoomStep || showsHeaders != self.showsHeaders || styleChanged
+        var plan = GridUpdatePlan.plan(revision: update.revision, shown: revision, change: update.change, layoutChanged: layoutChanged)
+        if styleChanged { plan.change = .structure }
         revision = update.revision
         self.zoomStep = zoomStep
         self.showsHeaders = showsHeaders
+        self.squareTiles = squareTiles
         return plan
     }
 
@@ -271,8 +278,14 @@ final class GridCore {
     /// Requests for the tiles at `indexPaths` (prefetching).
     func previewRequests(at indexPaths: [IndexPath], width: Double, scale: Double) -> [ImagePipeline.Request] {
         let side = geometry(width: width).side
+        let square = squareTiles
         return indexPaths.compactMap { model.item(section: $0.section, item: $0.item) }
-            .map { makeRequest($0, side, scale) }
+            .map { makeRequest($0, side, scale, square) }
+    }
+
+    /// The request a tile of the grid makes for `item`.
+    func previewRequest(for item: GridMedia, width: Double, scale: Double) -> ImagePipeline.Request {
+        makeRequest(item, geometry(width: width).side, scale, squareTiles)
     }
 }
 
@@ -301,8 +314,11 @@ struct GridTileBadges: Equatable {
         showsStack = item.stack.count > 1
         accessibilityLabel = GridTile.accessibilityLabel(for: item)
         if showsStack {
-            let copies = String(localized: "\(item.stack.count) copies", bundle: .module)
-            accessibilityLabel += ", " + copies
+            let members: String =
+                TimelineStacks.isBurst(leaderName: item.name)
+                ? String(localized: "Burst of \(item.stack.count) photos", bundle: .module)
+                : String(localized: "\(item.stack.count) copies", bundle: .module)
+            accessibilityLabel += ", " + members
         }
         if isPartner { accessibilityLabel += ", " + String(localized: "Partner photo", bundle: .module) }
     }

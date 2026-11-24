@@ -39,7 +39,7 @@ import Testing
     }
 
     func core() -> GridCore {
-        GridCore(headerMetrics: GridHeaderMetrics(titleHeight: 26, subtitleHeight: 16)) { item, side, scale in
+        GridCore(headerMetrics: GridHeaderMetrics(titleHeight: 26, subtitleHeight: 16)) { item, side, scale, _ in
             ImagePipeline.Request(fileId: item.fileId, etag: item.etag, bucket: 256, maxPixelSize: Int(side * scale))
         }
     }
