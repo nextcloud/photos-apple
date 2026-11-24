@@ -23,6 +23,8 @@ extension SessionModel {
         defer { afterSyncRunning = false }
         await refreshLabelsIfDue()
         await checkSharedAlbumActivity()
+        // After the labels: people come from them.
+        await updateSpotlight()
     }
 
     // MARK: Search labels

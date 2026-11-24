@@ -111,6 +111,7 @@ enum SearchEvaluator {
 
 /// The search tab (iPhone, iPad, Vision Pro) with its own search field. On the Mac the field is in the window toolbar.
 struct SearchTab: View {
+    @Environment(AppModel.self) private var app
     @State private var query = ""
     @State private var filters: [SearchFilter] = []
     @State private var submissions = 0
@@ -120,6 +121,13 @@ struct SearchTab: View {
             .searchable(text: $query, prompt: Text("Places, people, dates…", bundle: .module))
             // Return searches: the top suggestion, else the typed text.
             .onSubmit(of: .search) { submissions += 1 }
+            // A search link or the "Search photos" intent (SPEC §4.8, §7.23).
+            .onChange(of: app.requestedSearch, initial: true) { _, text in
+                guard let text else { return }
+                app.requestedSearch = nil
+                query = text
+                filters = []
+            }
     }
 }
 

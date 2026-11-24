@@ -24,8 +24,10 @@ public struct PersistentLog: Sendable {
     /// Whether the log is kept (Settings › Diagnostics). On unless the user turned it off.
     public static let enabledKey = "diagnosticsLogEnabled"
 
+    /// Never while the organisation turned logging off (managed `disable_log`, SPEC §5.1.9).
     public static func isEnabled(_ defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: enabledKey) as? Bool ?? true
+        guard !ManagedConfiguration.current(defaults).disablesLog else { return false }
+        return defaults.object(forKey: enabledKey) as? Bool ?? true
     }
 
     var current: URL { directory.appending(path: "diagnostics.log") }

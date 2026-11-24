@@ -181,6 +181,8 @@ struct PeopleScreen: View {
     func setHidden(_ person: Person, _ value: Bool) {
         if value { hidden.names.insert(person.name) } else { hidden.names.remove(person.name) }
         if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+        // A hidden person leaves Spotlight and Shortcuts at once.
+        Task { await session.updateSpotlight(force: true) }
     }
 
     func rename(_ person: Person, to name: String) {
@@ -368,6 +370,7 @@ struct PersonScreen: View {
     func toggleHidden() {
         if isHidden { hidden.names.remove(person.name) } else { hidden.names.insert(person.name) }
         if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+        Task { await session.updateSpotlight(force: true) }
         changed()
     }
 
