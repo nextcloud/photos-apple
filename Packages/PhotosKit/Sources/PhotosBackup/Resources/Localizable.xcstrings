@@ -25,6 +25,9 @@
     "The original is only in iCloud, and downloading from iCloud is turned off." : {
       "comment" : "Why a photo or video was not backed up (error shown for the item on the Backup screen): its original is stored only in iCloud and the option \"Download originals from iCloud\" is off."
     },
+    "The system could not upload the file." : {
+      "comment" : "Backup: why an item was not backed up, when the system's background upload of the photo library reported a failure without a reason."
+    },
     "There is not enough free space on this Mac to prepare the upload." : {
       "comment" : "Why a photo or video could not be backed up (Mac): the app copies each photo before uploading it and the Mac's disk has no room for the copy."
     },

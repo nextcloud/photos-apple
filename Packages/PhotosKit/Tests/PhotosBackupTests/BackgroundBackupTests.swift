@@ -152,6 +152,23 @@ final class FakeTransport: BackgroundUploading {
 
     var stagedFiles: [String] { Sandbox.files(in: directory).filter { !$0.hasSuffix("journal.json") } }
 
+    /// "The system" sends the chunks and the MOVE of every chunked upload as the engine hands them over, until none is left.
+    func completeChunked(_ engine: BackupEngine, status code: Int = 201) async {
+        for _ in 0..<1000 {
+            let pending = transport.started.filter { $0.request.url.path().contains("/uploads/") && transport.active.contains($0.jobId) }
+            if pending.isEmpty {
+                if await engine.chunkedJobs.isEmpty { return }
+                try? await Task.sleep(for: .milliseconds(5))
+                continue
+            }
+            for job in pending {
+                transport.deactivate(job.jobId)
+                await engine.backgroundUploadFinished(BackgroundUploadEvent(jobId: job.jobId, response: HTTPResponse(status: code)))
+            }
+        }
+        Issue.record("the chunked uploads did not end")
+    }
+
     enum Sandbox {
         static func files(in directory: URL) -> [String] {
             guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]) else {
@@ -206,7 +223,9 @@ final class FakeTransport: BackgroundUploading {
         remote.state.withLock { $0.uploadErrors = [:] }
         let later = await makeEngine(exports: exports)
         let next = Task { await later.run(settings) }
-        #expect(await eventually { remote.uploads == ["IMG_0001.mov"] })
+        #expect(await eventually { await !later.chunkedJobs.isEmpty })
+        await completeChunked(later)
+        #expect(remote.uploads == ["IMG_0001.mov"])
         await report(later, "IMG_0002.heic")
         await report(later, "IMG_0003.heic")
         await next.value
@@ -224,10 +243,12 @@ final class FakeTransport: BackgroundUploading {
         library.state.withLock { $0.exportedSizes["IMG_0001.MOV"] = 5000 }
         let engine = await makeEngine()
         let pass = Task { await engine.run(settings) }
-        #expect(await eventually { remote.uploads == ["IMG_0001.mov"] })
-        // The small one was handed over before the app started sending the large one itself; it was exported once.
+        #expect(await eventually { await !engine.chunkedJobs.isEmpty })
+        // The small one was handed over before the large one was prepared for its chunks; it was exported once.
         #expect(remote.attempts == ["IMG_0002.heic", "IMG_0001.mov"])
         #expect(library.exports == ["IMG_0001.MOV", "IMG_0002.HEIC"])
+        await completeChunked(engine)
+        #expect(remote.uploads == ["IMG_0001.mov"])
         await report(engine, "IMG_0002.heic")
         await pass.value
         #expect(status.phase == .upToDate)
@@ -351,13 +372,16 @@ final class FakeTransport: BackgroundUploading {
         #expect(status.phase == .upToDate)
     }
 
-    @Test func largeFilesAreUploadedByTheAppItself() async throws {
+    @Test func largeFilesGoInChunksThroughTheSystemToo() async throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         add(resource("0001", size: 10), resource("0002", .video, at: 3600, size: 500))
         let engine = await makeEngine(maxFileSize: 100)
         let pass = Task { await engine.run(settings) }
-        #expect(await eventually { transport.started.count == 1 && remote.uploads == ["IMG_0002.mov"] })
+        #expect(await eventually { await !engine.chunkedJobs.isEmpty })
         #expect(transport.started.first?.request.url.lastPathComponent == "IMG_0001.heic")
+        await completeChunked(engine)
+        // The app itself sent nothing.
+        #expect(remote.uploads == ["IMG_0002.mov"])
         await report(engine, "IMG_0001.heic")
         await pass.value
         #expect(status.phase == .upToDate)

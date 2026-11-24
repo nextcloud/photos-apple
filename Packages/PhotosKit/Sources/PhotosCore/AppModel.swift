@@ -61,6 +61,8 @@ public final class AppModel {
         applyManagedConfiguration()
         observeManagedConfiguration()
         Diagnostics.removeExports()
+        // Uploads of shares whose extension has ended go on in the app (SPEC §7.24).
+        if Bundle.main.bundleURL.pathExtension == "app" { ShareUploads.resumeAbandoned(layout: layout, keychain: keychain) }
         // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
         // background, `RootView`), so a crash loses at most the last few minutes.
         Task { [weak self] in
@@ -142,6 +144,11 @@ public final class AppModel {
     /// (`application(_:handleEventsForBackgroundURLSession:completionHandler:)`). The reports themselves arrive through
     /// the session; `completion` is called once they are recorded.
     public func handleBackgroundUploadEvents(identifier: String, completion: @escaping @MainActor @Sendable () -> Void) {
+        // A share's uploads: the share extension has ended, the app finishes them.
+        if ShareUploads.owns(identifier) {
+            ShareUploads.takeOver(identifier, completion: completion, layout: layout, keychain: keychain)
+            return
+        }
         guard let backgroundUploads, backgroundUploads.identifier == identifier else {
             completion()
             return

@@ -102,6 +102,7 @@ photos-ios/
     ShareExtension/         # iOS + macOS
     Widgets/                # iOS, macOS, visionOS
     NotificationService/    # iOS + macOS, decrypts push payloads
+    BackgroundUpload/       # iOS + macOS, PhotoKit background-upload extension (§7.18.6)
   Packages/PhotosKit/       # one local Swift package; everything else is a target of it
     Sources/
       PhotosModel/          # value types, IDs, feature flags; no I/O
@@ -118,8 +119,8 @@ photos-ios/
   docs/  LICENSE  LICENSES/  REUSE.toml  .swift-format  .github/
 ```
 
-Not there yet: platform folders under `App/` (the platform differences live in `PhotosAppUI`), and the PhotoKit
-background-upload extension (`Extensions/BackgroundUpload`, §7.18.6). The Xcode project is not checked in. Targets depend
+Not there: platform folders under `App/` (the platform differences live in `PhotosAppUI`). The Xcode project is not
+checked in. Targets depend
 downwards only, see [ARCHITECTURE.md](ARCHITECTURE.md); `PhotosDomain` depends only on `PhotosModel` and is fully
 unit-testable on macOS without a server.
 
@@ -562,7 +563,7 @@ On iPhone and iPad this flow is offered once, as a full-screen step right after 
 | Destination folder | `photosLocation` (default `/Photos`), or Files' folder in "switch" mode |
 | Subfolders | Year/Month (`yyyy/MM`); options: none, year, year/month, year/month/day (by capture date, local time) |
 | File names | **Original names** (`IMG_1234.HEIC`); option "Like Nextcloud Files" (`yy-MM-dd HH-mm-ss NNNN.ext`, optional "Photo "/"Video " prefix, or Files' custom mask — `reference/nextcloud-ios-and-nextcloudkit.md` §4.2) |
-| Formats | **Originals** (HEIC, HEVC, ProRAW DNG); option "Most compatible" (JPEG/H.264) |
+| Formats | **Originals** (HEIC, HEVC, ProRAW DNG); option "Most compatible" (JPEG/H.264): HEIC/HEIF photos become JPEG, HEVC videos (also Live Photo motion parts) H.264 in a QuickTime file (`.mov`, what the camera's own "Most Compatible" records), metadata kept; RAW and what already is JPEG/H.264 stay as they are; a video that cannot be converted is uploaded as it is. The conversion happens next to the export and is removed with it. |
 | Edited photos | Original + edited version (edited uploaded as Apple's `IMG_E1234.*` resource name, stacked by the server/app); options: edited only, original only |
 | Live Photos | Upload the motion part and link it |
 | What | Photos and videos; option per type; whole library or "from date"; all photos or selected device albums; include shared-library photos (on) |
@@ -599,7 +600,9 @@ An asset is uploaded only if **none** of these layers finds it already on the se
 | Shifted EXIF time | as "Probable" but times differ by a whole number of hours (≤ 14 h) and minutes/seconds equal — EXIF local time read without offset by older servers | skip only if the name number also matches |
 | Otherwise | — | upload |
 
-5. **Destination check** — before each PUT, `PROPFIND` the destination; if a file with that name exists: same size → mark matched; different → upload as `name (2).ext` (never overwrite in backup).
+5. **Destination check** — before each PUT, `PROPFIND` the destination; if a file with that name exists: same size → mark matched; different → upload as `name (2).ext` (never overwrite in backup). For a resource that may be converted ("Most compatible") a file of that name whose modification time is the capture time (± 1 s, the upload sets `X-OC-MTime`) is also this file: a conversion does not give the same bytes each time.
+
+*Converted files (decision, round 4):* the ledger (layer 1) records the upload per asset and resource whatever format was uploaded. On the server a converted copy has the original's name with another extension and the capture time, but not the original's size, so layer 4 finds it by capture second and name number ("Probable") or pixel size ("Probable (converted)"), and layer 5 by name and capture time. "Free up space" (§7.18.8) never counts a converted copy.
 
 The reconciliation result is shown to the user in the first run and is reviewable ("Already on server: 4 210 · will upload: 312 · see details"). Users can force-upload an individual skipped item from the details list.
 
@@ -618,6 +621,9 @@ If the identifiers from §4.2 change or Apple rejects the extra App Groups, drop
 #### 7.18.6 Background execution
 
 - Primary: the **PhotoKit background-upload extension** (iOS/iPadOS 27, extension point `com.apple.photos.background-upload`, `PHBackgroundResourceUploadJobExtension`; the Files app's implementation is a reference: `nextcloud-ios-and-nextcloudkit.md` §4.5). The app creates upload jobs only **after** reconciliation, one per resource, with the destination `PUT` request (headers: auth, user agent, `X-OC-MTime`, `X-OC-CTime`, `OC-Checksum`, `X-NC-WebDAV-Auto-Mkcol: 1`). Success = response has `OC-FileId`. Resources > 100 MB are handed back to the app for chunked upload. Check whether the extension point exists on macOS 27; if not, macOS uses the next mechanism.
+
+  *Implementation (round 4):* `Extensions/BackgroundUpload` (ExtensionKit, `EXExtensionPointIdentifier` `com.apple.photos.background-upload`), on iOS/iPadOS **and macOS**: the macOS 27 SDK has the API and macOS 27.3 defines the extension point (`/System/Library/ExtensionKit/ExtensionPoints/com.apple.photos.background-upload.appexpt`: platforms iOS and macOS, `EXRequiredEntitlements` `com.apple.photos.background-upload`). Not on visionOS (no API). The app turns it on with `PHPhotoLibrary.enableUploadJobExtension(with:)` while backup is on with **full** library access (PhotoKit requires it) and the App Group is there, off otherwise; "Wi-Fi only" is `PHAssetResourceUploadJobOptions.preventsExpensiveNetworkAccess`, videos with "Wi-Fi only for videos" and Low Data Mode go per request. Each run (`processJobs`) opens the backup account from the shared container and: records the jobs that ended (file id from `responseHeaderFields`, else the destination with the resource's size; a failed job is retried once under a freshly looked-up name; then it is a failure like any other), acknowledges them, then scans and reconciles exactly like a pass of the app (ledger, Files app, server search) and creates jobs for what is not on the server, oldest first, up to `min(jobLimit, 20)`. Decisions: PhotoKit sends the resource's bytes as they are, so it takes only resources ≤ 100 MB of known size that are not converted ("Most compatible" photos and videos, everything > 100 MB and of unknown size stay with the app); **no `OC-Checksum`** on its jobs (the bytes are not read here; layers 1, 4 and 5 do not need it); PhotoKit downloads from iCloud by itself, so with "Download originals from iCloud" off it creates no jobs; in Low Power Mode (with "pause") none either. The app and PhotoKit never take the same resource: the extension records a job (`<account>/UploadJobs.json`) before creating it and skips what the app's session has; the app skips the resources of that record and keeps their names free; every PUT has `If-None-Match: *`. Unverified: a real device (the entitlement has to be provisioned).
+- Files larger than 100 MB go in chunks (chunking v2) through the app's background `URLSession`: the app prepares the upload (name, upload folder — the same one an upload by the app itself would use, so either continues the other), moves the export into its container and hands 8 chunk `PUT`s at a time to the system, each from a file of its own; every report (also to a later launch) hands over the next ones, the final `MOVE` (empty body, `Overwrite: F`) too. One such file at a time. A lost answer to the `MOVE` is settled by looking at the destination. The user's pause takes the chunks back, the next pass sends only what the server does not have; turning backup off removes what waits.
 - Fallback / complement: background `URLSession` upload tasks, `BGProcessingTask` (`com.nextcloud.photos.processing`, requires network, prefers power) for reconciliation, hashing, Live Photo linking and metadata fix-ups, and `BGAppRefreshTask` for scanning new assets. No location-change or audio tricks.
 - A backup the user starts (the first one, or "Back up now" with many items waiting) runs as a `BGContinuedProcessingTask` on iOS/iPadOS: it shows system progress and goes on when the user leaves the app. Option "Keep screen on while backing up": the idle timer is off only while a pass runs and the app is in front.
 - After uploads: link Live Photo parts, PROPPATCH missing capture date/GPS where possible (`metadataEdit`), add to the local index immediately (the file appears in the timeline before the next sync).
@@ -686,6 +692,8 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 ### 7.24 Share extension, drag & drop, export — M2
 
 - **Share extension** (iOS, macOS): receive images/videos (and Live Photos) from any app → choose account, upload folder (default `photosLocation`), optional own album (create new allowed) → upload in a background session; shows progress and completion.
+
+  *Implementation (round 4):* each share gets a background `URLSession` of its own (`share-upload.<uuid>`, with the App Group as shared container); the copies of the shared files move into the App Group container (`ShareUploads/<session>/`), files up to 100 MB are one PUT, larger ones go in chunks (as backup, §7.18.6). "Continue in Background" closes the sheet while the system goes on. When the extension has ended, the system launches the app for the session's events (iOS) and the app takes the share over from its record (album, chunks, lost requests); at launch the app also continues shares whose extension stopped renewing its claim (45 s), e.g. on the Mac. What still fails is told in a local notification (when notifications are allowed); the files are removed when the share is through.
 - **Drag & drop** (iPad, Mac, visionOS): drag photos out of the grid/viewer (file promises — originals download lazily), drop into albums/folders/sidebar albums (upload and/or add), drag between albums (add), reorder is not supported by the server.
 - **Export / Save to device Photos library** with add-only permission; keeps capture date and location (create the asset from the original file, Live Photo with both resources).
 

@@ -14,6 +14,12 @@ public struct BackgroundUploads: Sendable {
     /// How many uploads are handed over ahead. More would only copy more of the photo library into the app's container.
     public var maxJobs = 16
     public var maxStagedBytes: Int64 = 256 * 1024 * 1024
+    /// Larger files go in chunks (`ChunkedUpload`), one request per chunk; this many of them at once, each with the whole
+    /// export waiting in the container.
+    public var maxChunkedUploads = 1
+    /// Chunks of one upload with the system at once (each a copy of its part of the file). More mean fewer launches of
+    /// the app in the background to hand over the next ones.
+    public var chunkWindow = 8
 
     public init(transport: any BackgroundUploading, directory: URL) {
         self.transport = transport
@@ -32,6 +38,20 @@ struct BackgroundUploadJob: Codable, Sendable, Equatable {
     var startedAt: Date
 }
 
+/// A large file that the system uploads in chunks (`ChunkedUpload`), one request per chunk. The export waits in
+/// `<directory>/<upload id>/<file name>`, the chunk files next to it in `chunks`.
+struct ChunkedBackgroundJob: Codable, Sendable, Equatable {
+    var upload: ChunkedUpload
+    var resource: BackupResource
+    var fileName: String
+    /// The networks its requests may use (Wi-Fi only, Low Data Mode), fixed when it was handed over.
+    var allowsExpensiveNetwork: Bool
+    var allowsConstrainedNetwork: Bool
+    var startedAt: Date
+
+    var id: String { upload.id }
+}
+
 /// The record of the uploads that are on their way, kept in a file so it outlives the app: when the system reports an
 /// upload as finished, possibly to a later launch, this says which resource it was and where it went.
 ///
@@ -40,12 +60,24 @@ struct BackgroundUploadJob: Codable, Sendable, Equatable {
 struct BackgroundUploadJournal {
     let directory: URL
     private(set) var jobs: [String: BackgroundUploadJob] = [:]
+    /// Chunked uploads by upload id; their requests are in `ChunkedUpload.running`.
+    private(set) var chunked: [String: ChunkedBackgroundJob] = [:]
 
     var file: URL { directory.appending(path: "journal.json") }
 
+    /// The file's content. Earlier versions wrote the single uploads only (a dictionary by job id).
+    private struct Stored: Codable {
+        var jobs: [String: BackgroundUploadJob]
+        var chunked: [String: ChunkedBackgroundJob]
+    }
+
     init(directory: URL) {
         self.directory = directory
-        if let data = try? Data(contentsOf: file), let jobs = try? JSONDecoder().decode([String: BackgroundUploadJob].self, from: data) {
+        guard let data = try? Data(contentsOf: file) else { return }
+        if let stored = try? JSONDecoder().decode(Stored.self, from: data) {
+            jobs = stored.jobs
+            chunked = stored.chunked
+        } else if let jobs = try? JSONDecoder().decode([String: BackgroundUploadJob].self, from: data) {
             self.jobs = jobs
         }
     }
@@ -54,8 +86,69 @@ struct BackgroundUploadJournal {
         jobs.values.first { $0.resource.localIdentifier == resource.localIdentifier && $0.resource.kind == resource.kind }
     }
 
+    func chunkedJob(for resource: BackupResource) -> ChunkedBackgroundJob? {
+        chunked.values.first { $0.resource.localIdentifier == resource.localIdentifier && $0.resource.kind == resource.kind }
+    }
+
+    /// The resource is with the system (as one upload or in chunks).
+    func isHandedOver(_ resource: BackupResource) -> Bool {
+        job(for: resource) != nil || chunkedJob(for: resource) != nil
+    }
+
+    /// Resources that are with the system.
+    var handedOverResources: [BackupResource] { jobs.values.map(\.resource) + chunked.values.map(\.resource) }
+
+    /// The chunked upload a request belongs to.
+    func chunkedUploadId(forJob jobId: String) -> String? {
+        chunked.values.first { $0.upload.running[jobId] != nil }?.id
+    }
+
+    /// Ids of every request with the system: single uploads and the requests of chunked ones.
+    var allJobIds: Set<String> {
+        Set(jobs.keys).union(chunked.values.flatMap { $0.upload.running.keys })
+    }
+
+    /// Uploads with the system, single or chunked.
+    var count: Int { jobs.count + chunked.count }
+
     /// Destinations that are taken although the server has nothing there yet.
-    var reservedPaths: Set<String> { Set(jobs.values.map(\.path)) }
+    var reservedPaths: Set<String> { Set(jobs.values.map(\.path)).union(chunked.values.map(\.upload.path)) }
+
+    /// Where a chunked upload's files are.
+    func files(of job: ChunkedBackgroundJob) -> ChunkedUploadDriver.Files {
+        let directory = stagingDirectory(job.id)
+        return ChunkedUploadDriver.Files(
+            file: directory.appending(path: job.fileName), chunks: directory.appending(path: "chunks"),
+            allowsExpensiveNetwork: job.allowsExpensiveNetwork, allowsConstrainedNetwork: job.allowsConstrainedNetwork)
+    }
+
+    /// Records a chunked upload (new, or its state changed).
+    mutating func setChunked(_ job: ChunkedBackgroundJob) throws {
+        let previous = chunked[job.id]
+        chunked[job.id] = job
+        do {
+            try save()
+        } catch {
+            chunked[job.id] = previous
+            throw error
+        }
+    }
+
+    /// The new state of a chunked upload's requests.
+    mutating func updateChunked(_ upload: ChunkedUpload) throws {
+        guard var job = chunked[upload.id] else { return }
+        job.upload = upload
+        try setChunked(job)
+    }
+
+    /// Forgets a chunked upload and deletes its files.
+    @discardableResult
+    mutating func removeChunked(_ id: String) -> ChunkedBackgroundJob? {
+        try? FileManager.default.removeItem(at: stagingDirectory(id))
+        guard let job = chunked.removeValue(forKey: id) else { return nil }
+        try? save()
+        return job
+    }
 
     var stagedBytes: Int64 { jobs.values.reduce(0) { $0 + $1.size } }
 
@@ -92,7 +185,9 @@ struct BackgroundUploadJournal {
     /// Deletes files that wait for an upload nobody knows about (the app ended between moving the file and recording it).
     func removeUnknownFiles() {
         let contents = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        for url in contents where url.lastPathComponent != file.lastPathComponent && jobs[url.lastPathComponent] == nil {
+        for url in contents
+        where url.lastPathComponent != file.lastPathComponent && jobs[url.lastPathComponent] == nil && chunked[url.lastPathComponent] == nil
+        {
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -104,6 +199,6 @@ struct BackgroundUploadJournal {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? directory.setResourceValues(values)
-        try JSONEncoder().encode(jobs).write(to: file, options: .atomic)
+        try JSONEncoder().encode(Stored(jobs: jobs, chunked: chunked)).write(to: file, options: .atomic)
     }
 }
