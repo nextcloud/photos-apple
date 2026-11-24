@@ -198,6 +198,9 @@ public actor BackupEngine {
     private var freeSpace: @Sendable () -> Int64?
     /// "Most compatible": the file to upload for an export (`MostCompatible.convert`).
     let convert: @Sendable (URL, BackupResource) async throws -> URL
+    /// The journal of the jobs PhotoKit's background-upload extension created (`UploadJobJournal`): those resources are
+    /// PhotoKit's to send, and their destinations are taken.
+    let uploadJobs: URL?
 
     struct Resume {
         var settings: BackupSettings
@@ -218,27 +221,32 @@ public actor BackupEngine {
 
     static let scanSignatureKey = "backup.scanSignature"
 
-    /// - Parameter background: hand uploads to a background transfer session, so they go on while the app is suspended.
-    ///   Without it every upload is sent by the app itself.
-    public init(api: PhotosAPI, database: AccountDatabase, accountId: AccountID, background: BackgroundUploads? = nil) {
+    /// - Parameters:
+    ///   - background: hand uploads to a background transfer session, so they go on while the app is suspended. Without it
+    ///     every upload is sent by the app itself.
+    ///   - uploadJobs: the journal of PhotoKit's background-upload extension (`UploadJobJournal.file(in:)`).
+    public init(
+        api: PhotosAPI, database: AccountDatabase, accountId: AccountID, background: BackgroundUploads? = nil, uploadJobs: URL? = nil
+    ) {
         self.init(
             library: PhotoLibrarySource(),
             remote: PhotosBackupRemote(api: api, library: LibraryStore(database: database), database: database),
             database: database, accountId: accountId, systemConditions: true, background: background,
-            exportDirectory: PhotoLibrarySource.exportDirectory)
+            exportDirectory: PhotoLibrarySource.exportDirectory, uploadJobs: uploadJobs)
     }
 
     /// - Parameter systemConditions: watch the network path and Low Power Mode. Tests pass `false` and call
     ///   `setNetwork` / `setLowPower` themselves.
     init(
         library: any BackupLibrary, remote: any BackupRemote, database: AccountDatabase, accountId: AccountID,
-        systemConditions: Bool = false, background: BackgroundUploads? = nil, exportDirectory: URL? = nil,
+        systemConditions: Bool = false, background: BackgroundUploads? = nil, exportDirectory: URL? = nil, uploadJobs: URL? = nil,
         filesLedger: @escaping @Sendable (AccountID) -> Set<String> = { FilesAppLedger.uploadedAssets(accountId: $0) },
         convert: @escaping @Sendable (URL, BackupResource) async throws -> URL = { try await MostCompatible.convert($0, resource: $1) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.background = background
         self.convert = convert
+        self.uploadJobs = uploadJobs
         self.exportDirectory = exportDirectory
         self.filesLedger = filesLedger
         freeSpace = { Self.freeDeviceSpace(at: exportDirectory ?? FileManager.default.temporaryDirectory) }
@@ -844,6 +852,8 @@ public actor BackupEngine {
             }
             // With the system since an earlier pass, or reported by it since this one started.
             if journal?.isHandedOver(resource) == true || settled.contains(key) { continue }
+            // PhotoKit sends it (the background-upload extension created a job for it).
+            if UploadJobJournal.claims(at: uploadJobs).keys.contains(key) { continue }
             // The system has to have room for a file it will take: a small one, or the chunks of a large one.
             while large.contains(key) ? chunkedIsFull : backgroundIsFull(adding: resource) {
                 try await waitForBackgroundUploads()
@@ -933,7 +943,7 @@ public actor BackupEngine {
     static let maxNameAttempts = 3
 
     /// The upload of a resource arrived: remembers it, links Live Photo halves, puts the file into the local index.
-    private func completed(_ resource: BackupResource, uploaded: UploadedFile) async throws {
+    func completed(_ resource: BackupResource, uploaded: UploadedFile) async throws {
         try record(resource, state: .uploaded, matchedBy: .ownUpload, serverPath: uploaded.path, serverFileId: uploaded.fileId)
         status.uploaded += 1
         status.uploadedThisPass += 1
@@ -1097,7 +1107,9 @@ public actor BackupEngine {
     // MARK: Chunked uploads handed to the system
 
     /// Destinations that are taken although the server has nothing there yet: what is on its way with the system.
-    private var reservedPaths: Set<String> { journal?.reservedPaths ?? [] }
+    private var reservedPaths: Set<String> {
+        (journal?.reservedPaths ?? []).union(UploadJobJournal.claims(at: uploadJobs).paths)
+    }
 
     private func chunkedDriver(_ background: BackgroundUploads) -> ChunkedUploadDriver {
         ChunkedUploadDriver(transport: background.transport, uploader: remote.chunkedServer, window: background.chunkWindow)
@@ -1493,6 +1505,7 @@ public actor BackupEngine {
         ledger: [LedgerKey: BackupLedgerEntry], checked: Set<String>?, seen: Set<String>, read: Set<String>, found: Set<LedgerKey>
     ) throws -> Set<LedgerKey> {
         let handedOver = Set(journal?.handedOverResources.map { LedgerKey($0) } ?? [])
+            .union(UploadJobJournal.claims(at: uploadJobs).keys)
         var stale = Set<LedgerKey>()
         for (key, entry) in ledger where !BackupPolicy.isComplete(entry) && !handedOver.contains(key) {
             let id = key.localIdentifier

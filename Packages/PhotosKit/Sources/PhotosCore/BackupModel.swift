@@ -195,10 +195,27 @@ public final class BackupModel {
         settings = BackupSettings.load(from: settingsFile)
     }
 
+    /// Where an account's files wait for the background transfer session (below the account's directory).
+    static let backgroundUploadsFolder = "BackgroundUploads"
+
+    /// Turns PhotoKit's background uploads (the app's background-upload extension, SPEC §7.18.6) on while backup is on with
+    /// access to the whole library, and off otherwise. Not in builds without the App Group: the extension would not see the
+    /// app's accounts.
+    func updateUploadJobExtension() {
+        #if os(iOS) || os(macOS)
+            let wanted =
+                settings.isEnabled && settings.filesAppMode != .keepFiles && settings.accountId != nil && authorization == .authorized
+                && AppPaths.usesAppGroup
+            guard wanted || AppPaths.usesAppGroup else { return }
+            UploadJobExtension.update(enabled: wanted, wifiOnly: settings.wifiOnly)
+        #endif
+    }
+
     /// Connects the model to the app. Options left behind by an account that no longer exists are discarded.
     func attach(_ app: AppModel) {
         self.app = app
         if let id = settings.accountId, !app.accounts.contains(where: { $0.id == id }) { forgetSettings() }
+        updateUploadJobExtension()
         keepScreenOn = app.defaults.bool(forKey: Self.keepScreenOnKey)
         #if os(iOS)
             observeIdleTimer()
@@ -268,6 +285,7 @@ public final class BackupModel {
         change(&settings)
         if settings.isEnabled != wasEnabled { logger.notice("backup: turned \(self.settings.isEnabled ? "on" : "off", privacy: .public)") }
         try? settings.save(to: settingsFile)
+        updateUploadJobExtension()
         guard let engine else { return }
         let settings = settings
         Task {
@@ -280,6 +298,7 @@ public final class BackupModel {
 
     public func requestAuthorization() async {
         authorization = await PhotoLibrarySource.requestAuthorization()
+        updateUploadJobExtension()
     }
 
     /// Only the photos the user selected can be seen (and backed up).
@@ -288,6 +307,7 @@ public final class BackupModel {
     /// Reads the access again (the user comes back from Settings).
     public func refreshAuthorization() {
         authorization = PhotoLibrarySource.authorization
+        updateUploadJobExtension()
     }
 
     /// Turns backup on for the active account and runs the first pass.
@@ -452,10 +472,13 @@ public final class BackupModel {
         }
         dropEngine()
         // Files that wait for their upload live with the account's data and go with it.
+        let directory = services.layout.accountDirectory(account.id)
         let background = backgroundUploads.map {
-            BackgroundUploads(transport: $0, directory: services.layout.accountDirectory(account.id).appending(path: "BackgroundUploads"))
+            BackgroundUploads(transport: $0, directory: directory.appending(path: Self.backgroundUploadsFolder))
         }
-        let engine = BackupEngine(api: services.api, database: services.database, accountId: account.id, background: background)
+        let engine = BackupEngine(
+            api: services.api, database: services.database, accountId: account.id, background: background,
+            uploadJobs: UploadJobJournal.file(in: directory))
         self.engine = engine
         engineServices = services
         engineConfigured = false
@@ -500,6 +523,7 @@ public final class BackupModel {
         settings = BackupSettings()
         status = BackupStatus()
         try? FileManager.default.removeItem(at: settingsFile)
+        updateUploadJobExtension()
     }
 
     /// The account is about to be removed from this device: stops its backup and waits until nothing uses its database any

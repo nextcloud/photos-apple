@@ -38,6 +38,10 @@ targets:
         embed: true
       - target: Widgets
         embed: true
+      # PhotoKit's background uploads (SPEC §7.18.6); not on visionOS.
+      - target: BackgroundUpload
+        embed: true
+        destinationFilters: [iOS, macOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID)
@@ -218,6 +222,44 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  # PhotoKit's background-upload extension (SPEC §7.18.6): the system starts it while backup is on, also when the app is not
+  # running, and sends photos and videos up to 100 MB from the library. An ExtensionKit extension (`EXAppExtensionAttributes`).
+  BackgroundUpload:
+    type: extensionkit-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Extensions/BackgroundUpload
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).background-upload
+        PRODUCT_NAME: BackgroundUpload
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/BackgroundUpload/BackgroundUpload.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: Extensions/BackgroundUpload/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.photos.background-upload
   # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
   NextcloudPhotosUITests:
     type: bundle.ui-testing

@@ -10,6 +10,12 @@ public struct UploadedFile: Sendable, Hashable {
     public var fileId: FileID
     public var path: String
     public var etag: String?
+
+    public init(fileId: FileID, path: String, etag: String?) {
+        self.fileId = fileId
+        self.path = path
+        self.etag = etag
+    }
 }
 
 /// Remembers the upload folders an uploader left on the server for a later attempt, so that those nobody continues can be
@@ -556,7 +562,7 @@ public struct Uploader: Sendable {
     }
 
     /// `OC-FileId` is the numeric id zero-padded and followed by the instance id, e.g. `00000123ocabcdef`.
-    static func parseFileId(_ header: String?) -> FileID? {
+    public static func parseFileId(_ header: String?) -> FileID? {
         guard let header else { return nil }
         let digits = header.prefix(while: \.isNumber)
         return digits.isEmpty ? nil : FileID(digits)
