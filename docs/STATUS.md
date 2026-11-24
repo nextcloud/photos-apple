@@ -250,7 +250,15 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
   server and against the test server (interrupted after 2 of 5 chunks, continued, checksum compared).
 - Share extension: uploaded items leave the list, the rest can be tried again after a failure, and it uses the app's
   trusted and client certificates 🟡 (compiled; not run). Items that cannot be read are counted ("2 of 5 items could
-  not be read"), and its temporary copies are removed on cancel, on completion and (leftovers) at the start ✅ unit-tested. ⬜ It still uploads in its own process, not in a background session.
+  not be read"), and its temporary copies are removed on cancel, on completion and (leftovers) at the start ✅ unit-tested.
+  🟡 (round 4) Its uploads go to a background `URLSession` of their own in the App Group container (one per share; files
+  up to 100 MB as one PUT, larger ones in chunks); "Continue in Background" closes the sheet. When the extension has ended,
+  the app takes the share over (iOS: the system launches it for the session's events; at every launch: shares whose
+  extension stopped renewing its claim), adds the uploads to the album, hands over the next chunks and tells what still
+  failed in a local notification. Batch logic (single and chunked, take-over from the record, 412 → next name, retry
+  without a second copy, lost requests) ✅ unit-tested with a fake session; the chunked upload through a real background
+  session ✅ against 8089, 8091 and 8093. **Not run**: the extension itself (share sheet not driven), the system
+  relaunching the app for a share's session on a device.
 
 - Share via Nextcloud (SH-7): OCS Files Sharing for a photo (grid context menu, selection "More" menu) or a folder (Folders toolbar):
   users, groups, other servers, email, Teams, Talk (when installed), public links with password, expiry, permissions, hide
@@ -264,15 +272,30 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
 ## M3 Backup — 🟡
 Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against server), matcher ✅, engine, UI, background tasks 🟡.
 - Backup belongs to one account and keeps running for it while another account is shown (the Backup screen says which) 🟡.
-- ⬜ PhotoKit background-upload extension (iOS 27, §7.18.6).
+- 🟡 PhotoKit background-upload extension (§7.18.6, round 4): `Extensions/BackgroundUpload` (ExtensionKit,
+  `PHBackgroundResourceUploadJobExtension`) for iOS/iPadOS **and macOS** (macOS 27.3 has the extension point; it requires
+  the `com.apple.photos.background-upload` entitlement, which is in the extension's entitlement file and has to be
+  enabled for Nextcloud's App ID). The app turns PhotoKit's background uploads on while backup is on with full library
+  access. Each run records and acknowledges ended jobs (file id from the answer, else the destination; one retry under a
+  new name), then scans and reconciles like the app and creates jobs for resources ≤ 100 MB that are not converted, up to
+  the job limit. The app and PhotoKit never take the same resource (journal `UploadJobs.json`, names kept free,
+  `If-None-Match: *`). Job logic ✅ unit-tested with a fake PhotoKit (creation up to the limit, recording, retry, failure,
+  cancelled, eligibility, Low Power, orphans, the limit error, both directions of "never the same resource"); the
+  extension builds for iOS and macOS and is embedded. **Not run**: PhotoKit itself (needs the entitlement and a signed
+  build), the real job states and response headers.
 - 🟡 iOS: files up to 100 MB are handed to a background `URLSession` (16 files / 256 MB ahead) and go on while the app is
   suspended; the app is woken for finished uploads (`handleEventsForBackgroundURLSession`), records them and hands over
   the next ones. Engine and bookkeeping ✅ unit-tested with a fake session; the real session ✅ against the test server
   on macOS. **Not run on a device**: suspension, relaunch for finished uploads, behaviour when the device is locked.
-  ⬜ Larger files (chunked) are only uploaded while the app runs; they continue where they stopped. They come after
-  everything the system can take, so one big video no longer holds back the queue in a short background pass, and
-  their export is kept for the next attempt when the upload is interrupted (`tmp/Backup/Kept`) ✅ unit-tested.
-  macOS uploads everything in the app.
+  🟡 (round 4) Larger files go in chunks through the same background session: the export waits in the account's
+  container, 8 chunk PUTs at a time are with the system, each report (also to a later launch, without a pass) hands over
+  the next ones and finally the MOVE; the upload folder is the one the app's own upload would use, so either continues
+  the other. A pass continues uploads whose chunks the system lost, the user's pause takes them back (only what the
+  server lacks is sent later), a refused chunk fails the file, turning backup off removes what waits. State machine,
+  driver and engine ✅ unit-tested (fake session; stub server with lost MOVE answers, expired upload folders, names taken
+  meanwhile); a real background session ✅ against 8089, 8091 and 8093. Large files still come after everything else,
+  and an interrupted export is kept (`tmp/Backup/Kept`) ✅ unit-tested. **Not run on a device.** macOS uploads
+  everything in the app.
 - A pass that a background task has to give up is interrupted, not "Paused": it stays due and goes on with the next
   background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
 - Background tasks, silent pushes and the "Back up now" intent find the app model after a launch without a window
@@ -308,7 +331,11 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 §7.18.10 Google Takeout import (Mac): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
   (duplicates, albums, comments, journal, stop/resume) ✅ unit-tested and ✅ end-to-end against 8089, 8091 and 8093 (dates
   as mtime, album, second import uploads nothing); the import window 🟡 compiled, not looked at (screen locked).
-- ⬜ Most-compatible video conversion (HEVC → H.264); images only.
+- ✅ Most compatible (round 4): HEVC videos become H.264 (QuickTime, metadata kept; Live Photo motion parts too), next
+  to the export and removed with it; a video that cannot be converted is uploaded as it is. Converted files are found
+  again by name and capture time (layer 5) and by the matcher's name/pixel-size rules, never by size (SPEC §7.18.4).
+  Real conversion of a generated HEVC clip ✅ unit-tested (codec, capture date kept, nothing left behind); engine
+  wiring ✅ unit-tested; not run against a device library.
 - ✅ Run state machine unit-tested with a fake library and server: pause and resume (Wi-Fi, Low Data, Low Power, lost connection),
   stop on full quota / invalid login / refused upload (`BackupStatus.blocker`), retry delays for failing files, skipping assets the
   ledger knows completely, edits and RAW files matched per rendition, Live Photo halves linked across runs.
