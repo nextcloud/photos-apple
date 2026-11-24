@@ -80,10 +80,11 @@ final class ExtrasTourTests: XCTestCase {
             waitForTimeline()
             app.tabBars.buttons["Settings"].tap()
             scroll(to: element("Space to use"))
+            // Checked before the extra swipe: a list row scrolled off screen is no longer in the accessibility tree.
+            XCTAssertTrue(element("Space to use").exists)
             app.swipeUp(velocity: .slow)
             pause(2)
             shot("02-settings-smart-offline")
-            XCTAssertTrue(element("Space to use").exists)
         }
 
         func testMakeSticker() throws {
