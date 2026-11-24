@@ -155,6 +155,8 @@ struct MainView: View {
     @State private var openingLink = false
     /// File › Import from Google Takeout… (Mac).
     @State private var importingTakeout = false
+    /// "Show in library": the photo the Library timeline scrolls to and highlights.
+    @State private var timelineReveal = TimelineRevealCenter()
 
     /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
     static var debugDestination: AppDestination? {
@@ -182,6 +184,8 @@ struct MainView: View {
     var body: some View {
         navigation
             .environment(\.showInFolder, ShowInFolderAction { directory in showFolder(directory) })
+            .environment(\.showInTimeline, ShowInTimelineAction { item in showInTimeline(item) })
+            .environment(\.timelineReveal, timelineReveal)
             .onChange(of: app.requestedDestination, initial: true) { _, _ in
                 restoreOnce()
                 openRequested()
@@ -249,6 +253,12 @@ struct MainView: View {
         #endif
         selection = .folders
         paths[.folders] = trail.isEmpty ? nil : trail
+    }
+
+    /// The Library from its root, scrolled to the photo's day with the photo highlighted.
+    func showInTimeline(_ item: MediaItem) {
+        go(.library)
+        timelineReveal.request(item)
     }
 
     func open(_ link: DeepLink) {

@@ -24,6 +24,10 @@ struct MediaGridScreen<Accessory: View>: View {
     var emptyAction: GridEmptyAction? = nil
     /// The title stays while items are selected; the screen shows the count itself (`GridSelectionState.Key`).
     var keepsTitleWhileSelecting = false
+    /// "Show in library" requests this grid carries out (the Library's grid only).
+    var reveal: TimelineRevealCenter? = nil
+    /// This is the Library: "Show in library" is not offered for its photos.
+    var isLibrary = false
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -45,6 +49,12 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var editedItem: MediaItem?
     /// Nextcloud's own sharing of one photo (users, other servers, email, Talk, links with password and expiry).
     @State private var nextcloudShare: SharingTarget?
+    /// Nextcloud's own sharing of several photos at once.
+    @State private var nextcloudShareMany: PickedItems?
+    /// Slideshow of the selection or of the whole grid (SPEC VW-5).
+    @State private var slideshow: SlideshowRequest?
+    /// The tile "Show in library" opened the grid at, marked for a moment (iPhone, iPad, Vision Pro).
+    @State private var highlight: TileHighlight?
     /// Haptic triggers (iPhone, iPad).
     @State private var favoriteToggles = 0
     @State private var deletions = 0
@@ -56,6 +66,12 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var zoomTile: FileID?
     @State private var zoomFrame: CGRect?
     @Environment(\.showInFolder) private var showInFolder
+    @Environment(\.showInTimeline) private var showInTimeline
+
+    struct TileHighlight: Equatable {
+        let id = UUID()
+        var frame: CGRect
+    }
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -102,6 +118,11 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
+            .sheet(item: $nextcloudShareMany) { picked in
+                if let services = session.services { MultiFileSharingSheet(items: picked.items, api: services.api.sharing) }
+            }
+            .slideshow($slideshow)
+            .task(id: RevealKey(request: reveal?.pending?.id, revision: feed.update.revision)) { await carryOutReveal() }
             .infoInspector(isPresented: $showingInfo) {
                 if let item = infoItem ?? selectionInfo.items?.first {
                     InfoPanel(item: item, inInspector: true)
@@ -170,6 +191,9 @@ struct MediaGridScreen<Accessory: View>: View {
             .overlay(alignment: .topLeading) {
                 ViewerZoomSourceMark(tile: zoomTile, frame: zoomFrame, namespace: zoomNamespace)
             }
+            .overlay(alignment: .topLeading) {
+                if let highlight { TileHighlightMark(frame: highlight.frame).id(highlight.id) }
+            }
         } else if session.isSignedOut {
             SignedOutView()
         } else if emptyPhase == .loading {
@@ -221,7 +245,44 @@ struct MediaGridScreen<Accessory: View>: View {
 
     /// The viewer over this grid's photos, at `id`; stacked copies can be opened in it.
     func viewerStart(at id: FileID) -> ViewerStart {
-        ViewerStart(ids: feed.model.ids, startId: id, stacks: TimelineStacking.stacks(in: feed.items))
+        ViewerStart(ids: feed.model.ids, startId: id, stacks: TimelineStacking.stacks(in: feed.items), fromLibrary: isLibrary)
+    }
+
+    struct RevealKey: Equatable {
+        var request: UUID?
+        var revision: Int
+    }
+
+    /// "Show in library": once the grid has its photos, scrolls to the photo (or, when the Library does not show it, to
+    /// the photo closest in time) and marks it — selected on the Mac, a short ring elsewhere.
+    func carryOutReveal() async {
+        guard let center = reveal, let request = center.pending, feed.loaded, !feed.items.isEmpty else { return }
+        // The grid lays out the model it was just given first; a newer one starts this again.
+        try? await Task.sleep(for: .milliseconds(150))
+        guard !Task.isCancelled, center.pending == request,
+            let target = TimelineRevealCenter.target(of: request, in: feed.items)
+        else { return }
+        center.pending = nil
+        endSelection()
+        tileLocator.reveal(target.id)
+        guard case .tile(let id) = target else { return }
+        #if os(macOS)
+            selection = [id]
+            isSelecting = true
+        #else
+            if let frame = tileLocator.frame(id) { highlight = TileHighlight(frame: frame) }
+        #endif
+    }
+
+    /// A slideshow of the selected items in the grid's order, or of the whole grid from `start` on.
+    func playSlideshow(_ ids: [FileID]) {
+        let all: [FileID] = feed.model.ids
+        if ids.count > 1 {
+            let chosen = Set(ids)
+            slideshow = SlideshowRequest(title: title, ids: all.filter { chosen.contains($0) })
+        } else if !all.isEmpty {
+            slideshow = SlideshowRequest(title: title, ids: all, startId: ids.first)
+        }
     }
 
     /// Favourites or unfavourites; undoable.
@@ -404,7 +465,8 @@ struct MediaGridScreen<Accessory: View>: View {
                 ? { withItems(Array(selected)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) } } : nil,
             export: summary.count == 0 ? nil : { withItems(Array(selected)) { export($0) } },
             shareItems: info.shareItems,
-            shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module)
+            shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module),
+            slideshow: feed.items.isEmpty ? nil : { playSlideshow(Array(selected)) }
         )
     }
 
@@ -474,7 +536,17 @@ struct MediaGridScreen<Accessory: View>: View {
                         showInFolder(item)
                     })
             }
+            if let showInTimeline, !isLibrary, ShowInTimelineAction.isOffered(for: item) {
+                actions.append(
+                    GridMenuAction(id: "timeline", title: ShowInTimelineAction.title, systemImage: ShowInTimelineAction.systemImage) { _ in
+                        showInTimeline(item)
+                    })
+            }
         }
+        actions.append(
+            GridMenuAction(id: "slideshow", title: SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage) { ids in
+                playSlideshow(ids)
+            })
         let albumTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Add to Album…", bundle: .module),
             other: LocalizedStringResource("Add to album…", bundle: .module))
@@ -498,6 +570,14 @@ struct MediaGridScreen<Accessory: View>: View {
                     id: "ncshare", title: String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus"
                 ) { _ in
                     nextcloudShare = SharingTarget(item: item)
+                })
+        } else if single == nil, let items = info.items, items.contains(where: \.permissions.canShare) {
+            // Several photos: one share per photo and recipient (`MultiFileSharingSheet`).
+            actions.append(
+                GridMenuAction(
+                    id: "ncshare", title: String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus"
+                ) { _ in
+                    nextcloudShareMany = PickedItems(items: items.filter(\.permissions.canShare))
                 })
         }
         let allFavorite = summary.allFavorite
@@ -674,6 +754,8 @@ struct ViewerStart: Identifiable, Hashable {
     var startId: FileID
     /// Copies of one shot behind a tile (`TimelineStacking`), by the tile's id: the viewer can open them.
     var stacks: [FileID: [FileID]] = [:]
+    /// Opened from the Library: the viewer does not offer "Show in library".
+    var fromLibrary = false
 }
 
 /// Shown when the account's login is no longer valid.

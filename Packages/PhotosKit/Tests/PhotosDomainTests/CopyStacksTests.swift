@@ -92,11 +92,27 @@ import Testing
 
 /// Stacked copies in the viewer, the folder trail of "Show in folder" and the slideshow's stepping.
 @Suite struct ViewerExtrasTests {
-    @Test func anOpenedStackPutsItsCopiesAfterTheTile() {
+    @Test func aStackIsOnePageThatShowsTheChosenCopy() {
         let stacks: [Int: [Int]] = [2: [2, 20, 21], 4: [4, 40]]
-        #expect(ViewerStacks.pages([1, 2, 3, 4], stacks: stacks, expanded: []) == [1, 2, 3, 4])
-        #expect(ViewerStacks.pages([1, 2, 3, 4], stacks: stacks, expanded: [2]) == [1, 2, 20, 21, 3, 4])
-        #expect(ViewerStacks.pages([1, 2, 3, 4], stacks: stacks, expanded: [2, 4]) == [1, 2, 20, 21, 3, 4, 40])
+        #expect(ViewerStacks.copies(of: 2, stacks: stacks) == [2, 20, 21])
+        #expect(ViewerStacks.copies(of: 3, stacks: stacks) == [3], "a photo in no stack is a stack of one")
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [:]) == 2, "the tile's copy first")
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [2: 21]) == 21)
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [2: 40]) == 2, "a copy of another stack is not shown")
+        #expect(ViewerStacks.shown(page: 3, stacks: stacks, chosen: [:]) == 3)
+        #expect(ViewerStacks.pages([1, 2, 3, 4], stacks: stacks, removed: []) == [1, 2, 3, 4], "no extra pages for copies")
+    }
+
+    @Test func aStackPageStaysWhileOneOfItsCopiesDoes() {
+        let stacks: [Int: [Int]] = [2: [2, 20, 21]]
+        // The copy shown is deleted: the page shows the next copy left.
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [2: 20], removed: [20]) == 2)
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [:], removed: [2]) == 20)
+        #expect(ViewerStacks.copies(of: 2, stacks: stacks, removed: [2]) == [20, 21])
+        #expect(ViewerStacks.pages([1, 2, 3], stacks: stacks, removed: [2, 20]) == [1, 2, 3])
+        #expect(ViewerStacks.pages([1, 2, 3], stacks: stacks, removed: [2, 20, 21]) == [1, 3], "gone with its last copy")
+        #expect(ViewerStacks.shown(page: 2, stacks: stacks, chosen: [:], removed: [2, 20, 21]) == nil)
+        #expect(ViewerStacks.pages([1, 2, 3], stacks: stacks, removed: [1]) == [2, 3])
     }
 
     @Test func theTileOfACopyIsFound() {

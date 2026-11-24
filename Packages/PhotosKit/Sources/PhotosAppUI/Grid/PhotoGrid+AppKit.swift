@@ -34,7 +34,12 @@
 
     final class PhotoGridScrollView: NSScrollView, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewPrefetching {
         let services: AccountServices
-        var callbacks: GridCallbacks?
+        var callbacks: GridCallbacks? {
+            didSet {
+                // "Show in library" scrolls to a tile (the zoom transition the locator serves elsewhere is not the Mac's).
+                callbacks?.tileLocator?.reveal = { [weak self] id in self?.reveal(id) }
+            }
+        }
         let collectionView = GridCollectionView()
         /// Model, zoom, anchor and layout bookkeeping, shared with the UIKit grid.
         private let core: GridCore
@@ -234,6 +239,21 @@
             }
             guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
             scroll(toDocumentY: frame.minY - CGFloat(headerHeight(section: indexPath.section)))
+        }
+
+        /// Scrolls the tile into the middle of the visible area if it is not wholly visible.
+        func reveal(_ id: FileID) {
+            guard let indexPath = core.indexPath(for: id) else { return }
+            collectionView.layoutSubtreeIfNeeded()
+            if let height = collectionView.collectionViewLayout?.collectionViewContentSize.height, collectionView.frame.height < height {
+                collectionView.setFrameSize(NSSize(width: collectionView.frame.width, height: height))
+            }
+            guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+            var visible: NSRect = contentView.bounds
+            visible.origin.y += topInset
+            visible.size.height -= topInset
+            guard !visible.contains(frame) else { return }
+            scroll(toDocumentY: frame.midY - visible.height / 2)
         }
 
         /// Scrolls so that the document offset `y` is at the top of the visible area (below the toolbar).

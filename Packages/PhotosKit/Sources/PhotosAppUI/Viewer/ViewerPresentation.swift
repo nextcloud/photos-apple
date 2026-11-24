@@ -35,22 +35,26 @@ private struct MediaViewerPresenter: ViewModifier {
     @Environment(SessionModel.self) private var session
     /// Passed on explicitly: the cover is a presentation of its own.
     @Environment(\.showInFolder) private var showInFolder
+    @Environment(\.showInTimeline) private var showInTimeline
 
     func body(content: Content) -> some View {
         #if os(iOS)
             content.fullScreenCover(item: $start) { (start: ViewerStart) in
                 NavigationStack {
-                    MediaViewer(ids: start.ids, startId: start.startId, stacks: start.stacks, currentChanged: zoom?.currentChanged)
+                    MediaViewer(
+                        ids: start.ids, startId: start.startId, stacks: start.stacks, fromLibrary: start.fromLibrary,
+                        currentChanged: zoom?.currentChanged)
                 }
                 .environment(session)
                 .environment(\.showInFolder, showInFolder)
+                .environment(\.showInTimeline, showInTimeline)
                 // The viewer paints its own black backdrop and fades it while it is dragged down to close.
                 .presentationBackground(.clear)
                 .modifier(ViewerZoomTransition(source: zoom))
             }
         #else
             content.navigationDestination(item: $start) { (start: ViewerStart) in
-                MediaViewer(ids: start.ids, startId: start.startId, stacks: start.stacks)
+                MediaViewer(ids: start.ids, startId: start.startId, stacks: start.stacks, fromLibrary: start.fromLibrary)
             }
         #endif
     }
