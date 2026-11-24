@@ -68,6 +68,8 @@ targets:
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         ENABLE_USER_SELECTED_FILES: readwrite
         ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY: YES
+        # Import from a camera connected by USB (ImageCaptureCore in the sandbox, SPEC §15.2).
+        ENABLE_RESOURCE_ACCESS_USB: YES
         # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
         PHOTOS_ENTITLEMENTS_NO: ""
         PHOTOS_ENTITLEMENTS_YES: App/NextcloudPhotos.entitlements
@@ -107,6 +109,8 @@ targets:
         # Face ID. The system's own question already names Face ID or Optic ID.
         NSFaceIDUsageDescription: Nextcloud Photos uses this to unlock the app and your archived photos.
         NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
+        # Import from a memory card (Mac, SPEC §15.2): macOS asks before an app reads a removable volume.
+        NSRemovableVolumesUsageDescription: Nextcloud Photos reads the photos and videos on memory cards you import from.
         NSAppTransportSecurity:
           # Nextcloud servers are self-hosted and their address is typed in by the user: plain http (home networks) and
           # TLS setups that ATS rejects must stay possible. Per-host exceptions (SPEC §8) cannot be used, the hosts are

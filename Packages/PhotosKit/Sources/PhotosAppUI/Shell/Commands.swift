@@ -16,6 +16,8 @@ public struct MainActions {
     var syncNow: () -> Void
     /// Import from Google Takeout (Mac only).
     var importTakeout: (() -> Void)? = nil
+    /// Import from a camera, memory card or folder (Mac, iPad; SPEC §15.2).
+    var importCard: (() -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -51,6 +53,14 @@ public struct GridActions {
     var addToNewAlbum: (() -> Void)? = nil
     /// Image ▸ Use as Desktop Picture (Mac, one still photo; SPEC §15.4).
     var useAsDesktopPicture: (() -> Void)? = nil
+    /// Image ▸ Flag / Rating with the selection (SPEC §15.2); nil when it cannot be rated.
+    var cull: ((CullingCommand) -> Void)? = nil
+    /// Image ▸ Compare (2–4 selected).
+    var compare: (() -> Void)? = nil
+    /// Image ▸ Delete Rejected… (the Library).
+    var deleteRejected: (() -> Void)? = nil
+    /// Image ▸ Edit With ▸ (Mac): the photo to open in another app.
+    var editWith: EditWithTarget? = nil
 }
 
 /// An album opened in a window of its own (File ▸ Open in New Window, the album's context menu, ⌥-click; SPEC §6.2).
@@ -123,6 +133,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Upload Photos…", bundle: .module)) { main?.upload() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(main == nil)
+            // ⇧⌘I, as Import… in Photos.
+            Button(CardImportAvailability.menuTitle) { main?.importCard?() }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(main?.importCard == nil)
             #if os(macOS)
                 Button(String(localized: "Import from Google Takeout…", bundle: .module)) { main?.importTakeout?() }
                     .disabled(main?.importTakeout == nil)
@@ -211,6 +225,7 @@ public struct PhotosCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .control])
             }
             .disabled(selectionCount == 0)
+            CullingCommands(grid: grid)
             Divider()
             Button(String(localized: "Delete…", bundle: .module)) { grid?.delete() }
                 .keyboardShortcut(.delete)

@@ -275,6 +275,9 @@
     "Checking your Nextcloud… %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel while the app compares the device's photos with the server."
     },
+    "Connect to your server once to start rating: the app creates the tags for ratings and flags there." : {
+      "comment" : "Culling error: the rating tags must be created on the server, which cannot be reached."
+    },
     "Continues when Nextcloud Photos runs again" : {
       "comment" : "Backup Live Activity and widget: the system stopped the backup in the background; it goes on later."
     },
@@ -304,6 +307,9 @@
     },
     "Place" : {
       "comment" : "Spotlight: kind of a result that is a place."
+    },
+    "Ratings and flags need the Collaborative tags app on your server." : {
+      "comment" : "Culling error: the server has no system tags."
     },
     "Remove from Album" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Album\"): photos were removed from an album. Title-style capitalisation as in the menu bar."
@@ -343,6 +349,9 @@
     },
     "Your photos are backed up." : {
       "comment" : "Result of a backup run when there was nothing left to upload."
+    },
+    "Your server only lets administrators create tags. Ask your administrator to create these collaborative tags: %@." : {
+      "comment" : "Culling error. The placeholder is a list of tag names such as ★★★, Pick, Rejected."
     }
   },
   "version" : "1.1"
