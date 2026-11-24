@@ -23,7 +23,8 @@ import Testing
         #expect(throws: Keychain.KeychainError.status(errSecDuplicateItem)) {
             try Keychain.isStored(errSecDuplicateItem, lastAttempt: false)
         }
-        #expect(Keychain.KeychainError.status(errSecMissingEntitlement).localizedDescription.contains("keychain"))
+        // The system's error number as it is, not grouped like a quantity ("-34.018").
+        #expect(Keychain.KeychainError.status(errSecMissingEntitlement).localizedDescription.contains("(error -34018)"))
     }
 
     /// A login whose app password cannot be stored fails with that reason; no account is added, and the app password the

@@ -39,10 +39,10 @@ public struct Keychain: Sendable {
             switch self {
             case .status(let status):
                 String(
-                    localized: "Your login could not be saved in the keychain (error \(Int(status))).", bundle: .module,
+                    localized: "Your login could not be saved in the keychain (error \(String(status))).", bundle: .module,
                     comment: """
                         Shown when a login cannot be completed because the app could not store the app password in the system \
-                        keychain. The placeholder is the system's error number.
+                        keychain. The placeholder is the system's error number (e.g. -34018), not formatted.
                         """)
             }
         }
