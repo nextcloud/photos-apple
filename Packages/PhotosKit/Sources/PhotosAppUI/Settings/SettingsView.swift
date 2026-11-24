@@ -579,6 +579,10 @@ struct ServerFolderList: View {
                         NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
                     }
                     Tab(String(localized: "Storage", bundle: .module), systemImage: "internaldrive") { SettingsView(page: .storage) }
+                    // Desktop pictures from the library (SPEC §15.4).
+                    Tab(String(localized: "Desktop", bundle: .module), systemImage: "menubar.dock.rectangle") {
+                        DesktopPictureSettingsPane()
+                    }
                     Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
                         NavigationStack { SettingsView(page: .server) }
                     }

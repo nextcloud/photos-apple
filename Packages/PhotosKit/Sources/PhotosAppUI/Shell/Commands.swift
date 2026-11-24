@@ -49,6 +49,8 @@ public struct GridActions {
     var addToRecentAlbum: ((Album) -> Void)? = nil
     /// "Add to Album ▸ New Album…" with the selection.
     var addToNewAlbum: (() -> Void)? = nil
+    /// Image ▸ Use as Desktop Picture (Mac, one still photo; SPEC §15.4).
+    var useAsDesktopPicture: (() -> Void)? = nil
 }
 
 /// An album opened in a window of its own (File ▸ Open in New Window, the album's context menu, ⌥-click; SPEC §6.2).
@@ -181,6 +183,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Rotate Right", bundle: .module)) { grid?.rotate?(true) }
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(grid?.rotate == nil)
+            #if os(macOS)
+                Button(DesktopPictureAction.title) { grid?.useAsDesktopPicture?() }
+                    .disabled(grid?.useAsDesktopPicture == nil)
+            #endif
             Divider()
             Button(
                 grid?.allFavorite == true
