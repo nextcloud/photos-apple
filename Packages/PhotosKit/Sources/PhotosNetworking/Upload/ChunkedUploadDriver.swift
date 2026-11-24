@@ -75,6 +75,26 @@ public struct ChunkedUploadDriver: Sendable {
         _ upload: inout ChunkedUpload, files: Files, isolation: isolated (any Actor)? = #isolation,
         save: (ChunkedUpload) throws -> Void
     ) async -> Progress {
+        // Ended in an earlier launch, which could not record the end any more.
+        switch upload.phase {
+        case .finished:
+            do {
+                if let uploaded = try await uploader.assembledFile(of: upload) {
+                    removeFiles(files)
+                    return .finished(uploaded)
+                }
+            } catch {
+                return .running
+            }
+            // Not at its destination after all: it is done again, from the start.
+            return .failed(NetworkError.cancelled)
+        case .failed:
+            // Not a failure of the file: whoever drives it starts it again (its chunks may still be on the server).
+            removeFiles(files)
+            return .failed(NetworkError.cancelled)
+        case .needsFolder, .sending, .assembling:
+            break
+        }
         do {
             if upload.phase == .needsFolder {
                 try await uploader.openFolder(&upload)

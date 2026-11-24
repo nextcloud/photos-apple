@@ -42,7 +42,8 @@ enum MostCompatible {
                 return try await convertToH264(file)
             } catch {
                 if error is CancellationError || BackupPolicy.isOutOfDeviceSpace(error) { throw error }
-                logger.error("converting a video to H.264 failed, the original is uploaded: \(error.localizedDescription, privacy: .public)")
+                logger.error(
+                    "converting a video to H.264 failed, the original is uploaded: \(error.localizedDescription, privacy: .public)")
                 return file
             }
         }
@@ -76,7 +77,9 @@ enum MostCompatible {
     static func isHEVC(_ asset: AVAsset) async throws -> Bool {
         for track in try await asset.loadTracks(withMediaType: .video) {
             let formats = try await track.load(.formatDescriptions)
-            if formats.contains(where: { [kCMVideoCodecType_HEVC, kCMVideoCodecType_HEVCWithAlpha].contains(CMFormatDescriptionGetMediaSubType($0)) }) {
+            if formats.contains(where: {
+                [kCMVideoCodecType_HEVC, kCMVideoCodecType_HEVCWithAlpha].contains(CMFormatDescriptionGetMediaSubType($0))
+            }) {
                 return true
             }
         }

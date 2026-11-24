@@ -189,7 +189,9 @@ public struct ShareExtensionView: View {
         }
         if let last, last.failed > 0 {
             phase = .failed(
-                last.lastFailure.map { String(localized: "\(last.failed) of \(last.total) items could not be uploaded: \($0)", bundle: .module) }
+                last.lastFailure.map {
+                    String(localized: "\(last.failed) of \(last.total) items could not be uploaded: \($0)", bundle: .module)
+                }
                     ?? String(localized: "\(last.failed) of \(last.total) items could not be uploaded.", bundle: .module))
         } else {
             SharedItems.remove(copies)

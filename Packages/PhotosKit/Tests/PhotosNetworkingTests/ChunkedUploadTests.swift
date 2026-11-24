@@ -39,8 +39,9 @@ import Testing
         #expect(upload.next(limit: 8) == [.assemble])
         upload.started(.assemble, jobId: "m")
         #expect(upload.next(limit: 8).isEmpty)
-        #expect(upload.finished(jobId: "m", status: 201, headers: ["oc-fileid": "00000042oc"], error: nil)
-            == .assembled(status: 201, headers: ["oc-fileid": "00000042oc"]))
+        #expect(
+            upload.finished(jobId: "m", status: 201, headers: ["oc-fileid": "00000042oc"], error: nil)
+                == .assembled(status: 201, headers: ["oc-fileid": "00000042oc"]))
         #expect(upload.phase == .finished)
         // A report that comes twice, or one that is not of this upload, changes nothing.
         #expect(upload.finished(jobId: "m", status: 201, error: nil) == .unknown)
@@ -258,7 +259,9 @@ actor UploadKeeper {
     }
 
     func start(_ file: URL, keeper: UploadKeeper) async throws {
-        guard case .chunked(let upload) = try await server.uploader.prepareChunked(file: file, fileName: "v.mov", folder: "/Photos", capturedAt: nil)
+        guard
+            case .chunked(let upload) = try await server.uploader.prepareChunked(
+                file: file, fileName: "v.mov", folder: "/Photos", capturedAt: nil)
         else {
             Issue.record("the destination is free")
             return
@@ -426,6 +429,35 @@ actor UploadKeeper {
         }
         #expect(error as? NetworkError == .timedOut)
         #expect(server.uploads.values.first?.chunks.keys.sorted() == [1, 2, 4])
+    }
+}
+
+extension ChunkedUploadDriverTests {
+    /// An earlier launch recorded the end but could not act on it any more.
+    @Test func anUploadThatEndedInAnEarlierLaunchIsSettled() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = try makeFile(size: 35)
+        let keeper = UploadKeeper()
+        try await start(file, keeper: keeper)
+        guard case .finished = await run(driver(), keeper: keeper) else {
+            Issue.record("not finished")
+            return
+        }
+        // The record still says "finished": the file is found at its destination.
+        guard case .finished(let uploaded) = await keeper.advance(driver(), files: files) else {
+            Issue.record("the file is at its destination")
+            return
+        }
+        #expect(uploaded.path == "/Photos/v.mov")
+        // One that failed is handed back to be started again, not as a failure of the file.
+        var failed = try #require(await keeper.upload)
+        failed.markFailed()
+        await keeper.set(failed)
+        guard case .failed(let error) = await keeper.advance(driver(), files: files) else {
+            Issue.record("expected the upload to be given back")
+            return
+        }
+        #expect(error as? NetworkError == .cancelled)
     }
 }
 

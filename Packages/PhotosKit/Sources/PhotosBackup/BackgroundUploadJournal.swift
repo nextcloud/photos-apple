@@ -186,7 +186,8 @@ struct BackgroundUploadJournal {
     func removeUnknownFiles() {
         let contents = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for url in contents
-        where url.lastPathComponent != file.lastPathComponent && jobs[url.lastPathComponent] == nil && chunked[url.lastPathComponent] == nil {
+        where url.lastPathComponent != file.lastPathComponent && jobs[url.lastPathComponent] == nil && chunked[url.lastPathComponent] == nil
+        {
             try? FileManager.default.removeItem(at: url)
         }
     }

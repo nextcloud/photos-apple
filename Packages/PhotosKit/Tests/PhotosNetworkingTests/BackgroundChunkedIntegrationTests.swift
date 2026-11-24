@@ -64,7 +64,8 @@ struct BackgroundChunkedIntegrationTests {
             defer { try? FileManager.default.removeItem(at: downloaded) }
             #expect(try Uploader.sha256(of: downloaded) == (try Uploader.sha256(of: file)))
             // The capture time went with the MOVE.
-            let resource = try await dav.propfind(dav.connection.filesURL(uploaded.path), depth: 0, properties: [DAVProp.lastModified]).first
+            let resource = try await dav.propfind(dav.connection.filesURL(uploaded.path), depth: 0, properties: [DAVProp.lastModified])
+                .first
             #expect(resource?.httpDate(DAVProp.lastModified)?.timeIntervalSince1970 == 1_700_000_000)
             #expect(!FileManager.default.fileExists(atPath: files.chunks.path(percentEncoded: false)))
         } catch {

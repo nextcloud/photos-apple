@@ -300,8 +300,10 @@ actor ShareUploadBatch {
         case .running: return
         case .finished(let uploaded): await done(index, uploaded)
         case .failed(let error):
-            // The name was taken after the lookup: another one, with the next attempt.
-            if error as? NetworkError == .preconditionFailed {
+            // The name was taken after the lookup, or an earlier launch stopped it: once more, with a new lookup (the
+            // same file under the same name counts as uploaded then).
+            if let error = error as? NetworkError, error == .preconditionFailed || error == .cancelled {
+                record.items[index].sameSizeIsThisFile = record.items[index].sameSizeIsThisFile || error == .cancelled
                 record.items[index].state = .waiting
                 record.items[index].chunked = nil
                 record.items[index].path = nil
@@ -503,7 +505,8 @@ public enum ShareUploads {
             serverURL: account.serverURL, userId: account.userId, loginName: account.loginName, appPassword: password,
             userAgent: UserAgent.make(appVersion: version))
         let dav = DAVClient(http: http, connection: connection)
-        return ServerShareUploadRemote(uploader: Uploader(dav: dav), api: PhotosAPI(dav: dav, ocs: OCSClient(http: http, connection: connection)))
+        return ServerShareUploadRemote(
+            uploader: Uploader(dav: dav), api: PhotosAPI(dav: dav, ocs: OCSClient(http: http, connection: connection)))
     }
 
     static func session(_ identifier: String, layout: StorageLayout, keychain: Keychain) -> BackgroundUploadSession {
@@ -637,7 +640,8 @@ public enum ShareUploads {
             return nil
         }
         let batch = ShareUploadBatch(
-            identifier: identifier, directory: directory, record: record, transport: session(identifier, layout: layout, keychain: keychain),
+            identifier: identifier, directory: directory, record: record,
+            transport: session(identifier, layout: layout, keychain: keychain),
             remote: remote)
         batches.withLock { $0[identifier] = batch }
         return batch
@@ -667,7 +671,8 @@ public enum ShareUploads {
             content.body = String(
                 localized: "\(failed) items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more.",
                 bundle: .module)
-            try? await center.add(UNNotificationRequest(identifier: "share-upload-failed-\(UUID().uuidString)", content: content, trigger: nil))
+            try? await center.add(
+                UNNotificationRequest(identifier: "share-upload-failed-\(UUID().uuidString)", content: content, trigger: nil))
         }
     }
 #else

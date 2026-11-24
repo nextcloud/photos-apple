@@ -252,5 +252,9 @@ final class ConversionLog: Sendable {
     private let log = Mutex<(names: [String], directories: [URL])>(([], []))
     var names: [String] { log.withLock { $0.names } }
     var directories: [URL] { log.withLock { $0.directories } }
-    func add(_ name: String, directory: URL) { log.withLock { $0.names.append(name); $0.directories.append(directory) } }
+    func add(_ name: String, directory: URL) {
+        log.withLock {
+            $0.names.append(name); $0.directories.append(directory)
+        }
+    }
 }

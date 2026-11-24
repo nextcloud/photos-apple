@@ -278,8 +278,7 @@ extension BackupEngine {
         // Entries whose job was never created (the extension ended in between): the resource is free again.
         let known = Set(await service.jobsInFlight().map(\.id))
         for entry in journal.entries.values
-        where (entry.jobId.map { !known.contains($0) } ?? true) && now().timeIntervalSince(entry.createdAt) > UploadJobPolicy.orphanAge
-        {
+        where (entry.jobId.map { !known.contains($0) } ?? true) && now().timeIntervalSince(entry.createdAt) > UploadJobPolicy.orphanAge {
             journal.remove(entry.path)
         }
     }
@@ -300,7 +299,9 @@ extension BackupEngine {
 
     /// Records a failed job, unless the resource got onto the server another way meanwhile (the app sent it).
     private func uploadJobFailed(_ job: UploadJobInfo, entry: UploadJobEntry) async throws {
-        if let current = try ledgerEntries(of: entry.resource.localIdentifier).first(where: { $0.resourceKind == entry.resource.kind.rawValue }),
+        if let current = try ledgerEntries(of: entry.resource.localIdentifier).first(where: {
+            $0.resourceKind == entry.resource.kind.rawValue
+        }),
             BackupPolicy.isComplete(current)
         {
             return

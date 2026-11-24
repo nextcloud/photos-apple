@@ -48,8 +48,10 @@
 
         public func create(_ resource: BackupResource, settings: BackupSettings, request: URLRequest) async throws -> String {
             guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [resource.localIdentifier], options: nil).firstObject,
-                let photoResource = PhotoLibrarySource().resources(of: asset, settings: settings).first(where: { $0.0.kind == resource.kind })?
-                    .1
+                let photoResource = PhotoLibrarySource().resources(of: asset, settings: settings).first(where: {
+                    $0.0.kind == resource.kind
+                })?
+                .1
             else { throw CocoaError(.fileNoSuchFile) }
             let id = Mutex<String?>(nil)
             try await PHPhotoLibrary.shared().performChanges {

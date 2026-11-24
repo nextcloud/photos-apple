@@ -43,7 +43,8 @@ final class FakeJobService: UploadJobService {
         try state.withLock { state in
             if let error = state.createError { throw error }
             let id = "job-\(state.order.count + 1)"
-            state.jobs[id] = Job(info: UploadJobInfo(id: id, destination: request.url, state: .inFlight), resource: resource, request: request)
+            state.jobs[id] = Job(
+                info: UploadJobInfo(id: id, destination: request.url, state: .inFlight), resource: resource, request: request)
             state.order.append(id)
             return id
         }

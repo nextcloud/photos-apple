@@ -110,7 +110,10 @@ public struct ChunkedUpload: Codable, Sendable, Equatable {
     /// right size are not sent again.
     public mutating func folderReady(existing: [Int: Int64] = [:]) {
         guard phase == .needsFolder else { return }
-        sent = Set(existing.compactMap { number, length in (1...chunkCount).contains(number) && length == Int64(range(of: number).count) ? number : nil })
+        sent = Set(
+            existing.compactMap { number, length in
+                (1...chunkCount).contains(number) && length == Int64(range(of: number).count) ? number : nil
+            })
         running = [:]
         phase = sent.count == chunkCount ? .assembling : .sending
     }
