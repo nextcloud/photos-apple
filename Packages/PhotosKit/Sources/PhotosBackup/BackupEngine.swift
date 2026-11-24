@@ -710,7 +710,7 @@ public actor BackupEngine {
     /// (the failure is then recorded and the resource backs off).
     private func uploadFailed(_ resource: BackupResource, error: any Error) -> (any Error)? {
         if BackupPolicy.isCancellation(error) { return CancellationError() }
-        if let error = error as? NetworkError, error.isTransient { return error }
+        if let error = error as? NetworkError, BackupPolicy.endsPass(error) { return error }
         logger.error("backup of \(resource.originalName, privacy: .private) failed: \(error.localizedDescription, privacy: .public)")
         let blocker = BackupPolicy.blocker(for: error)
         // A full quota or a refusal may concern this file only (too big, blocked type): it backs off like any

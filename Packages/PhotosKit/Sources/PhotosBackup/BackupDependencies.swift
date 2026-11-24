@@ -299,6 +299,14 @@ enum BackupPolicy {
             && now.timeIntervalSince1970 < entry.updatedAt + retryDelay(attempts: entry.attempts)
     }
 
+    /// Whether an upload's failure ends the pass instead of only this file's attempt (`blocker` aside): the transient
+    /// errors that every other file would meet as well (no connection, the server is down or busy). A locked file (423)
+    /// is transient too, but it concerns this file only: it is recorded as failed, waits for its next attempt, and the
+    /// pass goes on with the others. (The outbox keeps retrying such a file; that is `NetworkError.isTransient`.)
+    static func endsPass(_ error: NetworkError) -> Bool {
+        error.isTransient && error != .locked
+    }
+
     // MARK: Scan
 
     static func isComplete(_ entry: BackupLedgerEntry) -> Bool {
