@@ -16,6 +16,8 @@ struct PlacesScreen: View {
     @Environment(SessionModel.self) private var session
     @State private var places: [Place] = []
     @State private var error: String?
+    /// The travel globe's history and stats (SPEC §15.6).
+    @State private var travel = TravelModel()
 
     var grouped: [(country: String, places: [Place])] {
         guard session.features.has(.placeCountry) else { return [("", places)] }
@@ -26,6 +28,12 @@ struct PlacesScreen: View {
 
     var body: some View {
         ScrollView {
+            // Travel and "Then and now" (SPEC §15.6) above the places.
+            VStack(alignment: .leading, spacing: 24) {
+                TravelSummaryCard(model: travel)
+                ThenAndNowRow()
+            }
+            .padding([.horizontal, .top])
             LazyVStack(alignment: .leading, spacing: 24, pinnedViews: .sectionHeaders) {
                 ForEach(grouped, id: \.country) { group in
                     Section {
@@ -68,6 +76,7 @@ struct PlacesScreen: View {
             Task {
                 do { try await services.sync.refreshPlaces() } catch { self.error = error.localizedDescription }
             }
+            Task { await travel.load(services) }
             do {
                 for try await value in services.collections.observePlaces() { places = value }
             } catch {}

@@ -19,6 +19,9 @@
     "%@ of %@" : {
       "comment" : "Progress of the on-device recognition in Settings › Search: photos looked at of all photos, e.g. \"1,234 of 5,000\"."
     },
+    "%@ of the world" : {
+      "comment" : "Countries: the share of the world's 195 countries visited, e.g. \"19 % of the world\"."
+    },
     "%@ presents a different certificate than before. This happens when the server's certificate is replaced, but it is also what someone intercepting your connection would show. Until you decide, nothing is sent to the server." : {
       "comment" : "Explanation at the top of the sheet \"The server's certificate changed\" (opened from the account banner or Settings › Server). %@ is the server's host name."
     },
@@ -152,6 +155,29 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld copies in album folders are imported once."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld countries" : {
+      "comment" : "Travel stats: number of countries visited; plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld country"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld countries"
                 }
               }
             }
@@ -796,6 +822,52 @@
         }
       }
     },
+    "%lld places" : {
+      "comment" : "Travel stats: number of places visited; plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld place"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld places"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld places have no country on your server. Looking them up sends their approximate location to Apple." : {
+      "comment" : "Countries: explanation under the button that looks up countries. The argument is the number of places.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld place has no country on your server. Looking it up sends its approximate location to Apple."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld places have no country on your server. Looking them up sends their approximate location to Apple."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld results" : {
       "comment" : "Number of search results, shown below the search field or as the window subtitle.",
       "localizations" : {
@@ -825,6 +897,29 @@
     },
     "%lld to upload" : {
       "comment" : "Backup set-up, after the check: how many of the device's photos and videos will be uploaded."
+    },
+    "%lld trips" : {
+      "comment" : "Travel stats: number of trips; plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld trip"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld trips"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "%lld waiting" : {
       "comment" : "Number of photos that wait for backup.",
@@ -1077,8 +1172,14 @@
     "All memories" : {
       "comment" : "Last card of the memories strip at the top of the library: opens the Memories screen."
     },
+    "All photos from here" : {
+      "comment" : "Then and now: link to all photos of the spot from every year."
+    },
     "All time" : {
       "comment" : "Map time slider: button that shows the photos of every month again."
+    },
+    "All years" : {
+      "comment" : "Travel: the year filter's choice that shows every year."
     },
     "All your own photos are in this album already." : {
       "comment" : "Description of the empty state when adding photos to an album and every photo of the user is already in it. Title: \"No photos to add\"."
@@ -1525,6 +1626,9 @@
     "Couldn't sync" : {
       "comment" : "Title of the error banner at the bottom of photo grids, of the error state of the library and of the row in Settings › Server when synchronising with the server failed. Followed by the reason and a Retry button."
     },
+    "Countries" : {
+      "comment" : "Travel: title of the list of countries visited (a scratch map)."
+    },
     "Create" : {
       "comment" : "The label of a button that creates a new album.",
       "isCommentAutoGenerated" : true
@@ -1896,8 +2000,14 @@
     "Export" : {
       "comment" : "Button of the Mac's folder panel that starts exporting the selected photos (verb)."
     },
+    "Export Video…" : {
+      "comment" : "Then and now: button that saves the time-lapse as a video (Mac title case)."
+    },
     "Export diagnostics…" : {
       "comment" : "Button in Settings › Server › Diagnostics: writes a text file with the app's log for a bug report and lets the user save or share it."
+    },
+    "Export video…" : {
+      "comment" : "Then and now: button that saves the time-lapse as a video."
     },
     "Exported %lld items" : {
       "comment" : "Mac: originals were exported into a folder.",
@@ -1986,6 +2096,9 @@
     },
     "Find a tag" : {
       "comment" : "Prompt of the search field of the tag sheet."
+    },
+    "Finding the same view…" : {
+      "comment" : "Then and now: shown while the photos of the years are compared on the device to find the ones that show the same view."
     },
     "Finishing…" : {
       "comment" : "The title of a button that is displayed while the user is being logged in.",
@@ -2085,6 +2198,9 @@
     "Highlights" : {
       "comment" : "A slider that adjusts the highlights of an image.",
       "isCommentAutoGenerated" : true
+    },
+    "Home" : {
+      "comment" : "Travel: the marker of the place the user photographs most often (probably where they live)."
     },
     "Hours: %lld" : {
       "comment" : "A label at the bottom of the metadata editor that shows the number of hours to shift the capture date and time",
@@ -2365,6 +2481,9 @@
       "comment" : "A label for a text field that accepts a login link.",
       "isCommentAutoGenerated" : true
     },
+    "Look up countries with Apple Maps" : {
+      "comment" : "Countries: button that finds the countries of places the server knows none for."
+    },
     "Looking for duplicates…" : {
       "comment" : "Progress label while the library is searched for duplicates."
     },
@@ -2374,6 +2493,9 @@
     "Looking for new photos…" : {
       "comment" : "A status message displayed when the backup is scanning for new photos.",
       "isCommentAutoGenerated" : true
+    },
+    "Looking up countries…" : {
+      "comment" : "Countries: shown while the countries of places are looked up with Apple Maps."
     },
     "Make Album Cover" : {
       "comment" : "Menu command on the Mac (title case) that makes the selected photo the cover of the album."
@@ -2385,6 +2507,9 @@
     "Make available offline" : {
       "comment" : "A button that makes an album available offline.",
       "isCommentAutoGenerated" : true
+    },
+    "Making video…" : {
+      "comment" : "Then and now: shown while the time-lapse video is written."
     },
     "Map" : {
       "comment" : "The name of the map icon.",
@@ -2674,6 +2799,9 @@
       "comment" : "A message displayed when no text is found in the image.",
       "isCommentAutoGenerated" : true
     },
+    "No trips in this time." : {
+      "comment" : "Travel: the year filter shows a year without trips."
+    },
     "No videos" : {
       "comment" : "Title of the empty Videos view."
     },
@@ -2824,6 +2952,9 @@
     },
     "Open the link in another account?" : {
       "comment" : "Title of the question when a link opens a photo, album or person of another logged-in account."
+    },
+    "Opens the photos of this year." : {
+      "comment" : "Then and now: VoiceOver hint of a year's photo."
     },
     "Options" : {
       "comment" : "A section header for backup options.",
@@ -3015,8 +3146,14 @@
     "Play Slideshow" : {
       "comment" : "Button and menu item (Mac, title case): shows the photos of a memory one after the other."
     },
+    "Play Time-Lapse" : {
+      "comment" : "Then and now: button that plays the photos of the years cross-fading into each other (Mac title case)."
+    },
     "Play slideshow" : {
       "comment" : "Button and menu item: shows the photos of a memory one after the other."
+    },
+    "Play time-lapse" : {
+      "comment" : "Then and now: button that plays the photos of the years cross-fading into each other."
     },
     "Please enter a valid server address." : {
       "comment" : "Error message when the server address is invalid.",
@@ -3451,6 +3588,9 @@
     "Scan the QR code shown under Settings › Security › Devices & sessions on the web, or paste the login link (nc://login/…) from there." : {
       "comment" : "Instruction on the login screen (iPhone, iPad) for logging in with a QR code. \"Settings › Security › Devices & sessions\" is the path in the Nextcloud web interface: use the names Nextcloud's own translation uses. Keep nc://login/… as it is."
     },
+    "Scratch map" : {
+      "comment" : "Countries: show every country's flag, the visited ones in colour (like a scratch-off world map)."
+    },
     "Screen recordings" : {
       "comment" : "Section title for screen recordings in the free space screen.",
       "isCommentAutoGenerated" : true
@@ -3483,6 +3623,9 @@
     "Search your photos" : {
       "comment" : "A description of how to search for photos.",
       "isCommentAutoGenerated" : true
+    },
+    "See all" : {
+      "comment" : "Link from a row of items to the list of all of them."
     },
     "Select" : {
       "comment" : "The label of a button that opens a selection interface.",
@@ -3923,6 +4066,9 @@
     "The photo was changed on the server in the meantime. Nothing was overwritten; try again after the next sync." : {
       "comment" : "Image › Rotate or Overwrite original: the file on the server is newer than the one the app edited; nothing was replaced."
     },
+    "The photos could not be loaded." : {
+      "comment" : "Then and now: the time-lapse video could not be made because the photos did not load."
+    },
     "The photos stay in your library." : {
       "comment" : "The text that appears in a confirmation dialog when the user deletes an album.",
       "isCommentAutoGenerated" : true
@@ -3955,6 +4101,12 @@
     "The trash bin is disabled on your server: deleted items cannot be restored." : {
       "comment" : "The message displayed when the trash bin is disabled on the server.",
       "isCommentAutoGenerated" : true
+    },
+    "The video could not be made" : {
+      "comment" : "Then and now: title of the alert when the time-lapse video failed."
+    },
+    "Then and now" : {
+      "comment" : "Title of the feature that shows a place the user photographed in several years, side by side and as a time-lapse."
     },
     "There are no albums on this device." : {
       "comment" : "Backup › Albums (iPhone, iPad): mirroring device albums into Nextcloud albums. Shown when the device has no albums of its own."
@@ -4030,6 +4182,9 @@
     "This photo can't be shown spatially" : {
       "comment" : "Vision Pro: a spatial photo could not be loaded for the 3D view."
     },
+    "This place" : {
+      "comment" : "Then and now: name of a spot that has no place name."
+    },
     "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that." : {
       "comment" : "Error during login when a server that was entered with https:// redirects to http://."
     },
@@ -4051,6 +4206,9 @@
     },
     "Time range" : {
       "comment" : "Map toolbar: shows or hides the slider that limits the map to some months."
+    },
+    "Time-lapse of %@, %@" : {
+      "comment" : "Then and now: VoiceOver label of the playing time-lapse. The arguments are the place and its years."
     },
     "Timeline day counts" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -4076,6 +4234,9 @@
     },
     "Trash bin" : {
       "comment" : "A server feature in the list under Settings › Server features."
+    },
+    "Travel" : {
+      "comment" : "Title of the globe with the user's trips, from the geotagged photos."
     },
     "Trips" : {
       "comment" : "A heading for the list of trips.",
@@ -4315,6 +4476,9 @@
     "Vignette" : {
       "comment" : "A parameter that adjusts the vignette effect.",
       "isCommentAutoGenerated" : true
+    },
+    "Visited" : {
+      "comment" : "Countries: show the visited countries as a list."
     },
     "Vivid" : {
       "comment" : "Photo filter."
