@@ -89,5 +89,13 @@ The app has no accessibility identifiers yet; the tests find elements by role an
 the app in English. They are not part of CI because they need a server and, for now, have only been compiled
 (`build-for-testing` for macOS and iOS), not run.
 
+`UITests/AmbientUITests.swift` (SPEC §15.4) drives the system around the app, so it only makes sense in a simulator of
+its own: `testBackupLiveActivity` and `testControlActions` (iPhone) need backup set up for the test account and new
+photos in the simulator's library (`xcrun simctl addmedia`); `testControls` and `testPhotoFrameWidget` add the controls
+and widgets through Control Center's and the Home Screen's galleries, as a user would; `testMemoryRoom` (Vision Pro)
+opens a memory's room, with `PHOTOS_DEBUG_MEMORY_ROOM_FOCUS=1` bringing the first frame close (XCUITest cannot look and
+pinch). With `PHOTOS_UITEST_SHOTS=<folder>` (`TEST_RUNNER_…`) the iPhone tests write their screenshots there; on Vision Pro
+`XCUIScreen` captures nothing, take them with `xcrun simctl io <udid> screenshot` while the test runs.
+
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.

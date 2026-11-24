@@ -816,7 +816,86 @@ _To be written._
 
 ### 15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room [ambient]
 
-_To be written._
+Photos and the backup outside the app's window. Shared logic lives in `PhotosCore/Ambient` (unit-tested on macOS); the
+widgets and controls in `Extensions/Widgets`; the controls' intents in `App/Shared/AmbientIntents.swift`, compiled into both
+the app and the widget extension (`WIDGET_EXTENSION`).
+
+**Sources and rotation (`AmbientPhotos`, `AmbientRotation`).** A source is Favorites, Memories (On this day; on a day
+without, the newest year in review, then the newest trip), an album (own or shared; its own order, including photos only
+the album knows) or the Library (newest first). Only still images: no videos, no motion halves of Live Photos, nothing
+archived; at most 500 photos. The order is either the source's order or shuffled with a seed derived from the source
+(FNV-1a, the same in every process), so every photo comes once before any comes again and a new widget timeline continues
+where the last one ended (time slots of the interval, counted from 1970).
+
+**Mac desktop pictures (`DesktopPictures`, macOS).**
+- "Use as Desktop Picture" for one still photo: the grid's context menu, the viewer's More menu and Image ▸ Use as Desktop
+  Picture. The photo goes on every display, filling it (cropping what does not fit, as "Fill Screen"); a running rotation
+  stops, because it would replace the photo. Errors are shown with the system's error alert.
+- Rotation: Settings ▸ Desktop (a tab of the Settings window), and "Use as Desktop Pictures…" in an album's menu (a sheet
+  preset to the album). Options: photos (Favorites, Memories, Library or any own/shared album), Change picture (every 5,
+  15, 30 minutes, hour, day), Show on (All Displays or one display), Shuffle. With All Displays every display gets a photo
+  of its own, and each display gets a photo of its shape (landscape on landscape displays, portrait on portrait ones;
+  photos that suit none wait for a display they suit, and when none suits, the next photo is taken). "Next Picture" and
+  "Stop" in Settings; the running rotation is shown with its source, displays and interval.
+- The pictures are files in the app's caches (`Library/Caches/DesktopPictures`): the original for JPEG/HEIC/PNG up to
+  40 MB, else the largest preview (4096 px) as JPEG; only the files that are on a display are kept.
+- *Decided:* no login item or background agent. The rotation runs inside the app while it runs — in the background and
+  with no window open (the Mac app keeps running when its last window closes) — and continues where it was (remembered in
+  the app's defaults) at the next launch. It waits in steps of at most five minutes, so a Mac that slept changes soon after
+  waking; App Nap may delay a change by a little. Limits: `NSWorkspace` sets the picture of each display's *current* Space
+  only; the rotation's photos come from the account they were chosen in and change only while that account is the active
+  one; an album's photos must have been loaded once (opening the album). A screen saver is not built (no native API for a
+  sandboxed app's own saver short of a separate `.saver` bundle).
+
+**Photo frame widget (`PhotoFrameWidget`).** An App Intents–configured widget ("Photo Frame"): Photos (Favorites,
+Memories, Album, Library), Album (own and shared albums of the active account), Change Photo (every 15 minutes, hour,
+3 hours, day), Shuffle (on), Hide While Locked (off). Families: small, medium, large, extra large; on iPhone/iPad also the
+Lock Screen's rectangular accessory (a small picture with place and day). The photo fills the widget
+(`containerBackgroundRemovable(false)`, so StandBy keeps it full-bleed); place (else day) in the corner, left out in the
+vibrant/accented renderings and on an always-on screen, where the photo is dimmed (StandBy night mode). In the accented
+(tinted) Home Screen the photo is desaturated and tinted. On Vision Pro the frame is a paper-textured print, elevated or
+recessed on a wall. Tapping opens the photo in the app (with its account). A timeline has 3–6 entries (by size; each photo
+is decoded to the widget's pixel size, max 1200 px), from the preview cache; up to two missing previews are fetched per
+timeline. *Decided:* unlike the other widgets the frame shows its photo while the device is locked by default — StandBy
+and the Lock Screen are what a photo frame is for; "Hide While Locked" restores the redaction, and with app lock on the
+frame shows only a lock. The existing On this day and Favorites widgets stay.
+
+**Backup status widget and snapshot (`BackupPresence`, `BackupWidgetSnapshot`).** The app writes a small snapshot of the
+backup (on/off, set up, phase, counts, bytes left, last run; no file names) into the App Group
+(`Application Support/backup-status.json`) when it changes: a new phase or switch at once, progress at most every 30 s;
+the widget is reloaded at once for a new phase, else at most once a minute. The "Backup" widget: small (all platforms with
+backup), and on the Lock Screen circular (a gauge while uploading), rectangular and inline. Tapping opens Backup.
+
+**Live Activity (`BackupLiveActivity`, iPhone and iPad).** Shows photos left (of the pass), the size left (from the
+library's byte sizes of what waits, `BackupStatus.pendingBytes`), why it waits ("Waiting for Wi-Fi", "continues when
+Nextcloud Photos runs again"), why it stopped (storage full, login expired …) and "Backed up / N uploaded" at the end.
+Lock Screen banner with progress bar and a Pause (running) / Resume (paused) button (`PauseBackupIntent`,
+`BackUpNowControlIntent`); Dynamic Island: compact (symbol + number left), minimal (circular progress), expanded (counts,
+progress, detail, button). Rules: it starts for a pass that uploads at least 10 items or 100 MB, or for any pass the user
+started outside the app (control, Action button); it is updated at most every 2 s within a phase (a new phase at once);
+a done pass leaves the Lock Screen after 15 minutes, a stopped one stays (system limit) so the user sees what to fix; an
+activity not updated for 10 minutes shows "Continues in the background". It does not start while a continued processing
+task shows the system's own progress for the same pass, never again in a pass the user swiped it away, and not when the
+user turned it off — in Backup ▸ "Show progress on Lock Screen" (on by default) or for the app in Settings. Activities
+left from an earlier run end at launch.
+
+**Controls (iOS/iPadOS 18+ `ControlWidget`).** "Backup" (on/off toggle, value read from the backup options in the App
+Group), "Back Up Now" (button) and "Nextcloud Photos" (opens the library); all can be placed in Control Center, on the
+Lock Screen and on the Action button. Their intents are `LiveActivityIntent`s, so the system performs them in the app's
+process (launched in the background when needed); "Back Up Now" waits up to 20 s for the Live Activity to start. Turning
+backup on (or Back Up Now) without a backup set up continues in the foreground and opens Backup. "Turn Backup On or Off"
+is also a Shortcuts action. *Decided:* no controls on the Mac (backup there runs with the app; a Control Center item
+would add little) and none on Vision Pro (no backup).
+
+**Vision Pro memory room (`MemoryRoom`, visionOS).** "Memory Room" in a memory's toolbar opens an immersive space (mixed)
+where up to 24 of the memory's photos (all favourites, the others evenly spread, in order) hang as framed pictures — a
+dark frame, a light mat, the photo — on a ring around the viewer (at least 2 m away), facing the centre: one row at eye
+height up to 12, two rows (sitting and standing height) above. The 60° right in front stay free for the app's window and
+the title; the frames start right of the window and go round to its left. They grow into place as their previews arrive and drift slowly up and down;
+the memory's title floats in front. Look at one and pinch: it comes to the viewer (1.5 m in front at eye height, 1.2×); pinch again, or
+another frame, and it goes back. A spatial photo (HEIC with a stereo pair) brought close is shown with its depth
+(`ImagePresentationComponent`, spatial stereo); away from the viewer it is flat. Frames glow where the viewer looks
+(hover effect) and are VoiceOver elements with place or day. The button becomes "Leave Memory Room".
 
 ### 15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos [feel]
 

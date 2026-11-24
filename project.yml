@@ -278,7 +278,7 @@ targets:
   # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
   NextcloudPhotosUITests:
     type: bundle.ui-testing
-    supportedDestinations: [iOS, macOS]
+    supportedDestinations: [iOS, macOS, visionOS]
     sources:
       - path: UITests
     dependencies:
@@ -287,7 +287,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).uitests
         TEST_TARGET_NAME: NextcloudPhotos
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1,2,7"
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   NextcloudPhotos:

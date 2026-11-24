@@ -598,7 +598,40 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 - ⬜ Not started.
 
 ### §15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room
-- ⬜ Not started.
+Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the repository).
+- ✅ Live Activity of the backup (iPhone, iPad): run in the iOS 27.2 simulator (`AmbientUITests.testBackupLiveActivity`,
+  15 new photos): starts while many photos are compared with the server, Dynamic Island (compact, paused state), Lock
+  Screen banner "14 left · 21.8 MB left · Pause", then "Backed up · 14 uploaded". Start/update/end rules unit-tested
+  (`BackupActivityTests`); remaining size from `BackupStatus.pendingBytes` (engine test). Found and fixed in the
+  simulator: the activity first only started once the uploads began, by then the user had often left the app and the
+  system refused ("Target is not foreground"); it now starts during the server check and only while the app is in front
+  (or from the intent). Not seen: the expanded Dynamic Island, the stale state, the Pause button's effect, a real device.
+- ✅ Controls (iOS 18+ ControlWidget): "Backup" switch, "Back Up Now", "Nextcloud Photos" — added through Control
+  Center's gallery in the simulator (`testControls`); the switch turned backup off and on in the app's process while the
+  app was in the background, "Back Up Now" started a backup with its Live Activity from the background
+  (`testControlActions`, log: "turned off/on", "Live Activity started"). Lock Screen and Action button placement not
+  tried (same controls). Not on the Mac or Vision Pro (decided, SPEC §15.4).
+- ✅ Photo frame widget and backup widget: added to the Home Screen through the widget gallery in the simulator
+  (`testPhotoFrameWidget`): the frame shows a favourite with place and day, the backup widget "Backed up · Last backup …".
+  Rotation and sources unit-tested (`AmbientRotationTests`, `AmbientPhotosTests`). 🟡 Not seen: StandBy and its night mode
+  (the simulator has no StandBy), Lock Screen accessory families, the tinted Home Screen, the album picker of the frame's
+  settings, the Mac desktop and Vision Pro widgets; on visionOS the frame builds with paper texture and mounting styles.
+- 🟡 Mac desktop pictures: "Use as Desktop Picture" (grid context menu, viewer More menu, Image menu), rotation in
+  Settings ▸ Desktop and from an album's menu; plan/schedule/persistence/file clean-up unit-tested (`DesktopPictureTests`).
+  Seen in the Mac app (accessibility API, screenshots): Image ▸ Use as Desktop Picture, Settings ▸ Desktop, the album
+  menu's "Use as Desktop Pictures…" sheet preset to the album. Not run against the real desktop: starting it would
+  change the owner's wallpaper on this Mac.
+- ✅ Vision Pro memory room: run in the visionOS 27.2 simulator (`AmbientUITests.testMemoryRoom`): "Memory Room" in a
+  memory's toolbar opens the immersive space, the memory's photos hang framed around the viewer with the title in front,
+  the button becomes "Leave Memory Room"; a frame brought close (debug switch for the pinch) comes in front at eye height.
+  Layout unit-tested (`MemoryRoomLayoutTests`). Found in the simulator and changed: frames right in front covered the
+  window, and the frame brought close filled the view — the front 60° stay free now and the close frame sits 1.5 m away.
+  🟡 Not seen: a real look-and-pinch, the hover glow, a spatial photo shown with depth (no spatial photo in the test
+  library), VoiceOver in the room.
+- Found on the way and fixed (shared, `project.yml`): the app embedded the share and notification-service extensions on
+  visionOS, where these extension points do not exist, so it did not install in the visionOS simulator; and
+  `UIApplicationSupportsMultipleScenes` was not inside `UIApplicationSceneManifest`, so visionOS refused every immersive
+  space (also the round-4 panorama) and iPadOS may have kept the app to one window.
 
 ### §15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos
 - ⬜ Not started.
