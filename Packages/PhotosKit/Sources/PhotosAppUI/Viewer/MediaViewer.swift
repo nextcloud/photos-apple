@@ -34,6 +34,8 @@ struct MediaViewer: View {
     @State private var slideshow: SlideshowRequest?
     /// "Show Similar" for the photo shown (SPEC §15.5).
     @State private var similarTo: MediaItem?
+    /// "Then and now" of the place of the photo shown (SPEC §15.6).
+    @State private var thenAndNow: ThenAndNowStart?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -167,6 +169,7 @@ struct MediaViewer: View {
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
             .slideshow($slideshow) { last in showAfterSlideshow(last) }
+            .thenAndNowSheet($thenAndNow)
             .mediaSaveStatus(saver)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
@@ -584,6 +587,7 @@ struct MediaViewer: View {
                 }
             }
         #endif
+        ThenAndNowMenuItem(item: item, start: $thenAndNow)
         if showInFolder != nil {
             Button {
                 showFolder(item)

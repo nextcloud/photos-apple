@@ -35,6 +35,8 @@ struct MemoriesScreen: View {
                         section(String(localized: "Year in review", bundle: .module), [recap])
                     }
                     if !trips.isEmpty { section(String(localized: "Trips", bundle: .module), trips) }
+                    // Places photographed in several years (SPEC §15.6); shows nothing when there are none.
+                    ThenAndNowRow()
                 }
                 if loaded && onThisDay.isEmpty && (onlyOnThisDay || (trips.isEmpty && recap == nil && years.isEmpty)) {
                     ContentUnavailableView(

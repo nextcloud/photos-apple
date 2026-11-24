@@ -120,6 +120,15 @@ struct MapScreen: View {
             }
             .help(String(localized: "Photos in this area", bundle: .module))
         }
+        // The trips on a globe (SPEC §15.6): also where the server has no Places.
+        ToolbarItem {
+            NavigationLink {
+                TravelGlobeScreen()
+            } label: {
+                Label(TravelWording.title, systemImage: "globe.europe.africa")
+            }
+            .help(TravelWording.title)
+        }
     }
 
     static var timeRangeTitle: String {

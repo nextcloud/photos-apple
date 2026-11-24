@@ -741,7 +741,22 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   an iPhone pinch (the grid scales with the fingers and changes step on release).
 
 ### §15.6 Then and now, travel globe
-- ⬜ Not started.
+- ✅ Then and now spots (TN-1): 100 m spots over ≥ 2 years, ranking, titles; unit tests (`PlacesDelightTests`,
+  `TravelQueryTests`); run in the iOS 27.2 simulator against the test library (Places row, "See all", spot screen).
+- ✅ Same view (TN-2): Vision feature prints of 256 px previews choose each year's photo; unit tests with a fake distance
+  and with real feature prints of generated pictures (`ThenAndNowMediaTests`); ran in the simulator. Compass heading not
+  used (not in the index) — decision in SPEC.
+- ✅ Side by side, viewer More menu, time-lapse player and video export (TN-3, TN-4): run in the iOS 27.2 simulator
+  (`UITests/PlacesTourTests`, screenshots in `ios-fix-shots/r5-places`); the MP4 writer has a unit test that reads the
+  video back. Mac: the Places row seen in the running app (AX API, `mac-01-places.png`); visionOS: build only.
+- ✅ Travel model (TG-1, `TravelHistory`): unit tests; reusable for Year in Review (`stats(in:)`).
+- ✅ Travel globe (TG-2): MapKit hybrid realistic globe with legs, place markers, year filter, trips; run in the iOS
+  27.2 simulator. Mac: the screen and its panel seen in the running app, the map imagery not (it does not draw in a
+  window that is never brought to the front); visionOS: build only.
+- 🟡 Countries and scratch map (TG-3): run in the simulator. The index only has the server's country where the
+  extended Photos API is detected (`mediaIndexExtended` requests `nc:metadata-photos-place-country`), so on stock
+  servers countries come from the opt-in Apple Maps lookup; requesting that property on every server is a sync change
+  outside this package (left for the sync owner).
 
 ### §15.7 Bring everything home: imports
 - ⬜ Not started.
