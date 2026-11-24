@@ -5,6 +5,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import PhotosModel
+import Synchronization
 
 /// Wraps a `CGImage` for `NSCache`.
 final class ImageBox: @unchecked Sendable {
@@ -25,6 +26,21 @@ public final class PreviewCache: @unchecked Sendable {
     private let ioQueue = DispatchQueue(label: "com.nextcloud.photos.previewcache", qos: .utility)
     /// Fires when the system is short of memory (the notification behind `didReceiveMemoryWarning`, also on the Mac).
     private let memoryPressure: any DispatchSourceMemoryPressure
+    /// Disk hits whose files' modification dates (the "last used" of `trim`) are not written yet.
+    private let touches = Mutex(Touches())
+
+    struct Touches {
+        /// Keys already noted in this process: a file is touched at most once per run.
+        var noted: Set<String> = []
+        var pending: [URL] = []
+        var flushScheduled = false
+    }
+
+    /// A file used again is only marked as used when its date is older than this: scrolling through 10 000 cached tiles
+    /// then writes no metadata at all for the files used today.
+    static let touchInterval: TimeInterval = 86_400
+    /// Disk hits are written in batches, this long after the first one.
+    static let touchDelay: TimeInterval = 5
 
     /// Downloaded previews after which the pipeline trims the disk cache again.
     public static let trimInterval = 2000
@@ -89,10 +105,42 @@ public final class PreviewCache: @unchecked Sendable {
         let url = fileURL(key: key)
         let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
         guard let image = ImageDecoding.decode(url: url, maxPixelSize: limit) else { return nil }
-        // Touch for LRU.
-        try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
+        noteUse(url, key: key)
         remember(image, key: key, maxPixelSize: limit)
         return image
+    }
+
+    /// Remembers that a file was read, for the LRU order of `trim`: written later, in one batch, off the caller's thread.
+    func noteUse(_ url: URL, key: String) {
+        let schedule = touches.withLock { touches -> Bool in
+            // Bounded: a long session over a huge library forgets what it noted (a file is then at most noted again).
+            if touches.noted.count > 50_000 { touches.noted.removeAll(keepingCapacity: true) }
+            guard touches.noted.insert(key).inserted else { return false }
+            touches.pending.append(url)
+            guard !touches.flushScheduled else { return false }
+            touches.flushScheduled = true
+            return true
+        }
+        if schedule {
+            ioQueue.asyncAfter(deadline: .now() + Self.touchDelay) { [weak self] in self?.flushTouches() }
+        }
+    }
+
+    /// Writes the noted uses: a file's modification date is set to now unless it is less than `touchInterval` old.
+    /// Runs on the cache's queue (and in tests).
+    func flushTouches(now: Date = Date()) {
+        let urls = touches.withLock { touches -> [URL] in
+            defer {
+                touches.pending = []
+                touches.flushScheduled = false
+            }
+            return touches.pending
+        }
+        for url in urls {
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if let modified, now.timeIntervalSince(modified) < Self.touchInterval { continue }
+            try? fileManager.setAttributes([.modificationDate: now], ofItemAtPath: url.path(percentEncoded: false))
+        }
     }
 
     /// The limit a preview of `bucket` is decoded with: the requested size, never more than the bucket.
@@ -147,7 +195,8 @@ public final class PreviewCache: @unchecked Sendable {
 
     /// Deletes least-recently-used files until the cache is below `limit` bytes, in the background.
     ///
-    /// "Used" is the file's modification date: `diskImage` touches a file whenever it is read.
+    /// "Used" is the file's modification date: `diskImage` notes every read, and the notes are written in batches (a file
+    /// used again on the same day keeps its date).
     /// - Parameters:
     ///   - protecting: files whose previews are never deleted (offline-pinned items); they still count towards the size.
     ///   - completion: called on the cache's queue when the trim is done.
@@ -161,6 +210,8 @@ public final class PreviewCache: @unchecked Sendable {
     /// The trim itself. Returns the bytes left in the cache.
     @discardableResult
     func trimNow(toBytes limit: Int64, protecting: Set<FileID> = []) -> Int64 {
+        // What was used since the last batch counts as used.
+        flushTouches()
         guard
             let enumerator = fileManager.enumerator(
                 at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
