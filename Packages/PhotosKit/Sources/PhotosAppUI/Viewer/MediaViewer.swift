@@ -485,6 +485,10 @@ struct MediaViewer: View {
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 .help(String(localized: "Info", bundle: .module))
+                #if os(visionOS)
+                    // Spatial photos and panoramas (SPEC §6.2 visionOS specifics).
+                    SpatialViewerButton(item: item)
+                #endif
                 if item.kind == .image {
                     Button {
                         editing = item

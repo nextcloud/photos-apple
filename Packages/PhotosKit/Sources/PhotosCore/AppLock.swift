@@ -33,7 +33,11 @@ public enum AppLockSettings {
         }
     }
 
-    public static func isEnabled(_ defaults: UserDefaults = defaults) -> Bool { defaults.bool(forKey: enabledKey) }
+    /// On when the user turned it on, or when the organisation requires it (managed `enforce_passcode_lock`, SPEC §5.1.9;
+    /// the app also writes it into the setting, so the widgets and extensions follow).
+    public static func isEnabled(_ defaults: UserDefaults = defaults) -> Bool {
+        defaults.bool(forKey: enabledKey) || ManagedConfiguration.current().enforcesAppLock
+    }
 
     public static func timeout(_ defaults: UserDefaults = defaults) -> TimeInterval {
         defaults.object(forKey: timeoutKey) as? Double ?? defaultTimeout

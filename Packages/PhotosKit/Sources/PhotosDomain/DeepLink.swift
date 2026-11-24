@@ -14,30 +14,51 @@ public enum AppRoute: Hashable, Codable, Sendable {
     case destination(String)
     /// A folder of the user's files in the folder browser ("Show in folder").
     case folder(path: String)
+    /// The photos of a place (`Place.name`), a person (`Person.name`) or a tag (`SystemTag.name`), opened by a link.
+    case place(name: String)
+    case person(name: String)
+    case tag(name: String)
 }
 
-/// What a `nextcloudphotos://` link opens (SPEC §4.8): a destination, an album or a photo.
+/// What a `nextcloudphotos://` link opens (SPEC §4.8): a destination, an album, a photo, a place, a person, a tag, a folder
+/// or a search.
 ///
+/// The routes mirror the web app's (`/apps/photos/<route>`), so a link of the web app maps onto one of the app:
 /// - `nextcloudphotos://<destination>` — `library`, `albums`, `memories`, … (the raw values of the app's destinations;
-///   the web app's route names `timeline` and `thisday` are accepted too).
-/// - `nextcloudphotos://album/<name>` — one of the user's albums; `nextcloudphotos://album/shared/<name>` for a shared album.
-///   A full album id (`own:<name>`, `shared:<name>`) is accepted as well.
-/// - `nextcloudphotos://photo/<fileId>`
+///   the web app's route names `timeline`, `thisday`, `sharedalbums`, `faces`, `shared`, `maps` are accepted too).
+/// - `nextcloudphotos://albums/<name>`, `…/sharedalbums/<name>` (web) and `…/album/<name>`, `…/album/shared/<name>`
+///   (earlier links). A full album id (`own:<name>`, `shared:<name>`) is accepted after `album/` as well.
+/// - `nextcloudphotos://places/<name>`, `…/faces/<name>`, `…/tags/<name>`, `…/folders/<path>`
+/// - `nextcloudphotos://photo/<fileId>`, `nextcloudphotos://search/<text>`
+///
+/// A link that names an account puts it in front of the route, as the user and server of a URL
+/// (`nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>`, `IncomingLink`).
 public enum DeepLink: Hashable, Sendable {
     case destination(String)
     case album(id: String)
     case photo(fileId: FileID)
+    case place(name: String)
+    case person(name: String)
+    case tag(name: String)
+    /// A folder of the user's files, an absolute path (`/Photos/2024`).
+    case folder(path: String)
+    /// The search with this text.
+    case search(String)
 
     public static let scheme = "nextcloudphotos"
 
     /// Route names of the web app that differ from the app's destination names.
-    static let aliases = ["timeline": "library", "thisday": "onThisDay", "sharedalbums": "sharedAlbums"]
+    static let aliases = [
+        "timeline": "library", "thisday": "onThisDay", "sharedalbums": "sharedAlbums", "faces": "people", "shared": "sharedWithYou",
+        "maps": "map",
+    ]
 
     public init?(url: URL) {
-        guard url.scheme?.lowercased() == Self.scheme, let host = url.host(percentEncoded: false), !host.isEmpty else { return nil }
+        guard url.scheme?.lowercased() == Self.scheme, url.user(percentEncoded: false) == nil,
+            let host = url.host(percentEncoded: false), !host.isEmpty
+        else { return nil }
         // `pathComponents` decodes percent escapes, so an album name may contain "/" as %2F.
-        let parts = url.pathComponents.filter { $0 != "/" }
-        self.init(head: host, parts: parts)
+        self.init(route: [host] + Self.parts(of: url))
     }
 
     /// Parses the compact form produced by `request` (`"albums"`, `"album/own:Trip"`, `"photo/42"`), as handed around inside
@@ -45,29 +66,75 @@ public enum DeepLink: Hashable, Sendable {
     public init?(request: String) {
         let parts = request.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
         guard let head = parts.first else { return nil }
-        self.init(head: head, parts: parts.count > 1 ? [parts[1]] : [])
+        let rest: String? = parts.count > 1 ? parts[1] : nil
+        switch head {
+        // The rest is one name or path, which may contain "/".
+        case "place": self = .place(name: rest ?? "")
+        case "person": self = .person(name: rest ?? "")
+        case "tag": self = .tag(name: rest ?? "")
+        case "folder": self = .folder(path: "/" + (rest ?? ""))
+        case "search": self = .search(rest ?? "")
+        default:
+            self.init(route: [head] + (rest.map { [$0] } ?? []))
+            return
+        }
+        if case .place(let name) = self, name.isEmpty { return nil }
+        if case .person(let name) = self, name.isEmpty { return nil }
+        if case .tag(let name) = self, name.isEmpty { return nil }
     }
 
-    private init?(head: String, parts: [String]) {
-        switch head.lowercased() {
+    /// The path of a URL without the leading "/" (decoded).
+    static func parts(of url: URL) -> [String] {
+        url.pathComponents.filter { $0 != "/" }
+    }
+
+    /// A route as a list of decoded path segments: `["albums", "Trip"]`, `["folders", "Photos", "2024"]`.
+    init?(route parts: [String]) {
+        guard let head = parts.first?.lowercased() else { return nil }
+        let rest = Array(parts.dropFirst())
+        let joined = rest.joined(separator: "/")
+        switch head {
         case "album":
-            guard let first = parts.first else { return nil }
+            guard let first = rest.first else { return nil }
             let id: String
-            if parts.count == 1 {
+            if rest.count == 1 {
                 id = first.hasPrefix("own:") || first.hasPrefix("shared:") ? first : "own:\(first)"
             } else if first == "shared" {
-                id = "shared:" + parts.dropFirst().joined(separator: "/")
+                id = "shared:" + rest.dropFirst().joined(separator: "/")
             } else {
-                id = "own:" + parts.joined(separator: "/")
+                id = "own:" + joined
             }
             guard id.count > id.prefix(while: { $0 != ":" }).count + 1 else { return nil }
             self = .album(id: id)
+        case "albums" where !rest.isEmpty:
+            self = .album(id: "own:" + joined)
+        case "sharedalbums" where !rest.isEmpty:
+            self = .album(id: "shared:" + joined)
+        case "places" where !rest.isEmpty:
+            self = .place(name: joined)
+        case "faces" where !rest.isEmpty:
+            // The web app's list of faces without a person.
+            self = rest == ["unassigned"] ? .destination("people") : .person(name: joined)
+        case "tags" where !rest.isEmpty:
+            self = .tag(name: joined)
+        case "folders" where !rest.isEmpty:
+            self = .folder(path: "/" + joined)
+        case "shared":
+            // A folder shared with the user opens the list of shared folders: their paths are the sharer's.
+            self = .destination("sharedWithYou")
+        case "search":
+            guard !joined.isEmpty else {
+                self = .destination("search")
+                return
+            }
+            self = .search(joined)
         case "photo":
-            guard parts.count == 1, let fileId = FileID(parts[0]), fileId > 0 else { return nil }
+            guard rest.count == 1, let fileId = FileID(rest[0]), fileId > 0 else { return nil }
             self = .photo(fileId: fileId)
         default:
-            guard parts.isEmpty else { return nil }
-            self = .destination(Self.aliases[head.lowercased()] ?? head)
+            guard rest.isEmpty else { return nil }
+            // The case of the app's own destination names is kept (`onThisDay`).
+            self = .destination(Self.aliases[head] ?? parts[0])
         }
     }
 
@@ -85,7 +152,145 @@ public enum DeepLink: Hashable, Sendable {
         case .destination(let name): name
         case .album(let id): "album/\(id)"
         case .photo(let fileId): "photo/\(fileId)"
+        case .place(let name): "place/\(name)"
+        case .person(let name): "person/\(name)"
+        case .tag(let name): "tag/\(name)"
+        case .folder(let path): "folder/\(path.drop(while: { $0 == "/" }))"
+        case .search(let text): "search/\(text)"
         }
+    }
+
+    /// The route as the path segments of a link (the web app's names), e.g. `["albums", "Trip"]`.
+    public var routeSegments: [String] {
+        switch self {
+        case .destination(let name):
+            return [name]
+        case .album(let id):
+            let name = String(id.drop(while: { $0 != ":" }).dropFirst())
+            return [id.hasPrefix("shared:") ? "sharedalbums" : "albums", name]
+        case .photo(let fileId): return ["photo", String(fileId)]
+        case .place(let name): return ["places", name]
+        case .person(let name): return ["faces", name]
+        case .tag(let name): return ["tags", name]
+        case .folder(let path):
+            let parts = path.split(separator: "/").map(String.init)
+            return parts.isEmpty ? ["folders"] : ["folders"] + parts
+        case .search(let text): return ["search", text]
+        }
+    }
+
+    /// A link to this route for one account: `nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>`
+    /// (`IncomingLink.resolve` reads it back). Spotlight items and App Intent entities carry it, so they open the right
+    /// account's album or person.
+    public func url(for account: Account) -> URL? {
+        var components = URLComponents()
+        components.scheme = Self.scheme
+        components.percentEncodedUser = Self.encode(account.userId, allowed: .urlUserAllowed)
+        components.host = account.serverURL.host(percentEncoded: false)
+        components.port = account.serverURL.port
+        let serverPath = account.serverURL.pathComponents.filter { $0 != "/" }
+        // Each segment on its own: a "/" inside a name stays part of the name.
+        let segments = (serverPath + routeSegments).map { Self.encode($0, allowed: .urlPathAllowed) }
+        components.percentEncodedPath = "/" + segments.joined(separator: "/")
+        return components.url
+    }
+
+    private static func encode(_ value: String, allowed: CharacterSet) -> String {
+        var set = allowed
+        set.remove(charactersIn: "/@:?#")
+        return value.addingPercentEncoding(withAllowedCharacters: set) ?? value
+    }
+}
+
+/// A link from outside (another app, Spotlight, the clipboard) with what it means on this device (SPEC §4.8): a route for
+/// the account shown, a route for another logged-in account (the app asks before it switches), an account that is not
+/// logged in here, or a public album.
+///
+/// Accepted forms:
+/// - `nextcloudphotos://<route>` — for the account shown (`DeepLink`).
+/// - `nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>` — for that account.
+/// - `https://<host>[/<server path>][/index.php]/apps/photos/<route>` — a page of the web app of an account's server;
+///   `…/apps/photos/public/<token>` is a public album, which needs no account.
+public enum IncomingLink: Equatable, Sendable {
+    /// Open the route in the account shown.
+    case open(DeepLink)
+    /// The route belongs to another logged-in account (several when a web link names a server with more than one of them).
+    case switchAccount([AccountID], DeepLink)
+    /// No account on this device matches; `account` names what the link asks for (`user@host` or the server).
+    case unknownAccount(String)
+    case publicAlbum(serverURL: URL, token: String)
+
+    /// - Parameters:
+    ///   - accounts: the accounts logged in on this device.
+    ///   - active: the account shown.
+    public static func resolve(_ url: URL, accounts: [Account], active: AccountID?) -> IncomingLink? {
+        switch url.scheme?.lowercased() {
+        case DeepLink.scheme:
+            guard let user = url.user(percentEncoded: false) else { return DeepLink(url: url).map(IncomingLink.open) }
+            return resolveAccountLink(url, user: user, accounts: accounts, active: active)
+        case "https", "http":
+            return resolveWebLink(url, accounts: accounts, active: active)
+        default:
+            return nil
+        }
+    }
+
+    private static func resolveAccountLink(_ url: URL, user: String, accounts: [Account], active: AccountID?) -> IncomingLink? {
+        let parts = DeepLink.parts(of: url)
+        let host = serverName(url)
+        // The account whose user and server match; of two on the same host, the one with the longer server path.
+        let candidates = accounts.filter { account in
+            (account.userId == user || account.loginName == user) && serverName(account.serverURL) == host
+                && parts.starts(with: serverPath(account))
+        }
+        guard let account = candidates.max(by: { serverPath($0).count < serverPath($1).count }) else {
+            return .unknownAccount("\(user)@\(host)")
+        }
+        let route = Array(parts.dropFirst(serverPath(account).count))
+        guard let link = route.isEmpty ? .destination("library") : DeepLink(route: route) else { return nil }
+        return account.id == active ? .open(link) : .switchAccount([account.id], link)
+    }
+
+    private static func resolveWebLink(_ url: URL, accounts: [Account], active: AccountID?) -> IncomingLink? {
+        let parts = DeepLink.parts(of: url)
+        guard let index = (0..<max(parts.count - 1, 0)).first(where: { parts[$0] == "apps" && parts[$0 + 1] == "photos" }) else {
+            return nil
+        }
+        var base = Array(parts[..<index])
+        if base.last == "index.php" { base.removeLast() }
+        let route = Array(parts[(index + 2)...])
+        if route.first == "public" {
+            guard route.count >= 2, !route[1].isEmpty, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                return nil
+            }
+            components.percentEncodedPath =
+                base.isEmpty
+                ? "" : "/" + base.map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }.joined(separator: "/")
+            components.query = nil
+            components.fragment = nil
+            guard let serverURL = components.url else { return nil }
+            return .publicAlbum(serverURL: serverURL, token: route[1])
+        }
+        let host = serverName(url)
+        let matches = accounts.filter { serverName($0.serverURL) == host && serverPath($0) == base }
+        guard !matches.isEmpty else {
+            return .unknownAccount(([host] + base).joined(separator: "/"))
+        }
+        // The web app's start page is the timeline.
+        guard let link = route.isEmpty ? .destination("library") : DeepLink(route: route) else { return nil }
+        if let active, matches.contains(where: { $0.id == active }) { return .open(link) }
+        return .switchAccount(matches.map(\.id), link)
+    }
+
+    /// Host and port, lower-cased: `cloud.example.com`, `localhost:8089`. The scheme is not compared (an account added with
+    /// https:// is the same account in an http:// link of a proxy).
+    static func serverName(_ url: URL) -> String {
+        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    static func serverPath(_ account: Account) -> [String] {
+        account.serverURL.pathComponents.filter { $0 != "/" }
     }
 }
 

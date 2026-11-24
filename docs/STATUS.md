@@ -49,7 +49,14 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 - QR codes and login links show "Log in to <host> as <user>?" before anything is sent ✅ compiled (iOS scanner 🟡 not run).
 - Keychain items are `AfterFirstUnlockThisDeviceOnly` (not in backups or on other devices); existing items are switched once
   at launch 🟡 (signed builds only; unsigned Mac builds use the file store).
-- ⬜ MDM / AppConfig keys (§5.1.9).
+- MDM / AppConfig keys (§5.1.9) 🟡 (round 4): `serverUrl` (address filled in and fixed; logins to other servers refused, also
+  QR codes, links and Files-app suggestions; `addAccount` checks again and revokes the granted app password), `username`
+  (proposed on the login page with `?user=`), `disable_multiaccount` ("Add account" hidden, a second login refused, logging in
+  again allowed), `enforce_passcode_lock` (app lock on and its switch disabled; written to the App Group so widgets and
+  extensions follow), `disable_log` (no kept log, export and switch disabled, the log deleted), `disable_backup` (backup off,
+  Backup screen says so). Read from `com.apple.configuration.managed` at launch and on every `UserDefaults` change. Existing
+  accounts are kept when a restriction arrives. Parsing and policy ✅ unit-tested (`ManagedAndSpotlightTests`); the Mac app
+  started with a managed configuration, the managed UI was not looked at (no MDM-delivered configuration on the build Mac).
 - QR code login 🟡: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
   only where it is supported; camera access is asked for first, without it the link can be pasted). Compiles for iOS, not
   run (no simulator runtime, no device). The Mac and Vision Pro offer "Log in with a link".
@@ -285,8 +292,16 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Deep links `nextcloudphotos://<destination>`, `…/album/<name>` (`…/album/shared/<name>`), `…/photo/<fileId>` ✅ parsing unit-tested,
   destination and album links ✅ in the Mac app, photo links 🟡. Links wait while the app is locked and open after the
   unlock; photo links only open photos the library shows (not archived, not the video half of a Live Photo, not unknown
-  ids) ✅ policy unit-tested, 🟡 not run. ⬜ The account part and the other routes of §4.8
-  (`places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`), web URLs of the server.
+  ids) ✅ policy unit-tested, 🟡 not run.
+- Round 4: the account part and the other routes of §4.8 ✅ parsing unit-tested (`IncomingLink`, `DeepLinkRouteTests`).
+  `nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>` names the account; routes `albums/<name>`,
+  `sharedalbums/<name>`, `places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`, `shared`, `search/<text>` and the web
+  app's aliases. A link for another logged-in account asks "Open the link in another account?" and switches; an account that
+  is not logged in is explained ("This link is for another account") ✅ in the Mac app. Web links of an account's server
+  (`https://<host>/index.php/apps/photos/<route>`, opened with the app) open the same route ✅ Mac (folders); several accounts
+  on that server: the user picks one. Public album links open the "Open public link" sheet with the link filled in 🟡. Place,
+  tag and search links ✅ in the Mac app; person links 🟡 (no named person on the test server). The questions wait for the
+  unlock while the app is locked.
 - Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
   Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
   structure read from the running app; the same commands are the keyboard shortcuts on iPadOS 🟡.
@@ -508,8 +523,24 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   "Keep in albums and move N items to the trash bin" (the kept copy is added first); filter albums are left out, a kept copy
   shared with the user can't be added. Logic ✅ unit-tested with the store (`DuplicateAlbumNoteTests`); the dialog not run (Mac
   locked).
-- ⬜ Spotlight indexing of albums/people/places; App Intent entities (albums, people) and search intent.
-- ⬜ visionOS spatial photos / immersive panoramas.
+- Spotlight (round 4) 🟡: albums (own and shared), named people and places are indexed with Core Spotlight, one domain per
+  account (a digest of the account id), the item id is the account link, so a result opens in its account (after asking
+  when another one is shown). Updated after every sync when something changed; removed on logout and remote wipe
+  (`AccountPurge` path) ✅ unit-tested. Never indexed: anything while app lock is on (all items are deleted when it is turned
+  on, also by MDM), people hidden on this device (removed at once when hidden), unnamed people, places that only archived
+  photos have, public-link albums; no thumbnails (a cover may be archived since) ✅ policy unit-tested. Not seen in Spotlight:
+  the unsigned test build cannot be checked from the shell (🟡).
+- App Intents (round 4) 🟡: `AlbumEntity` and `PersonEntity` (`EntityStringQuery`, the same entries as Spotlight: nothing hidden,
+  nothing while app lock is on), `OpenAlbumIntent` / `OpenPersonIntent` (`OpenIntent`), "Search photos" (`ShowInAppSearchResultsIntent`,
+  opens the search with the text), App Shortcuts phrases ("Search photos in …", "Open <album> in …", "Show photos of <person> in …";
+  parameters updated after indexing). Compiled for all three platforms, metadata extracted (5 intents, 2 entities); not run in
+  Shortcuts or Siri. PlaceEntity/TagEntity and the other intents of §7.23 remain ⬜.
+- visionOS spatial photos / immersive panoramas (round 4) 🟡 compiled for visionOS 27.2, not run (no visionOS runtime or device):
+  a HEIC's original is read when it is viewed and a stereo pair group in its image properties makes it a spatial photo
+  (`SpatialMedia`, ✅ unit-tested with a generated stereo HEIC); the viewer then shows "Spatial", which opens it with RealityKit's
+  `ImagePresentationComponent` (`.spatialStereo`, "Immersive" switches to `.spatialStereoImmersive`). A still of 3000 px or more
+  and 2:1 or wider (from the server's size) is a panorama: "Immersive" opens an immersive space with the photo on the inside of
+  a cylinder segment as wide as the photo reaches (aspect × 60°, at most 360°); a tap ends it.
 - Accessibility and localisation audit 🟡: every module and target with user-facing text has a string catalog
   (`Localizable.xcstrings` in PhotosAppUI, PhotosNetworking, PhotosCore, PhotosBackup, PhotosDomain, the app, the widgets;
   `AppShortcuts.xcstrings`, `InfoPlist.xcstrings` for the permission texts), English plural variations, `bundle: .module` in the

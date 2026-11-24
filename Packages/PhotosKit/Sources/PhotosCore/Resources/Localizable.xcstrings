@@ -83,6 +83,9 @@
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
     },
+    "Album" : {
+      "comment" : "Spotlight: kind of a result that is an album."
+    },
     "An album was shared with you." : {
       "comment" : "Notification body; the title is the album's title."
     },
@@ -209,6 +212,12 @@
     "Only your own photos can be shared by link." : {
       "comment" : "Error message when the user tries to create a share link for photos that someone else shared with them."
     },
+    "Person" : {
+      "comment" : "Spotlight: kind of a result that is a person."
+    },
+    "Place" : {
+      "comment" : "Spotlight: kind of a result that is a place."
+    },
     "Remove from Album" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Album\"): photos were removed from an album. Title-style capitalisation as in the menu bar."
     },
@@ -223,6 +232,12 @@
     },
     "Uploading %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."
+    },
+    "Your organization allows only one account in this app." : {
+      "comment" : "Login refused by the device management: a second account cannot be added."
+    },
+    "Your organization only allows logging in to %@." : {
+      "comment" : "Login refused by the device management. %@ is the server's host name."
     },
     "Your photos are backed up." : {
       "comment" : "Result of a backup run when there was nothing left to upload."

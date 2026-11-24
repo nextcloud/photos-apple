@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@" : {
+      "comment" : "The name of an album or a person in Shortcuts and Siri. Not translated.",
+      "shouldTranslate" : false
+    },
+    "Album" : {
+      "comment" : "Type of a Shortcuts parameter: one of the user's albums."
+    },
     "Albums" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: the user's albums."
     },
@@ -34,6 +41,9 @@
     "On this day" : {
       "comment" : "Photos taken on today's date in earlier years: name of a view that Siri and Shortcuts can open, and short title of the App Shortcut that opens it."
     },
+    "Open album" : {
+      "comment" : "Title of the App Intent (and short title of the App Shortcut) that opens one of the user's albums."
+    },
     "Open in Nextcloud Photos" : {
       "comment" : "Title of the Shortcuts action that opens a view of the app. \"Nextcloud Photos\" is the app's name, do not translate it."
     },
@@ -43,14 +53,38 @@
     "People" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: people recognized in photos."
     },
+    "Person" : {
+      "comment" : "Type of a Shortcuts parameter: a person recognised in the user's photos."
+    },
     "Photo map" : {
       "comment" : "Short title of the App Shortcut that opens the map of photos, shown in Shortcuts and Spotlight."
+    },
+    "Photos of a person" : {
+      "comment" : "Short title of the App Shortcut that shows the photos of a person, shown in Shortcuts and Spotlight."
     },
     "Places" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: photos grouped by place."
     },
     "Search" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: search."
+    },
+    "Search for" : {
+      "comment" : "Parameter of the search App Intent: the text to search for."
+    },
+    "Search photos" : {
+      "comment" : "Title of the App Intent (and short title of the App Shortcut) that searches the user's photos."
+    },
+    "Searches your photos in Nextcloud Photos for places, people, dates and more." : {
+      "comment" : "Description of the search App Intent, shown in Shortcuts."
+    },
+    "Show photos of a person" : {
+      "comment" : "Title of the App Intent that shows the photos of a person."
+    },
+    "Shows an album in Nextcloud Photos." : {
+      "comment" : "Description of the App Intent that opens an album, shown in Shortcuts."
+    },
+    "Shows the photos of a person in Nextcloud Photos." : {
+      "comment" : "Description of the App Intent that shows the photos of a person, shown in Shortcuts."
     },
     "Uploads new photos of this device to your Nextcloud." : {
       "comment" : "Description of the \"Back up now\" action in Shortcuts."

@@ -24,7 +24,7 @@ struct HiddenPeople: Equatable {
         return copy
     }
 
-    static func file(in accountDirectory: URL) -> URL { accountDirectory.appending(path: "hidden-people.json") }
+    static func file(in accountDirectory: URL) -> URL { HiddenPeopleFile.url(in: accountDirectory) }
 
     static func load(from file: URL) -> HiddenPeople {
         guard let data = try? Data(contentsOf: file), let names = try? JSONDecoder().decode([String].self, from: data) else {

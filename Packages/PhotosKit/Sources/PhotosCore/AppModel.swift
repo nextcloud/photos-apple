@@ -20,6 +20,14 @@ public final class AppModel {
     public private(set) var session: SessionModel?
     /// A destination requested from outside (notification tap, widget, deep link), consumed by the main view.
     public var requestedDestination: String?
+    /// A link from outside that needs the user's answer before it opens: it names another account, an account that is not
+    /// logged in here, or a public album (`AppModel+Links.swift`).
+    public var linkPrompt: LinkPrompt?
+    /// What the organisation's device management sets (SPEC §5.1.9), kept current while the app runs (`AppModel+Managed.swift`).
+    public internal(set) var managed: ManagedConfiguration
+    @ObservationIgnored var managedObserver: (any NSObjectProtocol)?
+    /// Text for the search tab (iPhone, iPad, Vision Pro), from a search link or the "Search photos" intent; the tab takes it.
+    public var requestedSearch: String?
     /// The Notifications switch in Settings. Change it with `setPushEnabled(_:)`.
     public private(set) var pushEnabled: Bool
     /// After the first login on iPhone and iPad: the app offers backup before it asks for notifications. The UI shows the
@@ -49,6 +57,9 @@ public final class AppModel {
             appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard,
             backgroundUploads: AppModel.systemBackgroundUploads, system: .live)
         keychain.restrictToThisDevice(defaults: .standard)
+        // Managed settings that arrived while the app was not running, then every change while it runs.
+        applyManagedConfiguration()
+        observeManagedConfiguration()
         Diagnostics.removeExports()
         // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
         // background, `RootView`), so a crash loses at most the last few minutes.
@@ -85,6 +96,7 @@ public final class AppModel {
         self.layout = layout
         self.defaults = defaults
         self.pushEnabled = PushNotifications.isEnabled(defaults)
+        self.managed = ManagedConfiguration.current(defaults)
         let credentials: ClientCredentialProvider = { host in AppModel.clientCredential(host: host, keychain: keychain) }
         self.http = AppModel.makeHTTPClient(layout: layout, keychain: keychain, configuration: httpConfiguration)
         self.backgroundUploads = backgroundUploads?(http.trustStore, credentials)
@@ -159,6 +171,14 @@ public final class AppModel {
     public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true, offerBackup: Bool = true)
         async throws
     {
+        // The organisation's rules (SPEC §5.1.9) are checked again here, whatever way the login came: the app password that
+        // was granted for a refused login is revoked.
+        if let refusal = managed.loginRefusal(
+            serverURL: credentials.serverURL, loginName: credentials.loginName, existing: registry.accounts)
+        {
+            await loginService().revoke(credentials, at: credentials.serverURL)
+            throw refusal
+        }
         let status = try await loginService().status(serverURL: credentials.serverURL)
         let provisional = ServerConnection(
             serverURL: credentials.serverURL, userId: credentials.loginName, loginName: credentials.loginName,
@@ -255,6 +275,7 @@ public final class AppModel {
         // Outside the account's files: its notifications, the diagnostics reports that were shared, and the widgets, which
         // would keep showing its photos until their next refresh.
         await system.removeNotifications(id)
+        await system.removeSearchIndex(id)
         Diagnostics.removeExports()
         if session == nil, let next = registry.activeAccount { activate(next) }
         system.reloadWidgets()
@@ -441,6 +462,10 @@ public final class AppModel {
 struct SystemTraces: Sendable {
     var removeNotifications: @Sendable (AccountID) async -> Void
     var reloadWidgets: @Sendable () -> Void
+    /// Removes the account's albums, people and places from Spotlight (`SpotlightIndexer`).
+    var removeSearchIndex: @Sendable (AccountID) async -> Void = { _ in }
+    /// Deletes the log kept on the device (managed `disable_log`).
+    var removeLog: @Sendable () async -> Void = {}
 
     static let none = SystemTraces(removeNotifications: { _ in }, reloadWidgets: {})
 
@@ -450,5 +475,7 @@ struct SystemTraces: Sendable {
             #if canImport(WidgetKit)
                 WidgetCenter.shared.reloadAllTimelines()
             #endif
-        })
+        },
+        removeSearchIndex: { id in await SpotlightIndexer.shared.remove(id) },
+        removeLog: { await DiagnosticsLogWriter.shared.removeAll() })
 }

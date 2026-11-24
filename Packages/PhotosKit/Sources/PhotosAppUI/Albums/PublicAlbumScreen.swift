@@ -15,6 +15,11 @@ struct OpenPublicLinkSheet: View {
     /// An `http://` link waiting for the user's confirmation.
     @State private var unencrypted: PublicLink?
 
+    /// - Parameter link: a link that was opened from outside, shown for the user to open (SPEC §4.8).
+    init(link: String = "") {
+        _link = State(initialValue: link)
+    }
+
     struct PublicLink: Hashable, Identifiable {
         var id: String { token }
         var serverURL: URL

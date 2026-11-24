@@ -37,6 +37,8 @@ public final class SessionModel {
     /// A partner's shared photos in this account's timeline (SPEC SH-8).
     public private(set) var partners: PartnerTimelineModel?
     @ObservationIgnored var albumsRefreshedAt: Date?
+    /// What was last written to Spotlight for this account (`SessionModel+Spotlight.swift`); nil before the first pass.
+    @ObservationIgnored var spotlightEntries: [SpotlightEntry]?
     /// `afterSync()` runs (`SessionModel+Labels.swift`).
     @ObservationIgnored var afterSyncRunning = false
     @ObservationIgnored weak var app: AppModel?

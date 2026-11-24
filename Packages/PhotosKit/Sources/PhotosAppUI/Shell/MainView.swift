@@ -215,6 +215,8 @@ struct MainView: View {
             #if os(macOS)
                 .sheet(isPresented: $importingTakeout) { TakeoutImportSheet() }
             #endif
+            // A link for another account, an unknown account or a public album asks first (not while locked).
+            .linkPrompts(isLocked: lock.requiresUnlock)
             .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
                 guard case .success(let urls) = result else { return }
                 session.transfers.upload(UploadSources.copies(of: urls))
@@ -280,7 +282,28 @@ struct MainView: View {
                 let below: [AppRoute] = (paths[selection] ?? []).filter { if case .photo = $0 { false } else { true } }
                 paths[selection] = below + [.photo(fileId: fileId)]
             #endif
+        case .place(let name): show(.place(name: name), in: .places)
+        case .person(let name): show(.person(name: name), in: .people)
+        case .tag(let name): show(.tag(name: name), in: .tags)
+        case .folder(let path): showFolder(path)
+        case .search(let text):
+            #if os(macOS)
+                searchText = text
+                searchFilters = []
+                selection = .search
+            #else
+                // The search tab owns its field; it takes the text from here.
+                app.requestedSearch = text
+                go(.search)
+            #endif
         }
+    }
+
+    /// A collection's screen on top of its list, as if it had been chosen there.
+    func show(_ route: AppRoute, in destination: AppDestination) {
+        guard visible(destination) else { return }
+        selection = destination
+        paths[destination] = [route]
     }
 
     func restoreOnce() {
@@ -550,6 +573,9 @@ struct RouteView: View {
         case .album(let id): AlbumRouteScreen(albumId: id)
         case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
         case .folder(let path): FoldersScreen(path: path)
+        case .place(let name): PlaceRouteScreen(name: name)
+        case .person(let name): PersonRouteScreen(name: name)
+        case .tag(let name): TagRouteScreen(name: name)
         case .destination(let raw):
             // Pushed from the Collections list (the search tab has its own stack and field).
             if let destination = AppDestination(rawValue: raw) {
@@ -629,8 +655,10 @@ struct AccountHeader: View {
                     }
                 }
             }
-            Divider()
-            Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+            if app.canAddAccount {
+                Divider()
+                Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+            }
         } label: {
             HStack(spacing: 10) {
                 NextcloudLogo().frame(width: 36, height: 18)

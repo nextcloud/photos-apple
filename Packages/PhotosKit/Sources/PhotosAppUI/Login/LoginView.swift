@@ -91,6 +91,9 @@ public struct LoginView: View {
             startLogin()
         }
         .onDisappear { forgetUnusedTrust() }
+        .onChange(of: app.managed.serverURL, initial: true) { _, server in
+            if let server { address = server.absoluteString }
+        }
     }
 
     /// Takes back the trust in certificates accepted during this login for hosts that did not become an account.
@@ -119,7 +122,12 @@ public struct LoginView: View {
                     .textContentType(.URL)
                 #endif
                 .onSubmit { startLogin() }
-                .disabled(phase != .idle)
+                // The organisation names the server (SPEC §5.1.9): it is filled in and can't be changed.
+                .disabled(phase != .idle || app.managed.serverURL != nil)
+
+                if app.managed.serverURL != nil {
+                    Text(ManagedWording.serverManaged).font(.footnote).foregroundStyle(.secondary)
+                }
 
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -218,7 +226,10 @@ public struct LoginView: View {
     }
 
     @ViewBuilder var suggestions: some View {
-        let shared = SharedNextcloudAccounts.load().filter { entry in !app.accounts.contains { $0.serverURL.absoluteString == entry.url } }
+        let shared = SharedNextcloudAccounts.load().filter { entry in
+            !app.accounts.contains { $0.serverURL.absoluteString == entry.url }
+                && LoginService.normalizeServerAddress(entry.url).map { app.loginRefusal(serverURL: $0) == nil } ?? false
+        }
         if !shared.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Use an account from another Nextcloud app", bundle: .module)
@@ -344,6 +355,10 @@ public struct LoginView: View {
             if phase == .idle { error = String(localized: "Please enter a valid server address.", bundle: .module) }
             return
         }
+        if let refusal = app.loginRefusal(serverURL: serverURL) {
+            error = refusal.localizedDescription
+            return
+        }
         if !allowUnencrypted, LoginService.isUnencrypted(serverURL) {
             error = nil
             unencrypted = .address(host: serverURL.host() ?? serverURL.absoluteString)
@@ -360,7 +375,8 @@ public struct LoginView: View {
                 phase = .waitingForBrowser
                 let browser = Task { @MainActor in
                     _ = try? await webAuthenticationSession.authenticate(
-                        using: flow.loginURL, callbackURLScheme: "nc", preferredBrowserSession: .ephemeral)
+                        // With the user name the organisation configured proposed on the login page (SPEC §5.1.9).
+                        using: app.managed.loginPage(flow.loginURL), callbackURLScheme: "nc", preferredBrowserSession: .ephemeral)
                 }
                 defer { browser.cancel() }
                 var credentials = try await service.waitForGrant(flow)
@@ -397,6 +413,10 @@ public struct LoginView: View {
     /// - Parameter confirmed: the user saw which server and user the link names and wants to log in.
     func loginWithLink(confirmed: Bool = false) {
         let parsed = LoginService.parseLoginURL(pasteLink) ?? LoginService.parseOnetimeLoginURL(pasteLink)
+        if let parsed, let refusal = app.loginRefusal(serverURL: parsed.serverURL) {
+            error = refusal.localizedDescription
+            return
+        }
         if !confirmed, let parsed {
             error = nil
             if LoginService.isUnencrypted(parsed.serverURL) {

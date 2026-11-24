@@ -243,9 +243,12 @@ public final class BackupModel {
         #if os(visionOS)
             false
         #else
-            true
+            !isDisabledByOrganization
         #endif
     }
+
+    /// The organisation turned backup off (managed `disable_backup`, SPEC §5.1.9).
+    public var isDisabledByOrganization: Bool { app?.managed.disablesBackup ?? false }
 
     /// The Files app is installed and readable (same Apple team).
     public var filesAppDetected: Bool { FilesAppLedger.isAvailable }
@@ -292,7 +295,7 @@ public final class BackupModel {
 
     /// Turns backup on for the active account and runs the first pass.
     public func enable(mode: BackupSettings.FilesAppMode) async {
-        guard let session = app?.session else { return }
+        guard isAvailable, let session = app?.session else { return }
         // The first check stops; what it found is in the ledger, and the first pass goes on from there.
         await cancelPreview()
         logger.notice("backup: set up, Files app mode \(String(describing: mode), privacy: .public)")
