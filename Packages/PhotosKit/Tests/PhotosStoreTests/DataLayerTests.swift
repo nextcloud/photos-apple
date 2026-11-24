@@ -322,7 +322,10 @@ import Testing
 
 /// Queued operations follow the file (4, 6), locked files are retried, and operations that will never run give the
 /// local row back (5).
-@Suite struct OutboxSafetyTests {
+///
+/// The tests wait for the outbox (`waitUntilIdle`) instead of polling against the clock, and retry at once where a retry
+/// is wanted: the other tests of the bundle run in parallel and can keep these waiting for many seconds. The time limit only stops a hang.
+@Suite(.timeLimit(.minutes(5))) struct OutboxSafetyTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore
@@ -352,12 +355,14 @@ import Testing
         let outbox = outbox()
         server.setOffline(true)
         try await outbox.enqueue(operations)
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.nextRetryDate() != nil)
         elsewhere()
         server.setOffline(false)
         server.clearRequests()
         await outbox.kickNow()
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         return outbox
     }
 
@@ -454,9 +459,10 @@ import Testing
                 }
             }
         }
-        let outbox = outbox(retryDelay: 0.05)
+        let outbox = outbox(retryDelay: 0)
         try await outbox.enqueue([.delete(fileId: 1, path: "/Photos/a.jpg")])
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(try await outbox.failedOperations().isEmpty)
         #expect(server.file(1) == nil)
         #expect(server.requests(.delete).count == 3)
@@ -471,9 +477,10 @@ import Testing
         #expect(!Outbox.shouldRetry(.forbidden(message: nil), attempts: 0))
 
         server.statusOverride.withLock { $0 = { $0.kind == .delete ? 423 : nil } }
-        let outbox = outbox(retryDelay: 0.01)
+        let outbox = outbox(retryDelay: 0)
         try await outbox.enqueue([.delete(fileId: 1, path: "/Photos/a.jpg"), .favorite(fileId: 2, path: "/Photos/b.jpg", value: true)])
-        #expect(await eventually(timeout: 10) { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(try await outbox.failedOperations().map(\.operation) == [.delete(fileId: 1, path: "/Photos/a.jpg")])
         #expect(server.requests(.delete).count == Outbox.maxLockedAttempts)
         #expect(server.file(2)?.favorite == true)
@@ -487,15 +494,17 @@ import Testing
         let outbox = outbox()
         try await outbox.enqueue([.delete(fileId: 1, path: "/Photos/a.jpg")])
         #expect(try library.item(1) == nil)  // optimistic
-        #expect(await eventually { try await outbox.failedOperations().count == 1 })
-        #expect(await eventually { try library.item(1) != nil })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.failedOperations().count == 1)
+        #expect(try library.item(1) != nil)
         #expect(try library.item(1)?.etag == "e1")
 
         // "Retry" applies the change again and, once the server allows it, it sticks.
         server.statusOverride.withLock { $0 = nil }
         try await outbox.retryFailed()
         #expect(try library.item(1) == nil)
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(server.file(1) == nil)
         #expect(try library.item(1) == nil)
     }
@@ -506,8 +515,10 @@ import Testing
         try await outbox.enqueue([.favorite(fileId: 1, path: "/Photos/a.jpg", value: true), .archive(fileId: 2, path: "/Photos/b.jpg")])
         #expect(try library.item(1)?.isFavorite == true)
         #expect(try library.item(2)?.isArchived == true)
-        #expect(await eventually { try await outbox.failedOperations().count == 2 })
-        #expect(await eventually { try library.item(1)?.isFavorite == false && library.item(2)?.isArchived == false })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.failedOperations().count == 2)
+        #expect(try library.item(1)?.isFavorite == false)
+        #expect(try library.item(2)?.isArchived == false)
     }
 
     /// Without a connection to the sync engine (or when the fetch fails) the next sync restores the row.
@@ -516,7 +527,8 @@ import Testing
         server.statusOverride.withLock { $0 = { $0.kind == .delete ? 403 : nil } }
         let outbox = outbox(restoring: false)
         try await outbox.enqueue([.delete(fileId: 1, path: "/Photos/a.jpg")])
-        #expect(await eventually { try await outbox.failedOperations().count == 1 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.failedOperations().count == 1)
         #expect(try library.item(1) == nil)
 
         server.clearRequests()

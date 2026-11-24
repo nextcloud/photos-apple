@@ -238,8 +238,9 @@ import Testing
         try await outbox.enqueue([
             .favorite(fileId: 2, path: "/Photos/b.jpg", value: true), .delete(fileId: 1, path: "/Photos/a.jpg"),
         ])
-        #expect(await eventually { !server.requests(.proppatch).isEmpty })
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(!server.requests(.proppatch).isEmpty)
+        #expect(try await outbox.nextRetryDate() != nil)
         server.setOffline(false)
 
         // The server still has the old state; a reconciliation must not undo what the user did.
@@ -248,7 +249,8 @@ import Testing
         #expect(try ids() == [2, 3])
 
         await outbox.kickNow()
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(server.file(2)?.favorite == true)
         #expect(server.file(1) == nil)
     }

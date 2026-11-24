@@ -11,7 +11,10 @@ import Testing
 @testable import PhotosStore
 
 /// The outbox against a stubbed DAV layer (`FakeDAVServer`).
-@Suite(.timeLimit(.minutes(1))) struct OutboxTests {
+///
+/// The tests wait for the outbox (`waitUntilIdle`) and for observed values instead of polling against the clock: the
+/// other tests of the bundle run in parallel and can keep this one waiting for many seconds (iOS Simulator in CI). The time limit only stops a hang.
+@Suite(.timeLimit(.minutes(5))) struct OutboxTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore
@@ -27,6 +30,12 @@ import Testing
 
     func outbox(retryDelay: TimeInterval) -> Outbox {
         Outbox(api: server.api, database: database, retryDelay: { _ in retryDelay })
+    }
+
+    /// The next value of an observation, skipping none.
+    func next(_ values: inout AsyncThrowingStream<MediaItem?, any Error>.Iterator) async throws -> Bool? {
+        guard let item = try await values.next() else { return nil }
+        return item?.isFavorite ?? false
     }
 
     /// The favourite values the server was asked to set, in order.
@@ -48,17 +57,14 @@ import Testing
         server.setOffline(true)
 
         for id in [FileID(1), 77] {
-            let seen = Mutex<[Bool]>([])
-            let observation = Task {
-                for try await item in library.observeItem(id) { seen.withLock { $0.append(item?.isFavorite ?? false) } }
-            }
-            defer { observation.cancel() }
-            #expect(await eventually { seen.withLock { $0 } == [false] })
+            // Duplicates are removed: each change arrives as exactly one value.
+            var values = library.observeItem(id).makeAsyncIterator()
+            #expect(try await next(&values) == false, "file \(id)")
             try await outbox.enqueue([.favorite(fileId: id, path: "/x.jpg", value: true)])
-            #expect(await eventually(timeout: 2) { seen.withLock { $0 } == [false, true] }, "file \(id)")
+            #expect(try await next(&values) == true, "file \(id)")
             #expect(try library.item(id)?.isFavorite == true)
             try await outbox.enqueue([.favorite(fileId: id, path: "/x.jpg", value: false)])
-            #expect(await eventually(timeout: 2) { seen.withLock { $0 } == [false, true, false] }, "file \(id)")
+            #expect(try await next(&values) == false, "file \(id)")
         }
     }
 
@@ -69,7 +75,8 @@ import Testing
             .favorite(fileId: 1, path: "/Photos/a.jpg", value: true), .favorite(fileId: 1, path: "/Photos/a.jpg", value: false),
             .favorite(fileId: 2, path: "/Photos/b.jpg", value: true),
         ])
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.nextRetryDate() != nil)
         #expect(favouriteWrites == ["/Photos/a.jpg=1"])
         #expect(try attempts() == [1, 0, 0])
 
@@ -78,12 +85,13 @@ import Testing
         server.setOffline(false)
         server.clearRequests()
         await outbox.kick()
-        try await Task.sleep(for: .milliseconds(200))
+        await outbox.waitUntilIdle()
         #expect(favouriteWrites.isEmpty)
         #expect(try await outbox.pendingCount() == 3)
 
         await outbox.kickNow()
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(favouriteWrites == ["/Photos/a.jpg=1", "/Photos/a.jpg=0", "/Photos/b.jpg=1"])
         #expect(server.file(1)?.favorite == false)
         #expect(server.file(2)?.favorite == true)
@@ -96,13 +104,14 @@ import Testing
         try await outbox.enqueue([
             .favorite(fileId: 1, path: "/Photos/a.jpg", value: true), .favorite(fileId: 2, path: "/Photos/b.jpg", value: true),
         ])
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
         let retry = try #require(try await outbox.nextRetryDate())
         #expect(retry.timeIntervalSince(enqueued) >= 0.3)
         server.setOffline(false)
 
-        // Nobody kicks: the outbox's own timer does.
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        // Nobody kicks: the outbox's own timer does (waiting does not kick, it only waits for the timer).
+        await outbox.waitUntilIdle(retriesDueWithin: 60)
+        #expect(try await outbox.pendingCount() == 0)
         #expect(Date() >= retry)
         #expect(favouriteWrites == ["/Photos/a.jpg=1", "/Photos/a.jpg=1", "/Photos/b.jpg=1"])
         #expect(try await outbox.nextRetryDate() == nil)
@@ -112,7 +121,8 @@ import Testing
         let outbox = outbox(retryDelay: 0.2)
         server.setOffline(true)
         try await outbox.enqueue([.favorite(fileId: 1, path: "/Photos/a.jpg", value: true)])
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.nextRetryDate() != nil)
         await outbox.shutdown()
         server.setOffline(false)
         server.clearRequests()
@@ -124,14 +134,26 @@ import Testing
 
         // It is not dead: an explicit kick runs it again.
         await outbox.kickNow()
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
     }
 
     @Test func keepsBackingOffWhileTheErrorPersists() async throws {
-        let outbox = outbox(retryDelay: 0.05)
+        // Retried at once for longer than a locked file would be, then a long wait.
+        let quickRetries = Outbox.maxLockedAttempts + 2
+        let delaysAsked = Mutex<[Int]>([])
+        let outbox = Outbox(
+            api: server.api, database: database,
+            retryDelay: { attempts in
+                delaysAsked.withLock { $0.append(attempts) }
+                return attempts < quickRetries ? 0 : 3600
+            })
         server.setOffline(true)
         try await outbox.enqueue([.favorite(fileId: 1, path: "/Photos/a.jpg", value: true)])
-        #expect(await eventually { (try attempts().first ?? 0) >= 3 })
+        await outbox.waitUntilIdle()
+        #expect(delaysAsked.withLock { $0 } == Array(0...quickRetries))
+        #expect(try attempts() == [quickRetries + 1])
+        #expect(try await outbox.nextRetryDate() != nil)
         #expect(try await outbox.pendingCount() == 1)
         #expect(try await outbox.failedOperations().isEmpty)
 
@@ -145,17 +167,19 @@ import Testing
         let outbox = outbox(retryDelay: 3600)
         server.setOffline(true)
         try await outbox.enqueue([.favorite(fileId: 1, path: "/Photos/a.jpg", value: true)])
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.nextRetryDate() != nil)
         server.setOffline(false)
 
         // The path monitor's first report of a working connection is not a change.
         await outbox.networkChanged(satisfied: true)
-        try await Task.sleep(for: .milliseconds(100))
+        await outbox.waitUntilIdle()
         #expect(try await outbox.pendingCount() == 1)
 
         await outbox.networkChanged(satisfied: false)
         await outbox.networkChanged(satisfied: true)
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(server.file(1)?.favorite == true)
     }
 
@@ -169,7 +193,8 @@ import Testing
             .favorite(fileId: 9, path: "/Photos/gone.jpg", value: true),  // 404: not transient
             .favorite(fileId: 2, path: "/Photos/b.jpg", value: true),
         ])
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(server.file(2)?.favorite == true)
         #expect(try await outbox.failedOperations().map(\.operation) == [.favorite(fileId: 9, path: "/Photos/gone.jpg", value: true)])
         #expect(

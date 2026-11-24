@@ -84,6 +84,8 @@ public actor Outbox {
     private var worker: Task<Void, Never>?
     /// Timer that kicks the outbox when the operation in backoff is due.
     private var wakeUp: Task<Void, Never>?
+    /// When `wakeUp` fires.
+    private var wakeUpDate: Date?
     private var pathMonitor: NWPathMonitor?
     private var isNetworkSatisfied: Bool?
     /// Seconds to wait before the next attempt, given the number of failed attempts so far.
@@ -196,13 +198,29 @@ public actor Outbox {
     /// `kick()` or `enqueue` afterwards starts it again.
     public func shutdown() async {
         stopNetworkMonitoring()
-        wakeUp?.cancel()
-        wakeUp = nil
+        cancelWakeUp()
         worker?.cancel()
         await worker?.value
         // The worker may have scheduled a retry before it saw the cancellation.
-        wakeUp?.cancel()
-        wakeUp = nil
+        cancelWakeUp()
+    }
+
+    /// Returns once the outbox has done everything it does by itself within `horizon` seconds: no operation is running
+    /// and no retry falls due by then. The operations still pending wait for a later retry.
+    ///
+    /// For tests: waiting for the outbox, instead of polling it against the clock, holds however slowly the machine runs.
+    func waitUntilIdle(retriesDueWithin horizon: TimeInterval = 0) async {
+        while true {
+            if let worker {
+                await worker.value
+            } else if let wakeUp, let wakeUpDate, wakeUpDate <= Date().addingTimeInterval(horizon) {
+                await wakeUp.value
+                // A timer that ended without kicking (cancelled) is done with.
+                if self.wakeUp == wakeUp, worker == nil { return }
+            } else {
+                return
+            }
+        }
     }
 
     public func failedOperations() throws -> [FailedOperation] {
@@ -260,8 +278,7 @@ public actor Outbox {
 
     private func drain() async {
         defer { worker = nil }
-        wakeUp?.cancel()
-        wakeUp = nil
+        cancelWakeUp()
         while !Task.isCancelled {
             let next: Next
             do {
@@ -328,12 +345,19 @@ public actor Outbox {
 
     private func scheduleWakeUp(at date: Date) {
         wakeUp?.cancel()
+        wakeUpDate = date
         let delay = max(0, date.timeIntervalSinceNow)
         wakeUp = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             await self?.kick()
         }
+    }
+
+    private func cancelWakeUp() {
+        wakeUp?.cancel()
+        wakeUp = nil
+        wakeUpDate = nil
     }
 
     /// 404 on delete (deleted between the lookup and the request) or 409 on album add mean the server already has the
