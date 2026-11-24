@@ -81,6 +81,37 @@ public struct CollectionStore: Sendable {
             try db.execute(
                 sql: "UPDATE album SET contentFetchedAt = ?, itemCount = ? WHERE id = ?",
                 arguments: [Date().timeIntervalSince1970, children.count, albumId])
+            // What is still queued for the album is not on the server yet: it stays as the user left it.
+            try Outbox.reapplyPendingAlbumChanges(albumId: albumId, db: db)
+        }
+    }
+
+    /// The places of these photos in albums.
+    public func memberships(of fileIds: [FileID]) throws -> [AlbumMembership] {
+        guard !fileIds.isEmpty else { return [] }
+        return try database.writer.read { db in
+            var result: [AlbumMembership] = []
+            for start in stride(from: 0, to: fileIds.count, by: 500) {
+                let chunk = Array(fileIds[start..<min(start + 500, fileIds.count)])
+                result += try AlbumItemRecord.filter(chunk.contains(Column("fileId"))).fetchAll(db).map {
+                    AlbumMembership(
+                        albumId: $0.albumId, fileId: $0.fileId, childName: $0.childName, origin: $0.origin, ownerPath: $0.ownerPath,
+                        position: $0.position)
+                }
+            }
+            return result
+        }
+    }
+
+    /// Puts a photo back into an album it was taken out of locally (a delete that was taken back before it ran).
+    static func insert(_ member: AlbumMembership, db: Database) throws {
+        guard try AlbumRecord.exists(db, key: member.albumId) else { return }
+        try AlbumItemRecord(
+            albumId: member.albumId, fileId: member.fileId, childName: member.childName, origin: member.origin,
+            ownerPath: member.ownerPath, position: member.position
+        ).insert(db, onConflict: .ignore)
+        if db.changesCount > 0 {
+            try db.execute(sql: "UPDATE album SET itemCount = itemCount + 1 WHERE id = ?", arguments: [member.albumId])
         }
     }
 
@@ -146,6 +177,27 @@ public struct CollectionStore: Sendable {
                 try SmartAlbumRecord(id: album.id, name: album.name, filters: album.filters, isLocal: isLocal).upsert(db)
             }
         }
+    }
+}
+
+/// A photo's place in an album, as the index has it.
+public struct AlbumMembership: Hashable, Sendable {
+    public var albumId: String
+    public var fileId: FileID
+    /// Name of the photo inside the album collection.
+    public var childName: String
+    /// `filters` for a photo the album's filters put there (it cannot be removed or added by hand).
+    public var origin: String?
+    public var ownerPath: String?
+    public var position: Int
+
+    public init(albumId: String, fileId: FileID, childName: String, origin: String?, ownerPath: String?, position: Int) {
+        self.albumId = albumId
+        self.fileId = fileId
+        self.childName = childName
+        self.origin = origin
+        self.ownerPath = ownerPath
+        self.position = position
     }
 }
 

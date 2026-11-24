@@ -13,6 +13,8 @@ struct AlbumDetailScreen: View {
     @State var album: Album
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
+    /// The window's undo manager: a removal made here is undone with this window's Edit › Undo.
+    @Environment(\.undoManager) private var undoManager
     @State private var feed = GridFeed()
     @AppStorage("albumColumns") private var columns = GridColumns.default
     @AppStorage("albumPhotosSortOrder") private var photoOrder: AlbumPhotosSortOrder = .oldest
@@ -293,7 +295,8 @@ struct AlbumDetailScreen: View {
                         other: LocalizedStringResource("Remove from album", bundle: .module)),
                     systemImage: "rectangle.stack.badge.minus"
                 ) { _ in
-                    Task { await session.removeFromAlbum(items, album: album) }
+                    let undoManager = undoManager
+                    Task { await session.removeFromAlbum(items, album: album, undoManager: undoManager) }
                 })
         }
         if isOwn, items.count == 1, session.features.has(.albumCover), let item = items.first {

@@ -200,11 +200,13 @@ final class FakeDAVServer: Sendable {
                 "<d:response><d:href>/remote.php/dav/files/\(user)\(request.path)</d:href><d:propstat><d:prop><oc:favorite/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
             return .http(status: 207, body: Self.multistatus(body))
         case .delete:
+            if let refused = Self.precondition(headers, request.path, state) { return refused }
             guard let id = state.files.values.first(where: { $0.path == request.path })?.id else { return .http(status: 404, body: "") }
             state.files[id] = nil
             Self.bumpRoot(&state)
             return .http(status: 204, body: "")
         case .move:
+            if let refused = Self.precondition(headers, request.path, state) { return refused }
             guard let id = state.files.values.first(where: { $0.path == request.path })?.id,
                 let destination = headers["Destination"].flatMap(URL.init(string:))?.path(percentEncoded: false),
                 let range = destination.range(of: "/files/\(user)")
@@ -242,6 +244,13 @@ final class FakeDAVServer: Sendable {
         case .other:
             return .http(status: 405, body: "")
         }
+    }
+
+    /// `If-Match` as Nextcloud answers it: 412 unless the file at the path has that ETag (also when there is no file).
+    static func precondition(_ headers: [String: String], _ path: String, _ state: State) -> Response? {
+        guard let match = headers.first(where: { $0.key.lowercased() == "if-match" })?.value else { return nil }
+        let etag = state.files.values.first { $0.path == path }?.etag
+        return etag.map { "\"\($0)\"" } == match ? nil : .http(status: 412, body: "")
     }
 
     private func search(

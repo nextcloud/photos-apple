@@ -266,7 +266,7 @@ The app keeps a **complete local index** of the user's media metadata (not the f
 | `tag` | `id` PK, `name`, `visible`, `assignable`, `count`, `coverFileId` |
 | `tagItem` | `tagId`, `fileId` |
 | `smartAlbum` | `id`, `name`, `filters` (JSON), `origin` (server/local) |
-| `operation` | outbox: `id`, `kind`, `payload` JSON, `state`, `attempts`, `lastError`, `createdAt` |
+| `operation` | outbox: `id`, `kind`, `payload` JSON, `fileId`, `etag` (of the file when queued), `state`, `attempts`, `lockedAttempts`, `lastError`, `createdAt`, `nextAttemptAt` |
 | `offlinePin`, `offlineFile` | pinned albums/photos; downloaded originals (`fileId`, `etag`, `localPath`, `bytes`) |
 | `previewCache` | `fileId`, `etag`, `bucket`, `bytes`, `lastUsed` (LRU bookkeeping; files on disk) |
 | `faceDetections` | `fileId`, JSON, `fetchedAt` |
@@ -301,7 +301,7 @@ Triggered on foreground, pull-to-refresh, every 5 min while the app is open and 
 
 #### 5.4.5 Conflict rules
 
-Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs operations strictly in the order they were queued; while the oldest one waits for a retry (transient error, exponential backoff up to 1 h) nothing behind it runs, and it is retried when the backoff ends or the network comes back. Queued deletes and moves look the file up by its id right before they run and act on the path the server reports, so a file that was moved meanwhile is found and another file at the old path is not touched; the other operations do the same when their path answers 404, and a completed move rewrites the paths of the operations still queued for that file. 423 (locked) is retried like a transient error, 8 times. If an outbox operation fails for good with 403/404/409 (file gone, no permission, already in album), or the user discards it, refresh the affected item so the optimistic change is undone; 409 on album add means "already there" and is a success.
+Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs up to 5 operations at the same time, but never two for the same file: an operation waits for every operation queued before it for its file. A connection problem (offline, timeout, 5xx, 429) pauses the whole queue with exponential backoff up to 1 h; it resumes when the backoff ends or the network comes back. Queued deletes and moves send the path and ETag the index has with `If-Match` (one request); when the server answers 412 or 404 (the file was moved, changed or replaced meanwhile) they look the file up by its id and act on the path the server reports, so a file that was moved meanwhile is found and another file at the old path is not touched; the other operations do the same when their path answers 404, and a completed move rewrites the paths of the operations still queued for that file. 423 (locked) is retried like a transient error, but holds back only the operations for that file, and is given up after 8 answers of 423 (failures for other reasons do not count). Album content read from the server is shown with the album operations still queued applied on top. When rows are read again after a failed or discarded operation, only files the timeline shows (or already has rows for) are written to the index. If an outbox operation fails for good with 403/404/409 (file gone, no permission, already in album), or the user discards it, refresh the affected item so the optimistic change is undone; 409 on album add means "already there" and is a success.
 
 ### 5.5 Previews, originals, video
 
@@ -406,6 +406,8 @@ Requires: core.
 ### 7.3 Selection actions — M1 (album/tag actions in their milestones)
 
 Favourite / unfavourite, add to album, share (system share sheet with originals, or "Share link" = quick share §7.6.4), export (save to device Photos library — `PHPhotoLibrary` add-only permission — or Files/Finder), delete (to the server trash; confirm with count; explain when the trash bin is disabled that deletion is permanent), archive, edit date & location (§7.16.3), tags, download for offline. All writes go through the outbox with optimistic UI; bulk operations run with at most 5 concurrent requests and report per-item failures.
+
+Undo (Edit › Undo, ⌘Z, shake, and the Undo button of the confirmation) covers favourite, archive, remove from album and delete. A change is registered with the undo manager of the window it was made in; the confirmation's Undo only takes back its own change (a second tap while it runs does nothing), and everything is forgotten when the account is switched or removed. Undoing a delete takes the deletes that have not been sent yet out of the queue and puts their photos back at once (offline too), waits for the ones being sent, and restores only what reached the server from the trash bin (any file type), putting the photos back into the albums they were in (the server takes a deleted file out of every album). A delete the server refused is not reported as "couldn't be restored": nothing was deleted. Deleting a photo shared with the user offers no Undo (it does not land in the user's trash bin).
 
 ### 7.4 Info panel — M1 (people/caption parts in M4/M5)
 

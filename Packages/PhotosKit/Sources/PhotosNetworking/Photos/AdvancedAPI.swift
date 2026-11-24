@@ -20,17 +20,18 @@ public struct TrashedItem: Sendable, Hashable, Identifiable {
 extension PhotosAPI {
     // MARK: Trash bin
 
-    public func trash(mimeTypes: [String]) async throws -> [TrashedItem] {
+    /// The trash bin's files; with `mimeTypes`, only files of these types.
+    public func trash(mimeTypes: [String]?) async throws -> [TrashedItem] {
         let resources = try await dav.propfind(
             connection.davURL("trashbin/\(connection.userId)/trash/"), depth: 1,
             properties: [
                 DAVProp.fileId, DAVProp.contentType, DAVProp.size, DAVProp.trashbinFilename, DAVProp.trashbinOriginalLocation,
                 DAVProp.trashbinDeletionTime,
             ])
-        let mimes = Set(mimeTypes)
+        let mimes = mimeTypes.map(Set.init)
         return resources.dropFirst().compactMap { resource in
             guard !resource.isCollection, let fileId = resource.int64(DAVProp.fileId), let mime = resource.string(DAVProp.contentType),
-                mimes.contains(mime)
+                mimes?.contains(mime) ?? true
             else { return nil }
             return TrashedItem(
                 trashName: resource.lastPathComponent, fileId: fileId,

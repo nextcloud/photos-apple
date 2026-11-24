@@ -170,7 +170,11 @@ struct ChangeNoticeToast: View {
             let text: String = ChangeNoticeText.text(notice, trashbin: session.features.has(.trashbin))
             HStack(spacing: 12) {
                 Text(text)
-                if notice.canUndo && !notice.isReverted {
+                if notice.isReverting {
+                    // Undo runs (a delete waits for the server): no second Undo meanwhile.
+                    Divider().frame(height: 14)
+                    ProgressView().controlSize(.small)
+                } else if notice.canUndo && !notice.isReverted {
                     Divider().frame(height: 14)
                     Button(String(localized: "Undo", bundle: .module)) { Task { await session.undo(notice) } }
                         .buttonStyle(.borderless)

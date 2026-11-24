@@ -65,10 +65,6 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             .toolbar { toolbar }
             .overlay(alignment: .bottom) { statusBanner }
-            // Changes made in this window are undone by this window's Edit › Undo.
-            .onChange(of: undoManager, initial: true) { _, manager in
-                if let manager { session.undoManager = manager }
-            }
             .confirmationDialog(
                 deleteTitle, isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                 titleVisibility: .visible
@@ -76,7 +72,8 @@ struct MediaGridScreen<Accessory: View>: View {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
                     if let items = confirmDelete {
                         deletions += 1
-                        Task { await session.perform(.delete(items)) }
+                        let undoManager = undoManager
+                        Task { await session.perform(.delete(items), undoManager: undoManager) }
                     }
                     endSelection()
                 }
@@ -185,7 +182,8 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Favourites or unfavourites; undoable.
     func setFavorite(_ items: [MediaItem], _ value: Bool) {
         favoriteToggles += 1
-        Task { await session.perform(.favorite(items, value: value)) }
+        let undoManager = undoManager
+        Task { await session.perform(.favorite(items, value: value), undoManager: undoManager) }
     }
 
     /// Skeleton or empty state (SPEC §6.3): the timeline is only called empty after a first sync has finished.
@@ -292,7 +290,10 @@ struct MediaGridScreen<Accessory: View>: View {
             selectionCount: items.count,
             allFavorite: !items.isEmpty && items.allSatisfy(\.isFavorite),
             toggleFavorite: { setFavorite(items, !items.allSatisfy(\.isFavorite)) },
-            delete: { confirmDelete = items.filter(\.permissions.canDelete) },
+            delete: {
+                let deletable = items.filter(\.permissions.canDelete)
+                if !deletable.isEmpty { confirmDelete = deletable }
+            },
             toggleInfo: {
                 infoItem = items.first
                 showingInfo.toggle()
@@ -378,7 +379,8 @@ struct MediaGridScreen<Accessory: View>: View {
         if items.contains(where: { $0.isOwnStorage && !$0.isArchived && $0.permissions.canDelete }) {
             actions.append(
                 GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { _ in
-                    Task { await session.perform(.archive(items)) }
+                    let undoManager = undoManager
+                    Task { await session.perform(.archive(items), undoManager: undoManager) }
                     endSelection()
                 })
         }
@@ -386,7 +388,8 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "unarchive", title: String(localized: "Unarchive", bundle: .module), systemImage: "tray.and.arrow.up") {
                     _ in
-                    Task { await session.perform(.unarchive(items)) }
+                    let undoManager = undoManager
+                    Task { await session.perform(.unarchive(items), undoManager: undoManager) }
                     endSelection()
                 })
         }

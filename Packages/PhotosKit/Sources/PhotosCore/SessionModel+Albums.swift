@@ -78,8 +78,9 @@ extension SessionModel {
         return updated
     }
 
-    /// Removes photos from an album; undoable (`SessionModel+Undo.swift`).
-    public func removeFromAlbum(_ items: [MediaItem], album: Album) async {
+    /// Removes photos from an album; undoable with `undoManager`, the one of the window it is done in
+    /// (`SessionModel+Undo.swift`).
+    public func removeFromAlbum(_ items: [MediaItem], album: Album, undoManager: UndoManager?) async {
         guard let services, let infos = try? services.collections.albumItems(albumId: album.id) else { return }
         let byFile = Dictionary(infos.map { ($0.fileId, $0) }, uniquingKeysWith: { a, _ in a })
         let members: [UndoableChange.AlbumMember] = items.compactMap { item in
@@ -87,7 +88,7 @@ extension SessionModel {
             return UndoableChange.AlbumMember(
                 fileId: item.fileId, childName: info.childName, ownPath: info.ownerPath ?? (item.isOwnStorage ? item.path : nil))
         }
-        await perform(.removeFromAlbum(members, album: album))
+        await perform(.removeFromAlbum(members, album: album), undoManager: undoManager)
     }
 
     public func addToAlbum(_ items: [MediaItem], album: Album) async {

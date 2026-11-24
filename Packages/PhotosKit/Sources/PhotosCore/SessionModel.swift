@@ -22,8 +22,9 @@ public final class SessionModel {
     public internal(set) var certificateProblem: CertificateProblem?
     /// The last undoable change, for the confirmation banner (`SessionModel+Undo.swift`).
     public internal(set) var lastChange: ChangeNotice?
-    /// Where undoable changes are registered: the undo manager of the window that shows this session.
-    @ObservationIgnored public weak var undoManager: UndoManager?
+    /// Undo bookkeeping (`SessionModel+Undo.swift`): where the last change can be undone, and the undo managers this
+    /// session registered with.
+    @ObservationIgnored var undoState = UndoState()
     public let transfers = TransferQueue()
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
@@ -112,6 +113,8 @@ public final class SessionModel {
     func stop() {
         isStopped = true
         tasks.values.forEach { $0.cancel() }
+        // Nothing of this account can be undone any more (account switch, removal).
+        clearUndo()
     }
 
     /// Stops everything this session runs for its account and waits until it has stopped: its own tasks, manual uploads,
@@ -273,7 +276,7 @@ public final class SessionModel {
     }
 
     func enqueue(_ operations: [PendingOperation]) async {
-        guard let services, !operations.isEmpty else { return }
+        guard let services, !operations.isEmpty, !isStopped else { return }
         do {
             try await services.outbox.enqueue(operations)
         } catch {
