@@ -16,6 +16,8 @@ import UniformTypeIdentifiers
     var link: URL?
     var choosingFile = false
     var choosingSong = false
+    /// The memory whose film is being exported as a video.
+    var exporting: SlideshowStart?
 
     struct Message: Identifiable {
         let id = UUID()
@@ -90,6 +92,11 @@ struct MemoryActionsMenu: View {
                 Task { await model.shareLink(memory, session: session) }
             } label: {
                 Label(Self.linkTitle, systemImage: "link")
+            }
+            Button {
+                model.exporting = SlideshowStart(memory: memory)
+            } label: {
+                Label(MemoryFilmExportSheet.menuTitle, systemImage: "film")
             }
             Divider()
             musicMenu
@@ -193,6 +200,9 @@ private struct MemoryActionsPresenter: ViewModifier {
             }
             .sheet(item: Binding(get: { model.link.map(SharedURL.init) }, set: { model.link = $0?.url })) { shared in
                 LinkShareSheet(url: shared.url)
+            }
+            .sheet(item: $model.exporting) { (start: SlideshowStart) in
+                MemoryFilmExportSheet(start: start)
             }
             .fileImporter(isPresented: $model.choosingFile, allowedContentTypes: [.audio]) { result in
                 model.importMusic(result)

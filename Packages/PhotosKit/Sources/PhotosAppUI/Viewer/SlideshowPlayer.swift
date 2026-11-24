@@ -11,7 +11,7 @@ import PhotosStore
 import SwiftUI
 
 /// A slideshow of a grid's photos, of a selection or of the viewer's context (SPEC VW-5). Memories have their own player
-/// with a title card (`MemorySlideshow`); both share the stepping and cross-fade of `Slideshow`.
+/// as films (`MemoryFilmPlayer`); both use `Slideshow`.
 struct SlideshowRequest: Identifiable, Hashable {
     let id = UUID()
     /// The place it was started from ("Library", an album's name); the Mac's window title.
