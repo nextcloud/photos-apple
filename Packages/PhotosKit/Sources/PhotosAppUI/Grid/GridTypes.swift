@@ -82,6 +82,9 @@ struct GridCallbacks {
     var cull: (@MainActor (CullingCommand, [FileID]) -> Void)? = nil
     /// C with 2–4 selected: the compare view (SPEC §15.2); nil: the grid does not compare.
     var compare: (@MainActor ([FileID]) -> Void)? = nil
+    /// A pinch (or ⌘−) zoomed out past the densest step, on the photo under the fingers at a point of the grid (0…1):
+    /// the Library's days take over (SPEC §15.5). Nil: the grid just stops at its densest step.
+    var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
@@ -92,6 +95,10 @@ final class GridTileLocator {
     var frame: (FileID) -> CGRect? = { _ in nil }
     /// Scrolls the grid so the tile is on screen (without animation), so the viewer can zoom back into it.
     var reveal: (FileID) -> Void = { _ in }
+    /// Scrolls the grid so the tile's top is at a fraction of the grid's height (a zoom from the days, SPEC §15.5).
+    var place: (FileID, Double) -> Void = { _, _ in }
+    /// The first tile below the pinned header at the top, nil at the very top.
+    var topItem: () -> FileID? = { nil }
 }
 
 /// Whether a grid screen is selecting and how many items; screens around `MediaGridScreen` read it as a preference

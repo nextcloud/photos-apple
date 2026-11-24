@@ -690,7 +690,32 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   space (also the round-4 panorama) and iPadOS may have kept the app to one window.
 
 ### §15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos
-- ⬜ Not started.
+- ✅ Zoom levels Years › Months › Days › All Photos (all four Library filters): cards with key photos and date overlays,
+  day mosaics, pinch that follows the fingers with momentum and settles on the stop it was heading for (anchored on the
+  photo or card under the fingers), taps zoom in, segmented picker (bottom on iPhone/iPad/Vision Pro, toolbar on the
+  Mac), ⌘+/⌘− along the same ladder, Mac trackpad pinch through the grid steps into the days. Unit tests
+  (`LibraryZoomTests`, `KeyPhotoTests`, `LibrarySummaryTests`, `LibraryZoomModelTests`; 100 000 items: 80–190 ms, budget
+  800 ms); run in the iOS 27.2 simulator with the UI tour
+  `FeelTourTests` (years → tap → months → pinch → days → pinch out → months → tap a day's photo → All Photos at it; grid
+  pinch steps). Not verified by the tour: the pinch out of the densest grid into the days (XCUITest's synthesized pinch
+  starts UIKit's two-finger selection there; the grid now refuses that selection while a pinch runs, and the move
+  itself is unit-tested). Mac: built, not verified (the display was asleep, no window could be captured); visionOS
+  compiled, not run.
+- ✅ Haptics: year ticks while scrolling fast or scrubbing the year index, zoom snaps, selection start (iPhone, iPad);
+  trackpad level change and alignment feedback on the Mac. Logic unit-tested (`YearBoundaryTickerTests`); the
+  simulator cannot play haptics, so the feel itself is unverified on a device.
+- 🟡 No spinners: skeletons instead of spinners on albums, people, folders, tags, album picker, sharing sheets, partner
+  sharing, links; cached preview in the editor; delayed spinners (0.9 s) where nothing better exists. Remaining
+  spinners listed in SPEC §15.5. Built for all platforms; the screens were not looked at one by one in the simulator.
+- ✅ Show Similar (viewer More menu, grid context menu) with best shot of a series and "Keep Best…"; on-device feature
+  prints from cached previews, migration `v5-similarity`, incremental background indexing (BGProcessingTask with power,
+  Mac background activity, battery-aware trickle while the Library is shown), in-memory sketches searched in
+  milliseconds. Unit tests with real Vision on the Mac (`SimilarityIndexTests`, `SimilarityMathTests`,
+  `SimilarityStoreTests`; search over 100 000 sketches 40 ms); menu and screen run in the iOS simulator with prints made
+  on the Mac (the simulator cannot run Vision's models).
+- ⬜ Not done: a "Similar shots" section in Duplicates (series across the whole library) — the series logic
+  (`SimilarSeries.series`) is there and tested, the screen is not; a live cross-fade between grid steps in the middle of
+  an iPhone pinch (the grid scales with the fingers and changes step on release).
 
 ### §15.6 Then and now, travel globe
 - ⬜ Not started.

@@ -84,6 +84,10 @@ struct MediaGridScreen<Accessory: View>: View {
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
+    /// Years, months and days around this grid (the Library's zoom levels, SPEC §15.5); nil elsewhere.
+    @Environment(\.libraryZoom) private var libraryZoom
+    /// "Show Similar" for this photo (SPEC §15.5).
+    @State private var similarTo: MediaItem?
 
     struct TileHighlight: Equatable {
         let id = UUID()
@@ -132,6 +136,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $editedItem) { item in EditorView(item: item) }
+            .similarPhotosSheet($similarTo)
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
@@ -154,12 +159,14 @@ struct MediaGridScreen<Accessory: View>: View {
             .task(id: SelectionKey(ids: selection, revision: feed.update.revision)) { await loadSelectionInfo(selection) }
             .focusedSceneValue(\.gridActions, gridActions)
             .selectionHaptic(selection, isActive: isSelecting)
+            .selectionStartHaptic(isSelecting)
             .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
             .photosHaptic(.impact(weight: .medium), trigger: deletions)
             // Zoomed out, the timeline is cut into months and years instead of days.
             .onChange(of: columns, initial: true) { _, step in
                 feed.setZoom(step: step)
             }
+            .libraryZoomPlacement(libraryZoom, locator: tileLocator)
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
                 .task(id: feed.items.isEmpty) {
@@ -214,7 +221,8 @@ struct MediaGridScreen<Accessory: View>: View {
                     tileLocator: tileLocator,
                     copy: { ids in withItems(ids) { copy($0) } },
                     cull: cullCallback,
-                    compare: { (ids: [FileID]) in compare(ids) }
+                    compare: { (ids: [FileID]) in compare(ids) },
+                    zoomPastEnd: zoomPastEnd
                 )
             )
             .ignoresSafeArea(edges: .bottom)
@@ -531,8 +539,8 @@ struct MediaGridScreen<Accessory: View>: View {
                 showingInfo.toggle()
             },
             addToAlbum: { withItems(withStacks(Array(selected))) { albumPicker = PickedItems(items: $0) } },
-            zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
-            zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
+            zoomIn: { zoomStep(zoomIn: true) },
+            zoomOut: { zoomStep(zoomIn: false) },
             open: single.map { item in { openViewer(at: item.fileId) } },
             edit: single.flatMap { item in item.kind == .image ? { editedItem = item } : nil },
             editDateAndLocation: canEditMetadata(summary)
@@ -626,6 +634,23 @@ struct MediaGridScreen<Accessory: View>: View {
         #else
             return nil
         #endif
+    }
+
+    /// Out of the grid's densest step into the Library's days (SPEC §15.5); nil where there are no zoom levels.
+    var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? {
+        guard let libraryZoom else { return nil }
+        let step: Int = columns
+        return { (id: FileID?, point: UnitPoint) in libraryZoom.leaveGrid(from: id, at: point, currentStep: step) }
+    }
+
+    /// ⌘+ and ⌘−: the grid's next step, or the Library's zoom levels beyond its densest step.
+    func zoomStep(zoomIn: Bool) {
+        let next = GridColumns.step(columns, zoomIn: zoomIn)
+        if let libraryZoom, libraryZoom.level != .all || (!zoomIn && next == columns) {
+            libraryZoom.step(zoomIn: zoomIn, currentStep: columns)
+        } else {
+            columns = next
+        }
     }
 
     /// The albums the "Add to Album" submenus list.
@@ -769,6 +794,12 @@ struct MediaGridScreen<Accessory: View>: View {
                 actions.append(
                     GridMenuAction(id: "timeline", title: ShowInTimelineAction.title, systemImage: ShowInTimelineAction.systemImage) { _ in
                         showInTimeline(item)
+                    })
+            }
+            if SimilarPhotosAction.isOffered(for: item.kind) {
+                actions.append(
+                    GridMenuAction(id: "similar", title: SimilarPhotosAction.title, systemImage: SimilarPhotosAction.systemImage) { _ in
+                        similarTo = item
                     })
             }
         }
@@ -972,8 +1003,8 @@ struct GridSkeleton: View {
         .onAppear { dimmed = true }
         .overlay(alignment: .bottom) {
             if let caption {
+                // The skeleton itself shows that something is on its way: no spinner beside the count.
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
                     Text(caption)
                 }
                 .font(.footnote)

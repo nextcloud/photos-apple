@@ -33,6 +33,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
             PushNotifications.install(delegate: NotificationRouter.shared) { NSApplication.shared.registerForRemoteNotifications() }
             // On-device recognition for search, while the Mac is idle (opt-in).
             ContentLabeling.register { AppHost.model }
+            // On-device feature prints for "Show Similar" and key photos, while the Mac is idle.
+            SimilarIndexing.register { AppHost.model }
         }
 
         func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

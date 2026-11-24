@@ -313,6 +313,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v3-album-activity") { db in try SharedAlbumActivity.migrate(db) }
         // Album titles in the search index (SPEC SR-3).
         migrator.registerMigration("v4-search-albums") { db in try SearchAlbums.migrate(db) }
+        // Feature prints and aesthetics scores computed on this device ("Show Similar", key photos; SPEC §15.5).
+        migrator.registerMigration("v5-similarity") { db in try SimilarityStore.migrate(db) }
         return migrator
     }
 }

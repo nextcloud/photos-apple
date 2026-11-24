@@ -1,0 +1,670 @@
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: MIT
+
+import OSLog
+import PhotosCore
+import PhotosDomain
+import PhotosModel
+import PhotosStore
+import SwiftUI
+
+#if os(macOS)
+    import AppKit
+#endif
+
+// The Library's zoom levels (SPEC §15.5): Years › Months › Days › All Photos, as in Apple Photos. A pinch moves along one
+// ladder, the content following the fingers; a tap on a year or month zooms into it. Years, months and days are cards
+// drawn by SwiftUI over the grid; All Photos is the platform grid underneath, which keeps its scroll position.
+
+/// Where the grid should put a photo when a zoom arrives in it from the days.
+struct GridPlacement: Equatable {
+    let id = UUID()
+    var fileId: FileID
+    /// The photo's top edge in the grid, as a fraction of the grid's height (0: at the top).
+    var fraction: Double
+}
+
+/// Which level the Library shows, the summary it is drawn from and the moves between the levels.
+@MainActor
+@Observable
+final class LibraryZoomModel {
+    /// The level shown; remembered on this device.
+    private(set) var level: LibraryZoomLevel
+    var summary = LibrarySummary.empty
+    /// The bucket each summary level shows at its top when it appears.
+    var focus: [LibraryZoomLevel: Int] = [:]
+    /// The bucket each summary level shows at its top now (kept up to date by the level's scroll view).
+    var visible: [LibraryZoomLevel: Int] = [:]
+    /// A photo the grid should scroll to after a zoom into it.
+    var gridPlacement: GridPlacement?
+    /// Where the last zoom started (the transition grows from there) and whether it zoomed in.
+    private(set) var anchor: UnitPoint = .center
+    private(set) var zoomedIn = true
+    /// Counts the levels snapped to (haptics).
+    private(set) var snaps = 0
+    /// The grid step a zoom from the days goes back to.
+    var lastGridStep = GridColumns.default
+    /// The photo at the top of the grid (set by the grid's screen).
+    @ObservationIgnored var gridTopItem: @MainActor () -> FileID? = { nil }
+    /// Changes the grid's zoom step (set by the timeline screen).
+    @ObservationIgnored var setGridStep: @MainActor (Int) -> Void = { _ in }
+    /// When the last pinch on a summary level ended; taps right after it are the fingers lifting, not taps.
+    @ObservationIgnored var pinchEnded: ContinuousClock.Instant?
+    var acceptsTaps: Bool { pinchEnded.map { ContinuousClock.now - $0 > .milliseconds(500) } ?? true }
+    @ObservationIgnored private var builtRevision = -1
+    @ObservationIgnored private var building: Task<Void, Never>?
+    @ObservationIgnored private let defaults: UserDefaults
+
+    let ladder = LibraryZoomLadder(gridSteps: GridColumns.options)
+    static let logger = Logger(subsystem: "com.nextcloud.photos", category: "zoom")
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        level = LibraryZoomLevel(rawValue: defaults.string(forKey: LibraryZoomLevel.storageKey) ?? "") ?? .all
+    }
+
+    // MARK: Summary
+
+    /// Builds the summary of the grid's items off the main actor, once per revision of the feed; a burst of revisions (a
+    /// running sync) is built once at its end. The key photos use the aesthetics scores this device worked out.
+    func update(items: [GridMedia], revision: Int, services: AccountServices?) {
+        guard revision != builtRevision else { return }
+        builtRevision = revision
+        building?.cancel()
+        let first = summary.items.isEmpty
+        building = Task { [weak self] in
+            if !first { try? await Task.sleep(for: .milliseconds(600)) }
+            guard !Task.isCancelled else { return }
+            let database = services?.database
+            let built = await Task.detached(priority: .userInitiated) { () -> LibrarySummary in
+                let quality = (database.flatMap { try? SimilarityStore(database: $0).qualities() }) ?? [:]
+                return LibrarySummary(items: items, quality: quality)
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            self.summary = built
+        }
+    }
+
+    // MARK: Moves
+
+    func stop(for level: LibraryZoomLevel, gridStep: Int) -> LibraryZoomStop {
+        switch level {
+        case .years: .years
+        case .months: .months
+        case .days: .days
+        case .all: .grid(step: gridStep)
+        }
+    }
+
+    /// A pinch or a tap on a summary level: `steps` rungs in (positive) or out, towards `bucket` (the one under the fingers
+    /// or tapped). Into the grid, `photo` (a tapped photo of a day) or the bucket's first photo is put where the fingers are.
+    func move(
+        from level: LibraryZoomLevel, by steps: Int, bucket: LibrarySummary.Bucket?, photo: FileID? = nil, at point: UnitPoint = .center
+    ) {
+        guard steps != 0, level != .all else { return }
+        let target = ladder.moved(stop(for: level, gridStep: lastGridStep), by: steps)
+        Self.logger.debug("zoom from \(level.rawValue, privacy: .public) by \(steps) to \(target.level.rawValue, privacy: .public)")
+        anchor = point
+        zoomedIn = steps > 0
+        if case .grid = target {
+            enterGrid(at: photo ?? bucket.map { summary.items[$0.range.lowerBound].fileId }, fraction: point.y)
+            return
+        }
+        if let bucket, let matching = summary.bucket(target.level, matching: bucket) { focus[target.level] = matching.id }
+        set(target.level)
+    }
+
+    /// A pinch out of the grid past its densest step: the days, at the day of `fileId` (the photo under the fingers).
+    func leaveGrid(from fileId: FileID?, at point: UnitPoint, currentStep: Int) {
+        lastGridStep = currentStep == ladder.densestGrid.map(Self.step(of:)) ? GridColumns.default : currentStep
+        anchor = point
+        zoomedIn = false
+        focus[.days] = fileId.flatMap { summary.index(of: $0) }.flatMap { summary.bucket(.days, containing: $0)?.id }
+        set(.days)
+    }
+
+    /// The picker, a menu command or a key: straight to `level`, at what is on screen now.
+    func select(_ target: LibraryZoomLevel, currentStep: Int) {
+        guard target != level else { return }
+        let order = LibraryZoomLevel.allCases
+        zoomedIn = (order.firstIndex(of: target) ?? 0) > (order.firstIndex(of: level) ?? 0)
+        anchor = .center
+        // What is on screen: the bucket at the top of the level shown, or the photo at the top of the grid.
+        let topIndex: Int? =
+            level == .all
+            ? gridTopItem().flatMap { summary.index(of: $0) }
+            : visible[level].flatMap { id in summary.buckets(level).first { $0.id == id }?.range.lowerBound }
+        if level == .all {
+            lastGridStep = currentStep == ladder.densestGrid.map(Self.step(of:)) ? GridColumns.default : currentStep
+        }
+        if target == .all {
+            enterGrid(at: topIndex.map { summary.items[$0].fileId }, fraction: 0)
+            return
+        }
+        focus[target] = topIndex.flatMap { summary.bucket(target, containing: $0)?.id }
+        set(target)
+    }
+
+    /// ⌘+ and ⌘− (View menu) on a summary level; from the grid only ⌘− at its densest step comes here.
+    func step(zoomIn: Bool, currentStep: Int) {
+        switch level {
+        case .all:
+            guard !zoomIn else { return }
+            select(.days, currentStep: currentStep)
+        default:
+            let visibleBucket = visible[level].flatMap { id in summary.buckets(level).first { $0.id == id } }
+            move(from: level, by: zoomIn ? 1 : -1, bucket: visibleBucket ?? summary.buckets(level).first, at: .top)
+        }
+    }
+
+    private func enterGrid(at fileId: FileID?, fraction: Double) {
+        setGridStep(lastGridStep)
+        if let fileId { gridPlacement = GridPlacement(fileId: fileId, fraction: min(max(fraction - 0.1, 0), 0.8)) }
+        set(.all)
+    }
+
+    private func set(_ target: LibraryZoomLevel) {
+        guard target != level else { return }
+        withAnimation(Self.animation) { level = target }
+        snaps += 1
+        defaults.set(target.rawValue, forKey: LibraryZoomLevel.storageKey)
+    }
+
+    static func step(of stop: LibraryZoomStop) -> Int {
+        if case .grid(let step) = stop { return step }
+        return GridColumns.default
+    }
+
+    static var animation: Animation? {
+        LibraryZoomHaptics.reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.38)
+    }
+}
+
+extension EnvironmentValues {
+    /// The Library's zoom levels, for the grid of the timeline screen that offers them.
+    @Entry var libraryZoom: LibraryZoomModel? = nil
+}
+
+/// The haptics of the zoom levels and the timeline (SPEC §15.5).
+@MainActor
+enum LibraryZoomHaptics {
+    static var reduceMotion: Bool {
+        #if os(macOS)
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #elseif canImport(UIKit)
+            UIAccessibility.isReduceMotionEnabled
+        #else
+            false
+        #endif
+    }
+
+    /// A level change by a trackpad pinch on the Mac: the trackpad's "level change" feedback where it has a Taptic Engine
+    /// (the system leaves it out when the user turned force click feedback off). Nothing elsewhere: iPhone and iPad play
+    /// their tick through `sensoryFeedback`.
+    static func trackpadLevelChange() {
+        #if os(macOS)
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        #endif
+    }
+
+    /// A year passed while scrubbing on the Mac (alignment feedback, as when a dragged object snaps to a guide).
+    static func trackpadAlignment() {
+        #if os(macOS)
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        #endif
+    }
+}
+
+// MARK: - Overlay
+
+extension View {
+    /// The zoom levels over the Library's grid: the years, months or days when one of them is chosen, and the picker.
+    func libraryZoomLevels(_ model: LibraryZoomModel, feed: GridFeed, isSelecting: Bool) -> some View {
+        modifier(LibraryZoomOverlay(model: model, feed: feed, isSelecting: isSelecting))
+    }
+}
+
+struct LibraryZoomOverlay: ViewModifier {
+    @Bindable var model: LibraryZoomModel
+    let feed: GridFeed
+    var isSelecting: Bool
+    @Environment(SessionModel.self) private var session
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.libraryZoom, model)
+            #if os(visionOS)
+                // The cards have the window's glass behind them, not an opaque page: the grid must not show through.
+                .opacity(model.level == .all ? 1 : 0)
+            #endif
+            .overlay {
+                if model.level != .all, feed.model.hasTiles {
+                    LibrarySummaryView(model: model, level: model.level)
+                        .id(model.level)
+                        .transition(transition)
+                }
+            }
+            #if !os(macOS)
+                .overlay(alignment: .bottom) {
+                    if !isSelecting, feed.model.hasTiles {
+                        LibraryZoomPicker(model: model, gridStep: feed.zoomStep)
+                        .padding(.bottom, 12)
+                        .transition(.opacity)
+                    }
+                }
+            #endif
+            .photosHaptic(.impact(weight: .light), trigger: model.snaps)
+            .task(id: feed.update.revision) {
+                model.update(items: feed.items, revision: feed.update.revision, services: session.services)
+            }
+            // Photos the Library shows are indexed for "Show Similar" and key photos, a little at a time.
+            .task(id: session.account.id) {
+                guard let services = session.services else { return }
+                await SimilarIndexing.trickle(services)
+            }
+    }
+
+    /// Zooming in, the new level grows out of where the fingers were and the old one grows past them; out, both shrink.
+    var transition: AnyTransition {
+        let anchor = model.anchor
+        let inward = model.zoomedIn
+        return .asymmetric(
+            insertion: .scale(scale: inward ? 0.82 : 1.18, anchor: anchor).combined(with: .opacity),
+            removal: .scale(scale: inward ? 1.18 : 0.82, anchor: anchor).combined(with: .opacity))
+    }
+}
+
+/// Years · Months · Days · All Photos.
+struct LibraryZoomPicker: View {
+    @Bindable var model: LibraryZoomModel
+    var gridStep: Int
+
+    var body: some View {
+        Picker(
+            selection: Binding(get: { model.level }, set: { model.select($0, currentStep: gridStep) })
+        ) {
+            ForEach(LibraryZoomLevel.allCases, id: \.self) { level in
+                Text(Self.title(level)).tag(level)
+            }
+        } label: {
+            Text("Zoom level", bundle: .module, comment: "Accessibility label of the Years/Months/Days/All Photos picker.")
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+        #if !os(macOS)
+            .padding(4)
+            .background(.regularMaterial, in: .capsule)
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+        #endif
+    }
+
+    static func title(_ level: LibraryZoomLevel) -> String {
+        switch level {
+        case .years: String(localized: "Years", bundle: .module, comment: "Library zoom level: one card per year.")
+        case .months: String(localized: "Months", bundle: .module, comment: "Library zoom level: one card per month.")
+        case .days: String(localized: "Days", bundle: .module, comment: "Library zoom level: a few photos of every day.")
+        case .all: String(localized: "All Photos", bundle: .module, comment: "Library zoom level: the grid of all photos.")
+        }
+    }
+}
+
+// MARK: - Years, months and days
+
+/// Frames of the cards on screen, in the level's coordinate space: which one is under the fingers when a pinch starts.
+/// A reference that nobody observes: cards report their frames while scrolling without redrawing the level.
+@MainActor
+final class SummaryCardFrames {
+    var frames: [Int: CGRect] = [:]
+
+    func card(at point: CGPoint) -> Int? {
+        frames.first { $0.value.contains(point) }?.key
+            ?? frames.min { distance($0.value, point) < distance($1.value, point) }?.key
+    }
+
+    private func distance(_ rect: CGRect, _ point: CGPoint) -> CGFloat {
+        abs(rect.midY - point.y) + abs(rect.midX - point.x) / 4
+    }
+}
+
+/// The cards of one summary level, with the pinch that leaves it.
+struct LibrarySummaryView: View {
+    @Bindable var model: LibraryZoomModel
+    let level: LibraryZoomLevel
+    @State private var scrolledId: Int?
+    @State private var frames = SummaryCardFrames()
+    @State private var pinch: Double = 1
+    @State private var pinchAnchor: UnitPoint = .center
+    @State private var pinchStart: CGPoint?
+    @State private var size: CGSize = .zero
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    nonisolated static let space = "librarySummary"
+
+    init(model: LibraryZoomModel, level: LibraryZoomLevel) {
+        self.model = model
+        self.level = level
+        _scrolledId = State(initialValue: model.focus[level])
+    }
+
+    var buckets: [LibrarySummary.Bucket] { model.summary.buckets(level) }
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
+                ForEach(buckets) { bucket in
+                    card(bucket)
+                        .id(bucket.id)
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .named(Self.space))
+                        } action: { frame in
+                            frames.frames[bucket.id] = frame
+                        }
+                        .onDisappear { frames.frames[bucket.id] = nil }
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, 12)
+            // Room for the level picker over the bottom edge.
+            .padding(.bottom, 56)
+        }
+        .scrollPosition(id: $scrolledId, anchor: .top)
+        .accessibilityIdentifier("librarySummary")
+        .coordinateSpace(.named(Self.space))
+        .onGeometryChange(for: CGSize.self) {
+            $0.size
+        } action: {
+            size = $0
+        }
+        .background(background)
+        .scaleEffect(displayScale, anchor: pinchAnchor)
+        .opacity(1 - LibraryZoomGesture.progress(scale: pinch) * 0.25)
+        .simultaneousGesture(magnify)
+        .onChange(of: scrolledId, initial: true) { _, id in model.visible[level] = id }
+        .overlay {
+            if buckets.isEmpty { LibrarySummarySkeleton(level: level) }
+        }
+        .accessibilityAction(named: Text("Zoom Out", bundle: .module)) { zoom(by: -1, bucket: topBucket, at: .top) }
+    }
+
+    var background: Color {
+        #if os(macOS)
+            Color(nsColor: .windowBackgroundColor)
+        #elseif os(visionOS)
+            Color.clear
+        #else
+            Color(uiColor: .systemBackground)
+        #endif
+    }
+
+    var topBucket: LibrarySummary.Bucket? {
+        scrolledId.flatMap { id in buckets.first { $0.id == id } } ?? buckets.first
+    }
+
+    var isWide: Bool { sizeClass != .compact || size.width > 600 }
+
+    var spacing: CGFloat { level == .months ? 10 : 18 }
+    var horizontalPadding: CGFloat { isWide ? 20 : 12 }
+
+    var columns: [GridItem] {
+        switch level {
+        case .years: [GridItem(.adaptive(minimum: isWide ? 320 : 300), spacing: spacing, alignment: .top)]
+        case .months: [GridItem(.adaptive(minimum: isWide ? 220 : 150), spacing: spacing, alignment: .top)]
+        default: [GridItem(.adaptive(minimum: isWide ? 360 : 300), spacing: spacing, alignment: .top)]
+        }
+    }
+
+    @ViewBuilder func card(_ bucket: LibrarySummary.Bucket) -> some View {
+        switch level {
+        case .years:
+            SummaryCard(bucket: bucket, title: DayLabel.yearLabel(for: bucket.date), aspect: 4 / 3, large: true) {
+                tap(bucket, at: anchor(of: bucket))
+            }
+        case .months:
+            SummaryCard(bucket: bucket, title: DayLabel.monthYearLabel(for: bucket.date), aspect: 1, large: false) {
+                tap(bucket, at: anchor(of: bucket))
+            }
+        default:
+            DayMosaic(bucket: bucket) { photo in
+                tap(bucket, photo: photo, at: anchor(of: bucket))
+            }
+        }
+    }
+
+    func anchor(of bucket: LibrarySummary.Bucket) -> UnitPoint {
+        guard let frame = frames.frames[bucket.id], size.width > 0, size.height > 0 else { return .center }
+        return UnitPoint(x: frame.midX / size.width, y: min(max(frame.minY / size.height, 0), 1))
+    }
+
+    /// A tap on a card zooms into it, unless it is the end of a pinch: the lifted fingers would tap a card of the level
+    /// the pinch just arrived at.
+    func tap(_ bucket: LibrarySummary.Bucket, photo: FileID? = nil, at point: UnitPoint) {
+        guard pinchStart == nil, model.acceptsTaps else { return }
+        zoom(by: 1, bucket: bucket, photo: photo, at: point)
+    }
+
+    func zoom(by steps: Int, bucket: LibrarySummary.Bucket?, photo: FileID? = nil, at point: UnitPoint) {
+        model.move(from: level, by: steps, bucket: bucket, photo: photo, at: point)
+    }
+
+    var displayScale: Double {
+        LibraryZoomGesture.displayScale(pinch, canZoomIn: true, canZoomOut: level != .years)
+    }
+
+    /// Follows the fingers; on release settles on the level the pinch was heading for, with its speed.
+    var magnify: some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.01)
+            .onChanged { value in
+                if pinchStart == nil {
+                    pinchStart = value.startLocation
+                    pinchAnchor = value.startAnchor
+                }
+                pinch = Double(value.magnification)
+            }
+            .onEnded { value in
+                let projected = LibraryZoomGesture.projectedScale(scale: Double(value.magnification), velocity: Double(value.velocity))
+                let steps = LibraryZoomGesture.steps(projectedScale: projected)
+                LibraryZoomModel.logger.debug(
+                    "pinch ended: scale \(Double(value.magnification)), velocity \(Double(value.velocity)), steps \(steps)")
+                let start = pinchStart ?? value.startLocation
+                let bucket = frames.card(at: start).flatMap { id in buckets.first { $0.id == id } } ?? topBucket
+                pinchStart = nil
+                model.pinchEnded = .now
+                withAnimation(.smooth(duration: 0.3)) { pinch = 1 }
+                guard steps != 0, steps > 0 || level != .years else { return }
+                LibraryZoomHaptics.trackpadLevelChange()
+                zoom(by: steps, bucket: bucket, at: value.startAnchor)
+            }
+    }
+}
+
+/// A year or a month: its key photo with the date over it.
+struct SummaryCard: View {
+    let bucket: LibrarySummary.Bucket
+    let title: String
+    let aspect: CGFloat
+    let large: Bool
+    let open: () -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Button(action: open) {
+            Color.clear
+                .aspectRatio(aspect, contentMode: .fit)
+                .overlay { SummaryPhoto(item: bucket.key, bucket: large ? 1024 : 256) }
+                .overlay(alignment: .bottomLeading) { caption }
+                .clipShape(.rect(cornerRadius: large ? 14 : 10))
+                .contentShape(.rect(cornerRadius: large ? 14 : 10))
+        }
+        .buttonStyle(.plain)
+        #if os(visionOS)
+            .hoverEffect()
+        #endif
+        .accessibilityLabel(Text(verbatim: "\(title), \(AccessibilityText.photos(bucket.count))"))
+        .accessibilityHint(Text("Zooms in", bundle: .module, comment: "VoiceOver hint of a year or month card in the Library."))
+    }
+
+    var caption: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(large ? .largeTitle.weight(.bold) : .headline)
+            Text(AccessibilityText.photos(bucket.count))
+                .font(large ? .subheadline : .caption)
+                .opacity(0.85)
+        }
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .padding(large ? 16 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .bottom) {
+            LinearGradient(
+                colors: [.black.opacity(OverlayLegibility.scrimOpacity(base: 0.55, increased: increased)), .clear],
+                startPoint: .bottom, endPoint: .top
+            )
+            .padding(.top, -30)
+        }
+    }
+
+    var increased: Bool { contrast == .increased || reduceTransparency }
+}
+
+/// A day: its date, how many photos it has, and its best photos (up to three, the last one saying how many more).
+struct DayMosaic: View {
+    let bucket: LibrarySummary.Bucket
+    /// A photo (or the day, nil) was tapped.
+    let open: (FileID?) -> Void
+
+    var shown: [GridMedia] { Array(bucket.highlights.prefix(3)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                open(nil)
+            } label: {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(DayLabel.label(for: bucket.date)).font(.headline)
+                    Spacer()
+                    Text(AccessibilityText.photos(bucket.count)).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            mosaic
+                .clipShape(.rect(cornerRadius: 12))
+        }
+    }
+
+    @ViewBuilder var mosaic: some View {
+        let gap: CGFloat = 3
+        switch shown.count {
+        case 0:
+            EmptyView()
+        case 1:
+            tile(shown[0], more: 0).aspectRatio(16 / 10, contentMode: .fit)
+        case 2:
+            HStack(spacing: gap) {
+                tile(shown[0], more: 0)
+                tile(shown[1], more: 0)
+            }
+            .aspectRatio(2, contentMode: .fit)
+        default:
+            Color.clear
+                .aspectRatio(3 / 2, contentMode: .fit)
+                .overlay {
+                    GeometryReader { proxy in
+                        let side: CGFloat = (proxy.size.height - gap) / 2
+                        HStack(spacing: gap) {
+                            tile(shown[0], more: 0)
+                                .frame(width: max(proxy.size.width - side - gap, 0), height: proxy.size.height)
+                            VStack(spacing: gap) {
+                                tile(shown[1], more: 0).frame(width: side, height: side)
+                                tile(shown[2], more: bucket.count - shown.count).frame(width: side, height: side)
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    func tile(_ item: GridMedia, more: Int) -> some View {
+        Button {
+            open(item.fileId)
+        } label: {
+            Color.clear
+                .overlay { SummaryPhoto(item: item, bucket: 1024) }
+                .overlay {
+                    if more > 0 {
+                        ZStack {
+                            Color.black.opacity(0.35)
+                            Text(verbatim: "+\(more.formatted())").font(.title2.weight(.semibold)).foregroundStyle(.white)
+                        }
+                        .accessibilityHidden(true)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if item.kind == .video {
+                        Image(systemName: "video.fill").font(.caption).foregroundStyle(.white).shadow(radius: 2).padding(6)
+                    }
+                }
+                .clipped()
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(GridTile.accessibilityLabel(for: item)))
+    }
+}
+
+/// The picture of a grid item in a card, with its BlurHash until the preview is there.
+struct SummaryPhoto: View {
+    let item: GridMedia
+    let bucket: Int
+
+    var body: some View {
+        PreviewImage(
+            fileId: item.fileId, etag: item.etag, bucket: bucket, blurhash: item.blurhash, hasPreview: item.hasPreview,
+            mimeType: item.mimeType, path: item.directory.hasPrefix("/") ? Self.path(item) : nil)
+    }
+
+    static func path(_ item: GridMedia) -> String {
+        item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"
+    }
+}
+
+/// Card shapes while the summary is built (the first moment after a launch on a large library).
+struct LibrarySummarySkeleton: View {
+    let level: LibraryZoomLevel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(0..<4, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    if level == .days { RoundedRectangle(cornerRadius: 4).frame(width: 140, height: 16) }
+                    RoundedRectangle(cornerRadius: 14).aspectRatio(level == .years ? 4 / 3 : 3 / 2, contentMode: .fit)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .foregroundStyle(.quaternary)
+        .skeletonPulse()
+        .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// Carries out the zoom model's placements in a grid (the photo a zoom from the days arrives at) and tells the model
+    /// which photo is at the top of the grid.
+    func libraryZoomPlacement(_ model: LibraryZoomModel?, locator: GridTileLocator) -> some View {
+        onChange(of: model?.gridPlacement, initial: true) { _, placement in
+            guard let model, let placement else { return }
+            model.gridPlacement = nil
+            locator.place(placement.fileId, placement.fraction)
+        }
+        .onAppear {
+            guard let model else { return }
+            model.gridTopItem = { locator.topItem() }
+        }
+    }
+}

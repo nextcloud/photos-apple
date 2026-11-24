@@ -27,6 +27,8 @@ struct TimelineScreen: View {
     @State private var deleteRejected: DeleteRejectedConfirmation?
     @State private var nothingRejected = false
     @Environment(\.undoManager) private var undoManager
+    /// Years, months, days or all photos (SPEC §15.5).
+    @State private var zoom = LibraryZoomModel()
 
     /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
     var showsMemoriesStrip: Bool {
@@ -110,6 +112,7 @@ struct TimelineScreen: View {
                 MemoriesStrip(memories: memories)
             }
             grid
+                .libraryZoomLevels(zoom, feed: feed, isSelecting: gridSelection.isSelecting)
         }
         .task(id: MemoriesStrip.loadKey(session.syncStatus, isShown: filter == .all && showsMemories)) {
             guard filter == .all, showsMemories, let services = session.services else { return }
@@ -119,6 +122,7 @@ struct TimelineScreen: View {
             gridSelection = state
         }
         .task(id: query) { observe() }
+        .onAppear { zoom.setGridStep = { [columns = $columns] step in columns.wrappedValue = step } }
         .onChange(of: skeleton, initial: true) { _, skeleton in feed.setSkeleton(skeleton) }
         // The photo is looked for among all media (the iPhone's picker may show only videos or favourites).
         .onChange(of: reveal?.pending, initial: true) { _, pending in
@@ -183,6 +187,8 @@ struct TimelineScreen: View {
             UploadMenu()
             PartnerFilterButton()
             #if os(macOS)
+                // Mac: Years, Months, Days, All Photos, as in Apple Photos' toolbar (SPEC §15.5).
+                LibraryZoomPicker(model: zoom, gridStep: columns)
                 // Mac: zoom slider between two buttons that step, like Apple Photos. Three toolbar items, not a slider
                 // with value labels or a stack: the toolbar gives every control of an item that item's label, so the
                 // end caps would both be read as "Zoom".
@@ -191,6 +197,7 @@ struct TimelineScreen: View {
                     Text("Zoom", bundle: .module)
                 }
                 .frame(width: 100)
+                .disabled(zoom.level != .all)
                 .accessibilityLabel(Text("Zoom", bundle: .module))
                 .help(String(localized: "Zoom", bundle: .module))
                 zoomButton(zoomIn: true)

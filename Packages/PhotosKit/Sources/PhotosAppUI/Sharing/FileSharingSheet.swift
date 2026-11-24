@@ -243,7 +243,7 @@ struct FileSharingSheet: View {
             .formStyle(.grouped)
             .disabled(model.working)
             .overlay {
-                if !model.loaded { ProgressView() }
+                if !model.loaded { SkeletonRows(count: 4, thumbnail: 32, circular: true).frame(maxHeight: .infinity, alignment: .top) }
             }
             .navigationTitle(String(localized: "Share “\(model.target.name)”", bundle: .module))
             .toolbar {

@@ -16,7 +16,7 @@ struct PartnerSharingSection: View {
         if let partners = session.partners {
             Section {
                 if !partners.loaded {
-                    ProgressView().frame(maxWidth: .infinity)
+                    SkeletonRows(count: 2, thumbnail: 28, circular: true).padding(-16)
                 } else if partners.candidates.isEmpty && partners.settings.folders.isEmpty {
                     Text("No one has shared a folder with you yet.", bundle: .module).foregroundStyle(.secondary)
                 }

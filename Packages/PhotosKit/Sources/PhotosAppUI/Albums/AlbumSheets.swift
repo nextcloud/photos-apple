@@ -95,7 +95,7 @@ struct PhotoPickerSheet: View {
                 )
             )
         } else if candidates == nil {
-            ProgressView()
+            GridSkeleton(zoomStep: columns, showsHeader: false)
         } else if candidates?.isEmpty == true {
             ContentUnavailableView(
                 String(localized: "No photos to add", bundle: .module), systemImage: "photo.on.rectangle.angled",

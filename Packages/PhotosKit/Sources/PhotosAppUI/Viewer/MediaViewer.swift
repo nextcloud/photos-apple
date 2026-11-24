@@ -32,6 +32,8 @@ struct MediaViewer: View {
     @State private var nextcloudShare: SharingTarget?
     /// Slideshow from the photo shown through the viewer's photos (SPEC VW-5).
     @State private var slideshow: SlideshowRequest?
+    /// "Show Similar" for the photo shown (SPEC §15.5).
+    @State private var similarTo: MediaItem?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -160,6 +162,7 @@ struct MediaViewer: View {
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
             .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
+            .similarPhotosSheet($similarTo)
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
@@ -595,6 +598,13 @@ struct MediaViewer: View {
                 Label(ShowInTimelineAction.title, systemImage: ShowInTimelineAction.systemImage)
             }
         }
+        if SimilarPhotosAction.isOffered(for: item.kind) {
+            Button {
+                similarTo = item
+            } label: {
+                Label(SimilarPhotosAction.title, systemImage: SimilarPhotosAction.systemImage)
+            }
+        }
         Divider()
         if item.kind == .image {
             Button {
@@ -856,7 +866,8 @@ struct ViewerPage: View {
                 )
                 .foregroundStyle(.white)
             } else {
-                ProgressView().tint(.white)
+                // Read from the local index in a few milliseconds: nothing to show for that moment.
+                Color.clear
             }
         }
         .accessibilityAction(named: Text(favoriteActionTitle)) { actions.toggleFavorite() }

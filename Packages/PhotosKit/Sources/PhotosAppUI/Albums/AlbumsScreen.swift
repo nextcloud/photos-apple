@@ -73,7 +73,8 @@ struct AlbumsScreen: View {
                     }
                 }
             } else if !loaded {
-                ProgressView()
+                // The covers' shape while the albums load (SPEC §15.5: no spinners).
+                SkeletonCovers().frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .navigationTitle(title)
@@ -263,7 +264,7 @@ struct AlbumRouteScreen: View {
                     String(localized: "Album not found", bundle: .module), systemImage: "rectangle.stack.badge.minus",
                     description: Text("It may have been renamed or deleted.", bundle: .module))
             } else {
-                ProgressView()
+                GridSkeleton(zoomStep: GridColumns.default, showsHeader: false)
             }
         }
         // File ▸ Open in New Window.

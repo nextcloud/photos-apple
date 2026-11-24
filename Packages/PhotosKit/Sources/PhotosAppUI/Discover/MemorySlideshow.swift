@@ -94,7 +94,7 @@ struct MemorySlideshow: View {
                     String(localized: "No photos to show", bundle: .module),
                     systemImage: "photo.on.rectangle.angled")
             } else {
-                ProgressView().tint(.white)
+                DelayedSpinner(tint: .white)
             }
             if showsTitle && !items.isEmpty { titleCard }
         }

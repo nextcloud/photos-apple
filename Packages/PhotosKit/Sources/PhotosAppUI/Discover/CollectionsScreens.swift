@@ -120,7 +120,11 @@ struct PeopleScreen: View {
             .padding()
             if hiddenCount > 0 { hiddenNote }
         }
-        .overlay { if loading && people.isEmpty && error == nil { ProgressView() } }
+        .overlay {
+            if loading && people.isEmpty && error == nil {
+                SkeletonCovers(minimum: 100, circular: true).frame(maxHeight: .infinity, alignment: .top)
+            }
+        }
         .navigationTitle(String(localized: "People", bundle: .module))
         .toolbar {
             NavigationLink {
@@ -581,7 +585,7 @@ struct FoldersScreen: View {
         if !folders.isEmpty {
             EmptyView()
         } else if !loaded {
-            ProgressView()
+            SkeletonCovers().frame(maxHeight: .infinity, alignment: .top)
         } else if let error {
             ContentUnavailableView {
                 Label(String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle")

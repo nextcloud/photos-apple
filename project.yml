@@ -130,6 +130,7 @@ targets:
           - com.nextcloud.photos.refresh
           - com.nextcloud.photos.processing
           - com.nextcloud.photos.labels
+          - com.nextcloud.photos.similar
           - $(PRODUCT_BUNDLE_IDENTIFIER).backup.*
         UIBackgroundModes: [fetch, processing, remote-notification]
   ShareExtension:
