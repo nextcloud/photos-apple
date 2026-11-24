@@ -70,6 +70,25 @@ import Testing
         #expect(GridDrag.ids(dragged: 20, selection: [20, 99], isSelecting: true, position: position) == [20, 99])
     }
 
+    /// A photo dragged from a grid into an album window is added to the album, not uploaded again as a copy; a photo of
+    /// another account is left out; files from other apps are still uploaded.
+    @Test func aPhotoOfTheLibraryDroppedOnAnAlbumIsAddedNotUploaded() throws {
+        let reference = LibraryItemReference(account: "admin@cloud.example", fileId: 42)
+        #expect(try LibraryItemReference.decoded(reference.encoded()) == reference)
+        let file = URL(fileURLWithPath: "/tmp/IMG_0001.jpg")
+        let drops: [AlbumDrop] = [
+            .library(reference),
+            .file(file),
+            .library(LibraryItemReference(account: "other@cloud.example", fileId: 7)),
+            .library(reference),
+            .library(LibraryItemReference(account: "admin@cloud.example", fileId: 43)),
+        ]
+        let (fileIds, files) = AlbumDrop.split(drops, account: "admin@cloud.example")
+        #expect(fileIds == [42, 43])
+        #expect(files == [file])
+        #expect(AlbumDrop.split([], account: "admin@cloud.example").fileIds.isEmpty)
+    }
+
     @Test func theSelectionMarkShrinksOnSmallTilesAndBadgesMakeRoom() {
         #expect(GridTile.checkmarkSide(tileSide: 120) == 22)
         #expect(GridTile.checkmarkSide(tileSide: 28) == 13)

@@ -92,9 +92,8 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.photography
         UILaunchScreen: {}
-        UIApplicationSupportsMultipleScenes: true
-        # Where the system looks for it: without it Vision Pro refuses to open the immersive spaces (memory room, panorama)
-        # and iPadOS gives the app a single window.
+        # Several windows on iPad (album windows, File ▸ New Window) and Vision Pro's immersive spaces (memory room,
+        # panorama). The key only counts inside the scene manifest; at the top level the system ignored it.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
@@ -119,6 +118,12 @@ targets:
           NSAllowsArbitraryLoads: true
         # The backup's Live Activity (SPEC §15.4; iPhone and iPad, ignored elsewhere).
         NSSupportsLiveActivities: true
+        # A photo of the library dragged between the app's windows (`LibraryItemReference`); never leaves the app.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.nextcloud.photos.library-item
+            UTTypeDescription: Nextcloud Photos library item
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification: {}
         CFBundleURLTypes:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]

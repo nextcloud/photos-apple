@@ -156,6 +156,10 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the context menu of a photo shows a large preview (a tap opens it), tiles can be dragged into other apps on iPad (the original
   is downloaded on drop), selection mark in the bottom trailing corner, hover effect under the pointer. The logic behind them
   (single-flight refresh, what a drag carries, mark and preview sizes) ✅ unit-tested.
+  iPad drag and drop ✅ run in the iOS 27.2 simulator (windowed apps, two windows side by side): a photo dragged from the
+  library into an album window is added to that album — the same file, not an uploaded copy (`AlbumDrop`; it was ignored
+  before, the album only took file URLs); a photo dropped back on its own grid uploads nothing. Dragging into other apps
+  🟡 (XCUITest cannot drive another app's window).
 - Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
   were only exercised through accessibility, not with a real pointer).
 - Date scrubber on iPhone, iPad and Vision Pro ✅ run in the iOS 27.2 simulator (iPhone): replaces UIKit's section index, which
@@ -250,7 +254,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   Library does not show: the tile closest in time) and marks it — selected on the Mac, a short ring elsewhere. Target ✅
   unit-tested (`TimelineReveal`); the Mac grid got a `reveal` for it. 🟡 Not driven in the app (the screen locked).
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
-  buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
+  buttons under the pointer ✅ (iPad: inspector beside the photo in both orientations, → pages, run in the iOS 27.2 simulator;
+  the pointer was not). The grid's info inspector on iPad ✅ (simulator): opened from the context menu, closed with "Hide
+  info" in the toolbar, not brought back empty by the system at the next launch. Video and Live Photo motion play from the local copy when there is one, else through the app's
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
 - Performance budgets (§10) 🟡: the store side is measured with a synthetic 100 000-item index
   (`LargeLibraryPerformanceTests`, tag `performance`; skip with `PHOTOS_SKIP_PERFORMANCE=1`). On an Apple-silicon Mac, release
@@ -296,8 +302,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 ## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
 - Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
   search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
-  iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping 🟡 (compiled for iOS, not run).
-- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`, not run): tabs Library,
+  iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping; iPad ✅ run in the iOS 27.2
+  simulator on the iPad Pro 13-inch and the iPad mini (`IPadTourTests`: every sidebar row in landscape, the tab bar in
+  portrait shows Library, Settings and Search, turning the device keeps the app running), Vision Pro 🟡. Fixed on the way: Photos/Videos/Favorites hung at 100 % CPU (undo manager,
+  `UndoManagerBox`), the sidebar's sections and Backup were tabs of the portrait tab bar, rotating to landscape crashed (the
+  sidebar header had no app model).
+- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`; a narrow iPad window ✅ run in
+  the iOS 27.2 simulator on the iPad Pro 13-inch and the iPad mini with "Windowed Apps": the tab bar with Collections and its
+  list, `testWindowsNarrowWindowIsCompact`): tabs Library,
   Collections, Search, Settings. The Collections tab lists every place that is a sidebar row elsewhere (server features
   respected) and Backup with its state, and pushes it in its own stack; the navigation state stays the selected destination
   and its path, so deep links, state restoration and a change between tab bar and sidebar keep working.
@@ -318,7 +330,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   unlock while the app is locked.
 - Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
   Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
-  structure read from the running app; the same commands are the keyboard shortcuts on iPadOS 🟡.
+  structure read from the running app; the same commands are the keyboard shortcuts on iPadOS: ⌘1…⌘9 (Go), ⇧⌘N, ⌘F, ⌥⌘S and
+  ⌘. ✅ typed in the iOS 27.2 simulator; ⌘I (Get Info) and ⌘−/⌘+ (Zoom) are in the iPad's menu but did not reach their
+  action there (open; ⌘I in the viewer, a button's own shortcut, works).
   🟡 Image ▸ Rotate Left ⌘R / Rotate Right ⌥⌘R on the selection (as in Photos; Sync Now moved to ⇧⌘R), also in the grid's
   context menu: saved like the editor's "Overwrite original" — a new version of each file, only replacing the version the app
   knows (`If-Match`), read-only shares/videos/RAW-GIF-WebP left alone and reported; save path ✅ run against the 8089 server
@@ -330,7 +344,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the most recently changed, All Albums… 🟡 (Image menu structure ✅ read from the app). Share… in the grid's context menu (the
   system Share menu on the Mac, share sheet on iPhone/iPad, originals downloaded on demand) 🟡. Albums open in their own window
   (`WindowGroup(for: AlbumWindowValue)`): File ▸ Open in New Window, the album card's context menu, ⌥-click 🟡 (built for
-  macOS/iOS/visionOS, not run: Mac locked). ⬜ View ▸ Square Tiles (timeline area).
+  macOS/iOS/visionOS, not run on the Mac: Mac locked). iPad ✅ run in the iOS 27.2 simulator: "Open in new window" in the
+  album card's context menu opens the album in a window of its own, which is restored at the next launch (it never appeared
+  before: the multiple-scenes key was outside the scene manifest). ⬜ View ▸ Square Tiles (timeline area).
 - Mac: "Export…" saves the originals of the selection into a folder 🟡 (the panel was not driven by hand).
 
 ## M2 Albums, sharing, upload, offline — ✅

@@ -466,6 +466,7 @@ struct MainView: View {
                     } header: {
                         Text("Browse", bundle: .module)
                     }
+                    .customizationID("section.browse")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
@@ -475,6 +476,7 @@ struct MainView: View {
                     } header: {
                         Text("Collections", bundle: .module)
                     }
+                    .customizationID("section.collections")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
@@ -484,6 +486,7 @@ struct MainView: View {
                     } header: {
                         Text("Utilities", bundle: .module)
                     }
+                    .customizationID("section.utilities")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     Tab(value: AppDestination.backup) {
@@ -491,6 +494,7 @@ struct MainView: View {
                     } label: {
                         Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
                     }
+                    .customizationID(AppDestination.backup.rawValue)
                     .defaultVisibility(.hidden, for: .tabBar)
                 }
 
@@ -499,10 +503,14 @@ struct MainView: View {
                 } label: {
                     Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
                 }
+                .customizationID(AppDestination.settings.rawValue)
             }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewCustomization($customization)
-            .tabViewSidebarHeader { AccountHeader() }
+            // The models are handed over explicitly: when the sidebar first appears during a rotation (portrait → landscape),
+            // UIKit sizes the header before SwiftUI has given it the environment, and the app crashed ("No Observable object
+            // of type AppModel found").
+            .tabViewSidebarHeader { AccountHeader().environment(app).environment(session) }
             .onChange(of: selection, initial: true) { _, destination in
                 if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
             }

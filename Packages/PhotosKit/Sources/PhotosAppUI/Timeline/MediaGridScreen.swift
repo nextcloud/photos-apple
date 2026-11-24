@@ -33,8 +33,10 @@ struct MediaGridScreen<Accessory: View>: View {
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
-    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone.
-    @Environment(\.undoManager) private var undoManager
+    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone. Not `@Environment`: see
+    /// `UndoManagerBox`.
+    @State private var undoBox = UndoManagerBox()
+    private var undoManager: UndoManager? { undoBox.manager }
     @State private var selection: Set<FileID> = []
     /// What the toolbar and the menus show for the selection, loaded off the main thread when the selection changes.
     @State private var selectionInfo = GridSelectionInfo()
@@ -108,6 +110,7 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var body: some View {
         content
+            .readsUndoManager(into: undoBox)
             .navigationTitle(isSelecting && !keepsTitleWhileSelecting ? selectionTitle : title)
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
@@ -138,7 +141,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .collageEditor($collage)
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
-            .sheet(item: $editedItem) { item in EditorView(item: item) }
+            .photoEditor($editedItem)
             .similarPhotosSheet($similarTo)
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
@@ -412,6 +415,19 @@ struct MediaGridScreen<Accessory: View>: View {
         // label and tooltip, and the toolbar can move single items to the overflow menu instead of clipping at the window edge.
         ToolbarItemGroup(placement: .primaryAction) {
             accessory()
+            #if os(iOS)
+                // The grid has no Info button of its own (the context menu's "Info" opens the panel): without this, an iPad
+                // without a keyboard (⌘I) could not close the panel again.
+                if showingInfo {
+                    Button {
+                        showingInfo = false
+                    } label: {
+                        Label(
+                            String(localized: "Hide info", bundle: .module, comment: "Closes the info panel beside the grid (iPad)."),
+                            systemImage: "info.circle.fill")
+                    }
+                }
+            #endif
             #if !os(macOS)
                 Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
                     if isSelecting { endSelection() } else { isSelecting = true }
