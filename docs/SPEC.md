@@ -824,7 +824,57 @@ _To be written._
 
 ### 15.6 Then and now, travel globe [places]
 
-_To be written._
+Everything is computed on the device from the local index (GPS, the server's place name `nc:metadata-photos-place`
+and country `nc:metadata-photos-place-country`); no server changes. Domain types in PhotosDomain (`Geo.swift`,
+`ThenAndNow.swift`, `TimeLapsePlan.swift`, `Travel.swift`), queries in `TravelQueries.swift`, Vision and video in
+PhotosMedia (`ThenAndNowMedia.swift`), screens in `ThenAndNowScreens.swift` and `TravelScreens.swift`.
+
+**TN-1 Then and now spots.** A spot is the geotagged photos within 100 m of the first photo taken there (oldest photos
+seed the spots, through a spatial grid), kept when they span at least two calendar years. Each year leads with its
+best photo: the photo it was opened from, then favourites, then the photo nearest the spot's middle. Spots are ranked
+by number of years, then span, then the most recent year. Title: "Lisbon · 2014 · 2019 · 2025" (server place name,
+else "This place"; more than four years as "2010 · 2011 · 2012 · … · 2016").
+**TN-2 Same view.** When a spot opens, Vision feature prints (`GenerateImageFeaturePrintRequest`) of 256 px previews
+are compared on the device: up to 4 photos of the anchor year (the newest, or the year of the photo it was opened
+from) and up to 12 per other year (6 with more than 8 years: favourites/middle first, then spread over the year). The
+anchor whose matches are closest wins, and every year then leads with its photo closest to it. Without feature prints
+(Vision unavailable, previews not loadable) the location order stays. Compass heading is not used: the index has no
+`GPSImgDirection` (the server's metadata does not carry it) and reading it would mean downloading originals.
+**TN-3 Screens.** Places and Memories show a "Then and now" row (one spot per place name, 12 at most, "See all" for the
+full list); a card shows the first and the last year side by side. The spot screen shows the years side by side (two
+visible on iPhone, up to four on wide screens, scrolling sideways), each opening its photos in the viewer; "Play
+time-lapse"; "Export video…"; "All photos from here". The viewer's More menu has "Then and now" for a photo with
+photos of another year within 100 m (found from a small box of the coordinate index while the menu is built); it opens
+the spot in a sheet, anchored on that photo.
+**TN-4 Time-lapse.** `TimeLapsePlan`: each year's photo held 1.8 s, cross-fading 1 s into the next with a slow 6 %
+zoom (dissolve of 0.5 s without zoom with Reduce Motion), looping; the year large in the lower left. Full screen on
+iPhone/iPad, a sheet on the Mac and Vision Pro; tap or Space pauses, Escape closes. **Export** writes the same plan
+(1.6 s hold, 0.9 s fade, no loop) as an H.264 MP4 (1920 × 1080, or 1080 × 1920 when most photos are portrait, 30 fps,
+year burnt in) from the 1024 px previews the screen already loaded, then shows it playing with Share (save to Photos/Files from
+the share sheet).
+
+**TG-1 Travel model (`TravelHistory`, reusable).** Visits: consecutive photos within 25 km of where the visit started,
+without a gap of more than 2 days. Places: visits within 25 km of a place's largest visit. Home: the place with photos
+on the most different days; everything within 50 km of it is home. Trips: runs of visits away from home, ended by a
+visit at home or a gap of more than 4 days; path home → visits → home, distance = length of these great-circle paths.
+Country of a visit: the server's country code of most of its photos, else its place's. Per year (a visit or trip
+counts in each year it touches): trips, places, countries, distance, photo count, farthest place from home. Year in
+Review and widgets can use `TravelHistory(items).stats(in: year)`.
+**TG-2 Globe.** SwiftUI `Map` with `.hybrid(elevation: .realistic)` (MapKit draws the earth as a globe when zoomed
+out), opening on home from 45 000 km. The trips' legs are geodesic `MapPolyline`s, each pair of places once (wider the
+more trips used it, brighter the more recently), the selected trip in white on top; places are markers (the
+40 with most photos as photo thumbnails, the rest as dots, home as a house); tapping a place opens its photos (of the
+year shown). A bottom panel shows the year (or "All years"), the stats line ("37 countries · 412,000 km", miles where
+the locale uses them) and the trips newest first; tapping a trip flies the globe to it and offers its photos. A year
+filter menu and "Countries" are in the toolbar. Entry points: the Travel card at the top of Places (with the stats
+line) and the globe button in the Map's toolbar (the Map exists on every server, Places needs `places`).
+**TG-3 Countries.** A count with the share of the world's 195 countries, and per continent either the visited
+countries (flag, name, years, photos; opens their photos) or a "scratch map" of every country's flag, the visited ones
+in colour. Countries come from the index; for places without one, "Look up countries with Apple Maps" (MapKit
+`MKReverseGeocodingRequest`, at most 40 places per run, one request per 1.5 s, answers cached on the device by 0.1°
+coordinate) runs only after the user asked once, because it sends the place's approximate location to Apple.
+
+Platforms: iOS, iPadOS, macOS, visionOS (same screens; full-screen player on iOS only).
 
 ### 15.7 Bring everything home: imports [import]
 
