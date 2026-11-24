@@ -26,7 +26,10 @@ struct TimelineScreen: View {
     @State private var cullingFilter: CullingFilter = .all
     @State private var deleteRejected: DeleteRejectedConfirmation?
     @State private var nothingRejected = false
-    @Environment(\.undoManager) private var undoManager
+    /// Not `@Environment(\.undoManager)`: on iPad that rendered the timeline again each time the sidebar hosted it, an
+    /// endless loop (see `UndoManagerBox`).
+    @State private var undoBox = UndoManagerBox()
+    private var undoManager: UndoManager? { undoBox.manager }
     /// Years, months, days or all photos (SPEC §15.5).
     @State private var zoom = LibraryZoomModel()
 
@@ -114,6 +117,7 @@ struct TimelineScreen: View {
             grid
                 .libraryZoomLevels(zoom, feed: feed, isSelecting: gridSelection.isSelecting)
         }
+        .readsUndoManager(into: undoBox)
         .task(id: MemoriesStrip.loadKey(session.syncStatus, isShown: filter == .all && showsMemories)) {
             guard filter == .all, showsMemories, let services = session.services else { return }
             if let loaded = await MemoriesStrip.load(services) { memories = loaded }
