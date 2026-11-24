@@ -10,6 +10,12 @@ import SwiftUI
 /// Full-screen pager over a context (SPEC §7.2).
 struct MediaViewer: View {
     let ids: [FileID]
+    /// Copies of one shot behind a tile of the grid, by the tile's id (`ViewerStart.stacks`).
+    let stacks: [FileID: [FileID]]
+    /// Told the tile of the photo shown whenever it changes: the zoom transition goes back into that tile.
+    var currentChanged: (@MainActor (FileID) -> Void)?
+    /// Stacks whose other copies are pages of their own right now.
+    @State private var expandedStacks: Set<FileID> = []
     @State private var current: FileID?
     @State private var chromeHidden = false
     @State private var showingInfo = false
@@ -47,9 +53,14 @@ struct MediaViewer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.showInFolder) private var showInFolder
 
-    init(ids: [FileID], startId: FileID) {
+    init(
+        ids: [FileID], startId: FileID, stacks: [FileID: [FileID]] = [:], currentChanged: (@MainActor (FileID) -> Void)? = nil
+    ) {
         self.ids = ids
+        self.stacks = stacks
+        self.currentChanged = currentChanged
         _current = State(initialValue: startId)
     }
 
@@ -57,9 +68,11 @@ struct MediaViewer: View {
     /// changes made here or elsewhere — whatever screen opened the viewer.
     @State private var observedItem: MediaItem?
 
-    /// The pages: the context the viewer was opened with, without what was deleted or archived here.
+    /// The pages: the context the viewer was opened with, with the copies of opened stacks, without what was deleted or
+    /// archived here.
     var shownIds: [FileID] {
-        removed.isEmpty ? ids : ids.filter { !removed.contains($0) }
+        let pages: [FileID] = ViewerStacks.pages(ids, stacks: stacks, expanded: expandedStacks)
+        return removed.isEmpty ? pages : pages.filter { !removed.contains($0) }
     }
 
     struct PagerLayout: Hashable {
@@ -166,6 +179,7 @@ struct MediaViewer: View {
                 hoverEdge = Self.edge(under: phase, width: pagerWidth)
             }
             .overlay { stepButtons }
+            .overlay(alignment: .top) { stackBar }
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
@@ -178,8 +192,9 @@ struct MediaViewer: View {
                 .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
             #endif
             .toolbar { toolbar }
-            .onChange(of: current) { _, _ in
+            .onChange(of: current) { _, id in
                 zoomScale = ViewerZoom.minimumScale
+                if let id { currentChanged?(ViewerStacks.tile(of: id, in: stacks) ?? id) }
             }
             .task(id: current) {
                 guard let current, let library = session.services?.library else { return }
@@ -480,6 +495,21 @@ struct MediaViewer: View {
             Label(PhotosCommands.exportTitle, systemImage: "square.and.arrow.down")
         }
         .disabled(saver.isRunning)
+        if showInFolder != nil {
+            Button {
+                showFolder(item)
+            } label: {
+                Label(ShowInFolderAction.title, systemImage: ShowInFolderAction.systemImage)
+            }
+        }
+        if let stack = currentStack {
+            let open: Bool = expandedStacks.contains(stack.tile)
+            Button {
+                toggleStack(stack.tile)
+            } label: {
+                Label(Self.stackTitle(open: open, count: stack.copies.count), systemImage: "square.stack")
+            }
+        }
         Divider()
         if item.kind == .image {
             Button {
@@ -506,6 +536,80 @@ struct MediaViewer: View {
                     systemImage: item.isArchived ? "tray.and.arrow.up" : "archivebox")
             }
         }
+    }
+
+    /// Opens the folder browser at the photo's folder; the viewer closes, as Back would leave it.
+    func showFolder(_ item: MediaItem) {
+        guard let showInFolder else { return }
+        dismiss()
+        showInFolder(item)
+    }
+
+    // MARK: Stacks
+
+    /// The stack the photo shown belongs to: the tile's id and every copy, the tile's first.
+    var currentStack: (tile: FileID, copies: [FileID])? {
+        guard let current, let tile = ViewerStacks.tile(of: current, in: stacks), let copies = stacks[tile], copies.count > 1 else {
+            return nil
+        }
+        return (tile, copies)
+    }
+
+    /// Shows the other copies of a stack as pages after the tile's, or takes them out again (back on the tile's page).
+    func toggleStack(_ tile: FileID) {
+        withAnimation(reduceMotion ? nil : .default) {
+            if expandedStacks.contains(tile) {
+                if current != tile { current = tile }
+                expandedStacks.remove(tile)
+            } else {
+                expandedStacks.insert(tile)
+            }
+            realignments += 1
+        }
+    }
+
+    /// "Show 2 copies" / "Hide copies" (title case on the Mac).
+    static func stackTitle(open: Bool, count: Int) -> String {
+        if open {
+            return PlatformWording.title(
+                mac: LocalizedStringResource("Hide Copies", bundle: .module),
+                other: LocalizedStringResource("Hide copies", bundle: .module))
+        }
+        return PlatformWording.title(
+            mac: LocalizedStringResource("Show \(count) Copies", bundle: .module),
+            other: LocalizedStringResource("Show \(count) copies", bundle: .module))
+    }
+
+    /// Above a stacked photo: how many copies there are and a button to show them; once shown, which copy this is.
+    @ViewBuilder var stackBar: some View {
+        if let stack = currentStack, !chromeHidden {
+            let open: Bool = expandedStacks.contains(stack.tile)
+            HStack(spacing: 10) {
+                if open, let current, let index = stack.copies.firstIndex(of: current) {
+                    Text(Self.copyPosition(index: index, count: stack.copies.count, name: currentItem?.name ?? ""))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Button {
+                    toggleStack(stack.tile)
+                } label: {
+                    Label(Self.stackTitle(open: open, count: stack.copies.count), systemImage: "square.stack")
+                }
+                .buttonStyle(.plain)
+                .fontWeight(.semibold)
+            }
+            .font(.callout)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(.black.opacity(0.55), in: .capsule)
+            .padding(.top, 10)
+        }
+    }
+
+    /// "Copy 2 of 3 · IMG_1234.DNG".
+    static func copyPosition(index: Int, count: Int, name: String) -> String {
+        String(localized: "Copy \(index + 1) of \(count) · \(name)", bundle: .module)
     }
 
     /// What the favourite button does: title case on the Mac, sentence case elsewhere.

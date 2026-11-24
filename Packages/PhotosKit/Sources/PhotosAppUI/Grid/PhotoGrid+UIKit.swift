@@ -42,7 +42,13 @@
     {
         let services: AccountServices
         var callbacks: GridCallbacks? {
-            didSet { updateRefreshControl() }
+            didSet {
+                updateRefreshControl()
+                if let locator = callbacks?.tileLocator {
+                    locator.frame = { [weak self] id in self?.tileFrame(id) }
+                    locator.reveal = { [weak self] id in self?.reveal(id) }
+                }
+            }
         }
         private let refreshRunner = GridRefreshRunner()
         /// A two-finger drag over the tiles is selecting right now.
@@ -271,6 +277,25 @@
         func fileId(at indexPath: IndexPath) -> FileID? { core.fileId(at: indexPath) }
 
         private func indexPath(for id: FileID) -> IndexPath? { core.indexPath(for: id) }
+
+        /// The tile's frame in this controller's view, when it is on screen (the zoom transition of the viewer).
+        func tileFrame(_ id: FileID) -> CGRect? {
+            guard isViewLoaded, let indexPath = indexPath(for: id),
+                let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame
+            else { return nil }
+            let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+            guard visible.intersects(frame) else { return nil }
+            return view.convert(frame, from: collectionView)
+        }
+
+        /// Scrolls the tile on screen if it is not (the viewer was paged far from where it was opened).
+        func reveal(_ id: FileID) {
+            guard isViewLoaded, let indexPath = indexPath(for: id), let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame
+            else { return }
+            let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+            guard !visible.contains(frame) else { return }
+            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
+        }
 
         // MARK: Scroll position
 
@@ -540,6 +565,7 @@
         private let videoIcon = UIImageView(image: UIImage(systemName: "video.fill"))
         private let favoriteIcon = UIImageView(image: UIImage(systemName: "heart.fill"))
         private let liveIcon = UIImageView(image: UIImage(systemName: "livephoto"))
+        private let stackIcon = UIImageView(image: UIImage(systemName: "square.stack.fill"))
         private let checkmark = UIImageView()
         private let gradient = CAGradientLayer()
         /// Loads the preview and says what to draw; shared with the AppKit grid.
@@ -571,7 +597,15 @@
             checkmark.layer.shadowOpacity = 0.35
             checkmark.layer.shadowRadius = 1.5
             checkmark.layer.shadowOffset = .zero
-            [durationLabel, videoIcon, favoriteIcon, liveIcon, checkmark].forEach { contentView.addSubview($0) }
+            // On the picture without a shade: a soft shadow keeps it visible on bright pictures.
+            stackIcon.tintColor = .white
+            stackIcon.contentMode = .scaleAspectFit
+            stackIcon.layer.shadowColor = UIColor.black.cgColor
+            stackIcon.layer.shadowOpacity = 0.5
+            stackIcon.layer.shadowRadius = 1.5
+            stackIcon.layer.shadowOffset = .zero
+            stackIcon.isHidden = true
+            [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, checkmark].forEach { contentView.addSubview($0) }
             // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
             hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
             tilePicture.show = { [weak self] display in self?.show(display) }
@@ -607,6 +641,7 @@
             videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 4, y: bounds.height - 16, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: 4, width: 16, height: 16)
+            stackIcon.frame = CGRect(x: bounds.width - 20, y: 4, width: 16, height: 16)
         }
 
         /// The picture the tile shows right now (first picture of the context menu's preview).
@@ -670,6 +705,7 @@
             videoIcon.isHidden = !badges.showsVideo
             favoriteIcon.isHidden = !badges.showsFavorite
             liveIcon.isHidden = !badges.showsLivePhoto
+            stackIcon.isHidden = !badges.showsStack
             gradient.isHidden = !badges.showsShade
             let increased = UIAccessibility.isDarkerSystemColorsEnabled || UIAccessibility.isReduceTransparencyEnabled
             gradient.colors = [

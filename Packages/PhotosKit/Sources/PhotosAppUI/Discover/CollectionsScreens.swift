@@ -82,6 +82,18 @@ struct PeopleScreen: View {
     @State private var people: [Person] = []
     @State private var loading = true
     @State private var error: String?
+    /// Hidden on this device (Recognize has no way to hide a person on the server).
+    @State private var hidden = HiddenPeople()
+    @State private var showsHidden = false
+    @State private var renaming: Person?
+    @State private var newName = ""
+    @State private var actionError: String?
+
+    var shown: [Person] {
+        showsHidden ? people : people.filter { !hidden.names.contains($0.name) }
+    }
+
+    var hiddenCount: Int { people.filter { hidden.names.contains($0.name) }.count }
 
     var body: some View {
         ScrollView {
@@ -90,38 +102,110 @@ struct PeopleScreen: View {
                     String(localized: "People are not available", bundle: .module), systemImage: "person.2.slash", description: Text(error))
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 16)], spacing: 20) {
-                ForEach(people) { person in
+                ForEach(shown) { person in
                     NavigationLink {
-                        PersonScreen(person: person)
+                        PersonScreen(person: person) { Task { await load() } }
                     } label: {
                         CollectionTile(
                             title: person.isUnnamed ? String(localized: "Add name", bundle: .module) : person.name,
                             subtitle: AccessibilityText.photos(person.itemCount), coverFileId: person.coverFileId,
-                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module))
+                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module)
+                        )
+                        .opacity(hidden.names.contains(person.name) ? 0.45 : 1)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { personMenu(person) }
                 }
             }
             .padding()
+            if hiddenCount > 0 { hiddenNote }
         }
         .overlay { if loading && people.isEmpty && error == nil { ProgressView() } }
         .navigationTitle(String(localized: "People", bundle: .module))
         .toolbar {
             NavigationLink {
-                ItemsScreen(title: String(localized: "Unassigned faces", bundle: .module), sectioned: false) { services in
-                    try await services.api.personPhotos(nil, key: await session.recognizeKey()).map(\.item)
-                }
+                UnassignedFacesScreen()
             } label: {
                 Label(String(localized: "Unassigned faces", bundle: .module), systemImage: "person.crop.circle.badge.questionmark")
             }
+        }
+        .alert(String(localized: "Name", bundle: .module), isPresented: isRenaming) {
+            TextField(String(localized: "Name", bundle: .module), text: $newName)
+            Button(String(localized: "Save", bundle: .module)) { if let person = renaming { rename(person, to: newName) } }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        }
+        .alert(
+            String(localized: "Something went wrong", bundle: .module),
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+        } message: {
+            Text(actionError ?? "")
         }
         .task { await load() }
         .refreshable { await load() }
     }
 
+    var isRenaming: Binding<Bool> {
+        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    @ViewBuilder func personMenu(_ person: Person) -> some View {
+        Button {
+            newName = person.isUnnamed ? "" : person.name
+            renaming = person
+        } label: {
+            Label(PeopleActions.renameTitle, systemImage: "pencil")
+        }
+        Button {
+            setHidden(person, !hidden.names.contains(person.name))
+        } label: {
+            if hidden.names.contains(person.name) {
+                Label(PeopleActions.showTitle, systemImage: "eye")
+            } else {
+                Label(PeopleActions.hideTitle, systemImage: "eye.slash")
+            }
+        }
+    }
+
+    /// Says how many people are hidden and that it is this device only, with a way to see them.
+    var hiddenNote: some View {
+        VStack(spacing: 8) {
+            Text(PeopleActions.hiddenNote(count: hiddenCount)).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button(showsHidden ? PeopleActions.hideHiddenTitle : PeopleActions.showHiddenTitle) { showsHidden.toggle() }
+                .font(.footnote)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+    }
+
+    func setHidden(_ person: Person, _ value: Bool) {
+        if value { hidden.names.insert(person.name) } else { hidden.names.remove(person.name) }
+        if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+    }
+
+    func rename(_ person: Person, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let problem = PersonName.problem(trimmed, existing: people.map(\.name), current: person.name) {
+            actionError = PersonName.message(problem)
+            return
+        }
+        guard trimmed != person.name else { return }
+        Task {
+            do {
+                try await session.services?.api.renamePerson(person.name, to: trimmed, key: await session.recognizeKey())
+                hidden = hidden.renamed(person.name, to: trimmed)
+                if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+                await load()
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
     func load() async {
         loading = true
         defer { loading = false }
+        if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) }
         guard let services = session.services else { return }
         do {
             let key = await session.recognizeKey()
@@ -136,8 +220,47 @@ struct PeopleScreen: View {
     }
 }
 
+/// Titles of the people actions: title case on the Mac, sentence case elsewhere.
+enum PeopleActions {
+    static var renameTitle: String { String(localized: "Rename…", bundle: .module) }
+
+    static var hideTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Hide Person", bundle: .module),
+            other: LocalizedStringResource("Hide person", bundle: .module))
+    }
+
+    static var showTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Show Person", bundle: .module),
+            other: LocalizedStringResource("Show person", bundle: .module))
+    }
+
+    static var moveTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Move to Another Person…", bundle: .module),
+            other: LocalizedStringResource("Move to another person…", bundle: .module))
+    }
+
+    static var showHiddenTitle: String {
+        String(localized: "Show hidden people", bundle: .module)
+    }
+
+    static var hideHiddenTitle: String {
+        String(localized: "Don't show hidden people", bundle: .module)
+    }
+
+    /// Hiding is kept on this device: the server has no way to hide a person.
+    static func hiddenNote(count: Int) -> String {
+        String(
+            localized: "\(count) people are hidden on this device. Nextcloud can't hide people on all your devices yet.", bundle: .module)
+    }
+}
+
 struct PersonScreen: View {
     let person: Person
+    /// Called after the person was renamed, merged, emptied or deleted, so the People screen loads again.
+    var changed: () -> Void = {}
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var renaming = false
@@ -146,6 +269,12 @@ struct PersonScreen: View {
     @State private var confirmRemove = false
     @State private var error: String?
     @State private var photos: [PersonPhoto] = []
+    @State private var moving: [MediaItem]?
+    @State private var hidden = HiddenPeople()
+    /// Counted up to load the photos again after some were moved away.
+    @State private var reloads = 0
+
+    var isHidden: Bool { hidden.names.contains(person.name) }
 
     var body: some View {
         ItemsScreen(
@@ -164,8 +293,13 @@ struct PersonScreen: View {
                                     try? await session.services?.api.removeFromPerson(person.name, childName: photo.childName, key: key)
                                 }
                             }
+                            reloads += 1
+                            changed()
                         }
-                    }
+                    },
+                    GridMenuAction(id: "movePerson", title: PeopleActions.moveTitle, systemImage: "person.2.crop.square.stack") { _ in
+                        moving = items
+                    },
                 ]
             },
             load: { services in
@@ -179,24 +313,34 @@ struct PersonScreen: View {
                     renaming = true
                 }
                 Button(String(localized: "Merge with…", bundle: .module)) { merging = true }
+                Button(isHidden ? PeopleActions.showTitle : PeopleActions.hideTitle) { toggleHidden() }
                 Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
             }
         }
+        .id(reloads)
+        .task { if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) } }
         .alert(String(localized: "Name", bundle: .module), isPresented: $renaming) {
             TextField(String(localized: "Name", bundle: .module), text: $newName)
-            Button(String(localized: "Save", bundle: .module)) {
-                Task {
-                    do {
-                        try await session.services?.api.renamePerson(person.name, to: newName, key: await session.recognizeKey())
-                        dismiss()
-                    } catch { self.error = error.localizedDescription }
-                }
-            }
+            Button(String(localized: "Save", bundle: .module)) { rename() }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         }
-        .sheet(isPresented: $merging) { MergePersonSheet(person: person) { dismiss() } }
+        .sheet(isPresented: $merging) {
+            MergePersonSheet(person: person) {
+                changed()
+                dismiss()
+            }
+        }
+        .sheet(isPresented: Binding(get: { moving != nil }, set: { if !$0 { moving = nil } })) {
+            PersonPickerSheet(title: PeopleActions.moveTitle, excluding: person.name) { name in
+                let ids = Set((moving ?? []).map(\.fileId))
+                let children: [String] = photos.filter { ids.contains($0.item.fileId) }.map(\.childName)
+                try await session.services?.api.moveFaces(children, from: person.name, to: name, key: await session.recognizeKey())
+                reloads += 1
+                changed()
+            }
+        }
         .confirmationDialog(
             String(localized: "Remove this person?", bundle: .module), isPresented: $confirmRemove, titleVisibility: .visible
         ) {
@@ -204,6 +348,7 @@ struct PersonScreen: View {
                 Task {
                     do {
                         try await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
+                        changed()
                         dismiss()
                     } catch { self.error = error.localizedDescription }
                 }
@@ -217,6 +362,31 @@ struct PersonScreen: View {
         ) {
         } message: {
             Text(error ?? "")
+        }
+    }
+
+    func toggleHidden() {
+        if isHidden { hidden.names.remove(person.name) } else { hidden.names.insert(person.name) }
+        if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+        changed()
+    }
+
+    func rename() {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != person.name else { return }
+        Task {
+            do {
+                let key = await session.recognizeKey()
+                let others: [String] = ((try? await session.services?.api.people(key: key)) ?? []).map(\.name)
+                if let problem = PersonName.problem(name, existing: others, current: person.name) {
+                    error = PersonName.message(problem)
+                    return
+                }
+                try await session.services?.api.renamePerson(person.name, to: name, key: key)
+                if let file = session.hiddenPeopleFile { HiddenPeople.load(from: file).renamed(person.name, to: name).save(to: file) }
+                changed()
+                dismiss()
+            } catch { self.error = error.localizedDescription }
         }
     }
 }

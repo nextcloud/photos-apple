@@ -285,6 +285,8 @@ struct GridTileBadges: Equatable {
     var showsLivePhoto: Bool
     /// The lower edge is darkened so the white badges stay readable.
     var showsShade: Bool
+    /// The tile stands for several copies of one shot (`TimelineStacking`): a stack badge in the top trailing corner.
+    var showsStack = false
     var accessibilityLabel: String
 
     init(item: GridMedia) {
@@ -293,7 +295,12 @@ struct GridTileBadges: Equatable {
         showsFavorite = item.isFavorite
         showsLivePhoto = item.isLivePhoto
         showsShade = GridTile.showsBottomShade(for: item)
+        showsStack = item.stack.count > 1
         accessibilityLabel = GridTile.accessibilityLabel(for: item)
+        if showsStack {
+            let copies = String(localized: "\(item.stack.count) copies", bundle: .module)
+            accessibilityLabel += ", " + copies
+        }
     }
 }
 

@@ -105,6 +105,7 @@ public struct SettingsView: View {
                 } footer: {
                     Text("These settings are shared with the Photos app on the web.", bundle: .module)
                 }
+                TimelineDisplaySection()
             }
 
             if shows(.general) {

@@ -107,12 +107,20 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   with a real trackpad: pinch, and paging with a two-finger swipe over a photo that is not zoomed); iOS 🟡 compiled, not run.
 - iPhone/iPad 🟡 (compiled, not run): swipe down closes the viewer (the page follows the finger, the backdrop fades), swipe up
   shows the info panel; every screen opens the viewer through one modifier (`mediaViewer`), with the navigation stack its
-  toolbar needs — also from Folders, Shared with you and photo links. ⬜ Zoom transition from the tile (matched geometry).
+  toolbar needs — also from Folders, Shared with you and photo links. Zoom transition from the tile 🟡 (compiled for iOS,
+  not run): the grid marks the tapped tile's frame as `matchedTransitionSource` and the cover uses `.navigationTransition(.zoom)`;
+  while paging, the grid scrolls the current photo's tile on screen and the transition follows it, so closing zooms back into the
+  tile of the photo shown last. The system's own interactive dismissal is turned off (the viewer keeps its swipe down). The
+  Mac pushes the viewer without a zoom (`navigationTransition(.zoom)` is not available on macOS).
 - Viewer actions: More ▸ Add to Album… / Export… (Save to Photos on iOS), also from the menu bar; deleting or archiving takes
   the page out and shows the next photo ✅ Mac (delete; archive shares the code); Delete (⌘⌫) does nothing for a
   read-only photo, and a page whose photo was removed meanwhile says so instead of loading for ever (🟡 not run). Saving originals goes through one path for
   grid, viewer and menu bar (`MediaSaveModel`): progress with Cancel, "Exported 3 items" / what failed; on the Mac the viewer
   asks for a folder like the grid ✅ (panel opens; the export itself was not driven by hand) — result logic ✅ unit-tested.
+- Only the video page shown holds a player (`VideoRetention`): a page that is paged away pauses, lets go of its item and its
+  stream (`replaceCurrentItem(with: nil)`, the loader is released) and remembers the position, which playback goes on from when
+  the page is shown again. No neighbour is preloaded. Live Photo motion is released when it disappears. Policy ✅ unit-tested,
+  🟡 not measured.
 - Video page: loading, "Preparing video…" (server converts, no warning sign) and failure (what happened, reason, "Try again")
   are separate states; a stream that fails after the player is shown ends in the failure state 🟡 (states unit-tested, not
   provoked against a server). iOS 🟡: the player is `AVPlayerViewController` without any gesture of the viewer over it (taps
@@ -137,7 +145,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Skeleton grid during the first load and the first sync ✅; the empty state only after a completed sync.
 - Keyboard and accessibility in the Mac grid ✅: tiles are buttons (press opens, the context menu actions are accessibility
   actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape 🟡 (not run).
-- ⬜ TL-6 stacks in the grid (the algorithm exists in `PhotosDomain/Stacks.swift`, not yet applied to the grid).
+- TL-6 stacks, the conservative part 🟡 (unit-tested; Mac UI not checked, the screen was locked): copies of one shot — images in
+  the same folder with the same name apart from extension and case, taken at most 2 s apart (HEIC + JPEG, RAW + JPEG) — are one
+  tile in Library, Photos, Videos and Favorites (`CopyStacks`, `TimelineStacking`, off the main actor; 150 000 items ~90 ms in a
+  debug build). The tile shows the JPEG (or the copy with a preview), with a stack badge and "2 copies" for VoiceOver; the viewer's
+  "Show 2 copies" (bar above the photo and More menu) adds the other copies as pages. Settings › On this device › "Stack copies of a
+  photo" (on by default). ⬜ Bursts: the server reports no burst identifier, and stacking frames by time alone (the web's 3 s rule in
+  `PhotosDomain/Stacks.swift`) was left out as too aggressive. ⬜ Actions on a stacked tile apply to the tile's copy only (deleting
+  it brings the other copy back as a tile).
 - ⬜ Timeline skeleton from `timelineDays` during the first sync (a plain placeholder grid is shown instead).
 - ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles; the "Square tiles" switch is gone from Settings until
   the mode exists.
@@ -153,7 +168,11 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   (`IntegrationOutboxTests`); 🟡 the round-3 changes were not driven in the Mac app (screen locked during the run).
 - Empty and error states have an action (SPEC §6.3): "Sync now" / "Retry" in the library, "Refresh" / "Try again" in lists
   loaded from the server, "Clear search" for a search without results.
-- ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action), ⬜ VW-5 slideshow, ⬜ VW-6 stack strip.
+- ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action). VW-5 slideshow 🟡 for memories
+  only (see M4); ⬜ from any grid, interval setting, videos playing, AirPlay. VW-6 stacks 🟡: opened as extra pages, not a strip.
+- "Show in folder" 🟡 (VW-3; viewer More menu and the grid's context menu, every platform): opens the app's folder browser at the
+  photo's folder with a screen for each folder above it (`AppRoute.folder`, `FolderTrail` ✅ unit-tested), and closes the viewer.
+  ⬜ "Show in timeline".
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
   buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
@@ -306,7 +325,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡
-Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
+Places ✅, map 🟡, people 🟡 (no Recognize on test servers; managing people below), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
 memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
 - App lock (round 3) 🟡 compiled for iOS, macOS and visionOS, state machine unit-tested, not run: one lock state for the
   process (`AppLock`), setting in the App Group. Locked windows don't show their content at all (the viewer and sheets close);
@@ -322,7 +341,21 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
 - Folders and Shared with you show a folder's photos in the app's photo grid (selection, context menu, share, favourite,
   delete, keyboard, viewer), subfolders in a strip above it ✅ Mac. Like the other server-loaded lists (places, tags) the grid
   is loaded once: an item deleted there disappears after a reload.
-- ⬜ Memory player (ME-4) and "Save as album" from a memory.
+- Memories strip at the top of the Library (TL-3) 🟡: On this day, the year in review and trips (at most 12) as small cards over
+  the grid of the whole library (not with a filter, not while selecting), "All memories" at the end; loaded off the main actor
+  after each finished sync and when the day changes. Context menu "Hide memories"; Settings › On this device › "Show memories".
+  Memories stay in the sidebar / Collections.
+- Memory slideshow (ME-4) 🟡: "Play slideshow" in a memory's toolbar and in the cards' context menus. Full screen on iPhone and
+  iPad, pushed in the window on the Mac and Vision Pro; the title over the first photo, 4 s per photo, 1.2 s cross-fade with a
+  slow zoom, starts over after the last; Pause/Play, Previous, Next and Close (tap shows/hides them; ← → Space Esc on a
+  keyboard). Reduce Motion: a 0.4 s dissolve without the zoom. With VoiceOver it starts paused. Videos show their still.
+  Stepping ✅ unit-tested; not run (Mac screen locked). ⬜ "Save as album", share as link, music.
+- Managing people 🟡 (PE-3, PE-4; no Recognize on the test servers, so not run): rename (People grid context menu and the
+  person's menu; empty, digits-only and taken names are refused before sending), merge, remove person, "Not this person",
+  "Move to another person…" and, for unassigned faces, "Assign to person…" (pick a person or create one: MKCOL + MOVE of the
+  detections). "Hide person" is kept on this device only, per account, in the account's folder (removed on logout): Recognize has
+  no way to hide a person, and the People screen says so under the grid ("N people are hidden on this device…", "Show hidden
+  people"). Name check and hidden list ✅ unit-tested.
 - ⬜ Map time slider; MapKit native clustering (grid clustering is used).
 - ⬜ Tag assignment UI (API exists).
 

@@ -21,7 +21,7 @@ public enum MediaFilter: Hashable, Sendable {
 }
 
 /// Lightweight row for grids (keeps 100k items cheap in memory).
-public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
+public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord, CopyStackCandidate {
     public var id: FileID { fileId }
     public var fileId: FileID
     public var timestamp: Date
@@ -37,6 +37,9 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
     public var directory: String
     public var mimeType: String
     public var isArchived: Bool
+    /// The copies of one shot this tile stands for, the one it shows first (`CopyStacks`); empty when it is not a stack.
+    /// Set by the screen that stacks its grid, never by the store.
+    public var stack: [FileID] = []
 
     public init(row: Row) throws {
         fileId = row["fileId"]
@@ -108,6 +111,10 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
         mimeType = item.mimeType
         isArchived = item.isArchived
     }
+}
+
+extension GridMedia {
+    public var isVideo: Bool { kind == .video }
 }
 
 /// A row of the timeline with only what laying out, sectioning and badging the grid needs (about 40 bytes, no strings).
