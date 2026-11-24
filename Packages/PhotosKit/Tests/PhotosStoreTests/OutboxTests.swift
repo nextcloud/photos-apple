@@ -113,7 +113,14 @@ import Testing
         await outbox.waitUntilIdle(retriesDueWithin: 60)
         #expect(try await outbox.pendingCount() == 0)
         #expect(Date() >= retry)
-        #expect(favouriteWrites == ["/Photos/a.jpg=1", "/Photos/a.jpg=1", "/Photos/b.jpg=1"])
+        // On a slow machine the timer can fire once more before the test goes back online, so `a` may have been tried
+        // offline more than once; what matters is that both went through without a kick, in order.
+        let writes = favouriteWrites
+        #expect(writes.count >= 3)
+        #expect(writes.dropLast().allSatisfy { $0 == "/Photos/a.jpg=1" })
+        #expect(writes.last == "/Photos/b.jpg=1")
+        #expect(server.file(1)?.favorite == true)
+        #expect(server.file(2)?.favorite == true)
         #expect(try await outbox.nextRetryDate() == nil)
     }
 
