@@ -797,6 +797,43 @@ Places & map, people, tags, folders & shared with you, memories & On this day, s
 Editing (§7.16), metadata editing, recently deleted, duplicates, free up space, free up device space, ask your photos, extract text / Live Text / Visual Look Up, captions in UI, video renditions, App Intents/Siri/Spotlight, visionOS spatial/immersive extras, accessibility & localisation audit, App Store assets and review notes.
 **Accept:** full parity matrix (Appendix A) green; accessibility audit has no blockers; App Store submission ready.
 
+## 15. M6 — Delight
+
+Round 5 (2026-11-24): features that go beyond the other photo apps. No server changes; everything uses stock
+Nextcloud/Photos APIs and on-device frameworks. Each subsection is owned by one work package (name in brackets).
+
+### 15.1 Memory films and Year in Review [memories]
+
+_To be written._
+
+### 15.2 Photographer's Mac: import, culling, compare, external editors [macpro]
+
+_To be written._
+
+### 15.3 New platforms: Apple TV and Apple Watch [tvwatch]
+
+_To be written._
+
+### 15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room [ambient]
+
+_To be written._
+
+### 15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos [feel]
+
+_To be written._
+
+### 15.6 Then and now, travel globe [places]
+
+_To be written._
+
+### 15.7 Bring everything home: imports [import]
+
+_To be written._
+
+### 15.8 Smart offline and fun extras: stickers, collages, photo of the day [extras]
+
+_To be written._
+
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
 1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-ios) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".

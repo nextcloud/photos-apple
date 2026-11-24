@@ -586,6 +586,32 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   ([APP-ICON.md](APP-ICON.md)).
 - ⬜ App Store assets (screenshots), signing secrets in CI.
 
+## M6 Delight (SPEC §15) — ⬜
+
+### §15.1 Memory films and Year in Review
+- ⬜ Not started.
+
+### §15.2 Photographer's Mac: import, culling, compare, external editors
+- ⬜ Not started.
+
+### §15.3 New platforms: Apple TV and Apple Watch
+- ⬜ Not started.
+
+### §15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room
+- ⬜ Not started.
+
+### §15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos
+- ⬜ Not started.
+
+### §15.6 Then and now, travel globe
+- ⬜ Not started.
+
+### §15.7 Bring everything home: imports
+- ⬜ Not started.
+
+### §15.8 Smart offline and fun extras: stickers, collages, photo of the day
+- ⬜ Not started.
+
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification
 filtering entitlement, push proxy topic, notification routing in the notifications app, app icon artwork,
