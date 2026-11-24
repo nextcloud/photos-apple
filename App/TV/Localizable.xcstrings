@@ -1,0 +1,294 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ does not use an encrypted connection. Others on the network could see your photos and your app password." : {
+      "comment" : "TV login: warning before using an http:// server; the placeholder is the server's host name."
+    },
+    "%lld items" : {
+      "comment" : "TV: number of photos and videos under an album's title; plural variations.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld of %lld" : {
+      "comment" : "TV viewer: position of the photo, e.g. 3 of 40.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "%lld seconds" : {
+      "comment" : "TV settings: time per photo in slideshows; plural variations.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld second"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld seconds"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Account" : {
+      "comment" : "TV settings: label of the signed-in user's name."
+    },
+    "Albums" : {
+      "comment" : "TV: tab with all albums.\nTV: title of the shelf of the user's albums."
+    },
+    "Albums you create on your other devices appear here." : {
+      "comment" : "TV: explanation when there are no albums."
+    },
+    "Can't Play This Video" : {
+      "comment" : "TV: the video could not be loaded."
+    },
+    "Cancel" : {
+      "comment" : "TV login: button"
+    },
+    "Connect" : {
+      "comment" : "TV login: button that connects to an http:// server after the warning."
+    },
+    "Connect without encryption?" : {
+      "comment" : "TV login: title of the question before using an http:// server."
+    },
+    "Continue" : {
+      "comment" : "TV login: button after the server address."
+    },
+    "Family Slideshow" : {
+      "comment" : "TV settings: picker of the album of the family slideshow.\nTV: button state when the album is the family slideshow; pressing it again stops using it.\nTV: title of the banner that starts the family slideshow."
+    },
+    "Favorites" : {
+      "comment" : "TV: title of the favourites screen.\nTV: title of the favourites shelf."
+    },
+    "Home" : {
+      "comment" : "TV: tab with the memories, favourites and albums shelves."
+    },
+    "Library" : {
+      "comment" : "TV settings: label of the sync state.\nTV: title of the screen with all photos."
+    },
+    "Loading your photos…" : {
+      "comment" : "TV: shown on the home screen while the first sync runs."
+    },
+    "Log Out" : {
+      "comment" : "TV settings: button that removes the account from the TV."
+    },
+    "Log in to %@ again: the app's access was withdrawn." : {
+      "comment" : "TV login: the account's app password stopped working; the placeholder is the user's name."
+    },
+    "Log in to %@ and allow access." : {
+      "comment" : "TV login: second step; the placeholder is the server's host name."
+    },
+    "Log out of %@?" : {
+      "comment" : "TV settings: question before logging out; the placeholder is the user's name."
+    },
+    "Logging out removes the TV's access to your Nextcloud and everything the app keeps on this Apple TV." : {
+      "comment" : "TV settings: explanation under Log Out."
+    },
+    "Memories" : {
+      "comment" : "TV: title of the memories shelf."
+    },
+    "My Albums" : {
+      "comment" : "TV: heading of the user's own albums."
+    },
+    "Next" : {
+      "comment" : "TV viewer: VoiceOver action"
+    },
+    "Nextcloud" : {
+      "comment" : "TV settings: section header of the account."
+    },
+    "Nextcloud Photos" : {
+      "comment" : "TV login: app name as the title of the login screen."
+    },
+    "No Albums" : {
+      "comment" : "TV: title when the account has no albums."
+    },
+    "No Photos" : {
+      "comment" : "TV slideshow: the memory or album has no photos."
+    },
+    "No Photos Yet" : {
+      "comment" : "TV: title of the empty home screen."
+    },
+    "None" : {
+      "comment" : "TV settings: no album chosen for the family slideshow."
+    },
+    "Not synced yet" : {
+      "comment" : "TV settings: no sync has finished yet."
+    },
+    "Nothing to show here." : {
+      "comment" : "TV: an album or memory without photos."
+    },
+    "Offline" : {
+      "comment" : "TV settings: the server cannot be reached."
+    },
+    "Open the camera on your iPhone or iPad and point it at the code." : {
+      "comment" : "TV login: first step."
+    },
+    "Paused" : {
+      "comment" : "TV slideshow: VoiceOver label of the pause symbol."
+    },
+    "Photo, %@" : {
+      "comment" : "TV: VoiceOver label of a photo; the placeholder is its date."
+    },
+    "Photo, %@, %@" : {
+      "comment" : "TV: VoiceOver label of a photo; placeholders: date, place.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Photo, %1$@, %2$@"
+          }
+        }
+      }
+    },
+    "Photos and videos you add to your Nextcloud appear here." : {
+      "comment" : "TV: explanation on the empty home screen."
+    },
+    "Play Slideshow" : {
+      "comment" : "TV: button above a memory's or album's photos.\nTV: context menu item of a memory."
+    },
+    "Please enter a valid server address." : {
+      "comment" : "TV login: the address cannot be a server address."
+    },
+    "Previous" : {
+      "comment" : "TV viewer: VoiceOver action"
+    },
+    "QR code to log in" : {
+      "comment" : "TV login: VoiceOver label of the QR code."
+    },
+    "Recent" : {
+      "comment" : "TV: title of the shelf of the newest photos."
+    },
+    "Scan with your phone" : {
+      "comment" : "TV login: title next to the QR code."
+    },
+    "Server" : {
+      "comment" : "TV settings: label of the server's host name."
+    },
+    "Server address" : {
+      "comment" : "TV login: label of the server address field."
+    },
+    "Settings" : {
+      "comment" : "TV: tab with the account and slideshow settings."
+    },
+    "Shared Albums" : {
+      "comment" : "TV: title of the shelf of albums shared with the user."
+    },
+    "Shared with You" : {
+      "comment" : "TV: heading of the albums others shared with the user."
+    },
+    "Show All" : {
+      "comment" : "TV: button at the end of a shelf title that opens all of its items."
+    },
+    "Show Time and Date" : {
+      "comment" : "TV settings: the family slideshow shows a clock."
+    },
+    "Signing in…" : {
+      "comment" : "TV login: the phone granted access, the TV finishes the login."
+    },
+    "Slideshows" : {
+      "comment" : "TV settings: section header."
+    },
+    "Sync Now" : {
+      "comment" : "TV settings: button."
+    },
+    "Syncing…" : {
+      "comment" : "TV settings: a sync is running."
+    },
+    "The certificate of %@ is not trusted by Apple TV. Only trust it if its fingerprint matches the one of your server:\n%@" : {
+      "comment" : "TV login: explanation of an untrusted certificate; placeholders: host name, SHA-256 fingerprint.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The certificate of %1$@ is not trusted by Apple TV. Only trust it if its fingerprint matches the one of your server:\n%2$@"
+          }
+        }
+      }
+    },
+    "The code expired. Continue to get a new one." : {
+      "comment" : "TV login: the 20 minutes of the login flow passed."
+    },
+    "The family slideshow plays the chosen album in a shuffled order for as long as you like, like a picture frame. Start it from Home." : {
+      "comment" : "TV settings: explanation of the family slideshow."
+    },
+    "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that." : {
+      "comment" : "TV login: the server redirected an https login to http."
+    },
+    "Time per Photo" : {
+      "comment" : "TV settings: picker of the slideshow interval."
+    },
+    "Trust" : {
+      "comment" : "TV login: button that trusts the server's certificate."
+    },
+    "Trust this certificate?" : {
+      "comment" : "TV login: title of the question about a server certificate the system does not trust."
+    },
+    "Up to date, %@" : {
+      "comment" : "TV settings: last sync; the placeholder is e.g. '5 minutes ago'."
+    },
+    "Use Another Server" : {
+      "comment" : "TV login: button that goes back to the server address."
+    },
+    "Use for Family Slideshow" : {
+      "comment" : "TV: button that makes the album the family slideshow."
+    },
+    "Video, %@" : {
+      "comment" : "TV: VoiceOver label of a video; the placeholder is its date."
+    },
+    "Video, %@, %@" : {
+      "comment" : "TV: VoiceOver label of a video; placeholders: date, place.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Video, %1$@, %2$@"
+          }
+        }
+      }
+    },
+    "Waiting for your phone…" : {
+      "comment" : "TV login: shown while the TV waits for the login on the phone."
+    },
+    "Your memories and albums on the big screen. Log in with your phone: no password is typed on the TV." : {
+      "comment" : "TV login: introduction next to the login form."
+    },
+    "Your photos appear here." : {
+      "comment" : "TV login: third step."
+    },
+    "cloud.example.com" : {
+      "comment" : "TV login: placeholder of the server address field; an example host name."
+    }
+  },
+  "version" : "1.1"
+}
