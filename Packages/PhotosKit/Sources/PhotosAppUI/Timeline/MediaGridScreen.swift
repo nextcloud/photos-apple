@@ -31,8 +31,10 @@ struct MediaGridScreen<Accessory: View>: View {
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
-    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone.
-    @Environment(\.undoManager) private var undoManager
+    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone. Not `@Environment`: see
+    /// `UndoManagerBox`.
+    @State private var undoBox = UndoManagerBox()
+    private var undoManager: UndoManager? { undoBox.manager }
     @State private var selection: Set<FileID> = []
     /// What the toolbar and the menus show for the selection, loaded off the main thread when the selection changes.
     @State private var selectionInfo = GridSelectionInfo()
@@ -94,6 +96,7 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var body: some View {
         content
+            .readsUndoManager(into: undoBox)
             .navigationTitle(isSelecting && !keepsTitleWhileSelecting ? selectionTitle : title)
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
