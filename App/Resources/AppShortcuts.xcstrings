@@ -30,6 +30,50 @@
         }
       }
     },
+    "Open ${target} in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to open an album. ${target} is the album's name and ${applicationName} the app's name; both must stay in the phrase unchanged.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Open ${target} in ${applicationName}",
+              "Show the album ${target} in ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Search photos in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to search their photos. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Search photos in ${applicationName}",
+              "Search ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Show photos of ${target} in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to see the photos of a person. ${target} is the person's name and ${applicationName} the app's name; both must stay in the phrase unchanged.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Show photos of ${target} in ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
     "Show the photo map in ${applicationName}" : {
       "comment" : "Phrase the user says to Siri to open the map of photos. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
       "extractionState" : "extracted_with_value",
