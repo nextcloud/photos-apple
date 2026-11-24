@@ -19,6 +19,8 @@ struct ZoomablePhoto: View {
     @State private var playingLive = false
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var lock = AppLock.shared
 
     var bucket: Int { needsDetail ? 4096 : 1024 }
 
@@ -27,6 +29,12 @@ struct ZoomablePhoto: View {
         if let image { return CGSize(width: image.width, height: image.height) }
         if let width = item.width, let height = item.height, width > 0, height > 0 { return CGSize(width: width, height: height) }
         return .zero
+    }
+
+    /// Live Text and Visual Look Up (SPEC VW-4) for the photo shown, once its preview is there.
+    var analysesLiveText: Bool {
+        LiveTextPolicy.analyzes(
+            isCurrent: isCurrent, hasImage: image != nil, sceneIsActive: scenePhase == .active, requiresUnlock: lock.requiresUnlock)
     }
 
     var surfaceEvents: ZoomSurfaceEvents {
@@ -47,7 +55,7 @@ struct ZoomablePhoto: View {
         ZStack {
             ZoomSurface(
                 image: image ?? BlurHashCache.image(item.blurhash), contentSize: contentSize, command: command, isCurrent: isCurrent,
-                animates: !reduceMotion, pressEnabled: item.isLivePhoto, events: surfaceEvents)
+                animates: !reduceMotion, pressEnabled: item.isLivePhoto, liveText: analysesLiveText, events: surfaceEvents)
             if playingLive, item.livePhotoPeer != nil {
                 LivePhotoMotion(item: item)
                     .background(.black)

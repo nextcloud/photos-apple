@@ -20,6 +20,8 @@ struct TimelineScreen: View {
     /// Photos are being selected: the memories strip makes room for the grid.
     @State private var gridSelection = GridSelectionState()
     @State private var memories: [Memory] = []
+    /// "Show in library" from elsewhere: the Library scrolls to the photo and highlights it.
+    @Environment(\.timelineReveal) private var reveal
 
     /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
     var showsMemoriesStrip: Bool {
@@ -111,6 +113,10 @@ struct TimelineScreen: View {
         }
         .task(id: query) { observe() }
         .onChange(of: skeleton, initial: true) { _, skeleton in feed.setSkeleton(skeleton) }
+        // The photo is looked for among all media (the iPhone's picker may show only videos or favourites).
+        .onChange(of: reveal?.pending, initial: true) { _, pending in
+            if filter == .all, pending != nil { mediaKind = .all }
+        }
         .dropDestination(for: URL.self) { urls, _ in
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
@@ -127,7 +133,9 @@ struct TimelineScreen: View {
             emptyTitle: emptyTitle,
             emptyMessage: emptyMessage,
             columns: $columns,
-            waitsForFirstSync: true
+            waitsForFirstSync: true,
+            reveal: filter == .all ? reveal : nil,
+            isLibrary: filter == .all
         ) {
             TransfersIndicator()
             UploadMenu()

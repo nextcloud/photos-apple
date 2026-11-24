@@ -39,6 +39,8 @@ public struct GridActions {
     /// Originals of the selection for the system share sheet.
     var shareItems: [ShareableMedia] = []
     var shareTitle: String = ""
+    /// Plays a slideshow of the selection, or of the grid or viewer's photos (SPEC VW-5).
+    var slideshow: (() -> Void)? = nil
 }
 
 extension FocusedValues {
@@ -100,6 +102,9 @@ public struct PhotosCommands: Commands {
             } else {
                 Button(String(localized: "Share…", bundle: .module)) {}.disabled(true)
             }
+            Divider()
+            Button(SlideshowRequest.menuTitle) { grid?.slideshow?() }
+                .disabled(grid?.slideshow == nil)
         }
 
         CommandGroup(before: .sidebar) {

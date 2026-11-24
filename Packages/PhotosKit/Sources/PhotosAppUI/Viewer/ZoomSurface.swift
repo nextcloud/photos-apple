@@ -24,7 +24,8 @@ struct ZoomSurfaceEvents {
 // - `image`: the picture to show (a preview, later a larger one of the same shape);
 // - `contentSize`: its shape, known before the first image arrives;
 // - `command`: Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page that is shown;
-// - `isCurrent`: a page that is paged away goes back to the fitted size.
+// - `isCurrent`: a page that is paged away goes back to the fitted size;
+// - `liveText`: the photo shown may be analysed for Live Text and Visual Look Up (`LiveTextPolicy`).
 
 #if canImport(UIKit)
     import UIKit
@@ -36,6 +37,7 @@ struct ZoomSurfaceEvents {
         var isCurrent: Bool
         var animates: Bool
         var pressEnabled: Bool
+        var liveText = false
         var events: ZoomSurfaceEvents
 
         final class Coordinator {
@@ -56,6 +58,7 @@ struct ZoomSurfaceEvents {
             view.pressEnabled = pressEnabled
             view.show(image, contentSize: contentSize)
             if !isCurrent { view.resetZoom() }
+            view.updateLiveText(enabled: liveText)
             // Every page sees the command; only the one on screen carries it out.
             if let command, command.id != context.coordinator.lastCommand, isCurrent { view.apply(command) }
             context.coordinator.lastCommand = command?.id
@@ -78,6 +81,7 @@ struct ZoomSurfaceEvents {
         #if os(iOS)
             private var swipe: VerticalSwipe?
         #endif
+        private var liveText: LiveTextInteraction?
 
         init() {
             super.init(frame: .zero)
@@ -93,6 +97,7 @@ struct ZoomSurfaceEvents {
             imageView.contentMode = .scaleToFill
             imageView.clipsToBounds = true
             addSubview(imageView)
+            liveText = LiveTextInteraction(on: imageView)
 
             let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
             doubleTap.numberOfTapsRequired = 2
@@ -135,6 +140,15 @@ struct ZoomSurfaceEvents {
             return abs(first.width / first.height - second.width / second.height) < 0.01
         }
 
+        /// Analyses the picture shown for Live Text while `enabled`; otherwise the analysis stops and its result goes.
+        func updateLiveText(enabled: Bool) {
+            liveText?.update(image: shownImage, enabled: enabled)
+        }
+
+        private func layoutLiveText() {
+            liveText?.layout(visible: bounds.inset(by: safeAreaInsets), zoomed: ViewerZoom.isZoomed(zoomScale))
+        }
+
         /// The photo fitted into the page, at scale 1.
         private func refit() {
             if zoomScale != ViewerZoom.minimumScale { zoomScale = ViewerZoom.minimumScale }
@@ -152,6 +166,7 @@ struct ZoomSurfaceEvents {
                 refit()
             }
             center()
+            layoutLiveText()
         }
 
         /// Keeps a photo that is smaller than the page in its middle (as in Apple's PhotoScroller sample).
@@ -204,6 +219,7 @@ struct ZoomSurfaceEvents {
 
         func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
             report(force: true)
+            layoutLiveText()
         }
 
         // MARK: Gestures
@@ -213,10 +229,13 @@ struct ZoomSurfaceEvents {
         }
 
         @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+            // A tap on text, a link or the Live Text button is Live Text's, not a request to hide the bars.
+            if liveText?.claims(recognizer.location(in: imageView)) == true { return }
             events.tapped()
         }
 
         @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+            if recognizer.state == .began, liveText?.claims(recognizer.location(in: imageView)) == true { return }
             switch recognizer.state {
             case .began: events.pressing(true)
             case .ended, .cancelled, .failed: events.pressing(false)
@@ -291,6 +310,7 @@ struct ZoomSurfaceEvents {
         var isCurrent: Bool
         var animates: Bool
         var pressEnabled: Bool
+        var liveText = false
         var events: ZoomSurfaceEvents
 
         final class Coordinator {
@@ -311,6 +331,7 @@ struct ZoomSurfaceEvents {
             view.pressEnabled = pressEnabled
             view.show(image, contentSize: contentSize)
             if !isCurrent { view.resetZoom() }
+            view.updateLiveText(enabled: liveText)
             // Every page sees the command; only the one on screen carries it out.
             if let command, command.id != context.coordinator.lastCommand, isCurrent { view.apply(command) }
             context.coordinator.lastCommand = command?.id
@@ -341,6 +362,7 @@ struct ZoomSurfaceEvents {
         private var reportedScale: CGFloat = ViewerZoom.minimumScale
         private let press = NSPressGestureRecognizer()
         private let drag = NSPanGestureRecognizer()
+        private var liveText: LiveTextOverlay?
 
         init() {
             super.init(frame: .zero)
@@ -359,6 +381,7 @@ struct ZoomSurfaceEvents {
             // The frame has the photo's shape, so filling it never distorts; a BlurHash placeholder is stretched to it.
             photo.layer?.contentsGravity = .resize
             documentView = photo
+            liveText = LiveTextOverlay(over: photo)
 
             let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(doubleClicked(_:)))
             doubleClick.numberOfClicksRequired = 2
@@ -405,6 +428,11 @@ struct ZoomSurfaceEvents {
         static func sameShape(_ first: CGSize, _ second: CGSize) -> Bool {
             guard first.height > 0, second.height > 0 else { return first == second }
             return abs(first.width / first.height - second.width / second.height) < 0.01
+        }
+
+        /// Analyses the picture shown for Live Text while `enabled`; otherwise the analysis stops and its result goes.
+        func updateLiveText(enabled: Bool) {
+            liveText?.update(image: shownImage, enabled: enabled)
         }
 
         /// The photo fitted into the page at magnification 1. The magnification is kept: the window was resized or
@@ -459,6 +487,7 @@ struct ZoomSurfaceEvents {
 
         private func report(force: Bool = false) {
             let scale: CGFloat = magnification
+            liveText?.setZoomed(ViewerZoom.isZoomed(scale))
             let flipped: Bool =
                 ViewerZoom.isZoomed(scale) != ViewerZoom.isZoomed(reportedScale)
                 || (scale >= ViewerZoom.highResolutionScale) != (reportedScale >= ViewerZoom.highResolutionScale)
@@ -496,6 +525,8 @@ struct ZoomSurfaceEvents {
         }
 
         @objc private func pressed(_ recognizer: NSPressGestureRecognizer) {
+            // Pressing on text selects it; it does not play the Live Photo.
+            if recognizer.state == .began, liveText?.claims(recognizer.location(in: photo)) == true { return }
             switch recognizer.state {
             case .began: events.pressing(true)
             case .ended, .cancelled, .failed: events.pressing(false)
@@ -515,7 +546,9 @@ struct ZoomSurfaceEvents {
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool {
-            gestureRecognizer !== drag || ViewerZoom.isZoomed(magnification)
+            guard gestureRecognizer === drag else { return true }
+            // A drag over text selects it instead of moving the photo.
+            return ViewerZoom.isZoomed(magnification) && liveText?.claims(gestureRecognizer.location(in: photo)) != true
         }
     }
 #endif

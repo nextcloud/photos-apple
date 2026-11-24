@@ -195,11 +195,39 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   (`IntegrationOutboxTests`); 🟡 the round-3 changes were not driven in the Mac app (screen locked during the run).
 - Empty and error states have an action (SPEC §6.3): "Sync now" / "Retry" in the library, "Refresh" / "Try again" in lists
   loaded from the server, "Clear search" for a search without results.
-- ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action). VW-5 slideshow 🟡 for memories
-  only (see M4); ⬜ from any grid, interval setting, videos playing, AirPlay. VW-6 stacks 🟡: opened as extra pages, not a strip.
+- VW-4 Live Text and Visual Look Up 🟡: VisionKit `ImageAnalysisInteraction` on the photo's image view (iPhone, iPad, Vision
+  Pro) and `ImageAnalysisOverlayView` over it on the Mac (text selection, data detectors, Visual Look Up, lifting the
+  subject; the system's Live Text button, hidden while zoomed in and kept inside the visible part of the photo). Only the
+  photo shown is analysed, 0.35 s after it settles, from its preview (again when the sharper one arrives); paging away
+  cancels the analysis and takes the result away; nothing is analysed while the app is locked or its window is not active.
+  Taps/clicks and presses on text belong to Live Text (no bar toggling, no Live Photo playback, no drag of a zoomed photo).
+  "Extract text" stays in the More menu. Policy ✅ unit-tested (`LiveTextPolicy`); Mac ✅ looked at (the Live Text button
+  appears on a photo with text, `ios-fix-shots/r4-viewer/04-viewer-livetext.png`), selecting text not tried (needs real
+  input); iOS and visionOS 🟡 compiled, not run.
+- VW-5 slideshow of any grid 🟡 (`SlideshowPlayer`; memories keep their own player with title card): "Play Slideshow" (Mac) /
+  "Slideshow" in the viewer's More menu (from the photo shown through the viewer's photos), in the grid's context menu and
+  the selection's More menu (several selected: those; one: the whole grid from it) and File › Play Slideshow on the Mac
+  (selection or whole grid). Options menu: 2/3/5/10/20 s per photo (default 3), Repeat (on by default; off: it stops on
+  the last photo with the controls shown). Videos play to their end without controls (formats only the server's conversion
+  can play show their still for the interval). The screen stays on while it plays; it ends when the app locks; after it
+  the viewer shows the photo it ended on. iPhone/iPad: full screen with an AirPlay button (`AVRoutePickerView`: videos go
+  to the receiver; photos reach a TV or external display by Screen Mirroring — a second-screen scene of its own would need
+  an app scene change). Mac: a window of its own that goes full screen (the library window keeps its sidebar). Vision Pro:
+  pushed in the window. Order/repeat/interval ✅ unit-tested (`SlideshowPlan`); Mac ✅ run in a window
+  (`PHOTOS_DEBUG_SLIDESHOW_WINDOWED=1`, so as not to switch Spaces on the owner's Mac): started from the viewer (the
+  grid offers it as a tile action, seen), advanced, interval changed to 10 s, paused, closed, viewer moved to the last photo
+  (`05-slideshow.png`); the full-screen switch itself, videos in a slideshow and AirPlay 🟡 not run.
+- VW-6 stacks 🟡: a stack is one page; a strip of its copies above the photo (small picture and format, "JPG", "HEIC",
+  "DNG"; VoiceOver "Copy 2 of 3 · IMG_7.DNG", selected trait) chooses the copy the page shows, and every action applies to
+  that copy. A copy deleted or archived in the viewer leaves the strip; the page goes with its last copy. ✅ unit-tested
+  (`ViewerStacks`), Mac ✅ looked at and driven (`02-viewer-stack.png`); iOS 🟡 compiled.
 - "Show in folder" 🟡 (VW-3; viewer More menu and the grid's context menu, every platform): opens the app's folder browser at the
   photo's folder with a screen for each folder above it (`AppRoute.folder`, `FolderTrail` ✅ unit-tested), and closes the viewer.
-  ⬜ "Show in timeline".
+- "Show in library" 🟡 (VW-3 "Show in timeline", named after the place it opens, as Apple's "Show in All Photos"; viewer More
+  menu and grid context menu next to "Show in folder", not in the Library itself, not for archived photos): closes the
+  viewer, opens the Library from its root with all media, scrolls to the photo's tile (or its stack's tile; a photo the
+  Library does not show: the tile closest in time) and marks it — selected on the Mac, a short ring elsewhere. Target ✅
+  unit-tested (`TimelineReveal`); the Mac grid got a `reveal` for it. 🟡 Not driven in the app (the screen locked).
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
   buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
@@ -279,7 +307,11 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
   users, groups, other servers, email, Teams, Talk (when installed), public links with password, expiry, permissions, hide
   download; list, change, remove. API ✅ unit-tested and ✅ against the stock (8093), extended (8091) and default (8089)
   test servers (create, update, list, delete, sharee search); the sheet 🟡 compiled, not looked at (screen locked). Albums
-  keep album sharing; the album sheet says what only photos and folders can do. ⬜ From the viewer; several photos at once.
+  keep album sharing; the album sheet says what only photos and folders can do. From the viewer's More menu 🟡 (Mac: item
+  seen in the menu). Several photos at once 🟡 (grid context menu and selection "More"): one share per photo and recipient
+  (Nextcloud shares one file per share), four requests at a time, with progress and the failures listed with the server's
+  reason; recipients as for one photo except email addresses (one email per photo); a public link to all of them is an
+  album with a link (SH-4 quick share, own photos). ✅ batch unit-tested (`ShareBatchTests`), 🟡 sheet not looked at.
 - Partner sharing (SH-8): received folder shares in the timeline with badge and show/hide ✅ sync unit-tested and ✅ against
   8089 and 8093 (a real received share indexed and removed again); Settings section, badge and toolbar button 🟡 compiled,
   not looked at.
