@@ -46,7 +46,7 @@ let package = Package(
         // Preview cache, image pipeline, video and Live Photo loading, editing.
         .target(
             name: "PhotosMedia",
-            dependencies: ["PhotosModel", "PhotosNetworking", "PhotosStore"],
+            dependencies: ["PhotosModel", "PhotosDomain", "PhotosNetworking", "PhotosStore"],
             resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
