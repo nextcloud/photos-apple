@@ -142,7 +142,8 @@ import Testing
 
     @Test func onlyTheOldestLoadedMonthAndOlderOnesGetPlaceholders() {
         // Nothing loaded: every month.
-        #expect(skeleton.placeholders(granularity: .day, lastBucket: nil, loadedInLastBucket: 0).older.map(\.key) == [202611, 202610, 202501])
+        #expect(
+            skeleton.placeholders(granularity: .day, lastBucket: nil, loadedInLastBucket: 0).older.map(\.key) == [202611, 202610, 202501])
         // November complete, two of October's four loaded: the other two after them, then January 2025.
         let partial = skeleton.placeholders(granularity: .month, lastBucket: 202610, loadedInLastBucket: 2)
         #expect(partial.trailing == 2)
