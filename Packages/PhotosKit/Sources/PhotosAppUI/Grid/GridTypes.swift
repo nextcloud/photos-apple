@@ -55,6 +55,18 @@ struct GridCallbacks {
     /// Pull to refresh on iPhone and iPad; returns when the reload is through. Nil: the grid has no refresh control.
     /// `PhotoGrid` fills it from SwiftUI's `.refreshable` when it is not set.
     var refresh: (@MainActor () async -> Void)?
+    /// Says where a tile is, for the zoom transition into the viewer and back (iPhone, iPad). Nil: not needed.
+    var tileLocator: GridTileLocator?
+}
+
+/// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
+/// the tile that was tapped and, after paging, goes back to the tile of the photo shown last (iPhone, iPad).
+@MainActor
+final class GridTileLocator {
+    /// The tile's frame in the grid view's own coordinates, nil when the tile is not on screen.
+    var frame: (FileID) -> CGRect? = { _ in nil }
+    /// Scrolls the grid so the tile is on screen (without animation), so the viewer can zoom back into it.
+    var reveal: (FileID) -> Void = { _ in }
 }
 
 /// Whether a grid screen is selecting and how many items; screens around `MediaGridScreen` read it as a preference

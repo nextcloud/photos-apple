@@ -673,6 +673,7 @@
         private let videoIcon = NSImageView(image: NSImage(systemSymbolName: "video.fill", accessibilityDescription: nil)!)
         private let favoriteIcon = NSImageView(image: NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)!)
         private let liveIcon = NSImageView(image: NSImage(systemSymbolName: "livephoto", accessibilityDescription: nil)!)
+        private let stackIcon = NSImageView(image: NSImage(systemSymbolName: "square.stack.fill", accessibilityDescription: nil)!)
         private let selectionRing = NSView()
         /// Loads the preview and says what to draw; shared with the UIKit grid.
         private let picture = GridTilePicture()
@@ -700,7 +701,15 @@
             selectionRing.layer?.borderColor = NSColor.controlAccentColor.cgColor
             selectionRing.layer?.borderWidth = 3
             selectionRing.isHidden = true
-            [photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, selectionRing].forEach {
+            // On the picture without a shade: a soft shadow keeps it visible on bright pictures.
+            stackIcon.contentTintColor = .white
+            stackIcon.imageScaling = .scaleProportionallyUpOrDown
+            stackIcon.isHidden = true
+            let stackShadow = NSShadow()
+            stackShadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
+            stackShadow.shadowBlurRadius = 2
+            stackIcon.shadow = stackShadow
+            [photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, selectionRing].forEach {
                 container.addSubview($0)
             }
             view = container
@@ -723,6 +732,7 @@
             videoIcon.frame = CGRect(x: right - 16, y: 4, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 5, y: 4, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: bounds.height - 20, width: 16, height: 16)
+            stackIcon.frame = CGRect(x: bounds.width - 20, y: bounds.height - 20, width: 16, height: 16)
         }
 
         override var isSelected: Bool {
@@ -766,6 +776,7 @@
             videoIcon.isHidden = !badges.showsVideo
             favoriteIcon.isHidden = !badges.showsFavorite
             liveIcon.isHidden = !badges.showsLivePhoto
+            stackIcon.isHidden = !badges.showsStack
             shade.isHidden = !badges.showsShade
             let id = item.fileId
             tileView.fileId = id

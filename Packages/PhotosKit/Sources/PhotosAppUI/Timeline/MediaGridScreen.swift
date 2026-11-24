@@ -45,6 +45,12 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var deletions = 0
     /// Export… / Save to Photos, with its progress and result.
     @State private var saver = MediaSaveModel()
+    /// The zoom transition into the viewer and back (iPhone, iPad): the tile it starts from and where that tile is.
+    @Namespace private var zoomNamespace
+    @State private var tileLocator = GridTileLocator()
+    @State private var zoomTile: FileID?
+    @State private var zoomFrame: CGRect?
+    @Environment(\.showInFolder) private var showInFolder
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -114,7 +120,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
                 }
             #endif
-            .mediaViewer($viewerStart)
+            .mediaViewer($viewerStart, zoom: zoomSource)
             .mediaSaveStatus(saver)
             .alert(
                 String(localized: "Something went wrong", bundle: .module),
@@ -135,7 +141,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 showsHeaders: showsHeaders,
                 services: services,
                 callbacks: GridCallbacks(
-                    open: { id in viewerStart = ViewerStart(ids: feed.model.ids, startId: id) },
+                    open: { id in openViewer(at: id) },
                     menu: { ids in menuActions(for: ids) },
                     selectionChanged: { ids in
                         selection = ids
@@ -147,10 +153,14 @@ struct MediaGridScreen<Accessory: View>: View {
                     },
                     columnsChanged: { columns = $0 },
                     cancelSelection: { endSelection() },
-                    beginSelection: { isSelecting = true }
+                    beginSelection: { isSelecting = true },
+                    tileLocator: tileLocator
                 )
             )
             .ignoresSafeArea(edges: .bottom)
+            .overlay(alignment: .topLeading) {
+                ViewerZoomSourceMark(tile: zoomTile, frame: zoomFrame, namespace: zoomNamespace)
+            }
         } else if session.isSignedOut {
             SignedOutView()
         } else if emptyPhase == .loading {
@@ -180,6 +190,29 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
             }
         }
+    }
+
+    /// Opens the viewer from a tile, which it zooms out of (iPhone, iPad).
+    func openViewer(at id: FileID) {
+        zoomTile = id
+        zoomFrame = tileLocator.frame(id)
+        viewerStart = viewerStart(at: id)
+    }
+
+    /// The zoom transition follows the photo the viewer shows: its tile is scrolled on screen, so closing the viewer
+    /// zooms back into it.
+    var zoomSource: ViewerZoomSource? {
+        guard let tile = zoomTile ?? viewerStart?.startId else { return nil }
+        return ViewerZoomSource(namespace: zoomNamespace, tile: tile) { id in
+            tileLocator.reveal(id)
+            zoomTile = id
+            zoomFrame = tileLocator.frame(id)
+        }
+    }
+
+    /// The viewer over this grid's photos, at `id`; stacked copies can be opened in it.
+    func viewerStart(at id: FileID) -> ViewerStart {
+        ViewerStart(ids: feed.model.ids, startId: id, stacks: TimelineStacking.stacks(in: feed.items))
     }
 
     /// Favourites or unfavourites; undoable.
@@ -300,7 +333,7 @@ struct MediaGridScreen<Accessory: View>: View {
             addToAlbum: { albumPicker = PickedItems(items: items) },
             zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
             zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
-            open: items.count == 1 ? { viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: items[0].fileId) } : nil,
+            open: items.count == 1 ? { openViewer(at: items[0].fileId) } : nil,
             edit: items.count == 1 && items[0].kind == .image ? { editedItem = items[0] } : nil,
             editDateAndLocation: canEditMetadata(items)
                 ? { metadataItems = PickedItems(items: items.filter(\.permissions.canWrite)) } : nil,
@@ -346,7 +379,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 GridMenuAction(
                     id: "open", title: String(localized: "Open", bundle: .module), systemImage: "arrow.up.left.and.arrow.down.right"
                 ) { _ in
-                    viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: item.fileId)
+                    openViewer(at: item.fileId)
                 })
             let infoTitle: String = PlatformWording.title(
                 mac: LocalizedStringResource("Get Info", bundle: .module), other: LocalizedStringResource("Info", bundle: .module))
@@ -355,6 +388,12 @@ struct MediaGridScreen<Accessory: View>: View {
                     infoItem = item
                     showingInfo = true
                 })
+            if let showInFolder {
+                actions.append(
+                    GridMenuAction(id: "folder", title: ShowInFolderAction.title, systemImage: ShowInFolderAction.systemImage) { _ in
+                        showInFolder(item)
+                    })
+            }
         }
         let albumTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Add to Album…", bundle: .module),
@@ -526,6 +565,8 @@ struct ViewerStart: Identifiable, Hashable {
     var id: FileID { startId }
     var ids: [FileID]
     var startId: FileID
+    /// Copies of one shot behind a tile (`TimelineStacking`), by the tile's id: the viewer can open them.
+    var stacks: [FileID: [FileID]] = [:]
 }
 
 /// Shown when the account's login is no longer valid.

@@ -14,6 +14,7 @@ import SwiftUI
 struct MemoriesScreen: View {
     var onlyOnThisDay = false
     @Environment(SessionModel.self) private var session
+    @State private var slideshow: SlideshowStart?
     @State private var onThisDay: [Memory] = []
     @State private var trips: [Memory] = []
     @State private var recap: Memory?
@@ -41,6 +42,7 @@ struct MemoriesScreen: View {
             .padding()
         }
         .navigationTitle(onlyOnThisDay ? String(localized: "On this day", bundle: .module) : String(localized: "Memories", bundle: .module))
+        .memorySlideshow($slideshow)
         .task {
             guard let services = session.services else { return }
             // Purpose-built queries on a database queue; the library itself never comes into memory.
@@ -58,14 +60,19 @@ struct MemoriesScreen: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {
-                        ItemsScreen(title: memory.title, sectioned: false) { services in
-                            let map = try await services.library.fetchItems(memory.items)
-                            return memory.items.compactMap { map[$0] }
-                        }
+                        MemoryScreen(memory: memory)
                     } label: {
                         MemoryCard(memory: memory)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            slideshow = SlideshowStart(memory: memory)
+                        } label: {
+                            Label(MemoryScreen.playTitle, systemImage: "play.rectangle")
+                        }
+                    }
+                    .accessibilityAction(named: Text(MemoryScreen.playTitle)) { slideshow = SlideshowStart(memory: memory) }
                 }
             }
         }
@@ -74,6 +81,8 @@ struct MemoriesScreen: View {
 
 struct MemoryCard: View {
     let memory: Memory
+    /// Small, for the strip at the top of the library: smaller titles, always on the picture, which fills the card.
+    var compact = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -83,7 +92,9 @@ struct MemoryCard: View {
 
     var body: some View {
         Group {
-            if dynamicTypeSize.isAccessibilitySize {
+            if compact {
+                compactCard
+            } else if dynamicTypeSize.isAccessibilitySize {
                 // Large text does not fit on the picture: it goes below it, and wraps.
                 VStack(alignment: .leading, spacing: 6) {
                     cover.clipShape(.rect(cornerRadius: 14))
@@ -110,6 +121,24 @@ struct MemoryCard: View {
     var cover: some View {
         PreviewImage(fileId: memory.cover, etag: "", bucket: 1024)
             .aspectRatio(4 / 3, contentMode: .fit)
+    }
+
+    /// The picture fills the card the strip gives it; the title is on it and may take two lines.
+    var compactCard: some View {
+        Color.clear
+            .overlay { PreviewImage(fileId: memory.cover, etag: "", bucket: 256) }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(memory.title).font(.footnote.bold()).lineLimit(2)
+                    if let dateLine { Text(dateLine).font(.caption2).lineLimit(1) }
+                }
+                .foregroundStyle(.white)
+                .shadow(radius: 3)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+            }
+            .clipShape(.rect(cornerRadius: 12))
     }
 
     var titles: some View {

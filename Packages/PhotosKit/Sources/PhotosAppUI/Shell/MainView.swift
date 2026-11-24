@@ -177,6 +177,7 @@ struct MainView: View {
 
     var body: some View {
         navigation
+            .environment(\.showInFolder, ShowInFolderAction { directory in showFolder(directory) })
             .onChange(of: app.requestedDestination, initial: true) { _, raw in
                 restoreOnce()
                 if let raw {
@@ -223,6 +224,17 @@ struct MainView: View {
         #if os(macOS)
             if SidebarLayout.utilities.contains(destination) { utilitiesExpanded = true }
         #endif
+    }
+
+    /// The folder browser at `directory`, with a screen for every folder above it, so Back walks up the tree.
+    func showFolder(_ directory: String) {
+        guard visible(.folders) else { return }
+        let trail: [AppRoute] = FolderTrail.folders(to: directory).map { AppRoute.folder(path: $0) }
+        #if os(macOS)
+            utilitiesExpanded = true
+        #endif
+        selection = .folders
+        paths[.folders] = trail.isEmpty ? nil : trail
     }
 
     func open(_ link: DeepLink) {
@@ -510,6 +522,7 @@ struct RouteView: View {
         switch route {
         case .album(let id): AlbumRouteScreen(albumId: id)
         case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
+        case .folder(let path): FoldersScreen(path: path)
         case .destination(let raw):
             // Pushed from the Collections list (the search tab has its own stack and field).
             if let destination = AppDestination(rawValue: raw) {
