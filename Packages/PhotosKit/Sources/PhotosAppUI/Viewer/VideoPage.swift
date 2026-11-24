@@ -87,7 +87,11 @@ struct LivePhotoMotion: View {
                 fileId: peer, etag: motion?.etag, name: motion?.name ?? "live.mov", mimeType: motion?.mimeType ?? "video/quicktime",
                 originalURL: motion.map { services.originalURL(for: $0) }, services: services, offline: session.offline)
         }
-        .onDisappear { video?.player.pause() }
+        // Only shown while pressed: nothing of it stays once the photo is let go or paged away.
+        .onDisappear {
+            video?.release()
+            video = nil
+        }
     }
 }
 
@@ -188,6 +192,13 @@ struct PlayableVideo {
         self.loader = loader
     }
 
+    /// Stops playback and lets go of the item, its buffers and (once this value is dropped) the stream behind it. A
+    /// paused player still holds its buffers and may keep loading ahead.
+    func release() {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+    }
+
     /// Prefers a local copy (offline album, already downloaded original); otherwise streams a temporary
     /// direct-download URL through the app's own HTTP client, so certificates the user trusted and the
     /// account's client certificate apply to video like to everything else (SPEC §5.5.3).
@@ -218,6 +229,8 @@ struct VideoPage: View {
     @State private var phase = VideoLoadPhase.loading
     /// Counted up by "Try again".
     @State private var attempt = 0
+    /// Where playback was when the page was paged away; it goes on from there when the page is shown again.
+    @State private var resumeAt: Double?
 
     /// How often and how long the app waits for the server to convert a video (2 minutes).
     static let conversionAttempts = 12
@@ -245,7 +258,28 @@ struct VideoPage: View {
             guard isCurrent, let player else { return }
             if player.timeControlStatus == .paused { player.play() } else { player.pause() }
         }
-        .onDisappear { player?.pause() }
+        .onDisappear { release() }
+    }
+
+    /// Lets go of the player once the page is no longer the one shown (SPEC §10: only the current video holds a
+    /// player). Paging through twenty videos used to keep twenty players with their buffers and streams alive.
+    func release() {
+        guard let video else { return }
+        resumeAt = VideoRetention.resumePosition(
+            current: video.player.currentTime().seconds, duration: video.player.currentItem?.duration.seconds)
+        video.release()
+        self.video = nil
+        phase = .loading
+    }
+
+    /// Plays a freshly loaded video, from where it was left when the page was shown before.
+    func start(_ loaded: PlayableVideo) {
+        video = loaded
+        if let resumeAt {
+            self.resumeAt = nil
+            loaded.player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600))
+        }
+        loaded.player.play()
     }
 
     /// Loading and converting are progress, not problems: no warning sign. A failure says what happened and, where
@@ -287,11 +321,16 @@ struct VideoPage: View {
     }
 
     func load() async {
-        if !isCurrent {
-            player?.pause()
+        switch VideoRetention.action(isCurrent: isCurrent, hasPlayer: video != nil) {
+        case .release:
+            release()
             return
+        case .keep:
+            return
+        case .load:
+            break
         }
-        guard video == nil, let services = session.services else { return }
+        guard let services = session.services else { return }
         phase = .loading
         if MimeTypes.unplayableVideos.contains(item.mimeType) {
             guard session.features.has(.videoRenditions) else {
@@ -305,9 +344,11 @@ struct VideoPage: View {
             let loaded: PlayableVideo = try await PlayableVideo.load(
                 fileId: item.fileId, etag: item.etag, name: item.name, mimeType: item.mimeType,
                 originalURL: services.originalURL(for: item), services: services, offline: session.offline)
-            guard !Task.isCancelled else { return }
-            video = loaded
-            loaded.player.play()
+            guard !Task.isCancelled else {
+                loaded.release()
+                return
+            }
+            start(loaded)
         } catch {
             if !Task.isCancelled { phase = .failed(.loading(error)) }
         }
@@ -319,9 +360,7 @@ struct VideoPage: View {
             do {
                 let file: URL = try await services.api.videoRendition(fileId: item.fileId, etag: item.etag)
                 guard !Task.isCancelled else { return }
-                let loaded = PlayableVideo(file: file)
-                video = loaded
-                loaded.player.play()
+                start(PlayableVideo(file: file))
                 return
             } catch {
                 if Task.isCancelled { return }
@@ -344,9 +383,36 @@ struct VideoPage: View {
         for await status in playerItem.publisher(for: \.status).values where status == .failed {
             guard !Task.isCancelled else { return }
             let error: (any Error)? = playerItem.error
+            video?.release()
             video = nil
             phase = .failed(.loading(error))
             return
         }
+    }
+}
+
+/// Which video pages hold a player: only the one shown. A page that is paged away lets go of its player at once
+/// (not just pauses it), and loads it again when it is shown again.
+enum VideoRetention {
+    enum Action: Equatable {
+        /// Shown, without a player yet.
+        case load
+        /// Shown, and the player is there.
+        case keep
+        /// Not shown (any more): stop and let go of the player, if there is one.
+        case release
+    }
+
+    static func action(isCurrent: Bool, hasPlayer: Bool) -> Action {
+        guard isCurrent else { return .release }
+        return hasPlayer ? .keep : .load
+    }
+
+    /// Where to go on when the page is shown again: nil at the very start, near the end (it starts over) or when the
+    /// position is not known.
+    static func resumePosition(current: Double, duration: Double?) -> Double? {
+        guard current.isFinite, current >= 1 else { return nil }
+        if let duration, duration.isFinite, duration > 0, current >= duration - 1 { return nil }
+        return current
     }
 }
