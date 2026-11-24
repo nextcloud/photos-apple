@@ -436,19 +436,21 @@ enum DeviceLockWording: Equatable {
     }
 }
 
-/// Picks a folder of the user's Nextcloud by browsing it (Settings → Timeline folders).
+/// Picks a folder of the user's Nextcloud by browsing it (Settings → Timeline folders, the backup folder).
 struct ServerFolderPicker: View {
     /// Folders that are already chosen; they cannot be picked again.
     var excluded: [String] = []
+    /// The confirming button; "Add This Folder" when nil.
+    var confirmTitle: String?
     let onPick: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var path: [String] = []
 
     var body: some View {
         NavigationStack(path: $path) {
-            ServerFolderList(folder: "/", excluded: excluded, pick: pick, cancel: { dismiss() })
+            ServerFolderList(folder: "/", excluded: excluded, confirmTitle: confirmTitle, pick: pick, cancel: { dismiss() })
                 .navigationDestination(for: String.self) { folder in
-                    ServerFolderList(folder: folder, excluded: excluded, pick: pick, cancel: { dismiss() })
+                    ServerFolderList(folder: folder, excluded: excluded, confirmTitle: confirmTitle, pick: pick, cancel: { dismiss() })
                 }
         }
         .frame(minWidth: 420, minHeight: 440)
@@ -464,6 +466,7 @@ struct ServerFolderPicker: View {
 struct ServerFolderList: View {
     let folder: String
     let excluded: [String]
+    var confirmTitle: String?
     let pick: (String) -> Void
     let cancel: () -> Void
     @Environment(SessionModel.self) private var session
@@ -511,7 +514,7 @@ struct ServerFolderList: View {
                 Button(String(localized: "Cancel", bundle: .module)) { cancel() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "Add This Folder", bundle: .module)) { pick(folder) }
+                Button(confirmTitle ?? String(localized: "Add This Folder", bundle: .module)) { pick(folder) }
                     .disabled(folder == "/" || excluded.contains(folder))
             }
         }

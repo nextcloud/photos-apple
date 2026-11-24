@@ -60,6 +60,9 @@
     "Archive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
     },
+    "Backing up photos to Nextcloud" : {
+      "comment" : "Title of the system's progress panel (Live Activity) while a backup the user started runs in the background."
+    },
     "Backup failed: %@" : {
       "comment" : "Result of a backup run that failed. %@ is the error message."
     },
@@ -153,11 +156,17 @@
     "Cancelled" : {
       "comment" : "Status of an upload or download that the user cancelled, in the list of transfers."
     },
+    "Checking your Nextcloud… %lld of %lld" : {
+      "comment" : "Subtitle of the system's backup progress panel while the app compares the device's photos with the server."
+    },
     "Delete" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Delete\"): photos were moved to the server's trash bin. A verb."
     },
     "Log in to back up your photos." : {
       "comment" : "Result of the \"Back up now\" shortcut when no account is logged in."
+    },
+    "Looking for new photos…" : {
+      "comment" : "Subtitle of the system's backup progress panel before the uploads start."
     },
     "Nextcloud Photos has no access to your photos." : {
       "comment" : "Result of a backup run when the user has not allowed the app to read the device's photo library. \"Nextcloud Photos\" is the app's name."
@@ -179,6 +188,9 @@
     },
     "Unarchive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."
+    },
+    "Uploading %lld of %lld" : {
+      "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."
     },
     "Your photos are backed up." : {
       "comment" : "Result of a backup run when there was nothing left to upload."

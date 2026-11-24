@@ -18,6 +18,10 @@ public final class AppModel {
     public var requestedDestination: String?
     /// The Notifications switch in Settings. Change it with `setPushEnabled(_:)`.
     public private(set) var pushEnabled: Bool
+    /// After the first login on iPhone and iPad: the app offers backup before it asks for notifications. The UI shows the
+    /// offer while this is true and calls `finishBackupOffer()`.
+    public private(set) var offersBackup = false
+    @ObservationIgnored private var asksForNotificationsAfterOffer = false
     @ObservationIgnored private var deviceToken: Data?
     @ObservationIgnored private var unauthorizedChecks: Set<AccountID> = []
     /// Sessions that were replaced and are still shutting down.
@@ -44,7 +48,9 @@ public final class AppModel {
             if registry.accounts.isEmpty, let link = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_LOGIN"],
                 let credentials = LoginService.parseLoginURL(link)
             {
-                Task { try? await self.addAccount(credentials, askForNotifications: false) }
+                // PHOTOS_DEBUG_OFFER_BACKUP=1 shows the backup offer of a first login (UI tests don't want it).
+                let offer = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_OFFER_BACKUP"] != nil
+                Task { try? await self.addAccount(credentials, askForNotifications: false, offerBackup: offer) }
             }
         #endif
     }
@@ -128,7 +134,10 @@ public final class AppModel {
     ///
     /// - Parameter askForNotifications: ask for the notification permission now that there is an account to notify about
     ///   (the system only prompts the first time; nothing is asked at first launch).
-    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true) async throws {
+    /// - Parameter offerBackup: offer backup first when it is not set up yet (`offersBackup`).
+    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true, offerBackup: Bool = true)
+        async throws
+    {
         let status = try await loginService().status(serverURL: credentials.serverURL)
         let provisional = ServerConnection(
             serverURL: credentials.serverURL, userId: credentials.loginName, loginName: credentials.loginName,
@@ -142,12 +151,29 @@ public final class AppModel {
         registry.activeAccountID = account.id
         saveRegistry()
         activate(account)
+        let offer = offerBackup && BackupOffer.shouldOffer(backup: backup, defaults: defaults)
+        if offer { offersBackup = true }
         if pushEnabled {
-            if askForNotifications {
+            if askForNotifications && offer {
+                // Asked when the backup offer is answered: one question at a time.
+                asksForNotificationsAfterOffer = true
+            } else if askForNotifications {
                 Task { await PushNotifications.requestAuthorization() }
             } else if let deviceToken {
                 registerForPush(account, deviceToken: deviceToken)
             }
+        }
+    }
+
+    /// The backup offer after the first login was answered ("Back up" or "Not now"): it is not shown again, and the
+    /// notification permission is asked now if the login wanted to.
+    public func finishBackupOffer() {
+        guard offersBackup else { return }
+        offersBackup = false
+        defaults.set(true, forKey: BackupOffer.offeredKey)
+        if asksForNotificationsAfterOffer {
+            asksForNotificationsAfterOffer = false
+            Task { await PushNotifications.requestAuthorization() }
         }
     }
 
