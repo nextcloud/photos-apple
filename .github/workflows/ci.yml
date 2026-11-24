@@ -19,7 +19,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: swift-format
         run: |
           if [ ! -d "$DEVELOPER_DIR" ]; then
@@ -33,9 +33,9 @@ jobs:
   reuse:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: REUSE
-        uses: fsfe/reuse-action@v5
+        uses: fsfe/reuse-action@v6
 
   test:
     # The package targets OS 27, so its test bundles only load on macOS 27. `xcode-27` is GitHub's hosted macOS 27 image with
@@ -43,7 +43,7 @@ jobs:
     # Switch to `macos-27` once that label exists.
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Unit tests
         working-directory: Packages/PhotosKit
         run: |
@@ -82,7 +82,7 @@ jobs:
     # The same tests in an iOS 27 simulator: the iOS code paths (UIKit, background sessions) only compile and run there.
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Find an iOS 27 simulator
         id: simulator
         run: |
@@ -124,7 +124,7 @@ jobs:
       matrix:
         destination: ["generic/platform=iOS Simulator", "platform=macOS", "generic/platform=visionOS Simulator"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
       - name: Build
@@ -140,7 +140,7 @@ jobs:
       matrix:
         destination: ["generic/platform=iOS", "generic/platform=macOS", "generic/platform=visionOS"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
       - name: Archive (unsigned)

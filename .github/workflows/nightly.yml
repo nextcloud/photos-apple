@@ -15,7 +15,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-ios'
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Performance tests
         working-directory: Packages/PhotosKit
         run: |
@@ -44,7 +44,7 @@ jobs:
     env:
       SERVER_URL: http://127.0.0.1:8089
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:

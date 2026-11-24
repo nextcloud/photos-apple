@@ -26,7 +26,7 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
 
@@ -62,7 +62,7 @@ jobs:
       #   (method app-store-connect, destination upload), then tag the commit with the version and build number.
 
       - name: Keep the archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: NextcloudPhotos-${{ matrix.platform }}-${{ github.run_number }}-unsigned
           path: ${{ runner.temp }}/NextcloudPhotos-${{ matrix.platform }}.xcarchive
