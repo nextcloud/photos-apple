@@ -498,7 +498,7 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   is loaded once: an item deleted there disappears after a reload.
 - Memories strip at the top of the Library (TL-3) ✅ run in the iOS 27.2 simulator (the strip took a third of the screen's
   height as empty space above the cards — a horizontal scroll view takes the height it is offered —; it now has the height of
-  its cards on every platform, the Mac fix compiled, not run). On this day, the year in review and trips (at most 12) as small cards over
+  its cards on every platform, also checked in the Mac app, `ios-fix-shots/r4-iphone/04-mac-library-strip.png`). On this day, the year in review and trips (at most 12) as small cards over
   the grid of the whole library (not with a filter, not while selecting), "All memories" at the end; loaded off the main actor
   after each finished sync and when the day changes. Context menu "Hide memories"; Settings › On this device › "Show memories".
   Memories stay in the sidebar / Collections.
