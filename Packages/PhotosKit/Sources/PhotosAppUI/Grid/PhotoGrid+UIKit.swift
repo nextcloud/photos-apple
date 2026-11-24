@@ -506,6 +506,7 @@
         private let videoIcon = UIImageView(image: UIImage(systemName: "video.fill"))
         private let favoriteIcon = UIImageView(image: UIImage(systemName: "heart.fill"))
         private let liveIcon = UIImageView(image: UIImage(systemName: "livephoto"))
+        private let partnerIcon = UIImageView(image: UIImage(systemName: GridTileBadges.partnerSymbol))
         private let checkmark = UIImageView()
         private let gradient = CAGradientLayer()
         /// Loads the preview and says what to draw; shared with the AppKit grid.
@@ -527,17 +528,23 @@
             durationLabel.font = .monospacedDigitSystemFont(
                 ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold)
             durationLabel.textColor = .white
-            for icon in [favoriteIcon, liveIcon, videoIcon] {
+            for icon in [favoriteIcon, liveIcon, videoIcon, partnerIcon] {
                 icon.tintColor = .white
                 icon.contentMode = .scaleAspectFit
             }
+            // The top edge has no shade: a soft shadow keeps the white badge visible on bright pictures.
+            partnerIcon.layer.shadowColor = UIColor.black.cgColor
+            partnerIcon.layer.shadowOpacity = 0.5
+            partnerIcon.layer.shadowRadius = 1.5
+            partnerIcon.layer.shadowOffset = .zero
+            partnerIcon.isHidden = true
             checkmark.contentMode = .scaleAspectFit
             // The empty circle is white on the photo: a soft shadow keeps it visible on bright pictures.
             checkmark.layer.shadowColor = UIColor.black.cgColor
             checkmark.layer.shadowOpacity = 0.35
             checkmark.layer.shadowRadius = 1.5
             checkmark.layer.shadowOffset = .zero
-            [durationLabel, videoIcon, favoriteIcon, liveIcon, checkmark].forEach { contentView.addSubview($0) }
+            [durationLabel, videoIcon, favoriteIcon, liveIcon, partnerIcon, checkmark].forEach { contentView.addSubview($0) }
             // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
             hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
             tilePicture.show = { [weak self] display in self?.show(display) }
@@ -573,6 +580,7 @@
             videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 4, y: bounds.height - 16, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: 4, width: 16, height: 16)
+            partnerIcon.frame = CGRect(x: bounds.width - 21, y: 4, width: 17, height: 14)
         }
 
         /// The picture the tile shows right now (first picture of the context menu's preview).
@@ -630,7 +638,8 @@
         }
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridController) {
-            let badges = GridTileBadges(item: item)
+            let badges = GridTileBadges(item: item, isPartner: owner.services.partnerPaths.contains(directory: item.directory))
+            partnerIcon.isHidden = !badges.showsPartner
             durationLabel.text = badges.duration
             durationLabel.isHidden = badges.duration == nil
             videoIcon.isHidden = !badges.showsVideo

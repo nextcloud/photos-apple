@@ -673,6 +673,8 @@
         private let videoIcon = NSImageView(image: NSImage(systemSymbolName: "video.fill", accessibilityDescription: nil)!)
         private let favoriteIcon = NSImageView(image: NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)!)
         private let liveIcon = NSImageView(image: NSImage(systemSymbolName: "livephoto", accessibilityDescription: nil)!)
+        private let partnerIcon = NSImageView(
+            image: NSImage(systemSymbolName: GridTileBadges.partnerSymbol, accessibilityDescription: nil)!)
         private let selectionRing = NSView()
         /// Loads the preview and says what to draw; shared with the UIKit grid.
         private let picture = GridTilePicture()
@@ -692,15 +694,21 @@
             placeholderIcon.isHidden = true
             durationLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
             durationLabel.textColor = .white
-            for icon in [favoriteIcon, liveIcon, videoIcon] {
+            for icon in [favoriteIcon, liveIcon, videoIcon, partnerIcon] {
                 icon.contentTintColor = .white
                 icon.imageScaling = .scaleProportionallyUpOrDown
             }
+            // The top edge has no shade: a soft shadow keeps the white badge visible on bright pictures.
+            let partnerShadow = NSShadow()
+            partnerShadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+            partnerShadow.shadowBlurRadius = 2
+            partnerIcon.shadow = partnerShadow
+            partnerIcon.isHidden = true
             selectionRing.wantsLayer = true
             selectionRing.layer?.borderColor = NSColor.controlAccentColor.cgColor
             selectionRing.layer?.borderWidth = 3
             selectionRing.isHidden = true
-            [photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, selectionRing].forEach {
+            [photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, partnerIcon, selectionRing].forEach {
                 container.addSubview($0)
             }
             view = container
@@ -723,6 +731,7 @@
             videoIcon.frame = CGRect(x: right - 16, y: 4, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: 5, y: 4, width: 13, height: 12)
             liveIcon.frame = CGRect(x: 4, y: bounds.height - 20, width: 16, height: 16)
+            partnerIcon.frame = CGRect(x: bounds.width - 21, y: bounds.height - 18, width: 17, height: 14)
         }
 
         override var isSelected: Bool {
@@ -760,7 +769,8 @@
         }
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridScrollView) {
-            let badges = GridTileBadges(item: item)
+            let badges = GridTileBadges(item: item, isPartner: owner.services.partnerPaths.contains(directory: item.directory))
+            partnerIcon.isHidden = !badges.showsPartner
             durationLabel.stringValue = badges.duration ?? ""
             durationLabel.isHidden = badges.duration == nil
             videoIcon.isHidden = !badges.showsVideo

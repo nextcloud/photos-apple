@@ -28,6 +28,8 @@ public final class SessionModel {
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
     public private(set) var offline: OfflineManager?
+    /// A partner's shared photos in this account's timeline (SPEC SH-8).
+    public private(set) var partners: PartnerTimelineModel?
     @ObservationIgnored var albumsRefreshedAt: Date?
     @ObservationIgnored weak var app: AppModel?
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
@@ -58,6 +60,7 @@ public final class SessionModel {
         }
         transfers.session = self
         if let services {
+            partners = PartnerTimelineModel(services: services)
             let offline = OfflineManager(services: services)
             self.offline = offline
             // Weak: the offline manager owns the services, whose image pipeline would otherwise own the manager.

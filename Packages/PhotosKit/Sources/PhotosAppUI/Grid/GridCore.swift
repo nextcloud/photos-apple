@@ -256,18 +256,25 @@ struct GridTileBadges: Equatable {
     var showsVideo: Bool
     var showsFavorite: Bool
     var showsLivePhoto: Bool
+    /// From a partner's shared folder (partner sharing, SPEC SH-8).
+    var showsPartner: Bool
     /// The lower edge is darkened so the white badges stay readable.
     var showsShade: Bool
     var accessibilityLabel: String
 
-    init(item: GridMedia) {
+    init(item: GridMedia, isPartner: Bool = false) {
         duration = GridTile.durationText(for: item)
         showsVideo = item.kind == .video
         showsFavorite = item.isFavorite
         showsLivePhoto = item.isLivePhoto
+        showsPartner = isPartner
         showsShade = GridTile.showsBottomShade(for: item)
         accessibilityLabel = GridTile.accessibilityLabel(for: item)
+        if isPartner { accessibilityLabel += ", " + String(localized: "Partner photo", bundle: .module) }
     }
+
+    /// SF Symbol of the partner badge.
+    static let partnerSymbol = "person.2.fill"
 }
 
 /// Loads the picture of one tile and says what the tile should show.

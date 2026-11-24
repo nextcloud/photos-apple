@@ -97,6 +97,7 @@ public struct SettingsView: View {
                 } footer: {
                     Text("Photos and videos in these folders of your Nextcloud appear in the library.", bundle: .module)
                 }
+                PartnerSharingSection()
                 Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
                 } header: {

@@ -23,6 +23,8 @@ public final class AccountServices: Sendable {
     public let outbox: Outbox
     public let images: ImagePipeline
     public let layout: StorageLayout
+    /// The partner folders whose photos the timeline shows with a badge (`PartnerTimelineModel`).
+    public let partnerPaths = PartnerPaths()
 
     public init(
         account: Account,
@@ -50,6 +52,7 @@ public final class AccountServices: Sendable {
         self.collections = CollectionStore(database: database)
         let sync = SyncEngine(api: api, database: database, features: features)
         self.sync = sync
+        partnerPaths.set(PartnerSettings.load(database).folders.map(\.path))
         // Failed for good or discarded: the rows the operation had changed come back from the server.
         self.outbox = Outbox(api: api, database: database, restore: { _ = try? await sync.restoreRows() })
         let cache = PreviewCache(directory: layout.previews(account.id))
