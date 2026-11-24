@@ -153,8 +153,8 @@ struct MainView: View {
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
-    /// File › Import from Google Takeout… (Mac).
-    @State private var importingTakeout = false
+    /// File › Import Library… (SPEC §15.7).
+    @State private var importingLibrary = false
     /// File › Import from Camera or Card… (SPEC §15.2).
     @State private var importingCard = false
     /// "Show in library": the photo the Library timeline scrolls to and highlights.
@@ -209,15 +209,13 @@ struct MainView: View {
                     upload: { importingFiles = true },
                     openPublicLink: { openingLink = true },
                     syncNow: { Task { await session.syncNow(forceReconcile: true) } },
-                    importTakeout: { importingTakeout = true },
+                    importLibrary: { importingLibrary = true },
                     importCard: CardImportAvailability.isAvailable ? { importingCard = true } : nil
                 )
             )
             .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
             .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
-            #if os(macOS)
-                .sheet(isPresented: $importingTakeout) { TakeoutImportSheet() }
-            #endif
+            .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
             .sheet(isPresented: $importingCard) { CardImportSheet() }
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_CARD_IMPORT=1` opens the import sheet at launch.
@@ -317,6 +315,7 @@ struct MainView: View {
     func restoreOnce() {
         guard !restored else { return }
         restored = true
+        if ImportLibrarySheet.debugExport != nil { importingLibrary = true }
         if let destination = Self.debugDestination {
             selection = destination
         } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),

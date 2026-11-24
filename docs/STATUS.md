@@ -431,7 +431,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   Classification ✅ unit-tested; UI compiled, not looked at.
 - 🟡 §7.18.9 mirror device albums into Nextcloud albums (iOS, opt-in, picked albums): mirror logic ✅ unit-tested with a fake
   library and server; PhotoKit album reading and the Backup › Albums screen compiled for iOS, **not run on a device**.
-- 🟡 §7.18.10 Google Takeout import (Mac): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
+- 🟡 §7.18.10 Google Takeout import (now part of Import Library…, §15.7, on every platform): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
   (duplicates, albums, comments, journal, stop/resume) ✅ unit-tested and ✅ end-to-end against 8089, 8091 and 8093 (dates
   as mtime, album, second import uploads nothing); the import window 🟡 compiled, not looked at (screen locked).
 - ✅ Most compatible (round 4): HEVC videos become H.264 (QuickTime, metadata kept; Live Photo motion parts too), next
@@ -759,7 +759,24 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   outside this package (left for the sync owner).
 
 ### §15.7 Bring everything home: imports
-- ⬜ Not started.
+- ✅ General importer (`ImportPlanner`, `LibraryImporter`) with adapters for Google Takeout, Apple's iCloud Photos data
+  export, Facebook and Instagram JSON exports (2018–2026 layouts), plain photos: unit-tested with fixtures written from
+  documented real exports; ✅ end-to-end against 8089, 8091 and 8093 (Apple + Facebook: capture time written into the Facebook photo and
+  read by the server, favourite, hidden photo in `/.archive`, album, second import uploads nothing; Google Takeout as in
+  round 3).
+- ✅ Duplicates across exports and against the server (`ImportMatcher`: name+size, Apple minutes, reduced copies),
+  metadata write-back (`ImportMetadataWriter`), parallel uploads, free-space stop, journal/resume, summary and report:
+  unit-tested.
+- ✅ iPhone (iOS 27.2 simulator): start screen, review, progress with the photos sliding by, Welcome home (light, dark,
+  XXL text) against 8089 with a 4-service demo export (16 items: 14 uploaded, 2 found on the server, 4 albums, 1 hidden
+  photo archived, report uploaded). Screenshots: `ios-fix-shots/r5-import/`. The continued processing task is not
+  available in the simulator (the import ran in the app, as designed when the system declines); 🟡 on a device.
+- ✅ Mac: review, progress and Welcome home run (driven through the accessibility API). 🟡 Photos Library source:
+  the import of its items (export one at a time, archive, favourite, album) ✅ unit-tested with an injected export; reading
+  the library through PhotoKit not run (it needs the Photos permission prompt). 🟡 Picking
+  files with the file picker and resuming via bookmarks after a relaunch not run (needs real input); the Mac needs
+  `com.apple.security.files.bookmarks.app-scope` (added to the entitlements) for that.
+- ⬜ iPad and Vision Pro layouts not looked at (same sheet).
 
 ### §15.8 Smart offline and fun extras: stickers, collages, photo of the day
 - ⬜ Not started.

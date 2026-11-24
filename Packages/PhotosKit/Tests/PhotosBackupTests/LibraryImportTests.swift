@@ -12,7 +12,7 @@ import Testing
 
 @Suite struct TakeoutSidecarTests {
     func find(_ media: String, _ sidecars: [String]) -> String? {
-        TakeoutSidecars.sidecar(for: media, in: TakeoutSidecars.index(sidecars))
+        GoogleTakeoutSidecars.sidecar(for: media, in: GoogleTakeoutSidecars.index(sidecars))
     }
 
     @Test func matchesTheNamingSchemesOfTakeout() {
@@ -41,17 +41,25 @@ import Testing
              "geoData":{"latitude":0.0,"longitude":0.0,"altitude":0.0},
              "geoDataExif":{"latitude":38.7169,"longitude":-9.1399,"altitude":12.5}}
             """.utf8)
-        let metadata = try #require(TakeoutSidecars.parse(data))
+        let metadata = try #require(GoogleTakeoutSidecars.parse(data))
         #expect(metadata.takenAt == Date(timeIntervalSince1970: 1_561_291_200))
         #expect(metadata.latitude == 38.7169, "0/0 means no position; the EXIF copy is used")
         #expect(metadata.longitude == -9.1399)
         #expect(metadata.altitude == 12.5)
-        #expect(metadata.description == "Grandma's birthday")
+        #expect(metadata.caption == "Grandma's birthday")
 
-        #expect(TakeoutSidecars.parse(Data(#"{"title":"x","geoData":{"latitude":0,"longitude":0}}"#.utf8)) == nil)
-        #expect(TakeoutSidecars.parse(Data(#"{"photoTakenTime":{"timestamp":"-5"}}"#.utf8)) == nil)
-        #expect(TakeoutSidecars.parse(Data("not json".utf8)) == nil)
-        #expect(TakeoutSidecars.albumTitle(Data(#"{"title":"Trip to Lisbon","date":{}}"#.utf8)) == "Trip to Lisbon")
+        #expect(GoogleTakeoutSidecars.parse(Data(#"{"title":"x","geoData":{"latitude":0,"longitude":0}}"#.utf8)) == nil)
+        #expect(GoogleTakeoutSidecars.parse(Data(#"{"photoTakenTime":{"timestamp":"-5"}}"#.utf8)) == nil)
+        #expect(GoogleTakeoutSidecars.parse(Data("not json".utf8)) == nil)
+        #expect(GoogleTakeoutSidecars.albumTitle(Data(#"{"title":"Trip to Lisbon","date":{}}"#.utf8)) == "Trip to Lisbon")
+    }
+}
+
+extension ImportItem {
+    /// The export file's path (tests).
+    var filePath: String? {
+        if case .file(let file) = origin { return file.path }
+        return nil
     }
 }
 
@@ -138,33 +146,33 @@ struct TakeoutFixture {
         let fixture = try TakeoutFixture()
         defer { fixture.remove() }
         try fixture.standardExport()
-        let plan = try TakeoutPlan.build(try TakeoutSource.open([fixture.root.appending(path: "Takeout")]))
+        let plan = try ImportPlanner.plan(try ExportFiles.open([fixture.root.appending(path: "Takeout")]))
 
         #expect(plan.items.map(\.name) == ["no-sidecar.png", "IMG_0001.jpg", "IMG_0001(1).jpg", "VID_0002.mp4"])
-        #expect(plan.albums == ["Lisbon / Porto"], "the album's own title; year folders, the root and the trash are no albums")
+        #expect(plan.albums.map(\.title) == ["Lisbon / Porto"], "the album's own title; year folders, the root and the trash are no albums")
         #expect(plan.duplicatesInExport == 1, "the album's copy of IMG_0001.jpg is the year folder's file")
-        #expect(plan.skippedTrash == 1)
-        #expect(plan.withoutSidecar == 1)
+        #expect(plan.skipped[.deleted] == 1)
+        #expect(plan.withoutDetails == 1)
         let photo = try #require(plan.items.first { $0.name == "IMG_0001.jpg" })
         #expect(photo.albums == ["Lisbon / Porto"])
-        #expect(photo.metadata?.latitude == 38.7)
-        #expect(photo.file.path == "Google Photos/Photos from 2019/IMG_0001.jpg")
+        #expect(photo.metadata.latitude == 38.7)
+        #expect(photo.filePath == "Google Photos/Photos from 2019/IMG_0001.jpg")
         #expect(plan.items.first { $0.name == "IMG_0001(1).jpg" }?.takenAt == Date(timeIntervalSince1970: 1_561_291_260))
         #expect(plan.items.first { $0.name == "VID_0002.mp4" }?.kind == .video)
-        #expect(plan.items.first { $0.name == "VID_0002.mp4" }?.metadata?.description == "Beach")
+        #expect(plan.items.first { $0.name == "VID_0002.mp4" }?.metadata.caption == "Beach")
         // The same export gives the same key (resume), whether unpacked or zipped.
         guard TakeoutFixture.canZip else { return }
-        let zipped = try TakeoutPlan.build(try TakeoutSource.open([try fixture.zip()]))
+        let zipped = try ImportPlanner.plan(try ExportFiles.open([try fixture.zip()]))
         #expect(zipped.key == plan.key)
         #expect(zipped.items.map(\.name) == plan.items.map(\.name))
     }
 
     @Test func yearFoldersInOtherLanguages() {
-        #expect(TakeoutPlan.isYearFolder("Photos from 2019"))
-        #expect(TakeoutPlan.isYearFolder("Fotos von 2019"))
-        #expect(TakeoutPlan.isYearFolder("Photos de 2021"))
-        #expect(!TakeoutPlan.isYearFolder("Trip 2019 Lisbon"))
-        #expect(!TakeoutPlan.isYearFolder("Holidays"))
+        #expect(GoogleTakeoutExport.isYearFolder("Photos from 2019"))
+        #expect(GoogleTakeoutExport.isYearFolder("Fotos von 2019"))
+        #expect(GoogleTakeoutExport.isYearFolder("Photos de 2021"))
+        #expect(!GoogleTakeoutExport.isYearFolder("Trip 2019 Lisbon"))
+        #expect(!GoogleTakeoutExport.isYearFolder("Holidays"))
     }
 }
 
@@ -218,13 +226,14 @@ struct TakeoutFixture {
 }
 
 /// A server for the importer: records uploads and albums; candidates are given by the test.
-final class FakeTakeoutRemote: TakeoutRemote {
+final class FakeImportRemote: ImportRemote {
     struct State {
         var candidates: [RemoteCandidate] = []
         var uploads: [(name: String, folder: String, capturedAt: Date?, size: Int)] = []
         var albums: Set<String> = []
         var albumItems: [String: [String]] = [:]
         var comments: [FileID: String] = [:]
+        var favorites: Set<String> = []
         var nextId: FileID = 1000
         var failNames: Set<String> = []
         var cancelAfterUploads: Int?
@@ -247,17 +256,29 @@ final class FakeTakeoutRemote: TakeoutRemote {
         let size = (try? Data(contentsOf: file).count) ?? -1
         let result: UploadedFile = try state.withLock { state in
             if state.failNames.contains(fileName) { throw NetworkError.http(status: 500, message: "boom") }
+            let path = folder + "/" + fileName
+            // The uploader's "same name and size is this file".
+            if let existing = state.candidates.first(where: { $0.path == path && $0.size == Int64(size) }) {
+                return UploadedFile(fileId: existing.fileId, path: path, etag: nil)
+            }
             state.uploads.append((fileName, folder, capturedAt, size))
             state.nextId += 1
-            return UploadedFile(fileId: state.nextId, path: folder + "/" + fileName, etag: nil)
+            // What the server's search finds from now on (the capture time arrives as the file's time).
+            let kind: MediaKind = ExportFiles.kind(of: fileName) ?? .image
+            state.candidates.append(
+                RemoteCandidate(
+                    fileId: state.nextId, path: path, kind: kind, size: Int64(size), capturedAt: nil, modifiedAt: capturedAt ?? Date()))
+            return UploadedFile(fileId: state.nextId, path: path, etag: nil)
         }
         onUpload.withLock { $0 }?()
         return result
     }
 
-    func didUpload(_ uploaded: UploadedFile, metadata: TakeoutMetadata?, comment: Bool) async {
-        if comment, let text = metadata?.description { state.withLock { $0.comments[uploaded.fileId] = text } }
+    func didUpload(_ uploaded: UploadedFile, metadata: ImportMetadata, comment: Bool) async {
+        if comment, let text = metadata.caption { state.withLock { $0.comments[uploaded.fileId] = text } }
     }
+
+    func setFavorite(path: String) async throws { _ = state.withLock { $0.favorites.insert(path) } }
 
     func albumNames() async throws -> Set<String> { state.withLock { $0.albums } }
 
@@ -269,10 +290,10 @@ final class FakeTakeoutRemote: TakeoutRemote {
 }
 
 @Suite struct TakeoutImporterTests {
-    func makePlan(_ fixture: TakeoutFixture, zipped: Bool = TakeoutFixture.canZip) throws -> (TakeoutSource, TakeoutPlan) {
+    func makePlan(_ fixture: TakeoutFixture, zipped: Bool = TakeoutFixture.canZip) throws -> (ExportFiles, ImportPlan) {
         try fixture.standardExport()
-        let source = try TakeoutSource.open([zipped ? try fixture.zip() : fixture.root])
-        return (source, try TakeoutPlan.build(source))
+        let source = try ExportFiles.open([zipped ? try fixture.zip() : fixture.root])
+        return (source, try ImportPlanner.plan(source))
     }
 
     var utc: Calendar {
@@ -285,7 +306,7 @@ final class FakeTakeoutRemote: TakeoutRemote {
         let fixture = try TakeoutFixture()
         defer { fixture.remove() }
         let (source, plan) = try makePlan(fixture)
-        let remote = FakeTakeoutRemote()
+        let remote = FakeImportRemote()
         // IMG_0001(1).jpg is on the server already (backed up from a phone under the Files app's name).
         remote.state.withLock {
             $0.candidates = [
@@ -295,8 +316,8 @@ final class FakeTakeoutRemote: TakeoutRemote {
             ]
         }
         let journal = fixture.root.appending(path: "journal")
-        let importer = TakeoutImporter(
-            source: source, plan: plan, remote: remote, options: TakeoutOptions(destination: "/Photos/Google Photos"),
+        let importer = LibraryImporter(
+            files: source, plan: plan, remote: remote, options: ImportOptions(destination: "/Photos"),
             journalDirectory: journal, calendar: utc)
         let result = await importer.run { _ in }
 
@@ -319,12 +340,14 @@ final class FakeTakeoutRemote: TakeoutRemote {
         #expect(remote.state.withLock { Array($0.comments.values) } == ["Beach"])
 
         // A second run of the same export does nothing again.
-        let again = await TakeoutImporter(
-            source: source, plan: plan, remote: remote, options: TakeoutOptions(destination: "/Photos/Google Photos"),
+        let again = await LibraryImporter(
+            files: source, plan: plan, remote: remote, options: ImportOptions(destination: "/Photos"),
             journalDirectory: journal, calendar: utc
         ).run { _ in }
         #expect(again.phase == .finished)
-        #expect(again.uploaded == 3 && again.duplicates == 1)
+        // A finished import is checked against the server again: everything is there.
+        #expect(again.duplicates == 3, "found by the server search")
+        #expect(again.uploaded == 1, "the photo without a capture time is found by its name and size where it went")
         #expect(remote.state.withLock { $0.uploads.count } == 3)
         #expect(remote.state.withLock { $0.albumItems["Lisbon - Porto"]?.count } == 1)
     }
@@ -333,22 +356,25 @@ final class FakeTakeoutRemote: TakeoutRemote {
         let fixture = try TakeoutFixture()
         defer { fixture.remove() }
         let (source, plan) = try makePlan(fixture, zipped: false)
-        let remote = FakeTakeoutRemote()
+        let remote = FakeImportRemote()
         let journal = fixture.root.appending(path: "journal")
-        let options = TakeoutOptions(destination: "/Photos/Import", createAlbums: false)
-        let running = Mutex<Task<TakeoutProgress, Never>?>(nil)
+        var options = ImportOptions(destination: "/Photos/Import")
+        options.createAlbums = false
+        let running = Mutex<Task<ImportProgress, Never>?>(nil)
         remote.onUpload.withLock { $0 = { running.withLock { $0?.cancel() } } }
         let task = Task {
-            await TakeoutImporter(source: source, plan: plan, remote: remote, options: options, journalDirectory: journal).run { _ in }
+            await LibraryImporter(files: source, plan: plan, remote: remote, options: options, journalDirectory: journal).run { _ in }
         }
         running.withLock { $0 = task }
         let first = await task.value
         #expect(first.phase == .cancelled)
-        #expect(remote.state.withLock { $0.uploads.count } == 1)
-        #expect(TakeoutJournal.load(from: journal, planKey: plan.key)?.completed == 1)
+        // Uploads run a few at a time: those under way when the import stopped may finish; the journal knows each one.
+        let uploadedFirst = remote.state.withLock { $0.uploads.count }
+        #expect(uploadedFirst >= 1 && uploadedFirst < 4)
+        #expect(ImportJournal.load(from: journal, planKey: plan.key)?.completed == uploadedFirst)
 
         remote.onUpload.withLock { $0 = nil }
-        let second = await TakeoutImporter(source: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
+        let second = await LibraryImporter(files: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
             .run { _ in }
         #expect(second.phase == .finished)
         #expect(second.uploaded == 4)
@@ -359,30 +385,30 @@ final class FakeTakeoutRemote: TakeoutRemote {
         let fixture = try TakeoutFixture()
         defer { fixture.remove() }
         let (source, plan) = try makePlan(fixture)
-        let remote = FakeTakeoutRemote()
+        let remote = FakeImportRemote()
         remote.state.withLock { $0.failNames = ["VID_0002.mp4"] }
         let journal = fixture.root.appending(path: "journal")
-        let options = TakeoutOptions(destination: "/Photos/Import")
-        let first = await TakeoutImporter(source: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
+        let options = ImportOptions(destination: "/Photos/Import")
+        let first = await LibraryImporter(files: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
             .run { _ in }
         #expect(first.phase == .finished)
         #expect(first.failed == 1)
         #expect(first.failures.count == 1 && first.failures[0].hasPrefix("VID_0002.mp4"))
 
         remote.state.withLock { $0.failNames = [] }
-        let second = await TakeoutImporter(source: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
+        let second = await LibraryImporter(files: source, plan: plan, remote: remote, options: options, journalDirectory: journal)
             .run { _ in }
         #expect(second.failed == 0)
         #expect(remote.state.withLock { $0.uploads.map(\.name) }.last == "VID_0002.mp4")
     }
 
     @Test func groupsItemsIntoDayWindows() {
-        func item(_ id: String, _ time: TimeInterval?) -> TakeoutItem {
-            TakeoutItem(
-                id: id, file: TakeoutSource.File(path: id, size: 1), kind: .image,
-                metadata: time.map { TakeoutMetadata(takenAt: Date(timeIntervalSince1970: $0)) }, albums: [])
+        func item(_ id: String, _ time: TimeInterval?) -> ImportItem {
+            ImportItem(
+                id: id, origin: .file(ExportFiles.File(path: id, size: 1)), name: id, size: 1, kind: .image, source: .googlePhotos,
+                metadata: ImportMetadata(takenAt: time.map { Date(timeIntervalSince1970: $0) }))
         }
-        let windows = TakeoutImporter.windows([
+        let windows = LibraryImporter.windows([
             item("a", nil), item("b", 0), item("c", 3600), item("d", 100_000), item("e", 100_001),
         ])
         #expect(windows.map { $0.map(\.id) } == [["a"], ["b", "c"], ["d", "e"]])
@@ -416,10 +442,10 @@ struct TakeoutIntegrationTests {
         try fixture.sidecar("\(photos)/\(album)/r3E3_\(run)_2.jpg.json", time: taken + 3600)
         let zip = try fixture.zip()
         defer { try? FileManager.default.removeItem(at: zip) }
-        let source = try TakeoutSource.open([zip])
-        let plan = try TakeoutPlan.build(source)
+        let source = try ExportFiles.open([zip])
+        let plan = try ImportPlanner.plan(source)
         #expect(plan.items.count == 2)
-        #expect(plan.albums == [album])
+        #expect(plan.albums.map(\.title) == [album])
 
         let database = try AccountDatabase.temporary()
         let features = ServerFeatures(serverVersion: ServerVersion(major: 36), enabled: [.comments])
@@ -430,9 +456,10 @@ struct TakeoutIntegrationTests {
                 try? await api.deleteAlbum(Album(kind: .own, name: album))
             }
         }
-        let options = TakeoutOptions(destination: destination)
-        let first = await TakeoutImporter(
-            source: source, plan: plan, api: api, database: database, features: features, options: options, journalDirectory: journal
+        var options = ImportOptions(destination: destination)
+        options.folderPerSource = false
+        let first = await LibraryImporter(
+            files: source, plan: plan, api: api, database: database, features: features, options: options, journalDirectory: journal
         ).run { _ in }
         #expect(first.phase == .finished, "\(first.failures)")
         #expect(first.uploaded == 2)
@@ -449,8 +476,8 @@ struct TakeoutIntegrationTests {
         #expect(content.map(\.item.name) == ["r3E3_\(run)_2.jpg"])
 
         // A second import (no journal) finds both on the server and uploads nothing.
-        let second = await TakeoutImporter(
-            source: source, plan: plan, api: api, database: database, features: features, options: options,
+        let second = await LibraryImporter(
+            files: source, plan: plan, api: api, database: database, features: features, options: options,
             journalDirectory: fixture.root.appending(path: "journal2")
         ).run { _ in }
         #expect(second.phase == .finished)

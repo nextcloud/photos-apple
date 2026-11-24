@@ -4,8 +4,140 @@
     "%@: the copy on the server differs from the card." : {
       "comment" : "Card import failure: the file name. The file is not deleted from the card."
     },
+    "%lld albums" : {
+      "comment" : "Import summary: number of albums. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items were not imported (see below)." : {
+      "comment" : "Import report: some photos did not arrive. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item was not imported (see below)."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items were not imported (see below)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos" : {
+      "comment" : "Import summary: how many photos and videos are now on the server. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "- Not reached yet (the import was stopped; resume it to continue): %lld" : {
+      "comment" : "Import report line."
+    },
+    "A file type Nextcloud Photos cannot show" : {
+      "comment" : "Why files were not imported (list in the import summary)."
+    },
+    "Already on your Nextcloud: %lld" : {
+      "comment" : "Import report line: not uploaded twice."
+    },
     "Camera" : {
       "comment" : "Import folder name part when the camera has no name."
+    },
+    "Captions kept as comments: %lld" : {
+      "comment" : "Import report line."
+    },
+    "Copies in the exports, imported once: %lld" : {
+      "comment" : "Import report line: the same photo in several album folders or exports."
+    },
+    "Destination: %@" : {
+      "comment" : "Import report line: the server folder."
+    },
+    "Facebook" : {
+      "comment" : "An import source."
+    },
+    "Favourites: %lld" : {
+      "comment" : "Import report line."
+    },
+    "Google Photos" : {
+      "comment" : "An import source: the Google service."
+    },
+    "Hidden photos put into the archive: %lld" : {
+      "comment" : "Import report line."
+    },
+    "Import report %@.txt" : {
+      "comment" : "File name of the report an import writes. The value is a date and time such as 2026-11-24 18.30."
+    },
+    "In the trash or recently deleted in the service" : {
+      "comment" : "Why photos were not imported (list in the import summary)."
+    },
+    "Instagram" : {
+      "comment" : "An import source."
+    },
+    "Left out" : {
+      "comment" : "Import report: heading of the skipped items."
+    },
+    "Listed by Apple without the photo itself (with Advanced Data Protection, Apple's export leaves photos out)" : {
+      "comment" : "Why photos were not imported from an iCloud data export."
+    },
+    "Listed in the export, but in none of the chosen files: choose all parts of the export" : {
+      "comment" : "Why photos were not imported: a ZIP part of the export was not chosen."
+    },
+    "Nextcloud Photos import report" : {
+      "comment" : "Title of the import report file."
+    },
+    "Not imported" : {
+      "comment" : "Import report: heading of the failed items."
+    },
+    "Nothing lost." : {
+      "comment" : "Import report: every photo arrived."
+    },
+    "Other files" : {
+      "comment" : "An import source: photos not from a known service."
+    },
+    "Part of the export's description could not be read" : {
+      "comment" : "Why photos were not imported: an index or JSON file of the export is damaged."
     },
     "Paused" : {
       "comment" : "Backup status: the user paused the backup."
@@ -18,6 +150,18 @@
     },
     "Photo" : {
       "comment" : "First word of the file name given to a backed-up photo when file names start with the kind of file, followed by date and number, e.g. \"Photo 26-05-01 12-30-00 1234.jpg\". Keep it short and usable in a file name."
+    },
+    "Photos Library" : {
+      "comment" : "An import source: the Photos app's library on this Mac."
+    },
+    "Photos given back their date, place or caption: %lld" : {
+      "comment" : "Import report line: the import wrote the capture date, location or caption into these files."
+    },
+    "Sent or received in conversations" : {
+      "comment" : "Why photos were not imported: they are photos from Facebook or Instagram messages."
+    },
+    "Sources" : {
+      "comment" : "Import report: heading of the list of sources."
     },
     "The ZIP archive is encrypted." : {
       "comment" : "Google Takeout import: a ZIP file that is protected by a password cannot be read."
@@ -40,11 +184,17 @@
     "There is not enough free space on this Mac to prepare the upload." : {
       "comment" : "Why a photo or video could not be backed up (Mac): the app copies each photo before uploading it and the Mac's disk has no room for the copy."
     },
+    "There is not enough free space on this device for the next file (%@ needed)." : {
+      "comment" : "Why an import stopped: the device's storage is full. The value is a size such as 1.2 GB."
+    },
     "There is not enough free space on this device to prepare the upload." : {
       "comment" : "Why a photo or video could not be backed up (iPhone, iPad): the app copies each photo before uploading it and the device has no room for the copy."
     },
     "Unknown date" : {
       "comment" : "Import folder name for files without a date."
+    },
+    "Uploaded: %lld" : {
+      "comment" : "Import report line."
     },
     "Video" : {
       "comment" : "First word of the file name given to a backed-up video when file names start with the kind of file, followed by date and number, e.g. \"Video 26-05-01 12-30-00 1234.mov\". Keep it short and usable in a file name."
@@ -57,6 +207,15 @@
     },
     "Waiting for a network connection" : {
       "comment" : "Backup status: the device is offline."
+    },
+    "from %@" : {
+      "comment" : "Import summary: the year of the photos."
+    },
+    "from %@ to %@" : {
+      "comment" : "Import summary: the years of the oldest and newest photo."
+    },
+    "iCloud Photos" : {
+      "comment" : "An import source: Apple's service."
     },
     "“%@” in the ZIP archive is damaged." : {
       "comment" : "Google Takeout import: one file inside the ZIP archive failed its checksum. The argument is its name."

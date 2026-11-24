@@ -19,6 +19,8 @@ public struct SettingsView: View {
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
     @State private var reviewedCertificate: CertificateProblem?
+    /// Import Library… (iPhone, iPad, Vision Pro; the Mac has it in the File menu).
+    @State private var importingLibrary = false
     /// In the App Group: the widgets and the share extension follow it.
     @AppStorage(AppLockSettings.enabledKey, store: AppLockSettings.defaults) private var appLock = false
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
@@ -107,6 +109,18 @@ public struct SettingsView: View {
                 PartnerSharingSection()
                 Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
+                    #if !os(macOS)
+                        Button {
+                            importingLibrary = true
+                        } label: {
+                            Label(
+                                String(
+                                    localized: "Import from Other Services…", bundle: .module,
+                                    comment: "Settings row that opens the import of Google Photos, iCloud, Facebook and Instagram exports."),
+                                systemImage: "square.and.arrow.down.on.square")
+                        }
+                        .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
+                    #endif
                 } header: {
                     Text("Library", bundle: .module)
                 } footer: {

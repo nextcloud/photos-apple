@@ -642,6 +642,9 @@ Opt-in, for the albums the user picks (Backup › Albums): after each pass, back
 
 #### 7.18.10 Import from Google Takeout (Mac)
 
+_Round 5: part of Import Library… (§15.7), on every platform; the rules below still apply to Google exports._
+
+
 File › Import from Google Takeout…: pick the unpacked export, its ZIP parts (read in place, ZIP64, no unpacking) or a folder holding them. JSON sidecars are matched with the server's rules (`TakeoutSidecarService`: truncated names, `(1)` copies, `supplemental-metadata`, edited copies and Live Photo videos); `photoTakenTime` is sent as `X-OC-MTime`, the file itself is uploaded unchanged (EXIF stays), the position is set by PROPPATCH where the file has none (Nextcloud 35+), captions become file comments. Files already on the server are skipped with the backup matcher (§7.18.4); copies in album folders are imported once; album folders become Photos albums; the trash folder is left out. Destination: a folder below a timeline folder (default `<upload folder>/Google Photos/<year>`). Resumable through a journal per export in the account's directory; progress, stop and resume.
 
 ### 7.19 Offline — M2
@@ -1235,7 +1238,75 @@ Platforms: iOS, iPadOS, macOS, visionOS (same screens; full-screen player on iOS
 
 ### 15.7 Bring everything home: imports [import]
 
-_To be written._
+**Import Library…** (File menu on the Mac and iPad keyboard menu; Settings › Library › Import from Other Services… on
+iPhone, iPad and Vision Pro) takes the user's photos out of other services into their Nextcloud, without duplicates, and
+ends with a "Welcome home" summary. It replaces the round-3 Google Takeout import (§7.18.10), whose reader, sidecar
+rules and journal it generalises.
+
+- **Choosing.** One file picker for everything: ZIP parts as they are (read in place, never unpacked as a whole; ZIP64),
+  unpacked folders, or folders holding the parts; several services at once. The start screen says how to get each export
+  (takeout.google.com; privacy.apple.com › Request a copy of your data › iCloud Photos; Meta Accounts Center › Download
+  your information, format JSON, high quality for Facebook and Instagram) with links. Files in iCloud Drive that are not on
+  the device are downloaded first. On the Mac, **Import Photos Library** adds the Photos app's library (PhotoKit).
+- **Sources** (`ImportPlanner`, one adapter each; every adapter takes the files the ones before it left):
+  - *Instagram* (2018–2026): `media.json` (`photos`/`videos`/`stories`/`profile`, `taken_at`, `caption`),
+    `content/posts_1.json`, `your_instagram_activity/{content,media}/…` (`posts_1`, `stories` → album "Instagram
+    Stories", `reels`/`igtv` → "Instagram Reels", `profile_photos` → "Instagram Profile Pictures", `archived_posts` →
+    archive, `recently_deleted_content` left out). Caption: the post's `title` when it has several photos, else the
+    photo's. Capture time: `exif_data[].date_time_original` (elements merged), else the posting time.
+  - *Facebook* (2018–2026): every index below `your_facebook_activity`, `your_activity_across_facebook` or
+    `photos_and_videos`: albums (`album/<n>.json`, named), posts (caption: the photo's `description` or the post's text;
+    place: the post's check-in), uncategorized photos, videos, stories; `archive` → archive, `trash` left out. Capture time:
+    `exif_data[].taken_timestamp` when plausible, else `creation_timestamp` (posting time). Video stills and subtitles are
+    not photos.
+  - Both: Meta's escaped UTF-8 (`CafÃ©`) is repaired; photos in conversations (`messages/inbox/…`) are left out (mostly
+    other people's); index paths resolve against the export's root wherever the user picked it.
+  - *Apple iCloud Photos data export*: parts `iCloud Photos Part n of m` (also translated), `Photo Details*.csv` per part
+    (`favorite`, `hidden`, `deleted`, `originalCreationDate` "Tuesday November 19,2024 8:31 AM GMT", UTC, to the minute;
+    rows belong to their own part because camera counters repeat), `Recently Deleted/` left out, `Albums/*.csv` (names
+    across parts; Favorites is no album; Memories ignored), shared albums as folders, ZIPs inside parts unpacked one level
+    deep. Rows without a file (Advanced Data Protection) are reported. A Live Photo video renamed `-1` finds its row.
+  - *Google Takeout*: §7.18.10 rules, plus `favorited`, `archived` (→ archive) and `trashed` (left out), translated
+    `metadata.json` names and the older `albumData` wrapper.
+  - *Photos Library (Mac)*: the user's library with hidden photos, the resources the backup would take (original and
+    edited version, RAW, Live Photo video; §7.18.2), originals in iCloud downloaded one at a time, favourites, user albums
+    (also inside folders). PhotoKit gives no captions.
+  - *Other photos* in the chosen files are imported as they are.
+- **Nothing twice.** Within the chosen exports: copies in album folders once; the same photo in two services once (same
+  name and size, or same kind, size and capture minute/second), keeping the copy with the more exact time and merging
+  albums, caption and favourite. Against the server (per day of photos, one SEARCH as the backup does, §7.18.4):
+  the backup matcher, then the same name and size, Apple's minute times (same minute with the same size or name, also
+  whole hours apart for EXIF without offset), and Facebook/Instagram reduced copies (the capture second of exactly one
+  server photo of that kind, proportions agreeing when the export knows the original size; never for a posting time). A
+  file without a time in the export is matched by the time in its own EXIF once it is unpacked. Duplicates still get the
+  export's favourite and albums.
+- **Metadata.** The file is uploaded unchanged, except that a photo without its own capture time, position or caption
+  gets them from the export written into its metadata (EXIF `DateTimeOriginal` + offset in the device's time zone, GPS,
+  IPTC caption; metadata only, no re-encoding; JPEG, HEIC, PNG, TIFF; option "Give photos back their date and place").
+  The capture time (or the posting time when nothing better is known) is sent as `X-OC-MTime`. Captions become file
+  comments (stock), favourites `oc:favorite`, positions of files without one a PROPPATCH on Nextcloud 35+, hidden or
+  archived photos go to the archive (`/.archive/…`, §7.13), albums are recreated (names merged with existing ones).
+- **Where.** `<upload folder>/<service>/<year>` (`Google Photos`, `iCloud Photos`, `Facebook`, `Instagram`, `Photos
+  Library`, `Imported`; folder names are not translated: they are server folders), options for the folder per service
+  and per year; a warning when the folder is outside the timeline folders.
+- **Running.** Up to three uploads at a time while the next day's search runs; one file at a time is unpacked or exported
+  (free space checked before each: the import stops with "not enough free space" rather than filling the device). A
+  journal per plan makes it resumable (stop, quit, crash); the chosen files are remembered as (security-scoped)
+  bookmarks, so the start screen offers "Resume Import" after a relaunch. A finished import of the same files run again
+  checks everything against the server again. iPhone/iPad: a continued processing task (`<bundle>.backup.import`, under
+  the backup's permitted wildcard) with the system's progress and Stop; when the system does not start one the app runs it
+  while open. Mac: the import goes on with the sheet closed and keeps the Mac from sleeping.
+- **Welcome home.** Photos of the import fan out like prints, "Welcome home", the number of photos and videos counts up,
+  albums and years ("4 albums · from 2004 to 2026"), "Nothing lost" (or "3 not imported — see below"), a chip per
+  service, what was uploaded, already there, merged, favourites, captions, dates given back, archived, and what was left
+  out and why (deleted, conversations, missing ZIP parts, unsupported files, unreadable indexes, listed without file) with
+  examples. "Nothing lost" means every photo the exports hold arrived, apart from what is left out on purpose. Reduce
+  Motion shows it without animation. A report file (plain text) is kept in the account's directory, shared from the
+  summary, and uploaded to the destination folder.
+- **Decisions.** No server change. Facebook/Instagram posting times are used as the file time when nothing better is
+  known, but never written as a capture time into EXIF. Unsupported files are counted as not imported rather than
+  uploaded into Files. Meta's message photos are excluded. Google Photos' people names and shared-album comments are not
+  imported (no stock place for them).
 
 ### 15.8 Smart offline and fun extras: stickers, collages, photo of the day [extras]
 

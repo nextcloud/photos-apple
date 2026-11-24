@@ -10,6 +10,8 @@
 		<string>group.com.nextcloud.apps</string>
 		<string>group.it.twsweb.Crypto-Cloud</string>
 	</array>
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)$(PHOTOS_BUNDLE_ID)</string>
