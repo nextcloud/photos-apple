@@ -100,6 +100,8 @@ targets:
           # not known at build time. The app asks before it signs in over http and before it trusts an unknown
           # certificate. App Review justification: docs/PRIVACY-AND-EXPORT.md.
           NSAllowsArbitraryLoads: true
+        # The backup's Live Activity (SPEC §15.4; iPhone and iPad, ignored elsewhere).
+        NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
@@ -197,6 +199,8 @@ targets:
     sources:
       - path: Extensions/Widgets
         excludes: ["*.entitlements"]
+      # The controls' intents: compiled here for the controls, performed in the app (SPEC §15.4).
+      - path: App/Shared/AmbientIntents.swift
     dependencies:
       - package: PhotosKit
         product: PhotosCore
@@ -204,6 +208,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).widgets
         PRODUCT_NAME: Widgets
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET_EXTENSION
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES

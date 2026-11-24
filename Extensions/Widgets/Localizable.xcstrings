@@ -1,6 +1,44 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@" : {
+      "comment" : "The name of an album in the photo frame's settings. Not translated.",
+      "shouldTranslate" : false
+    },
+    "%lld of %lld" : {
+      "comment" : "Backup Live Activity: uploaded of all in this pass.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "%lld waiting" : {
+      "comment" : "Backup widget: items not uploaded yet. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item waiting"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items waiting"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld years ago" : {
       "comment" : "Widget title; plural variations in the catalog.",
       "localizations" : {
@@ -24,29 +62,137 @@
         }
       }
     },
+    "Album" : {
+      "comment" : "Photo frame widget setting and source: one album of the user."
+    },
+    "Back Up Now" : {
+      "comment" : "Shortcuts/Control Center: title of the action that starts a photo backup."
+    },
+    "Backed up" : {
+      "comment" : "Backup widget and Live Activity: everything is on the server."
+    },
+    "Backup" : {
+      "comment" : "Control Center control: photo backup on or off.\nWidget name: the photo backup's status."
+    },
+    "Backup is off" : {
+      "comment" : "Backup widget: backup is not set up or turned off."
+    },
+    "Change Photo" : {
+      "comment" : "Photo frame widget setting: how often the photo changes."
+    },
+    "Choose the photos the frame shows and how often they change." : {
+      "comment" : "Description of the photo frame widget's settings."
+    },
+    "Continues in the background" : {
+      "comment" : "Backup Live Activity: the app is suspended, uploads go on."
+    },
+    "Every 15 Minutes" : {
+      "comment" : "Photo frame widget setting \"Change Photo\"."
+    },
+    "Every 3 Hours" : {
+      "comment" : "Photo frame widget setting \"Change Photo\"."
+    },
+    "Every Day" : {
+      "comment" : "Photo frame widget setting \"Change Photo\"."
+    },
+    "Every Hour" : {
+      "comment" : "Photo frame widget setting \"Change Photo\"."
+    },
     "Favorites" : {
       "comment" : "Name of the widget that shows favorite photos, in the widget gallery and as the widget's title."
+    },
+    "Hide While Locked" : {
+      "comment" : "Photo frame widget setting: the photo is hidden until the iPhone or iPad is unlocked."
+    },
+    "How the backup of your photos is doing." : {
+      "comment" : "Widget description."
+    },
+    "Last backup %@" : {
+      "comment" : "Backup widget: when the last backup ran, e.g. “Last backup 5 minutes ago”."
+    },
+    "Library" : {
+      "comment" : "Photo frame widget source: the whole photo library."
     },
     "Locked" : {
       "comment" : "Widget: shown instead of the photo while app lock is on or the device is locked; also the VoiceOver label of the lock symbol."
     },
+    "Memories" : {
+      "comment" : "Photo frame widget source: On this day and the other memories."
+    },
     "Nextcloud Photos" : {
       "comment" : "The app's name, shown in a widget that has no photo to show. Do not translate."
+    },
+    "No photos in %@ yet" : {
+      "comment" : "Photo frame widget: the chosen source has no photos."
     },
     "No photos yet" : {
       "comment" : "Text in a widget when there is no photo to show."
     },
+    "Off" : {
+      "comment" : "Backup control: value."
+    },
+    "On" : {
+      "comment" : "Backup control: value."
+    },
     "On this day" : {
       "comment" : "Name of the widget that shows photos taken on today's date in earlier years, in the widget gallery and as the widget's title."
+    },
+    "Open Nextcloud Photos" : {
+      "comment" : "Title of the action of the Control Center control that opens the app."
     },
     "Open the app to log in" : {
       "comment" : "Text in a widget when no account is logged in in the app."
     },
+    "Opens your photo library." : {
+      "comment" : "Control description."
+    },
+    "Pause" : {
+      "comment" : "Backup Live Activity button."
+    },
+    "Pause Backup" : {
+      "comment" : "Title of the action behind the Pause button of the backup's Live Activity."
+    },
+    "Photo Backup" : {
+      "comment" : "Control name in the controls gallery."
+    },
+    "Photo Frame" : {
+      "comment" : "Widget name: rotating photos for StandBy and the Home Screen."
+    },
+    "Photos" : {
+      "comment" : "Photo frame widget setting: which photos it shows."
+    },
     "Photos from this day in past years." : {
       "comment" : "Description of the \"On this day\" widget in the widget gallery."
     },
+    "Resume" : {
+      "comment" : "Backup Live Activity button."
+    },
+    "Shuffle" : {
+      "comment" : "Photo frame widget setting: the photos come in a random order."
+    },
+    "Turn Backup On or Off" : {
+      "comment" : "Shortcuts action and Control Center switch: turns the photo backup on or off."
+    },
+    "Turn it on in the app" : {
+      "comment" : "Backup widget, below \"Backup is off\"."
+    },
+    "Turns the backup of this device's photos to your Nextcloud on or off." : {
+      "comment" : "Description of the Shortcuts action \"Turn Backup On or Off\"."
+    },
+    "Turns the backup to your Nextcloud on or off." : {
+      "comment" : "Control description."
+    },
+    "Uploads new photos of this device to your Nextcloud." : {
+      "comment" : "Description of the \"Back Up Now\" action and control."
+    },
+    "Uploads new photos to your Nextcloud." : {
+      "comment" : "Control description."
+    },
     "Your favourite photos." : {
       "comment" : "Description of the \"Favorites\" widget in the widget gallery."
+    },
+    "Your photos, one after another. Made for StandBy." : {
+      "comment" : "Widget description."
     }
   },
   "version" : "1.1"
