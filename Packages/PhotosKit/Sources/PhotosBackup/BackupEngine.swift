@@ -160,6 +160,8 @@ public actor BackupEngine {
     private var interrupting = false
     /// Set by the user's pause: chunked uploads are not handed further to the system until the next pass.
     private var handOverPaused = false
+    /// One piece of work on chunked uploads at a time (a report and a hand-over must not work on two copies of the state).
+    private let chunkedGate = AsyncGate()
     var metadataEditing = false
 
     // Uploads handed to the system (SPEC §7.18.6); all nil or empty without `background`.
@@ -1148,6 +1150,8 @@ public actor BackupEngine {
 
     /// Hands over what a chunked upload needs next (its upload folder, chunks, the `MOVE`).
     private func advanceChunked(_ id: String) async -> ChunkedUploadDriver.Progress? {
+        await chunkedGate.enter()
+        defer { chunkedGate.leave() }
         guard let background, let job = journal?.chunked[id], let files = journal?.files(of: job) else { return nil }
         var upload = job.upload
         let progress = await chunkedDriver(background).advance(&upload, files: files) { try self.journal?.updateChunked($0) }
@@ -1167,13 +1171,17 @@ public actor BackupEngine {
     /// The system reports a request of a chunked upload.
     private func chunkReported(_ id: String, event: BackgroundUploadEvent) async {
         missing.remove(event.jobId)
-        guard let background, let job = journal?.chunked[id], let files = journal?.files(of: job) else { return }
         finishing += 1
-        var upload = job.upload
-        let progress = await chunkedDriver(background).report(
-            event, upload: &upload, files: files, handOver: !handOverPaused && !isShutDown
-        ) { try self.journal?.updateChunked($0) }
-        try? journal?.updateChunked(upload)
+        await chunkedGate.enter()
+        var progress: ChunkedUploadDriver.Progress?
+        if let background, let job = journal?.chunked[id], let files = journal?.files(of: job) {
+            var upload = job.upload
+            progress = await chunkedDriver(background).report(
+                event, upload: &upload, files: files, handOver: !handOverPaused && !isShutDown
+            ) { try self.journal?.updateChunked($0) }
+            try? journal?.updateChunked(upload)
+        }
+        chunkedGate.leave()
         finishing -= 1
         if let progress { await chunkedEnded(id, progress) }
         try? refreshCounts()
@@ -1254,6 +1262,8 @@ public actor BackupEngine {
         lastMissingCheck = Date()
         let active = await background.transport.activeJobIds()
         let gone = ids.subtracting(active)
+        await chunkedGate.enter()
+        defer { chunkedGate.leave() }
         for id in gone.intersection(missing) {
             if journal?.remove(id) != nil {
                 logger.notice("an upload handed to the system was lost; it is done again")

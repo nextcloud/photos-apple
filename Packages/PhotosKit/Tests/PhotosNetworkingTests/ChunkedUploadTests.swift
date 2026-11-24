@@ -472,3 +472,27 @@ extension ChunkedUploadDriverTests {
         #expect(!Uploader.ConflictPolicy.rename.isSameFile(size: 10, existingSize: 10, existingModified: captured))
     }
 }
+
+@Suite(.timeLimit(.minutes(1))) struct AsyncGateTests {
+    actor Log {
+        var entries: [String] = []
+        func add(_ entry: String) { entries.append(entry) }
+    }
+
+    /// Work that waits in the middle is not overtaken by work that came later.
+    @Test func oneAtATimeInTheOrderTheyCame() async {
+        let gate = AsyncGate()
+        let log = Log()
+        await gate.enter()
+        let second = Task {
+            await gate.enter()
+            await log.add("second")
+            gate.leave()
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        await log.add("first, after waiting")
+        gate.leave()
+        await second.value
+        #expect(await log.entries == ["first, after waiting", "second"])
+    }
+}

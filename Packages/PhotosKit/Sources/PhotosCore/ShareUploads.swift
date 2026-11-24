@@ -113,6 +113,9 @@ actor ShareUploadBatch {
     private var missing: Set<String> = []
     /// The share is through (or cancelled) and its directory is gone: nothing is written any more.
     private var removed = false
+    /// One piece of work at a time: the work waits for the network in the middle, and a report must not overtake a
+    /// hand-over of the same file (they would work on two copies of its state).
+    private let gate = AsyncGate()
 
     /// Files up to this size are one PUT; larger ones go in chunks.
     let maxSingleSize: Int64
@@ -190,6 +193,12 @@ actor ShareUploadBatch {
     /// Returns the first error that stopped it (no connection, invalid login); single files that failed are marked.
     @discardableResult
     func handOver() async -> (any Error)? {
+        await gate.enter()
+        defer { gate.leave() }
+        return await handOverUnlocked()
+    }
+
+    private func handOverUnlocked() async -> (any Error)? {
         for index in record.items.indices {
             switch record.items[index].state {
             case .waiting:
@@ -215,6 +224,8 @@ actor ShareUploadBatch {
 
     /// Lets the failed files be tried again: a file of the same name and size counts as uploaded then.
     func retryFailed() async -> (any Error)? {
+        await gate.enter()
+        defer { gate.leave() }
         for index in record.items.indices where record.items[index].state == .failed {
             record.items[index].state = .waiting
             record.items[index].failure = nil
@@ -222,7 +233,7 @@ actor ShareUploadBatch {
             record.items[index].path = nil
             record.items[index].chunked = nil
         }
-        return await handOver()
+        return await handOverUnlocked()
     }
 
     private func file(of item: ShareUploadItem) -> URL { directory.appending(path: "\(item.id)/\(item.name)") }
@@ -308,7 +319,7 @@ actor ShareUploadBatch {
                 record.items[index].chunked = nil
                 record.items[index].path = nil
                 try? save()
-                _ = await handOver()
+                _ = await handOverUnlocked()
             } else {
                 fail(index, error)
             }
@@ -319,6 +330,8 @@ actor ShareUploadBatch {
 
     /// The system reports a request of this batch.
     func handle(_ event: BackgroundUploadEvent) async {
+        await gate.enter()
+        defer { gate.leave() }
         missing.remove(event.jobId)
         if let index = record.items.firstIndex(where: { $0.jobId == event.jobId && $0.state == .sending }) {
             await singleFinished(index, event: event)
@@ -345,7 +358,7 @@ actor ShareUploadBatch {
             record.items[index].jobId = nil
             record.items[index].path = nil
             try? save()
-            _ = await handOver()
+            _ = await handOverUnlocked()
         } catch {
             if let error = error as? NetworkError, error == .cancelled {
                 record.items[index].state = .waiting
@@ -388,6 +401,8 @@ actor ShareUploadBatch {
 
     /// Requests the system no longer knows and never reported (it was reset): seen twice, they are handed over again.
     func checkLost() async {
+        await gate.enter()
+        defer { gate.leave() }
         let active = await transport.activeJobIds()
         var gone = Set<String>()
         for index in record.items.indices where record.items[index].state == .sending {
@@ -409,7 +424,7 @@ actor ShareUploadBatch {
         }
         missing = gone.subtracting(missing)
         try? save()
-        _ = await handOver()
+        _ = await handOverUnlocked()
     }
 
     // MARK: Ending
@@ -425,6 +440,8 @@ actor ShareUploadBatch {
 
     /// The user cancelled: what the system has is taken back, and the copies are removed.
     func cancelAll() async {
+        await gate.enter()
+        defer { gate.leave() }
         let ids = Set(record.items.compactMap(\.jobId)).union(record.items.flatMap { $0.chunked?.running.keys.map { $0 } ?? [] })
         await transport.cancel(jobIds: ids)
         for item in record.items where item.state == .sending {
