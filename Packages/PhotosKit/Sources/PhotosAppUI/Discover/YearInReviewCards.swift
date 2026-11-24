@@ -30,8 +30,12 @@ struct YearCard: View {
         ZStack {
             background
             VStack(alignment: .leading, spacing: 0) {
-                Text("\(yearText) in review", bundle: .module, comment: "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name.")
-                    .font(.system(size: 13, weight: .semibold)).textCase(.uppercase).tracking(1.5).opacity(0.85)
+                Text(
+                    "\(yearText) in review", bundle: .module,
+                    comment:
+                        "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name."
+                )
+                .font(.system(size: 13, weight: .semibold)).textCase(.uppercase).tracking(1.5).opacity(0.85)
                 Spacer(minLength: 12)
                 main
             }
@@ -99,22 +103,27 @@ struct YearCard: View {
                 Text(yearText).font(.system(size: 104, weight: .heavy, design: .rounded)).minimumScaleFactor(0.5).lineLimit(1)
                 Text("Your year in photos", bundle: .module, comment: "Year in review, first card: under the big year number.")
                     .font(.system(size: 26, weight: .bold))
-                Text(AccessibilityText.join([AccessibilityText.photos(review.photos), review.videos > 0 ? videosText(review.videos) : nil]))
-                    .font(.system(size: 17, weight: .medium)).opacity(0.9)
+                Text(
+                    AccessibilityText.join([AccessibilityText.photos(review.photos), review.videos > 0 ? videosText(review.videos) : nil])
+                )
+                .font(.system(size: 17, weight: .medium)).opacity(0.9)
             }
         case .busiestDay:
             if let day = review.busiestDay {
                 headline(
                     String(localized: "Your busiest day", bundle: .module, comment: "Year in review card: the day with the most photos."),
                     value: day.count,
-                    unit: String(localized: "photos in one day", bundle: .module, comment: "Year in review: under the number of photos of the busiest day."),
+                    unit: String(
+                        localized: "photos in one day", bundle: .module,
+                        comment: "Year in review: under the number of photos of the busiest day."),
                     detail: day.date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
             }
         case .topMonth:
             if let top = review.topMonth {
                 VStack(alignment: .leading, spacing: 16) {
                     headline(
-                        String(localized: "Your top month", bundle: .module, comment: "Year in review card: the month with the most photos."),
+                        String(
+                            localized: "Your top month", bundle: .module, comment: "Year in review card: the month with the most photos."),
                         text: Self.monthName(top.month), detail: AccessibilityText.photos(top.count))
                     monthChart(highlight: top.month)
                 }
@@ -122,9 +131,12 @@ struct YearCard: View {
         case .streak:
             if let streak = review.longestStreak {
                 headline(
-                    String(localized: "Your longest streak", bundle: .module, comment: "Year in review card: most days in a row with photos."),
+                    String(
+                        localized: "Your longest streak", bundle: .module, comment: "Year in review card: most days in a row with photos."),
                     value: streak.days,
-                    unit: String(localized: "days in a row with photos", bundle: .module, comment: "Year in review: under the length of the longest streak."),
+                    unit: String(
+                        localized: "days in a row with photos", bundle: .module,
+                        comment: "Year in review: under the length of the longest streak."),
                     detail: DateRangeLabel.string(from: streak.start, to: streak.end))
             }
         case .travel:
@@ -140,20 +152,24 @@ struct YearCard: View {
         case .firstSnow:
             if let first = review.firstSnow {
                 headline(
-                    String(localized: "First snow", bundle: .module, comment: "Year in review card: the first photo of the year with snow."),
+                    String(
+                        localized: "First snow", bundle: .module, comment: "Year in review card: the first photo of the year with snow."),
                     text: first.date.formatted(.dateTime.day().month(.wide)), detail: nil)
             }
         case .firstBeach:
             if let first = review.firstBeach {
                 headline(
-                    String(localized: "First beach day", bundle: .module, comment: "Year in review card: the first photo of the year on a beach."),
+                    String(
+                        localized: "First beach day", bundle: .module,
+                        comment: "Year in review card: the first photo of the year on a beach."),
                     text: first.date.formatted(.dateTime.day().month(.wide)), detail: nil)
             }
         case .favorites:
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: "heart.fill").font(.system(size: 56)).symbolRenderingMode(.multicolor)
                 headline(
-                    String(localized: "Favorites", bundle: .module, comment: "Year in review card: how many photos of the year are favorites."),
+                    String(
+                        localized: "Favorites", bundle: .module, comment: "Year in review card: how many photos of the year are favorites."),
                     value: review.favorites,
                     unit: String(localized: "photos you loved", bundle: .module, comment: "Year in review: under the number of favorites."),
                     detail: nil)
@@ -172,17 +188,27 @@ struct YearCard: View {
             Text("On the move", bundle: .module, comment: "Year in review card about places, countries and distance.")
                 .font(.system(size: 30, weight: .bold))
             if review.travel.places.count >= 2 {
-                stat(review.travel.places.count, String(localized: "places", bundle: .module, comment: "Year in review: number of places photographed."))
+                stat(
+                    review.travel.places.count,
+                    String(localized: "places", bundle: .module, comment: "Year in review: number of places photographed."))
             }
             if review.travel.countries.count >= 2 {
-                stat(review.travel.countries.count, String(localized: "countries", bundle: .module, comment: "Year in review: number of countries photographed."))
+                stat(
+                    review.travel.countries.count,
+                    String(localized: "countries", bundle: .module, comment: "Year in review: number of countries photographed."))
             }
             if review.travel.kilometres >= 50 {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(Measurement(value: review.travel.kilometres.rounded(), unit: UnitLength.kilometers).formatted(.measurement(width: .abbreviated, usage: .road)))
-                        .font(.system(size: 40, weight: .heavy, design: .rounded))
-                    Text("between the places you photographed, as the crow flies", bundle: .module, comment: "Year in review: under the distance travelled.")
-                        .font(.system(size: 15, weight: .medium)).opacity(0.9)
+                    Text(
+                        Measurement(value: review.travel.kilometres.rounded(), unit: UnitLength.kilometers).formatted(
+                            .measurement(width: .abbreviated, usage: .road))
+                    )
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
+                    Text(
+                        "between the places you photographed, as the crow flies", bundle: .module,
+                        comment: "Year in review: under the distance travelled."
+                    )
+                    .font(.system(size: 15, weight: .medium)).opacity(0.9)
                 }
             }
             if !review.travel.places.isEmpty {
@@ -293,13 +319,17 @@ struct YearCard: View {
     }
 
     func videosText(_ count: Int) -> String {
-        String(localized: "\(count) videos", bundle: .module, comment: "Year in review: number of videos of the year. Plural variations in the catalog.")
+        String(
+            localized: "\(count) videos", bundle: .module,
+            comment: "Year in review: number of videos of the year. Plural variations in the catalog.")
     }
 
     static func petText(_ label: String) -> String {
         switch label {
-        case "dog": String(localized: "photos with a dog", bundle: .module, comment: "Year in review: under the number of photos showing a dog.")
-        case "cat": String(localized: "photos with a cat", bundle: .module, comment: "Year in review: under the number of photos showing a cat.")
+        case "dog":
+            String(localized: "photos with a dog", bundle: .module, comment: "Year in review: under the number of photos showing a dog.")
+        case "cat":
+            String(localized: "photos with a cat", bundle: .module, comment: "Year in review: under the number of photos showing a cat.")
         default: label
         }
     }
@@ -331,20 +361,27 @@ struct YearCard: View {
         case .streak:
             AccessibilityText.join([
                 String(localized: "Your longest streak", bundle: .module),
-                review.longestStreak.map { String(localized: "\($0.days) days", bundle: .module, comment: "Year in review: length of the longest streak, for VoiceOver. Plural variations in the catalog.") },
+                review.longestStreak.map {
+                    String(
+                        localized: "\($0.days) days", bundle: .module,
+                        comment: "Year in review: length of the longest streak, for VoiceOver. Plural variations in the catalog.")
+                },
             ])
         case .travel:
             AccessibilityText.join(
                 [String(localized: "On the move", bundle: .module)] + review.travel.places.prefix(3).map { Optional($0) })
         case .people:
             AccessibilityText.join(
-                [String(localized: "Your people", bundle: .module)] + review.people.map { "\($0.name), \(AccessibilityText.photos($0.count))" })
+                [String(localized: "Your people", bundle: .module)]
+                    + review.people.map { "\($0.name), \(AccessibilityText.photos($0.count))" })
         case .pets:
             AccessibilityText.join([
                 String(localized: "Pet of the year", bundle: .module), review.pets.first.map { "\($0.count) \(Self.petText($0.name))" },
             ])
         case .firstSnow:
-            AccessibilityText.join([String(localized: "First snow", bundle: .module), review.firstSnow?.date.formatted(date: .long, time: .omitted)])
+            AccessibilityText.join([
+                String(localized: "First snow", bundle: .module), review.firstSnow?.date.formatted(date: .long, time: .omitted),
+            ])
         case .firstBeach:
             AccessibilityText.join([
                 String(localized: "First beach day", bundle: .module), review.firstBeach?.date.formatted(date: .long, time: .omitted),

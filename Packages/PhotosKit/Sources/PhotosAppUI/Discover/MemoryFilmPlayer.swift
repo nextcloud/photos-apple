@@ -106,7 +106,10 @@ struct MemoryFilmPlayer: View {
             .onAppear { model.setViewport(proxy.size) }
             .onChange(of: proxy.size) { _, size in model.setViewport(size) }
         }
-        .ignoresSafeArea()
+        #if os(iOS)
+            // Full screen on iPhone and iPad; in the window on the Mac and Vision Pro, beside the sidebar, not under it.
+            .ignoresSafeArea()
+        #endif
         .contentShape(.rect)
         .onTapGesture { toggleControls() }
         .overlay(alignment: .top) { if controlsShown { topBar } }
@@ -273,14 +276,16 @@ private struct FilmFrame: View {
         case .title:
             ZStack {
                 if let shot = plan.cover { shotView(shot, layer: layer, showsClip: false) }
-                FilmTitleOverlay(title: model.start.title, subtitle: model.start.subtitle, place: model.start.place, height: size.height)
+                FilmTitleOverlay(
+                    title: model.start.title, subtitle: model.start.subtitle, place: model.start.place,
+                    height: FilmTitleOverlay.textScale(size))
             }
         case .shot(let shot):
             shotView(shot, layer: layer, showsClip: true)
         case .flight(_, _, let from, let to):
             ZStack {
                 FlightView(map: model.maps[layer.segment], progress: layer.progress, still: model.still, size: size)
-                FilmFlightCaption(from: from, to: to, height: size.height)
+                FilmFlightCaption(from: from, to: to, height: FilmTitleOverlay.textScale(size))
             }
         case .card:
             Color.black
@@ -333,7 +338,8 @@ private struct FlightView: View {
                     .frame(width: size.width / crop.width, height: size.height / crop.height)
                     .offset(x: -crop.x * size.width / crop.width, y: -crop.y * size.height / crop.height)
                 Canvas { context, canvas in
-                    FlightRoute.draw(in: &context, size: canvas, from: from, to: to, crop: crop, travelled: MapFlight.travelled(at: progress))
+                    FlightRoute.draw(
+                        in: &context, size: canvas, from: from, to: to, crop: crop, travelled: MapFlight.travelled(at: progress))
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -385,6 +391,11 @@ struct FilmTitleOverlay: View {
     let place: String?
     /// The frame's height: the text is sized to it, so it looks the same on a phone, a Mac and in the video.
     let height: CGFloat
+
+    /// What the text is sized to: the frame's height, but no more than a narrow (portrait) frame's width allows.
+    static func textScale(_ size: CGSize) -> CGFloat {
+        min(size.height, size.width * 1.25)
+    }
 
     var body: some View {
         VStack(spacing: height * 0.012) {

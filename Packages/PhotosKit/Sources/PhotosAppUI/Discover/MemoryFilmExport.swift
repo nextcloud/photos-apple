@@ -62,7 +62,8 @@ import UniformTypeIdentifiers
     /// A copy of the finished video for an upload (the upload removes it when it is done).
     static func uploadCopy(of url: URL) throws -> URL {
         // Outside the export folder (whose leftovers the next export removes); the system empties it in time.
-        let folder = FileManager.default.temporaryDirectory.appending(path: "MemoryFilmCopies/\(UUID().uuidString)", directoryHint: .isDirectory)
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: "MemoryFilmCopies/\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let copy = folder.appending(path: url.lastPathComponent)
         try FileManager.default.copyItem(at: url, to: copy)
@@ -215,7 +216,9 @@ struct FilmExportView: View {
                 case .working(let progress, let step):
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
-                            ProgressView(value: progress) { Text(step) } currentValueLabel: {
+                            ProgressView(value: progress) {
+                                Text(step)
+                            } currentValueLabel: {
                                 Text(progress.formatted(.percent.precision(.fractionLength(0))))
                             }
                         }
@@ -228,7 +231,8 @@ struct FilmExportView: View {
                         Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                         Button(
                             PlatformWording.title(
-                                mac: LocalizedStringResource("Try Again", bundle: .module, comment: "Video export failed: starts it again."),
+                                mac: LocalizedStringResource(
+                                    "Try Again", bundle: .module, comment: "Video export failed: starts it again."),
                                 other: LocalizedStringResource("Try again", bundle: .module))
                         ) { start() }
                     }
@@ -250,10 +254,16 @@ struct FilmExportView: View {
             }
         }
         .frame(minWidth: 420, minHeight: 320)
+        #if os(iOS)
+            .presentationDetents([.medium, .large])
+        #endif
         .interactiveDismissDisabled(job.isWorking)
         .onDisappear { job.cleanUp() }
         .sheet(isPresented: $choosingFolder) {
-            ServerFolderPicker(confirmTitle: String(localized: "Save Here", bundle: .module, comment: "Folder picker: saves the video into the folder shown.")) { folder in
+            ServerFolderPicker(
+                confirmTitle: String(
+                    localized: "Save Here", bundle: .module, comment: "Folder picker: saves the video into the folder shown.")
+            ) { folder in
                 saveToNextcloud(folder)
             }
         }
@@ -300,7 +310,9 @@ struct FilmExportView: View {
                 choosingFolder = true
             } label: {
                 Label(
-                    String(localized: "Save to Nextcloud…", bundle: .module, comment: "Video export: uploads the video to a folder the user picks."),
+                    String(
+                        localized: "Save to Nextcloud…", bundle: .module,
+                        comment: "Video export: uploads the video to a folder the user picks."),
                     systemImage: "icloud.and.arrow.up")
             }
             #if os(macOS)
@@ -308,7 +320,9 @@ struct FilmExportView: View {
                     fileToSave = try? FilmExportJob.uploadCopy(of: url)
                     savingFile = fileToSave != nil
                 } label: {
-                    Label(String(localized: "Save to Mac…", bundle: .module, comment: "Video export: saves the video as a file on the Mac."), systemImage: "arrow.down.doc")
+                    Label(
+                        String(localized: "Save to Mac…", bundle: .module, comment: "Video export: saves the video as a file on the Mac."),
+                        systemImage: "arrow.down.doc")
                 }
             #endif
         } footer: {

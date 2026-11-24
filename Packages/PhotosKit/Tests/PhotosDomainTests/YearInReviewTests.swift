@@ -114,7 +114,11 @@ import Testing
         #expect(review.firstBeach?.fileId == 12)
         #expect(review.cards.contains(.pets) && review.cards.contains(.firstSnow) && review.cards.contains(.firstBeach))
         // Without labels (labelling off) none of these cards.
-        let plain = YearInReview(year: 2025, items: items.map { var copy = $0; copy.labels = []; return copy }, calendar: utcCalendar)
+        let plain = YearInReview(
+            year: 2025,
+            items: items.map {
+                var copy = $0; copy.labels = []; return copy
+            }, calendar: utcCalendar)
         #expect(!plain.cards.contains(.pets) && !plain.cards.contains(.firstSnow))
     }
 
@@ -136,7 +140,8 @@ import Testing
     }
 
     @Test func aPastYearsRecapCanBeAskedFor() {
-        let items = (0..<40).map { MemoryItem(fileId: FileID($0), timestamp: day(2023, 1 + $0 % 12, 1 + $0 % 27)) }
+        let items =
+            (0..<40).map { MemoryItem(fileId: FileID($0), timestamp: day(2023, 1 + $0 % 12, 1 + $0 % 27)) }
             + (0..<40).map { MemoryItem(fileId: FileID(100 + $0), timestamp: day(2025, 1 + $0 % 12, 2)) }
         #expect(Memories.yearRecap(items, calendar: utcCalendar)?.kind == .yearRecap(2025))
         #expect(Memories.yearRecap(items, year: 2023, calendar: utcCalendar)?.kind == .yearRecap(2023))

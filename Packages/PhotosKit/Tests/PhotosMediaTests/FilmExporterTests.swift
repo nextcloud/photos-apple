@@ -113,13 +113,17 @@ import Testing
         var plan = plan(3, kinds: [.photo, .video(duration: 3), .photo])
         plan.segments.insert(
             FilmSegment(
-                content: .flight(from: GeoPoint(latitude: 38, longitude: -9), to: GeoPoint(latitude: 41, longitude: -8), fromName: nil, toName: nil),
+                content: .flight(
+                    from: GeoPoint(latitude: 38, longitude: -9), to: GeoPoint(latitude: 41, longitude: -8), fromName: nil, toName: nil),
                 start: plan.segments[2].start, duration: 3, transition: 0.8, seed: 0), at: 2)
         for index in 3..<plan.segments.count { plan.segments[index].start += 3 }
         var material = material(3)
         material.clips[1] = clip
-        material.maps[2] = FilmMapPicture(image: picture(width: 320, height: 180, red: 0.1), from: CGPoint(x: 0.3, y: 0.6), to: CGPoint(x: 0.7, y: 0.3))
-        let url = try await FilmExporter(plan: plan, material: material, size: size, codec: .h264, music: nil, fileName: "trip").export { _ in }
+        material.maps[2] = FilmMapPicture(
+            image: picture(width: 320, height: 180, red: 0.1), from: CGPoint(x: 0.3, y: 0.6), to: CGPoint(x: 0.7, y: 0.3))
+        let url = try await FilmExporter(plan: plan, material: material, size: size, codec: .h264, music: nil, fileName: "trip").export {
+            _ in
+        }
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let (duration, video, _) = try await tracks(url)
         #expect(video.count == 1)

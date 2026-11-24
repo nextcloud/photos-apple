@@ -18,7 +18,9 @@ public enum FrameFocus {
             // The larger faces; tiny ones in the background would pull the camera away from the people the photo is of.
             let largest = faces.map { $0.boundingBox.width * $0.boundingBox.height }.max() ?? 0
             let crops = faces.filter { $0.boundingBox.width * $0.boundingBox.height >= largest * 0.25 }
-                .map { crop(x: $0.boundingBox.origin.x, y: $0.boundingBox.origin.y, width: $0.boundingBox.width, height: $0.boundingBox.height) }
+                .map {
+                    crop(x: $0.boundingBox.origin.x, y: $0.boundingBox.origin.y, width: $0.boundingBox.width, height: $0.boundingBox.height)
+                }
             if let first = crops.first {
                 return crops.dropFirst().reduce(first) { $0.union($1) }.expanded(by: faceMargin)
             }

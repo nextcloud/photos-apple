@@ -294,7 +294,9 @@ final class FilmFrameRenderer {
         let onScreen = Set(layers.map(\.segment))
         for layer in layers {
             var content = try await layerImage(layer)
-            if let overlay = material.overlays[layer.segment] { content = cached("overlay-\(layer.segment)", overlay).composited(over: content) }
+            if let overlay = material.overlays[layer.segment] {
+                content = cached("overlay-\(layer.segment)", overlay).composited(over: content)
+            }
             image = Self.faded(content.cropped(to: frame), layer.opacity).composited(over: image)
         }
         let brightness = plan.brightness(at: time)
@@ -333,7 +335,8 @@ final class FilmFrameRenderer {
                 let base = KenBurns.base(imageAspect: source.extent.width / source.extent.height, viewportAspect: aspect)
                 if case .livePhoto = kind {
                     let motion = motion(shot, imageAspect: source.extent.width / source.extent.height, seed: segment.seed)
-                    return compose(source, fill: Self.blurredFill(source, size: size), crop: motion.crop(at: layer.progress), fits: motion.fits)
+                    return compose(
+                        source, fill: Self.blurredFill(source, size: size), crop: motion.crop(at: layer.progress), fits: motion.fits)
                 }
                 return compose(source, fill: Self.blurredFill(source, size: size), crop: base.crop, fits: base.fits)
             }
@@ -383,7 +386,8 @@ final class FilmFrameRenderer {
         let left = extent.minX + crop.x * extent.width
         // Core Image counts from the bottom.
         let bottom = extent.minY + (1 - crop.y - crop.height) * extent.height
-        return image.transformed(by: CGAffineTransform(translationX: -left, y: -bottom).concatenating(CGAffineTransform(scaleX: scale, y: scale)))
+        return image.transformed(
+            by: CGAffineTransform(translationX: -left, y: -bottom).concatenating(CGAffineTransform(scaleX: scale, y: scale)))
     }
 
     func flight(_ map: FilmMapPicture, progress: Double) -> CIImage {
@@ -426,7 +430,8 @@ final class FilmFrameRenderer {
             context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
             context.fillEllipse(in: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2))
             context.setFillColor(CGColor(red: 0, green: 0.51, blue: 0.79, alpha: 1))
-            context.fillEllipse(in: CGRect(x: centre.x - radius * 0.6, y: centre.y - radius * 0.6, width: radius * 1.2, height: radius * 1.2))
+            context.fillEllipse(
+                in: CGRect(x: centre.x - radius * 0.6, y: centre.y - radius * 0.6, width: radius * 1.2, height: radius * 1.2))
         }
         // The plane: a bright dot at the head of the route.
         let head = point(MapFlight.point(at: travelled, from: from, to: to))
@@ -489,7 +494,8 @@ final class ClipReader {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw CocoaError(.fileReadCorruptFile) }
         orientation = try await track.load(.preferredTransform)
         reader = try AVAssetReader(asset: asset)
-        output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        output = AVAssetReaderTrackOutput(
+            track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         output.alwaysCopiesSampleData = false
         reader.add(output)
         guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadCorruptFile) }

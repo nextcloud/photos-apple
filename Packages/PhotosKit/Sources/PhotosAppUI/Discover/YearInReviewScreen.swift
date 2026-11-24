@@ -72,7 +72,8 @@ import SwiftUI
 
     /// The cards as PNG files in a temporary folder of their own (removed when the screen closes).
     private func renderCardFiles() -> [URL] {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "YearInReview/\(UUID().uuidString)", directoryHint: .isDirectory)
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: "YearInReview/\(UUID().uuidString)", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var files: [URL] = []
         for (index, image) in renderCards().enumerated() {
@@ -102,7 +103,9 @@ import SwiftUI
         let plan = FilmPlan(cards: material.cards.count, rhythm: rhythm)
         let exporter = FilmExporter(
             plan: plan, material: material, size: CGSize(width: 1080, height: 1920), codec: codec, music: musicFile, still: still,
-            fileName: String(localized: "\(String(year)) in review", bundle: .module, comment: "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name."))
+            fileName: String(
+                localized: "\(String(year)) in review", bundle: .module,
+                comment: "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name."))
         return try await exporter.export { progress in
             Task { @MainActor in report(0.1 + 0.9 * progress, FilmExportJob.renderingStep) }
         }
@@ -126,12 +129,15 @@ struct YearInReviewScreen: View {
     }
 
     static func title(_ year: Int) -> String {
-        String(localized: "\(String(year)) in review", bundle: .module, comment: "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name.")
+        String(
+            localized: "\(String(year)) in review", bundle: .module,
+            comment: "Year in review title, e.g. 2025 in review: the screen title, the heading of every card and the video file name.")
     }
 
     var body: some View {
         GeometryReader { proxy in
-            let scale = min(1.4, max(0.4, min((proxy.size.height - 60) / YearCard.design.height, (proxy.size.width - 32) / YearCard.design.width)))
+            let scale = min(
+                1.4, max(0.4, min((proxy.size.height - 90) / YearCard.design.height, (proxy.size.width - 32) / YearCard.design.width)))
             VStack(spacing: 14) {
                 if let content = model.content {
                     cardPages(content, scale: scale, width: proxy.size.width)
@@ -149,6 +155,8 @@ struct YearInReviewScreen: View {
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            // The cards take the screen; the page dots would sit under the tab bar.
+            .toolbar(.hidden, for: .tabBar)
         #endif
         .toolbar { toolbar }
         .memorySlideshow($slideshow)
@@ -234,8 +242,10 @@ struct YearInReviewScreen: View {
 
     static var playTitle: String {
         PlatformWording.title(
-            mac: LocalizedStringResource("Play Film", bundle: .module, comment: "Year in review: plays the year's highlights as a memory film."),
-            other: LocalizedStringResource("Play film", bundle: .module, comment: "Year in review: plays the year's highlights as a memory film."))
+            mac: LocalizedStringResource(
+                "Play Film", bundle: .module, comment: "Year in review: plays the year's highlights as a memory film."),
+            other: LocalizedStringResource(
+                "Play film", bundle: .module, comment: "Year in review: plays the year's highlights as a memory film."))
     }
 
     static var shareImagesTitle: String {

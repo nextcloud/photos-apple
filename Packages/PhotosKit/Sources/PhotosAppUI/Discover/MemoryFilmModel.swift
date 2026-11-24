@@ -3,6 +3,7 @@
 
 import AVFoundation
 import MapKit
+import OSLog
 import PhotosCore
 import PhotosDomain
 import PhotosMedia
@@ -99,6 +100,7 @@ actor FilmRhythmCache {
     private var loading: Set<Int> = []
     private var loadingVideos: Set<Int> = []
     private var loadingMaps: Set<Int> = []
+    private var failedMaps: Set<Int> = []
     private weak var session: SessionModel?
 
     init(start: SlideshowStart) {
@@ -283,11 +285,14 @@ actor FilmRhythmCache {
         viewportAspect = aspect
         motions = [:]
         maps = [:]
+        failedMaps = []
         tick()
     }
 
     private func loadMaps(_ plan: FilmPlan, time: Double) {
         for (index, segment) in plan.segments.enumerated() where maps[index] == nil && !loadingMaps.contains(index) {
+            // A map that could not be made (offline, no map service) is not asked for again: the flight shows its caption.
+            guard !failedMaps.contains(index) else { continue }
             guard case .flight(let from, let to, _, _) = segment.content, segment.start <= time + 20, segment.end >= time else {
                 continue
             }
@@ -296,7 +301,11 @@ actor FilmRhythmCache {
             Task {
                 defer { self.loadingMaps.remove(index) }
                 let size = CGSize(width: 1280, height: 1280 / aspect)
-                if let picture = await FilmPictures.map(from: from, to: to, size: size) { self.maps[index] = picture }
+                if let picture = await FilmPictures.map(from: from, to: to, size: size) {
+                    self.maps[index] = picture
+                } else {
+                    self.failedMaps.insert(index)
+                }
             }
         }
     }
@@ -381,6 +390,8 @@ actor FilmRhythmCache {
 
 /// Pictures the film makes itself: the blur behind pictures shown whole, and the map pictures of flights.
 enum FilmPictures {
+    static let logger = Logger(subsystem: "com.nextcloud.photos", category: "film")
+
     /// A tiny copy of a picture; drawn enlarged it is a soft blur.
     static func thumbnail(_ image: CGImage, width: Int) -> CGImage? {
         let height = max(1, Int(Double(width) * Double(image.height) / Double(max(1, image.width))))
@@ -404,7 +415,17 @@ enum FilmPictures {
             span: MKCoordinateSpan(latitudeDelta: region.latitudeSpan, longitudeDelta: region.longitudeSpan))
         options.size = size
         options.preferredConfiguration = MKHybridMapConfiguration(elevationStyle: .flat)
-        guard let snapshot = try? await MKMapSnapshotter(options: options).start() else { return nil }
+        var made = try? await MKMapSnapshotter(options: options).start()
+        if made == nil {
+            // Satellite imagery is not available everywhere (the simulator, some regions): the standard map instead.
+            options.preferredConfiguration = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .muted)
+            do {
+                made = try await MKMapSnapshotter(options: options).start()
+            } catch {
+                logger.error("map flight picture failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        guard let snapshot = made else { return plain(from: from, to: to, region: region, size: size) }
         #if os(macOS)
             guard let image = snapshot.image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         #else
@@ -420,5 +441,41 @@ enum FilmPictures {
             #endif
         }
         return FilmMapPicture(image: image, from: normalised(from), to: normalised(to))
+    }
+
+    /// Without a map (offline, no map service): a night-blue background with a faint grid, the stops placed where they
+    /// are in the region, so the flight still shows the way from one to the other.
+    static func plain(
+        from: GeoPoint, to: GeoPoint, region: (centre: GeoPoint, latitudeSpan: Double, longitudeSpan: Double), size: CGSize
+    ) -> FilmMapPicture? {
+        let width = Int(size.width)
+        let height = Int(size.height)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+            let gradient = CGGradient(
+                colorsSpace: space,
+                colors: [CGColor(red: 0.04, green: 0.1, blue: 0.2, alpha: 1), CGColor(red: 0.01, green: 0.03, blue: 0.07, alpha: 1)]
+                    as CFArray,
+                locations: [0, 1])
+        else { return nil }
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: size.height), end: .zero, options: [])
+        context.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.07))
+        context.setLineWidth(1)
+        for step in 1..<12 {
+            let x = size.width * Double(step) / 12
+            let y = size.height * Double(step) / 12
+            context.strokeLineSegments(between: [CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height)])
+            context.strokeLineSegments(between: [CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y)])
+        }
+        guard let image = context.makeImage() else { return nil }
+        func place(_ point: GeoPoint) -> CGPoint {
+            CGPoint(
+                x: 0.5 + (point.longitude - region.centre.longitude) / region.longitudeSpan,
+                y: 0.5 - (point.latitude - region.centre.latitude) / region.latitudeSpan)
+        }
+        return FilmMapPicture(image: image, from: place(from), to: place(to))
     }
 }

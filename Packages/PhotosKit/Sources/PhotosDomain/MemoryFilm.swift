@@ -348,7 +348,9 @@ public enum MapFlight {
     /// The map region (centre and span in degrees) a flight's picture shows: both stops with a margin, never smaller than
     /// a city, with the span's aspect matching the film's frame (longitude span in degrees is wider per degree near the
     /// equator; good enough for the short spans of a trip, and the picture is made by MapKit for exactly this region).
-    public static func region(from: GeoPoint, to: GeoPoint, aspect: Double) -> (centre: GeoPoint, latitudeSpan: Double, longitudeSpan: Double) {
+    public static func region(from: GeoPoint, to: GeoPoint, aspect: Double) -> (
+        centre: GeoPoint, latitudeSpan: Double, longitudeSpan: Double
+    ) {
         let centre = GeoPoint(latitude: (from.latitude + to.latitude) / 2, longitude: (from.longitude + to.longitude) / 2)
         let squeeze = max(0.2, cos(centre.latitude * .pi / 180))
         var latitudeSpan = max(abs(from.latitude - to.latitude) * 1.8, 0.3)

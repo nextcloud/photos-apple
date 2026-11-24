@@ -148,7 +148,8 @@ public enum Memories {
 
     /// Year recap: the newest year with ≥ 30 photos (or `year`, when it has that many); 60 highlights, favourites first,
     /// then evenly per month.
-    public static func yearRecap<Item: MemoryCandidate>(_ items: [Item], year wanted: Int? = nil, calendar: Calendar = .current) -> Memory? {
+    public static func yearRecap<Item: MemoryCandidate>(_ items: [Item], year wanted: Int? = nil, calendar: Calendar = .current) -> Memory?
+    {
         var byYear: [Int: [Item]] = [:]
         for item in items { byYear[calendar.component(.year, from: item.timestamp), default: []].append(item) }
         let years = wanted.map { [$0] } ?? byYear.keys.sorted(by: >)
