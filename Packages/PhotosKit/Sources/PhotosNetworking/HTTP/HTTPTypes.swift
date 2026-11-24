@@ -28,7 +28,7 @@ public struct HTTPRequest: Sendable {
         self.retry = retry
     }
 
-    var urlRequest: URLRequest {
+    public var urlRequest: URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
