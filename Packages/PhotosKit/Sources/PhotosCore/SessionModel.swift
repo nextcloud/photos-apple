@@ -83,6 +83,9 @@ public final class SessionModel {
     }
 
     public var isSignedOut: Bool { account.isSignedOut || services == nil }
+    /// Signed out because the app password is not in the keychain (it could not be stored or read), not because the
+    /// server stopped accepting it: the UI says so instead of "no longer valid".
+    public internal(set) var isLoginMissing = false
 
     /// Directories excluded from all views (`.nomedia`).
     public var excludedFolders: [String] { features.nomediaPaths }

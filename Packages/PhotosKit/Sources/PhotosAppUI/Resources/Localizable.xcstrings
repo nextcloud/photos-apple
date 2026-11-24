@@ -932,6 +932,9 @@
     "Add Folder…" : {
       "comment" : "Button in Settings that adds a folder of the server to the folders shown in the timeline (Mac, title case)."
     },
+    "Add folder…" : {
+      "comment" : "Button in Settings that adds a folder of the server to the folders shown in the timeline (iPhone and iPad, sentence case)."
+    },
     "Add This Folder" : {
       "comment" : "Button in the folder browser that confirms the folder currently shown as a timeline folder."
     },
@@ -4059,7 +4062,7 @@
       "comment" : "Title of the setting that chooses which folders of the server appear in the timeline."
     },
     "Timeline position" : {
-      "comment" : "VoiceOver label of the scrubber at the edge of the grid on the Mac that scrolls through the years."
+      "comment" : "VoiceOver label of the date scrubber at the trailing edge of the photo grid that scrolls through the years."
     },
     "Tint" : {
       "comment" : "A parameter that can be adjusted to change the color of the image.",
@@ -4403,6 +4406,9 @@
     },
     "Your library only shows photos in %@. Photos uploaded to %@ are on your Nextcloud, but not in your library." : {
       "comment" : "Explains why backed-up photos would not appear. The first placeholder lists the timeline folders (\"/Photos, /InstantUpload\"), the second is the backup folder."
+    },
+    "Your login for %@ is missing from the keychain. Please log in again." : {
+      "comment" : "Signed-out screen and Settings when the app password of the account is not in the system keychain (it could not be saved or read). The placeholder is the server's host name."
     },
     "Your login for %@ is no longer valid. Please log in again." : {
       "comment" : "A description of the message shown when the user's login is no longer valid. The argument is the display name of the account's host.",

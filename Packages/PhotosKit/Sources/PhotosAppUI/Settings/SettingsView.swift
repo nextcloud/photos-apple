@@ -93,7 +93,11 @@ public struct SettingsView: View {
                         }
                     }
                     // A picker over the server's folders, not a path to type.
-                    Button(String(localized: "Add Folder…", bundle: .module)) { pickingFolder = true }
+                    Button(
+                        PlatformWording.title(
+                            mac: LocalizedStringResource("Add Folder…", bundle: .module),
+                            other: LocalizedStringResource("Add folder…", bundle: .module))
+                    ) { pickingFolder = true }
                     if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
                 } header: {
                     Text("Timeline folders", bundle: .module)
@@ -313,7 +317,7 @@ public struct SettingsView: View {
                 Button(String(localized: "Log in again", bundle: .module)) { addingAccount = true }
             } label: {
                 Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
-                Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+                SignedOutView.reason(session)
             }
         }
     }

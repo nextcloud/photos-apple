@@ -33,6 +33,9 @@ struct MemoriesStrip: View {
         return LoadKey(lastSync: lastSync, day: Calendar.current.startOfDay(for: Date()), isShown: isShown)
     }
 
+    /// Room above and below the cards.
+    static let verticalPadding: CGFloat = 8
+
     /// Card size: small enough to leave the grid most of the screen.
     var cardSize: CGSize {
         #if os(macOS)
@@ -51,9 +54,13 @@ struct MemoriesStrip: View {
                         allMemoriesLink
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, Self.verticalPadding)
                 }
                 .scrollIndicators(.hidden)
+                // A horizontal scroll view takes all the height it is offered: in the library's stack it would share
+                // the screen with the grid and leave a large empty band above the cards. A fixed height, not
+                // `fixedSize()`: measured at its ideal size the lazy stack could stay empty until it was scrolled.
+                .frame(height: cardSize.height + 2 * Self.verticalPadding)
                 .contextMenu {
                     Button {
                         showsMemories = false
@@ -74,6 +81,9 @@ struct MemoriesStrip: View {
         } label: {
             MemoryCard(memory: memory, compact: true)
                 .frame(width: cardSize.width, height: cardSize.height)
+                // The card has a fixed size: at accessibility text sizes its title would be cut to a word or two. The
+                // whole title is in the VoiceOver label and on the memory's screen.
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         }
         .buttonStyle(.plain)
         .contextMenu {

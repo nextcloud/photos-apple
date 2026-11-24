@@ -86,8 +86,34 @@ TEST_RUNNER_PHOTOS_UITEST_LOGIN='nc://login/server:http://127.0.0.1:8089&user:ad
 ```
 
 The app has no accessibility identifiers yet; the tests find elements by role and by their English labels, and start
-the app in English. They are not part of CI because they need a server and, for now, have only been compiled
-(`build-for-testing` for macOS and iOS), not run.
+the app in English. They are not part of CI because they need a server. They have run in the iOS 27.2 simulator (iPhone).
 
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
+
+`UITests/PhoneTourTests.swift` walks through the iPhone screens (library and date scrubber, selection and context menu,
+viewer, Collections, Settings, Search, a memory, and every screen a link leads to). It runs only on an iPhone simulator,
+needs the same login variable, and attaches a screenshot of every step; with `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<directory>`
+it also writes the screenshots and the accessibility tree of each step there.
+
+## Running the app in the iOS simulator
+
+Use a simulator of your own, booted headless (`xcrun simctl boot <UDID>`; Simulator.app is not needed), and a bundle id
+of your own. Debug builds need the entitlements switched on (`PHOTOS_DEBUG_ENTITLEMENTS=YES`): without them the keychain
+cannot store the login, and the login fails with "Your login could not be saved in the keychain".
+
+```sh
+xcodegen generate
+xcodebuild -scheme NextcloudPhotos -destination 'platform=iOS Simulator,id=<UDID>' -derivedDataPath /tmp/photos-dd \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PHOTOS_DEBUG_ENTITLEMENTS=YES \
+  PHOTOS_BUNDLE_ID=com.example.nextcloudphotos.sim build
+xcrun simctl install <UDID> '/tmp/photos-dd/Build/Products/Debug-iphonesimulator/Nextcloud Photos.app'
+SIMCTL_CHILD_PHOTOS_DEBUG_LOGIN='nc://login/server:http://localhost:8089&user:admin&password:admin' \
+  xcrun simctl launch <UDID> com.example.nextcloudphotos.sim
+xcrun simctl io <UDID> screenshot shot.png
+xcrun simctl spawn <UDID> log show --last 2m --predicate 'process == "Nextcloud Photos"'
+```
+
+The simulator reaches servers on the Mac as `localhost`. `xcrun simctl openurl` asks "Open in Nextcloud Photos?" first;
+UI tests open links without asking (`XCUIApplication.open(_:)`). Appearance and text size:
+`xcrun simctl ui <UDID> appearance dark`, `xcrun simctl ui <UDID> content_size extra-extra-large`.

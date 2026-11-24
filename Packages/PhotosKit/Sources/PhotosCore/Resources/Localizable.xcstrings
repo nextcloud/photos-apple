@@ -239,6 +239,9 @@
     "Uploading %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."
     },
+    "Your login could not be saved in the keychain (error %@)." : {
+      "comment" : "Shown when a login cannot be completed because the app could not store the app password in the system keychain. The placeholder is the system's error number (e.g. -34018), not formatted."
+    },
     "Your organization allows only one account in this app." : {
       "comment" : "Login refused by the device management: a second account cannot be added."
     },

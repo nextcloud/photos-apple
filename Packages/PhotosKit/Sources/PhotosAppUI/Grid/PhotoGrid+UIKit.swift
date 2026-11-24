@@ -63,6 +63,10 @@
         private var isSelecting = false
         private var pinchHandled = false
         private var selected = GridSelectionTracker()
+        /// Date scrubber along the trailing edge (SPEC §6.4).
+        private let scrubber = GridScrubberView()
+        /// Top of every section in the document, plus its height as last element (scrubber positions).
+        private var sectionOffsets: [Double] = []
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -99,6 +103,11 @@
                 SectionHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                 withReuseIdentifier: SectionHeader.reuseIdentifier)
             view.addSubview(collectionView)
+            scrubber.isHidden = true
+            scrubber.labelAt = { [weak self] fraction in self?.scrubberLabel(at: fraction) ?? "" }
+            scrubber.onScrub = { [weak self] fraction in self?.scroll(toFraction: fraction) }
+            scrubber.onStep = { [weak self] delta in self?.scrollToYear(delta: delta) }
+            view.addSubview(scrubber)
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             collectionView.addGestureRecognizer(pinch)
@@ -107,6 +116,7 @@
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.core.headerMetrics = Self.currentHeaderMetrics
                 controller.collectionView.collectionViewLayout.invalidateLayout()
+                controller.reloadScrubber()
             }
             registerForTraitChanges([UITraitDisplayScale.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.refreshVisibleTiles()
@@ -210,6 +220,7 @@
                 setSelecting(isSelecting)
             }
             syncSelection(selection, modelChanged: plan.relayouts || plan.sectionChanges != nil)
+            if plan.relayouts || plan.sectionChanges != nil { reloadScrubber() }
         }
 
         /// Some sections came, went or changed (an upload, a sync page): only those are updated, in one batch, instead
@@ -352,6 +363,116 @@
             core.resizeAnchor = nil
             if core.sideChanged(width: gridWidth) { refreshVisibleTiles() }
             core.noteLayout(width: gridWidth)
+            layoutScrubber()
+        }
+
+        // MARK: Date scrubber
+
+        /// The scrubber runs along the part of the grid that is not under the bars, inside the safe area.
+        private func layoutScrubber() {
+            guard isViewLoaded else { return }
+            let insets = collectionView.adjustedContentInset
+            let width = min(GridScrubberView.width, view.bounds.width)
+            let frame = CGRect(
+                x: view.bounds.maxX - view.safeAreaInsets.right - width, y: insets.top, width: width,
+                height: max(view.bounds.height - insets.top - insets.bottom, 0))
+            let resized = frame.size != scrubber.frame.size
+            scrubber.frame = frame
+            if resized { reloadScrubber() }
+        }
+
+        /// Height of the part of the grid between the bars.
+        private var visibleHeight: Double {
+            let insets = collectionView.adjustedContentInset
+            return Double(collectionView.bounds.height - insets.top - insets.bottom)
+        }
+
+        /// How far the grid scrolls, as document offsets of its top edge.
+        private var scrollRange: Double { max((sectionOffsets.last ?? 0) - visibleHeight, 0) }
+
+        private func reloadScrubber() {
+            guard isViewLoaded else { return }
+            let visibleHeight = visibleHeight
+            guard headersShown, visibleHeight > 0 else {
+                setScrubberShown(false)
+                return
+            }
+            let sections = model.sections
+            // Placeholder tiles (the first sync's skeleton) count: the scrubber covers the whole library.
+            sectionOffsets = geometry.sectionOffsets(
+                itemCounts: sections.map(\.tileCount), headerHeights: sections.map { headerMetrics.height(for: $0) })
+            let range = scrollRange
+            // Not worth it for a library that fits on two screens.
+            guard range > visibleHeight else {
+                setScrubberShown(false)
+                return
+            }
+            setScrubberShown(true)
+            scrubber.ticks = model.yearStarts.map { entry in
+                GridScrubberView.Tick(fraction: min(sectionOffsets[entry.section] / range, 1), label: String(entry.year))
+            }
+            updateScrubberPosition(userInitiated: false)
+        }
+
+        /// One indicator at the edge: the scrubber's handle where it is shown, else the scroll view's own.
+        private func setScrubberShown(_ shown: Bool) {
+            scrubber.isHidden = !shown
+            collectionView.showsVerticalScrollIndicator = !shown
+        }
+
+        private func section(atFraction fraction: Double) -> GridSection? {
+            // The section under the pinned header, i.e. the one whose items are at the top.
+            guard let index = GridGeometry.section(at: fraction * scrollRange + 1, in: sectionOffsets) else { return nil }
+            return model.sections[safe: index]
+        }
+
+        private func scrubberLabel(at fraction: Double) -> String {
+            section(atFraction: fraction).map(GridHeaderTexts.scrubberLabel) ?? ""
+        }
+
+        private var scrollFraction: Double {
+            let range = scrollRange
+            return range > 0 ? min(max(Double(collectionView.contentOffset.y + topInset) / range, 0), 1) : 0
+        }
+
+        private func scroll(toFraction fraction: Double) {
+            scroll(toDocumentY: fraction * scrollRange)
+        }
+
+        private func scroll(toDocumentY y: Double) {
+            let offset = GridAnchor.offset(
+                documentY: y, topInset: Double(topInset), contentHeight: sectionOffsets.last ?? 0,
+                bottomInset: Double(collectionView.adjustedContentInset.bottom), viewportHeight: Double(collectionView.bounds.height))
+            collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: CGFloat(offset)), animated: false)
+        }
+
+        /// Jumps to the start of the next older (+1) or newer (−1) year.
+        private func scrollToYear(delta: Int) {
+            let years = model.yearStarts
+            guard !years.isEmpty, let current = section(atFraction: scrollFraction)?.year,
+                let index = years.firstIndex(where: { $0.year == current })
+            else { return }
+            let target = years[max(0, min(years.count - 1, index + delta))]
+            guard target.section < sectionOffsets.count else { return }
+            scroll(toDocumentY: sectionOffsets[target.section])
+            updateScrubberPosition(userInitiated: false)
+            UIAccessibility.post(notification: .pageScrolled, argument: scrubberLabel(at: scrollFraction))
+        }
+
+        private func updateScrubberPosition(userInitiated: Bool) {
+            guard !scrubber.isHidden else { return }
+            let fraction = scrollFraction
+            scrubber.scrolled(to: fraction, label: scrubberLabel(at: fraction), userInitiated: userInitiated)
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            // Only the user's scrolling shows the scrubber, not a jump to a photo or a relayout.
+            updateScrubberPosition(userInitiated: scrollView.isTracking || scrollView.isDecelerating)
+        }
+
+        func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
+            layoutScrubber()
+            reloadScrubber()
         }
 
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
@@ -420,17 +541,6 @@
                 header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
             }
             return header
-        }
-
-        /// Year index (native section index as date scrubber).
-        func indexTitles(for collectionView: UICollectionView) -> [String]? {
-            guard headersShown else { return nil }
-            let years = model.yearStarts
-            return years.count > 1 ? years.map { String($0.year) } : nil
-        }
-
-        func collectionView(_ collectionView: UICollectionView, indexPathForIndexTitle title: String, at index: Int) -> IndexPath {
-            IndexPath(item: 0, section: model.yearStarts[safe: index]?.section ?? 0)
         }
 
         // MARK: Delegate

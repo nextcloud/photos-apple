@@ -23,9 +23,11 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
   extended test server (Photos integration branch); upgrading and downgrading the server's Photos app switched the extended features on and off.
 - A fresh Nextcloud 35.0.3 from the release archive (`scripts/test-server.sh`, 2026-11-23): the nine integration tests pass
   when run one after the other; the nightly workflow uses the same script.
-- UI smoke tests (`UITests`, three cases) 🟡 compile for macOS and iOS, never run.
+- UI smoke tests (`UITests`) ✅ on iPhone: `PhoneTourTests` (library and date scrubber, selection, context menu, viewer, Collections,
+  Settings, Search, a memory, every link destination) run in the iOS 27.2 simulator (iPhone 18 Pro and iPhone 17e) against the local test
+  server, screenshots in `ios-fix-shots/r4-iphone/`; `SmokeTests` (three cases) pass there too. Not run on the Mac.
 - Nothing has run on a device; the plan for that is [test-plan.md](test-plan.md).
-- Not available on the build Mac: iOS/visionOS simulator runtimes, signed builds (App Groups, keychain group, push), devices.
+- Not available on the build Mac: a visionOS simulator runtime (the iOS 27.2 simulator is installed since 2026-11-24), signed builds (App Groups, keychain group, push), devices.
 
 ## M0 Foundation — ✅
 Login Flow v2 (✅ code; browser flow 🟡 not exercised by hand), login links ✅, untrusted certificates 🟡, client certificates 🟡,
@@ -60,6 +62,11 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 - QR code login 🟡: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
   only where it is supported; camera access is asked for first, without it the link can be pasted). Compiles for iOS, not
   run (no simulator runtime, no device). The Mac and Vision Pro offer "Log in with a link".
+- A login whose app password the keychain cannot store (an unsigned build without the keychain entitlement) fails with "Your
+  login could not be saved in the keychain (error …)" and the granted app password is revoked; before, the write failed
+  silently and the app showed "Signed out — your login … is no longer valid" at once. An account whose app password is
+  missing from the keychain says so ("… is missing from the keychain") instead of "no longer valid" ✅ unit-tested; seen in
+  the iOS 27.2 simulator before the fix.
 - Account state over a cached library ✅ (Mac app, against a proxy in front of the test server): the banner at the bottom of
   every grid says "Couldn't sync" with the reason and Retry, "Signed out" with "Log in again", and "The server's certificate
   changed" with "Review…"; Settings › Server shows the same. Review shows the previous and the new certificate (subject,
@@ -81,7 +88,7 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
-(macOS ✅, iOS 🟡), year index on iOS 🟡, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
+(macOS ✅, iOS 🟡), date scrubber on iOS ✅ run in the iOS 27.2 simulator, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
 - Sync and outbox safety ✅ unit-tested against the stubbed DAV server (`PhotosStoreTests/DataLayerTests.swift`,
   `PhotosCoreTests/DataLayerTests.swift`), 🟡 not exercised against a real server:
   a detection that cannot read the Photos settings keeps the cached timeline folders, MIME types and `.nomedia` folders
@@ -142,13 +149,20 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - The parts of the grid that do not depend on the platform (what an update means, section layout, the item kept in place
   across a relayout, prefetch requests, tile badges and preview loading) are shared by the AppKit and the UIKit grid
   (`Grid/GridCore.swift`) ✅ unit-tested; the Mac grid was compared before and after the extraction (zoom, resize, scrubber, selection).
-- iPhone/iPad grid 🟡 (compiled for iOS and visionOS, not run): pull to refresh (a refresh control on the collection view, driven
+- iPhone grid ✅ run in the iOS 27.2 simulator: scrolling, selection mode (the tab bar now makes room for the selection's
+  actions, which were under it), context menu with preview; pull to refresh, pinch and the two-finger drag were not exercised.
+  iPad and visionOS 🟡 (compiled, not run here). Pull to refresh (a refresh control on the collection view, driven
   by the screen's `.refreshable`; it ends when the sync or reload has returned), a two-finger drag starts the selection mode,
   the context menu of a photo shows a large preview (a tap opens it), tiles can be dragged into other apps on iPad (the original
   is downloaded on drop), selection mark in the bottom trailing corner, hover effect under the pointer. The logic behind them
   (single-flight refresh, what a drag carries, mark and preview sizes) ✅ unit-tested.
 - Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
   were only exercised through accessibility, not with a real pointer).
+- Date scrubber on iPhone, iPad and Vision Pro ✅ run in the iOS 27.2 simulator (iPhone): replaces UIKit's section index, which
+  listed every year in a column over the photos and down into the tab bar. Runs between the bars, appears while the grid
+  scrolls and fades out, can be grabbed at the edge while shown (month label while scrubbing, a tick of haptic feedback per
+  year), leaves out year labels that do not fit (`GridScrubberTrack`, unit-tested, shared with the Mac), labels on a background
+  of their own (opaque with Increase Contrast / Reduce Transparency), adjustable element for VoiceOver.
 - Skeleton grid during the first load and the first sync ✅; the empty state only after a completed sync.
 - First-sync progress "Loading your library — 12,000 of 48,213" where the extended server's `timelineDays` gives the total
   (summed once per session; no total once more items arrived than it counted, since it leaves out shared folders); stock
@@ -482,7 +496,9 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
 - Folders and Shared with you show a folder's photos in the app's photo grid (selection, context menu, share, favourite,
   delete, keyboard, viewer), subfolders in a strip above it ✅ Mac. Like the other server-loaded lists (places, tags) the grid
   is loaded once: an item deleted there disappears after a reload.
-- Memories strip at the top of the Library (TL-3) 🟡: On this day, the year in review and trips (at most 12) as small cards over
+- Memories strip at the top of the Library (TL-3) ✅ run in the iOS 27.2 simulator (the strip took a third of the screen's
+  height as empty space above the cards — a horizontal scroll view takes the height it is offered —; it now has the height of
+  its cards on every platform, also checked in the Mac app, `ios-fix-shots/r4-iphone/04-mac-library-strip.png`). On this day, the year in review and trips (at most 12) as small cards over
   the grid of the whole library (not with a filter, not while selecting), "All memories" at the end; loaded off the main actor
   after each finished sync and when the day changes. Context menu "Hide memories"; Settings › On this device › "Show memories".
   Memories stay in the sidebar / Collections.

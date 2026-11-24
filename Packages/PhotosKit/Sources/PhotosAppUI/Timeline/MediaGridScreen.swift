@@ -76,6 +76,9 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Square tiles or the aspect ratio grid (Settings, View ▸ Square Tiles).
     @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
     @Environment(\.showInTimeline) private var showInTimeline
+    #if os(iOS)
+        @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     struct TileHighlight: Equatable {
         let id = UUID()
@@ -98,6 +101,8 @@ struct MediaGridScreen<Accessory: View>: View {
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
+                // iPhone: the selection's actions take the place of the tab bar, as in Photos (else they are under it).
+                .toolbar(isSelecting && sizeClass == .compact ? .hidden : .automatic, for: .tabBar)
             #endif
             .toolbar { toolbar }
             .overlay(alignment: .bottom) { statusBanner }
@@ -927,11 +932,26 @@ struct SignedOutView: View {
         ContentUnavailableView {
             Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
         } description: {
-            Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+            Self.reason(session)
         } actions: {
             Button(String(localized: "Log in again", bundle: .module)) { relogin = true }
                 .buttonStyle(.borderedProminent)
         }
         .sheet(isPresented: $relogin) { AddAccountSheet() }
+    }
+
+    /// Why the account is signed out: the server no longer accepts the login, or the keychain has none (it could not
+    /// be stored or read) — the latter is not the server's doing and must not be reported as such.
+    static func reason(_ session: SessionModel) -> Text {
+        let host = session.account.hostDisplayName
+        if session.isLoginMissing {
+            return Text(
+                "Your login for \(host) is missing from the keychain. Please log in again.", bundle: .module,
+                comment: """
+                    Signed-out screen and Settings when the app password of the account is not in the system keychain (it could \
+                    not be saved or read). The placeholder is the server's host name.
+                    """)
+        }
+        return Text("Your login for \(host) is no longer valid. Please log in again.", bundle: .module)
     }
 }
