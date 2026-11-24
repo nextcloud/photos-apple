@@ -106,7 +106,10 @@ import Testing
 
     /// SPEC §10: what one database change costs for a 100 000-item library — building the model (sections and index
     /// by id) and finding out what changed. Runs off the main actor in the app. Prints the times.
-    @Test func modelPerformance100k() {
+    @Test(
+        .tags(.performance),
+        .enabled(if: ProcessInfo.processInfo.environment["PHOTOS_SKIP_PERFORMANCE"] == nil, "PHOTOS_SKIP_PERFORMANCE is set"))
+    func modelPerformance100k() {
         var seed: UInt64 = 7
         func random() -> Double {
             seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
