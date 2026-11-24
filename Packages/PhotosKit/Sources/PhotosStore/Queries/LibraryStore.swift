@@ -164,8 +164,8 @@ public struct TimelineRow: Hashable, Sendable, Identifiable {
 /// A search over the index (SPEC SR-2/SR-3): AND between the kinds of criteria, OR within places, dates and albums.
 public struct LibrarySearch: Hashable, Sendable {
     /// Free text. Every word must occur (as a substring, ignoring case and diacritics) in the file name, place, country,
-    /// caption or folder path, or in the names of the file's tags and people or the labels recognised on this device
-    /// (`SearchLabels`).
+    /// caption or folder path, or in the names of the file's tags and people, the labels recognised on this device
+    /// (`SearchLabels`) or the titles of the albums it is in (`SearchAlbums`).
     public var texts: [String]
     public var places: [String]
     public var dateRanges: [Range<Date>]
@@ -712,7 +712,9 @@ public struct LibraryStore: Sendable {
                 let fileId: FileID = row[0]
                 if search.memberships.allSatisfy({ $0.contains(fileId) }) { result.append(GridMedia(gridRow: row)) }
             }
-            return result
+            let extra = try Self.albumOnlyMatches(search, db: db)
+            guard !extra.isEmpty else { return result }
+            return Self.newestFirst(result + extra.map(GridMedia.init), timestamp: \.timestamp, fileId: \.fileId)
         }
     }
 
@@ -721,8 +723,66 @@ public struct LibraryStore: Sendable {
         let (sql, arguments) = Self.searchSQL(search, columns: "media.*")
         return try await database.writer.read { db in
             let items = try MediaItem.fetchAll(db, sql: sql, arguments: arguments)
-            return search.memberships.isEmpty ? items : items.filter { item in search.memberships.allSatisfy { $0.contains(item.fileId) } }
+            let found = items.filter { item in search.memberships.allSatisfy { $0.contains(item.fileId) } }
+            let extra = try Self.albumOnlyMatches(search, db: db)
+            guard !extra.isEmpty else { return found }
+            return Self.newestFirst(found + extra, timestamp: \.timestamp, fileId: \.fileId)
         }
+    }
+
+    static func newestFirst<T>(_ items: [T], timestamp: (T) -> Date, fileId: (T) -> FileID) -> [T] {
+        items.sorted { a, b in
+            let (ta, tb) = (timestamp(a), timestamp(b))
+            return ta != tb ? ta > tb : fileId(a) > fileId(b)
+        }
+    }
+
+    /// Photos of albums that are not in the timeline index (other people's photos in albums shared with the user, own
+    /// albums' photos outside the timeline folders), matched by the album filters and by free text over their name,
+    /// place, caption and album titles (SPEC SR-3). Only for searches by text or album: the other criteria alone search
+    /// the library. They are known once the album's content was read (`collectionMedia`), and are checked here in Swift
+    /// with the same rules as the index (every word a substring, case and diacritics ignored).
+    static func albumOnlyMatches(_ search: LibrarySearch, db: Database) throws -> [MediaItem] {
+        let terms = search.terms
+        guard !terms.isEmpty || !search.albumIds.isEmpty else { return [] }
+        var conditions = ["album.kind IN ('own', 'shared')", "albumItem.fileId NOT IN (SELECT fileId FROM media)"]
+        var arguments: StatementArguments = []
+        if !search.albumIds.isEmpty {
+            let marks = search.albumIds.map { _ in "?" }.joined(separator: ",")
+            conditions.append("albumItem.fileId IN (SELECT fileId FROM albumItem WHERE albumId IN (\(marks)))")
+            for id in search.albumIds { arguments += [id] }
+        }
+        let sql = """
+            SELECT albumItem.fileId, group_concat(album.title, ' ') FROM albumItem JOIN album ON album.id = albumItem.albumId
+            WHERE \(conditions.joined(separator: " AND ")) GROUP BY albumItem.fileId
+            """
+        var titles: [FileID: String] = [:]
+        for row in try Row.fetchAll(db, sql: sql, arguments: arguments) { titles[row[0]] = row[1] ?? "" }
+        guard !titles.isEmpty else { return [] }
+        var result: [MediaItem] = []
+        for chunk in Array(titles.keys).chunked(500) {
+            for record in try CollectionMediaRecord.fetchAll(db, keys: Array(chunk)) {
+                let item = record.item
+                guard Self.matches(item, albumTitles: titles[item.fileId] ?? "", search: search, terms: terms) else { continue }
+                result.append(item)
+            }
+        }
+        return result
+    }
+
+    /// Whether a photo that is not in the index meets a search: what `searchSQL` asks of an indexed one.
+    static func matches(_ item: MediaItem, albumTitles: String, search: LibrarySearch, terms: [String]) -> Bool {
+        guard !item.isLivePhotoVideo, !item.isArchived else { return false }
+        if !terms.isEmpty {
+            let fields = [item.name, item.place, item.placeCountry, item.caption, albumTitles].compactMap { $0 }
+            let text = fields.joined(separator: " ")
+            for term in terms where text.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) == nil { return false }
+        }
+        if !search.places.isEmpty && !search.places.contains(item.place ?? "") { return false }
+        if !search.dateRanges.isEmpty && !search.dateRanges.contains(where: { $0.contains(item.timestamp) }) { return false }
+        if search.favoritesOnly && !item.isFavorite { return false }
+        if search.videosOnly && item.kind != .video { return false }
+        return search.memberships.allSatisfy { $0.contains(item.fileId) }
     }
 
     /// The names of the places visible items were taken at, sorted (search suggestions).
@@ -933,25 +993,25 @@ public struct LibraryStore: Sendable {
     /// they do not depend on the folders, and offline albums are defined by them.
     public func deleteIndex() throws {
         try database.writer.write { db in
-            try db.execute(sql: SearchLabels.dropTriggersSQL)
+            try db.execute(sql: SearchAlbums.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(sql: "DELETE FROM media; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect")
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchLabels.triggersSQL)
+            try db.execute(sql: SearchAlbums.triggersSQL)
         }
     }
 
     public func deleteAll() throws {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.
-            try db.execute(sql: SearchLabels.dropTriggersSQL)
+            try db.execute(sql: SearchAlbums.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(
                 sql:
                     "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect"
             )
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchLabels.triggersSQL)
+            try db.execute(sql: SearchAlbums.triggersSQL)
         }
     }
 }

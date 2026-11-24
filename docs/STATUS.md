@@ -201,7 +201,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the named people in it (Recognize) and the labels recognised on the device (SR-7). Tag and people memberships are copied
   from the server by `LabelSync` (every 30 min, changed tags/people only, all once a day; file ids only) ✅ unit-tested and
   against the stock and extended test servers. Tag and person filters still ask the server first and fall back to the stored
-  memberships offline. ⬜ Album titles are not in the index.
+  memberships offline. Album titles ✅ (round 4, migration `v4-search-albums`, `SearchAlbums`): the titles of the own and shared
+  albums a file is in (once the album's content was read; not public links) are in its index text, kept current by triggers
+  on `albumItem` and `album` (rename, content change, deleted album). Photos of albums that are not in the index (another
+  user's photos in an album shared with the user, own albums' photos outside the timeline folders) are found by free text
+  (name, place, caption, album titles) and by the album chip, with the other criteria applied to them too; searches without
+  text or album stay in the library. Unit-tested (incl. migration of a v3 database) and against the stock (8093) and extended
+  (8091) servers with a second user sharing an album (`AlbumSearchIntegrationTests`). First write of an album of 5000:
+  350 ms in debug (every new member's index row is written again).
 - On-device labels (SR-7, opt-in in Settings › Search): Vision classification of cached previews into the index, in a
   power-requiring `BGProcessingTask` (iOS) or an `NSBackgroundActivityScheduler` activity (Mac) 🟡: labelling unit-tested with a
   real classifier run, labels checked on two test photos ("cat", "food"); the background scheduling was not seen to run
