@@ -487,6 +487,12 @@
     "%lld of %lld items could not be read." : {
       "comment" : "Note in the share extension (\"Upload to Nextcloud Photos\" from the share sheet): the first %lld is the number of shared items that could not be read, the second the number of all shared items."
     },
+    "%lld of %lld items could not be uploaded." : {
+      "comment" : "Share extension: the first %lld is the number of shared items that could not be uploaded, the second the number of all shared items."
+    },
+    "%lld of %lld items could not be uploaded: %@" : {
+      "comment" : "Share extension: the first %lld is the number of shared items that could not be uploaded, the second the number of all shared items, %@ the reason the server or the system gave for the last one."
+    },
     "%lld people are hidden on this device. Nextcloud can't hide people on all your devices yet." : {
       "comment" : "Note under the People grid. Recognize (the server) has no way to hide a person, so hiding only applies to this device. %lld is the number of hidden people. Has plural forms.",
       "localizations" : {
@@ -1263,6 +1269,9 @@
     },
     "Content hashes" : {
       "comment" : "A server feature in the list under Settings › Server features."
+    },
+    "Continue in Background" : {
+      "comment" : "Share extension (\"Upload to Nextcloud Photos\" from the share sheet): button while the shared items upload. It closes the sheet; the uploads go on in the background and the app finishes them."
     },
     "Contrast" : {
       "comment" : "A label displayed in a slider.",

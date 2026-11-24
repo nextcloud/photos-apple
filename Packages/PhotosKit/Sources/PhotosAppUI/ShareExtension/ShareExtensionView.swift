@@ -27,8 +27,9 @@ public struct ShareExtensionView: View {
     @State private var copies = SharedItems.directory.appending(path: UUID().uuidString)
     @State private var phase: Phase = .preparing
     @State private var progress: Double = 0
-    /// Files an upload was started for. A second attempt must not create "name (2)" when the first one did arrive.
-    @State private var attempted: Set<URL> = []
+    /// The uploads, once started: the system sends them in a background session of their own, and the app finishes them
+    /// when this extension has ended (SPEC §7.24).
+    @State private var share: ShareUploads.Share?
 
     enum Phase: Equatable {
         case preparing
@@ -92,13 +93,27 @@ public struct ShareExtensionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(String(localized: "Cancel", bundle: .module)) {
-                        SharedItems.remove(copies)
-                        cancel()
+                        Task {
+                            await share?.cancel()
+                            SharedItems.remove(copies)
+                            cancel()
+                        }
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(uploadTitle) { Task { await upload() } }
-                        .disabled(!canUpload)
+                    if phase == .uploading {
+                        // The system goes on with the uploads; the app finishes them.
+                        Button(String(localized: "Continue in Background", bundle: .module)) {
+                            Task {
+                                await share?.leaveToApp()
+                                SharedItems.remove(copies)
+                                complete()
+                            }
+                        }
+                    } else {
+                        Button(uploadTitle) { Task { await upload() } }
+                            .disabled(!canUpload)
+                    }
                 }
             }
         }
@@ -137,38 +152,45 @@ public struct ShareExtensionView: View {
     }
 
     func upload() async {
-        guard let account, let password = Keychain().string(for: Keychain.passwordKey(account.id.rawValue)) else {
-            phase = .failed(String(localized: "Please log in again in Nextcloud Photos.", bundle: .module))
-            return
-        }
+        guard let account else { return }
         phase = .uploading
         progress = 0
-        // The app's trust settings and client certificates (shared container and keychain group).
-        let http = AppModel.makeHTTPClient()
-        let connection = ServerConnection(
-            serverURL: account.serverURL, userId: account.userId, loginName: account.loginName, appPassword: password,
-            userAgent: UserAgent.make(appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"))
-        let api = PhotosAPI(dav: DAVClient(http: http, connection: connection), ocs: OCSClient(http: http, connection: connection))
-        // Requests are repeated after transient failures; a large file that was interrupted continues where it stopped.
-        let uploader = Uploader(dav: api.dav)
-        let folder = AccountServices.loadFeatures(account.id)?.userConfig.photosLocation ?? "/Photos"
-        let album = albums.first { $0.id == albumId }
-        let total = files.count
-        let retried = attempted
-        attempted.formUnion(files)
-        let result = await SequentialUploads.run(files) { file in
-            let uploaded = try await uploader.upload(
-                file: file, fileName: file.lastPathComponent, folder: folder, capturedAt: CaptureDate.read(file),
-                conflict: retried.contains(file) ? .skipIfSameSize : .rename)
-            if let album { try? await api.addToAlbum(album, userPath: uploaded.path) }
-        } done: { file in
-            // What is uploaded leaves the list, so a second attempt only sends the rest.
-            files.removeAll { $0 == file }
-            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
-            progress = Double(total - files.count) / Double(max(total, 1))
-        }
-        if let error = result.error {
+        let stopped: (any Error)?
+        let share: ShareUploads.Share
+        do {
+            if let existing = self.share {
+                share = existing
+                stopped = await share.retryFailed()
+            } else {
+                let album = albums.first { $0.id == albumId }
+                share = try await ShareUploads.start(account: account, album: album)
+                self.share = share
+                let folder = AccountServices.loadFeatures(account.id)?.userConfig.photosLocation ?? "/Photos"
+                // The copies move into the container the app shares, where they wait for the system.
+                let items = files.map { (file: $0, capturedAt: CaptureDate.read($0), sameSizeIsThisFile: false) }
+                stopped = try await share.upload(items, folder: folder)
+            }
+        } catch NetworkError.unauthorized {
+            phase = .failed(String(localized: "Please log in again in Nextcloud Photos.", bundle: .module))
+            return
+        } catch {
             phase = .failed(error.localizedDescription)
+            return
+        }
+        if let stopped {
+            phase = .failed(stopped.localizedDescription)
+            return
+        }
+        var last: ShareUploadProgress?
+        for await update in await share.progressUpdates() {
+            progress = update.fraction
+            last = update
+            if update.isThrough { break }
+        }
+        if let last, last.failed > 0 {
+            phase = .failed(
+                last.lastFailure.map { String(localized: "\(last.failed) of \(last.total) items could not be uploaded: \($0)", bundle: .module) }
+                    ?? String(localized: "\(last.failed) of \(last.total) items could not be uploaded.", bundle: .module))
         } else {
             SharedItems.remove(copies)
             complete()

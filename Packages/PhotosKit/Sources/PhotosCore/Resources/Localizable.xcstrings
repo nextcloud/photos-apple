@@ -57,6 +57,9 @@
         }
       }
     },
+    "%lld items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more." : {
+      "comment" : "Text of a notification: %lld is the number of shared items that could not be uploaded after the share sheet was closed."
+    },
     "%lld new photos" : {
       "comment" : "Notification body about a shared album (its title is the title): how many photos others added.",
       "localizations" : {
@@ -211,6 +214,9 @@
     },
     "Remove from Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Favorites\"): photos are no longer favourites. Title-style capitalisation as in the menu bar."
+    },
+    "Shared items were not uploaded" : {
+      "comment" : "Title of a notification: items the user shared to Nextcloud Photos from another app could not be uploaded after the share sheet was closed."
     },
     "Shared on %@" : {
       "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
