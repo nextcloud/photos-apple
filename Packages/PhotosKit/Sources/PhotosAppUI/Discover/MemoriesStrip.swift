@@ -125,10 +125,12 @@ struct MemoriesStrip: View {
     }
 }
 
-/// One memory's photos, with "Play Slideshow" in the toolbar.
+/// One memory's photos, with "Play Slideshow" and the memory's menu (`MemoryActionsMenu`) in the toolbar.
 struct MemoryScreen: View {
     let memory: Memory
     @State private var slideshow: SlideshowStart?
+    /// Save as album, share as link, slideshow music (SPEC ME-4).
+    @State private var actions = MemoryActionsModel()
 
     var body: some View {
         ItemsScreen(title: memory.title, sectioned: false) { services in
@@ -141,8 +143,10 @@ struct MemoryScreen: View {
                 Label(Self.playTitle, systemImage: "play.rectangle")
             }
             .help(Self.playTitle)
+            MemoryActionsMenu(memory: memory, model: actions)
         }
         .memorySlideshow($slideshow)
+        .memoryActions(actions)
     }
 
     static var playTitle: String {

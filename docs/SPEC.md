@@ -488,6 +488,7 @@ All computed locally over the whole index (constants in `photos-extended-api.md`
 - **ME-2** **Trips**: split by gaps > 2 days, keep clusters ≥ 8 photos, cover = photo nearest the middle time, title = most frequent place (+ second place if ≥ half as frequent, "A & B"), else the date range. Newest first.
 - **ME-3** **Year recap**: newest year with ≥ 30 photos, 60 highlights (favourites first, then evenly per month).
 - **ME-4** Memory player: full-screen slideshow of a memory with title card; share as quick-share link; "Save as album".
+  Decided in round 4: a memory's "More" menu has "Save as album" (an own album named after the memory: trip and recap titles, On this day by its dates; " (2)" when the name is taken; a trip's places as location; only the user's own photos, the others are counted in the confirmation), "Share as link…" (an album with a public link named after the memory, SH-4) and "Slideshow music". Music is optional and off by default; the app ships none (no licensed tracks). The user picks an audio file (copied into the app's storage) or, on iPhone and iPad, a song of the Music library (`MPMediaPickerController`, played through the app's queue of the system player); one choice for all memory slideshows. It fades in, pauses and stops with the slideshow and loops; a speaker button in the slideshow turns it off for that slideshow; files play in the `ambient` audio category (mixes, follows the Ring/Silent switch).
 
 ### 7.13 Archive and hidden photos — M4
 

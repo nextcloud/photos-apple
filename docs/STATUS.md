@@ -383,7 +383,20 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   iPad, pushed in the window on the Mac and Vision Pro; the title over the first photo, 4 s per photo, 1.2 s cross-fade with a
   slow zoom, starts over after the last; Pause/Play, Previous, Next and Close (tap shows/hides them; ← → Space Esc on a
   keyboard). Reduce Motion: a 0.4 s dissolve without the zoom. With VoiceOver it starts paused. Videos show their still.
-  Stepping ✅ unit-tested; not run (Mac screen locked). ⬜ "Save as album", share as link, music.
+  Stepping ✅ unit-tested; not run (Mac screen locked).
+- Memory menu (ME-4, round 4) 🟡: "More" in a memory's toolbar. "Save as album" makes an own Nextcloud album named after the
+  memory (trip and recap titles; for On this day its dates, "1 year ago" says nothing later; " (2)" when taken, "/" becomes
+  "-"; a trip's places become the album's location) and adds the user's own photos through the outbox; photos of shared
+  folders are left out and counted in the confirmation. "Share as link…" makes an album with a public link named after the
+  memory (SH-4) and shows the link sheet. "Slideshow music": none (default), an audio file (copied into Application
+  Support, so it keeps playing after the original moves) or, on iPhone and iPad, a song of the Music library
+  (`MPMediaPickerController`, played by the app's own queue of the system player, so Apple Music songs work;
+  `NSAppleMusicUsageDescription`). One choice for all memory slideshows; the app ships no music (licences). It fades in,
+  pauses with the slideshow, loops, stops on close; a speaker button next to the controls turns it off for this slideshow;
+  files play in the `ambient` category (mixes with other audio, silenced by the Ring/Silent switch, as in Photos). Only
+  memory slideshows play it (`SlideshowStart.playsMemoryMusic`). Album name, save (stub server: MKCOL, location, outbox COPY
+  of the own photos only) and the music choice and file copy ✅ unit-tested; the menu, the link sheet, the pickers and the
+  playback were not run (Mac screen locked; iOS not run).
 - Managing people 🟡 (PE-3, PE-4; no Recognize on the test servers, so not run): rename (People grid context menu and the
   person's menu; empty, digits-only and taken names are refused before sending), merge, remove person, "Not this person",
   "Move to another person…" and, for unassigned faces, "Assign to person…" (pick a person or create one: MKCOL + MOVE of the
