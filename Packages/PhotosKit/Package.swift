@@ -11,7 +11,7 @@ let swiftSettings: [SwiftSetting] = [
 let package = Package(
     name: "PhotosKit",
     defaultLocalization: "en",
-    platforms: [.iOS("27.0"), .macOS("27.0"), .visionOS("27.0")],
+    platforms: [.iOS("27.0"), .macOS("27.0"), .visionOS("27.0"), .tvOS("27.0"), .watchOS("27.0")],
     products: [
         .library(name: "PhotosModel", targets: ["PhotosModel"]),
         .library(name: "PhotosDomain", targets: ["PhotosDomain"]),

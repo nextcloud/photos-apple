@@ -105,18 +105,23 @@ public enum HiddenPeopleFile {
 /// a whole when its library changed, and deleted when the account is logged out or wiped (`AppModel.purge`); all items go
 /// while app lock is on.
 public actor SpotlightIndexer {
-    /// No index in unit tests: a test host has no app identity for Spotlight (on iOS its calls never return), and tests must
-    /// not fill the Mac's Spotlight with test accounts.
-    public static let shared = SpotlightIndexer(
-        index: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil ? .default() : nil)
+    #if os(tvOS)
+        // Apple TV has no Spotlight (Core Spotlight's index is unavailable there, SPEC §15.3): nothing is indexed.
+        public static let shared = SpotlightIndexer()
+    #else
+        /// No index in unit tests: a test host has no app identity for Spotlight (on iOS its calls never return), and tests
+        /// must not fill the Mac's Spotlight with test accounts.
+        public static let shared = SpotlightIndexer(
+            index: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil ? .default() : nil)
 
-    private let index: CSSearchableIndex?
+        private let index: CSSearchableIndex?
+
+        /// - Parameter index: nil in tests: nothing is sent to Spotlight.
+        init(index: CSSearchableIndex?) {
+            self.index = CSSearchableIndex.isIndexingAvailable() ? index : nil
+        }
+    #endif
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "spotlight")
-
-    /// - Parameter index: nil in tests: nothing is sent to Spotlight.
-    init(index: CSSearchableIndex?) {
-        self.index = CSSearchableIndex.isIndexingAvailable() ? index : nil
-    }
 
     /// The Spotlight domain of an account. A digest of the account id: domains are hierarchical with "." (deleting
     /// `a.b` would delete `a.b.c` too), and an id contains the server address.
@@ -125,22 +130,24 @@ public actor SpotlightIndexer {
         return "account-\(digest)"
     }
 
-    /// The Spotlight items of these entries.
-    static func items(_ entries: [SpotlightEntry], account: Account) -> [CSSearchableItem] {
-        entries.compactMap { entry in
-            guard let url = entry.link.url(for: account) else { return nil }
-            let attributes = CSSearchableItemAttributeSet(contentType: UTType.content)
-            attributes.title = entry.title
-            attributes.displayName = entry.title
-            attributes.contentDescription = [kindName(entry.kind), entry.detail].compactMap { $0 }.joined(separator: " · ")
-            attributes.keywords = [entry.title] + (entry.detail.map { [$0] } ?? [])
-            let item = CSSearchableItem(
-                uniqueIdentifier: url.absoluteString, domainIdentifier: domain(account.id), attributeSet: attributes)
-            // Removed again by the next pass when it is gone; the date only keeps a forgotten item from staying for ever.
-            item.expirationDate = Date().addingTimeInterval(60 * 24 * 3600)
-            return item
+    #if !os(tvOS)
+        /// The Spotlight items of these entries.
+        static func items(_ entries: [SpotlightEntry], account: Account) -> [CSSearchableItem] {
+            entries.compactMap { entry in
+                guard let url = entry.link.url(for: account) else { return nil }
+                let attributes = CSSearchableItemAttributeSet(contentType: UTType.content)
+                attributes.title = entry.title
+                attributes.displayName = entry.title
+                attributes.contentDescription = [kindName(entry.kind), entry.detail].compactMap { $0 }.joined(separator: " · ")
+                attributes.keywords = [entry.title] + (entry.detail.map { [$0] } ?? [])
+                let item = CSSearchableItem(
+                    uniqueIdentifier: url.absoluteString, domainIdentifier: domain(account.id), attributeSet: attributes)
+                // Removed again by the next pass when it is gone; the date only keeps a forgotten item from staying for ever.
+                item.expirationDate = Date().addingTimeInterval(60 * 24 * 3600)
+                return item
+            }
         }
-    }
+    #endif
 
     static func kindName(_ kind: SpotlightEntry.Kind) -> String {
         switch kind {
@@ -152,35 +159,41 @@ public actor SpotlightIndexer {
 
     /// Replaces the account's items with these entries.
     public func update(_ account: Account, entries: [SpotlightEntry]) async {
-        guard let index else { return }
-        let domain = Self.domain(account.id)
-        do {
-            try await index.deleteSearchableItems(withDomainIdentifiers: [domain])
-            let items = Self.items(entries, account: account)
-            if !items.isEmpty { try await index.indexSearchableItems(items) }
-            logger.info("spotlight: \(items.count) items indexed")
-        } catch {
-            logger.error("spotlight: indexing failed: \(error.localizedDescription, privacy: .public)")
-        }
+        #if !os(tvOS)
+            guard let index else { return }
+            let domain = Self.domain(account.id)
+            do {
+                try await index.deleteSearchableItems(withDomainIdentifiers: [domain])
+                let items = Self.items(entries, account: account)
+                if !items.isEmpty { try await index.indexSearchableItems(items) }
+                logger.info("spotlight: \(items.count) items indexed")
+            } catch {
+                logger.error("spotlight: indexing failed: \(error.localizedDescription, privacy: .public)")
+            }
+        #endif
     }
 
     /// Removes an account's items (logout, remote wipe).
     public func remove(_ id: AccountID) async {
-        guard let index else { return }
-        do {
-            try await index.deleteSearchableItems(withDomainIdentifiers: [Self.domain(id)])
-        } catch {
-            logger.error("spotlight: removing an account failed: \(error.localizedDescription, privacy: .public)")
-        }
+        #if !os(tvOS)
+            guard let index else { return }
+            do {
+                try await index.deleteSearchableItems(withDomainIdentifiers: [Self.domain(id)])
+            } catch {
+                logger.error("spotlight: removing an account failed: \(error.localizedDescription, privacy: .public)")
+            }
+        #endif
     }
 
     /// Removes every item of the app (app lock turned on).
     public func removeAll() async {
-        guard let index else { return }
-        do {
-            try await index.deleteAllSearchableItems()
-        } catch {
-            logger.error("spotlight: removing all items failed: \(error.localizedDescription, privacy: .public)")
-        }
+        #if !os(tvOS)
+            guard let index else { return }
+            do {
+                try await index.deleteAllSearchableItems()
+            } catch {
+                logger.error("spotlight: removing all items failed: \(error.localizedDescription, privacy: .public)")
+            }
+        #endif
     }
 }

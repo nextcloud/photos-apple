@@ -676,7 +676,8 @@ public enum ShareUploads {
     }
 }
 
-#if canImport(UserNotifications)
+// Apple TV shows no notification banners (SPEC §15.3).
+#if canImport(UserNotifications) && !os(tvOS)
     /// Tells the user that shared items could not be uploaded after the share extension had closed.
     enum ShareUploadNotice {
         static func post(failed: Int) async {
