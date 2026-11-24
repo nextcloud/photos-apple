@@ -832,7 +832,93 @@ _To be written._
 
 ### 15.8 Smart offline and fun extras: stickers, collages, photo of the day [extras]
 
-_To be written._
+#### 15.8.1 Smart offline
+
+The app keeps, on its own, the photos the user is most likely to want without a connection, within a storage budget.
+Settings › Storage › Smart offline: **Space to use** Off / Small (1 GB) / Medium (5 GB) / Large (20 GB) — *decided:*
+Small by default on every platform (a device setting, the same for all accounts); **Keep originals** (off: photos are
+kept as previews of 2048 px on the long edge, which fill an iPhone or iPad screen); what it uses now ("1.2 GB · 1,840
+photos") and what that covers ("your photos since August 2026, 210 favorites, 12 photos of the coming days' memories and
+photos of 2 albums you opened recently").
+
+- **What is wanted** (`SmartOfflinePolicy`, pure and unit-tested): every photo gets a score for each reason that applies,
+  the highest counts. *On this day* in the next 7 days of an earlier year: 1.0 (−0.01 per day further away); taken in the
+  last 12 months: 0.9 halving every 60 days; in an album opened in the last 30 days: 0.6 halving every 7 days; favourite:
+  0.35–0.55 (newer a little higher). The best-scored photos are wanted until their sizes (real ones once downloaded, an
+  estimate learnt from the kept previews before) fill the budget; a smaller one further down still takes a gap.
+- **Never**: archived photos, Live Photo videos, photos in excluded (`.nomedia`) folders, photos an offline album (§7.19)
+  keeps already (those are separate, not counted in the budget, and stay as they are). Videos are kept as previews
+  (a still) even with "Keep originals": one video would take the room of hundreds of photos; offline albums keep videos.
+- **Eviction**: a kept file whose photo is gone, archived, changed (ETag) or kept at the other quality is removed in the
+  next pass. A file that no reason applies to any more stays until its room is needed; then the least recently used go
+  first (LRU: a file's modification date is set when the image pipeline reads it, at most once a day). Off removes all.
+- **When**: removing happens in every pass. Downloading needs an unmetered network (Wi-Fi/Ethernet; not cellular, a
+  hotspot or Low Data Mode) and no Low Power Mode. iPhone/iPad: a `BGProcessingTask` (`com.nextcloud.photos.offline`)
+  that requires external power and network (charging, usually at night); in the foreground, after a sync, at most 150
+  files per pass (every 10 minutes at most). Mac: an hourly `NSBackgroundActivityScheduler` activity, deferred while the
+  Mac is busy or in Low Power Mode. Vision Pro: while the app is open.
+- **Storage**: the account's `SmartOffline` folder (Application Support, excluded from backups, removed with the account),
+  outside the caches, so a cache trim never touches it; table `smartOfflineFile` (migration `v5-smart-offline`) and
+  `smartOfflineAlbumView` (when an album was opened).
+- **Use**: the image pipeline asks smart offline for a kept preview at least as large as the bucket before the network
+  (decoded to the size asked for, not copied into the cache); kept originals serve like those of offline albums.
+- **Visible**: the Info panel says "Available offline" for photos kept by smart offline or an offline album; the offline
+  banner over the grids says what can be looked at in full ("Available in full: your photos since August 2026 and 210
+  favorites."); other photos show their cached tiles or blurhash. *Not done:* a badge on grid tiles (the grid is another
+  package's; Photos.app has no such badge either).
+
+#### 15.8.2 Stickers
+
+- **Make Sticker** (viewer › More, photos): the 4096 px preview (else 1024) is segmented on the device with Vision's
+  `VNGenerateForegroundInstanceMaskRequest`; all subjects that are not specks (≥ 1 % of the picture) are lifted
+  together, as Photos does. Styles: Cut-out, Outline (white border, faint shadow — the default), Shadow, Comic; at most
+  1024 px. Share (transparent PNG through the share sheet), Copy (PNG on the pasteboard), Add to Sticker Book. On
+  iPhone and iPad the sticker carries VisionKit's subject interaction: touch and hold shows the system's menu, which
+  offers "Add Sticker" for the system's stickers (where the system offers it; the app cannot add to them itself).
+  PNG and HEIC with transparency are both produced by `StickerMaker` (the share sheet uses PNG, which every app takes).
+- **Sticker book**: a Collections/sidebar entry "Stickers": the stickers made in the app, per account, on this device
+  (PNG files plus a JSON list in the account folder; removed with the account). People's packs first, then the others;
+  context menu Share, Copy, Delete. Not uploaded.
+- **Sticker pack of a person** (People › person › menu › Make Sticker Pack, named people): up to 8 photos of the person
+  where the face (Recognize's detection box) is at least 6 % of the picture's width, favourites first (up to half), the
+  rest spread over time, largest faces first; in each only the subject that holds the face's centre (or overlaps it
+  most) is lifted, so people standing next to them are left out. The stickers appear one by one and go into the book
+  under the person's name.
+- Segmentation is not available in the simulator (the sheet says so); it runs on devices and Macs with Apple silicon.
+
+#### 15.8.3 Collage and card
+
+- From a selection (grid › More › Create Collage, 1–12 photos), an album (album options) or a memory (memory ›
+  More › Create Card: up to 6 photos chosen by `CollagePicker` — favourites first, at most half, the rest spread over the
+  memory's time, the best one first — with the memory's title and dates).
+- Layouts (`CollageLayouts`, pure and unit-tested): **Grid** (cells about square; a shorter last row fills the width),
+  **Mosaic** (justified rows: the number of rows whose natural height fits best, then stretched to fill), **Prints**
+  (instant-photo prints with a white border, turned up to ±6°, deterministic per shuffle), **Magazine** (one large photo,
+  the others in a column or row, the title over the large photo on a shade). Every photo is cropped around its focus:
+  the faces (Vision face rectangles, with room for hair and shoulders) or else the attention-based salient objects;
+  when the focus does not fit, its top is kept.
+- Title and subtitle, four themes (Classic white, Night, Paper with a serif title, Ocean in Nextcloud blue), formats
+  Square, Portrait 4:5, Landscape 3:2, Story 9:16. Editing: tap a photo, then another to swap them; Shuffle; Remove Photo.
+- Export: Share (JPEG, 3000 px on the long edge, or a one-page PDF at print size: 8×8 in, 8×10 in, 9×6 in, 4.5×8 in),
+  rendered with the 4096 px previews when a destination asks for it; **Save to Nextcloud** uploads the JPEG as
+  "Collage <date time>.jpg" into the upload folder (`photosLocation`) and syncs.
+
+#### 15.8.4 Photo of the day
+
+- Settings › Photo of the Day: off by default; turning it on asks for permission to notify (alerts, no push
+  registration); a time (default 9:00).
+- Choice (`PhotoOfTheDay`, pure and unit-tested): a photo taken on this very calendar day in an earlier year, else within
+  ±3 days, else a favourite not shown in the last 60 days (a repeat only when nothing else is left). Scored: favourite
+  +3, a recognised person +1.5, ≥ 2 MP +1, a place +0.25, a panorama or sliver −1; screenshots, PNG/GIF graphics and
+  pictures under 0.5 MP are never chosen; ties are broken by a hash of the day, so the choice is stable for a day.
+  Never an archived photo, a video, a Live Photo video or anything in an excluded folder.
+- Local notifications for today (if the time is still to come) and the next days (3 in all), each with its photo as a
+  1024 px attachment (the system shows it large when the notification is expanded; no content extension needed). They are
+  scheduled again after syncs (at most every 30 minutes), when the setting or app lock changes and when another account
+  is shown, so a photo archived meanwhile is replaced before its day. Text: "On this day 3 years ago · Lisbon", "This week
+  2 years ago", "From your favorites · June 2019". With app lock on: "A photo from your library is waiting for you." with
+  no photo, date or place. Tapping opens the photo in the viewer of its account (`nextcloudphotos://user@host/photo/<id>`,
+  after the unlock). Pending ones are removed with their account.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
