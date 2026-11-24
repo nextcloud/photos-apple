@@ -174,6 +174,8 @@ User-visible settings: global database. Server-side Photos user config (§7.25) 
 
 `nextcloudphotos://<accountId>/<route>` with routes mirroring the web app: `timeline`, `photos`, `videos`, `favorites`, `thisday`, `memories`, `map`, `albums/<name>`, `sharedalbums/<name>`, `places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`, `photo/<fileId>`. Also accept web URLs of the same account's server (`https://<host>/index.php/apps/photos/...`) when shared into the app, and public album links (`…/apps/photos/public/<token>`).
 
+*Decided (round 4):* the account is written as the user and server of the URL: `nextcloudphotos://<userId>@<host>[:port][/<server path>]/<route>` (the account id `"<userId> <serverURL>"` cannot be a URL host); a link without it opens in the account shown. A link for another logged-in account asks before switching; one for an account that is not logged in is explained (nothing is added). A web link of a server with several accounts on the device lets the user pick the account. Also `search/<text>` (the "Search photos" intent). Public album links open the "Open public link" sheet with the link filled in, so the user sees where it leads before anything loads.
+
 ### 4.9 Branding
 
 One `Brand` type (modelled on the Files app's `NCBrandOptions`) holds name, accent colour (`#0082C9`), logo assets, push proxy URL, default upload folder, privacy/source/help URLs, and MDM/AppConfig overrides. Optionally use the server's theming colour as accent (setting, default off).
@@ -199,7 +201,7 @@ One `Brand` type (modelled on the Files app's `NCBrandOptions`) holds name, acce
 6. **401 handling:** on a 401 from a request, re-verify with `cloud/user`. If it is a real 401: call `POST /index.php/core/wipe/check` with the app password; if wipe is requested, delete all local data of the account and confirm with `…/wipe/success`; otherwise mark the account "signed out" and ask the user to log in again (keep the local cache until they remove the account).
 7. **Logout / remove account:** unsubscribe push (server + proxy), **revoke the app password** (`DELETE /ocs/v2.php/core/apppassword`), delete keychain items, the account database, caches and offline files.
 8. **User agent:** `Mozilla/5.0 (<iOS|iPadOS|macOS|visionOS>) Nextcloud-Photos/<version>`. Before finalising, check the server's client regexes (`lib/public/IRequest.php`, e.g. `USER_AGENT_CLIENT_IOS`) and pick a string that is recognised as a mobile/desktop client where that matters (session naming in "Devices & sessions") but is not mistaken for the Files app.
-9. **MDM / AppConfig** (`com.apple.configuration.managed`), keys compatible with the Files app: `serverUrl`, `username`, `disable_multiaccount`, `enforce_passcode_lock`, `disable_log`, plus `disable_backup`.
+9. **MDM / AppConfig** (`com.apple.configuration.managed`), keys compatible with the Files app: `serverUrl`, `username`, `disable_multiaccount`, `enforce_passcode_lock`, `disable_log`, plus `disable_backup`. *Decided (round 4):* `serverUrl` fixes the login's address and refuses logins to any other server (QR codes and links too); `username` is proposed on the login page (`?user=`); `disable_multiaccount` allows logging in again to the existing account but no second one; `enforce_passcode_lock` turns app lock on and locks its switch; `disable_log` stops the kept log and diagnostics export; `disable_backup` turns backup off. Applied at launch and live; accounts that exist when a restriction arrives are not removed. `password`/`apppassword` of the Files app are not supported (credentials do not belong in a configuration profile).
 
 ### 5.2 Versions and the Photos app on each server
 
@@ -356,7 +358,7 @@ The structure mirrors the web app's navigation (including the extended "Advanced
 
 **macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square tiles; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
 
-**visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5).
+**visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5). *Decided (round 4):* a spatial photo is recognised from the original's stereo pair group (read when a HEIC is viewed on Vision Pro) and shown with `ImagePresentationComponent`; a panorama (≥ 3000 px wide, ≥ 2:1, from the server's size) opens in an immersive space on a cylinder segment (aspect × 60°, at most 360°).
 
 ### 6.3 Empty, loading and error states
 
@@ -675,7 +677,7 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 - **Entities**: `PhotoEntity`, `AlbumEntity`, `PersonEntity`, `PlaceEntity`, `TagEntity` (indexed entities for Spotlight).
 - **Intents**: Search photos (place, person, date range, tag, favourites), Open album/person/place, Show On this day, Start slideshow (of album/memory), Add photos to album, Upload photos/files (accepts images from Shortcuts) to the upload folder or an album, Create album, Toggle backup / Back up now, Share album link.
 - **App Shortcuts** with Siri phrases ("Show my photos from Paris in Nextcloud Photos", "On this day in Nextcloud Photos").
-- **Spotlight**: index albums, people, places and smart albums (not every photo in v1; optional setting to index captions later). Archived content is never indexed.
+- **Spotlight**: index albums, people, places and smart albums (not every photo in v1; optional setting to index captions later). Archived content is never indexed. *Decided (round 4):* one Core Spotlight domain per account, removed on logout and remote wipe; nothing is indexed while app lock is on; people hidden on the device and unnamed people are not indexed; a place only while a non-archived photo has it; no thumbnails. Smart albums are not indexed yet.
 
 ### 7.24 Share extension, drag & drop, export — M2
 
