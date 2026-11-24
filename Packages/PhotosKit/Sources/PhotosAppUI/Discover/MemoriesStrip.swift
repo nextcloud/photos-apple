@@ -54,6 +54,9 @@ struct MemoriesStrip: View {
                     .padding(.vertical, 8)
                 }
                 .scrollIndicators(.hidden)
+                // A horizontal scroll view takes all the height it is offered: in the library's stack it would share
+                // the screen with the grid and leave a large empty band above the cards.
+                .fixedSize(horizontal: false, vertical: true)
                 .contextMenu {
                     Button {
                         showsMemories = false
