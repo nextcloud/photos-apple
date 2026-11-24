@@ -32,10 +32,13 @@ targets:
         product: PhotosAppUI
       - package: PhotosKit
         product: PhotosCore
+      # Neither extension point exists on visionOS: an app that embeds them does not install there.
       - target: ShareExtension
         embed: true
+        destinationFilters: [iOS, macOS]
       - target: NotificationService
         embed: true
+        destinationFilters: [iOS, macOS]
       - target: Widgets
         embed: true
       # PhotoKit's background uploads (SPEC §7.18.6); not on visionOS.
@@ -82,6 +85,10 @@ targets:
         LSApplicationCategoryType: public.app-category.photography
         UILaunchScreen: {}
         UIApplicationSupportsMultipleScenes: true
+        # Where the system looks for it: without it Vision Pro refuses to open the immersive spaces (memory room, panorama)
+        # and iPadOS gives the app a single window.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
         NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
