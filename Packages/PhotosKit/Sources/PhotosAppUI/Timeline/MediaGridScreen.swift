@@ -76,6 +76,9 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Square tiles or the aspect ratio grid (Settings, View ▸ Square Tiles).
     @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
     @Environment(\.showInTimeline) private var showInTimeline
+    #if os(iOS)
+        @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     struct TileHighlight: Equatable {
         let id = UUID()
@@ -98,6 +101,8 @@ struct MediaGridScreen<Accessory: View>: View {
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
+                // iPhone: the selection's actions take the place of the tab bar, as in Photos (else they are under it).
+                .toolbar(isSelecting && sizeClass == .compact ? .hidden : .automatic, for: .tabBar)
             #endif
             .toolbar { toolbar }
             .overlay(alignment: .bottom) { statusBanner }

@@ -23,7 +23,8 @@ struct MemoriesScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if !onThisDay.isEmpty {
-                    section(String(localized: "On this day", bundle: .module), onThisDay)
+                    // The On this day screen is titled so already: no heading that repeats the title.
+                    section(onlyOnThisDay ? nil : String(localized: "On this day", bundle: .module), onThisDay)
                 }
                 if !onlyOnThisDay {
                     if let recap { section(String(localized: "Year in review", bundle: .module), [recap]) }
@@ -53,9 +54,9 @@ struct MemoriesScreen: View {
         }
     }
 
-    func section(_ title: String, _ memories: [Memory]) -> some View {
+    func section(_ title: String?, _ memories: [Memory]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            if let title { Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {

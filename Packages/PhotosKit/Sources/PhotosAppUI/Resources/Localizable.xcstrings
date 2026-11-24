@@ -932,6 +932,9 @@
     "Add Folder…" : {
       "comment" : "Button in Settings that adds a folder of the server to the folders shown in the timeline (Mac, title case)."
     },
+    "Add folder…" : {
+      "comment" : "Button in Settings that adds a folder of the server to the folders shown in the timeline (iPhone and iPad, sentence case)."
+    },
     "Add This Folder" : {
       "comment" : "Button in the folder browser that confirms the folder currently shown as a timeline folder."
     },
