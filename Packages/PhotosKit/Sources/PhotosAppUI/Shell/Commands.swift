@@ -105,7 +105,8 @@ public struct PhotosCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(main == nil)
             if supportsMultipleWindows {
-                Button(String(localized: "Open in New Window", bundle: .module, comment: "File menu: the album shown in a window of its own.")) {
+                // The album the window shows, in a window of its own.
+                Button(String(localized: "Open in New Window", bundle: .module)) {
                     if let shownAlbum { openWindow(id: AlbumWindowValue.sceneId, value: shownAlbum) }
                 }
                 .disabled(shownAlbum == nil)

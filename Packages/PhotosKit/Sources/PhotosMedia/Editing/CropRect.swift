@@ -146,12 +146,24 @@ public struct CropRect: Hashable, Sendable {
             newWidth = horizontal ? fromX : fromY
         }
         // The room there is: up to the picture's edges from what stays in place.
-        var maxWidth: Double = 1
-        var maxHeight: Double = 1
+        let maxWidth: Double
+        let maxHeight: Double
         let centerX = x + width / 2
         let centerY = y + height / 2
-        if handle.movesLeft { maxWidth = maxX } else if handle.movesRight { maxWidth = 1 - x } else { maxWidth = 2 * min(centerX, 1 - centerX) }
-        if handle.movesTop { maxHeight = maxY } else if handle.movesBottom { maxHeight = 1 - y } else { maxHeight = 2 * min(centerY, 1 - centerY) }
+        if handle.movesLeft {
+            maxWidth = maxX
+        } else if handle.movesRight {
+            maxWidth = 1 - x
+        } else {
+            maxWidth = 2 * min(centerX, 1 - centerX)
+        }
+        if handle.movesTop {
+            maxHeight = maxY
+        } else if handle.movesBottom {
+            maxHeight = 1 - y
+        } else {
+            maxHeight = 2 * min(centerY, 1 - centerY)
+        }
         newWidth = min(newWidth, maxWidth, maxHeight / ratio)
         newWidth = max(newWidth, min(minimum, maxWidth, maxHeight / ratio))
         let newHeight = newWidth * ratio

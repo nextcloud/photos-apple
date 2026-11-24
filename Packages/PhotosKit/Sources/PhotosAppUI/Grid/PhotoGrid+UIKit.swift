@@ -500,7 +500,8 @@
                     children: group.map { action -> UIMenuElement in
                         let image = UIImage(systemName: action.systemImage)
                         if !action.children.isEmpty {
-                            return UIMenu(title: action.title, image: image, children: menuElements(action.children, ids: ids, at: indexPath))
+                            let children: [UIMenuElement] = menuElements(action.children, ids: ids, at: indexPath)
+                            return UIMenu(title: action.title, image: image, children: children)
                         }
                         if let share = action.share {
                             return UIAction(title: action.title, image: image) { [weak self] _ in

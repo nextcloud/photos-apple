@@ -30,7 +30,8 @@ enum PhotoEditSaving {
                     bundle: .module)
             case .changedOnServer:
                 String(
-                    localized: "The photo was changed on the server in the meantime. Nothing was overwritten; try again after the next sync.",
+                    localized:
+                        "The photo was changed on the server in the meantime. Nothing was overwritten; try again after the next sync.",
                     bundle: .module)
             }
         }

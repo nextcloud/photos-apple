@@ -34,7 +34,8 @@ public struct AlbumWindowView: View {
                     }
                 } else {
                     ContentUnavailableView(
-                        String(localized: "Album of another account", bundle: .module), systemImage: "person.crop.circle.badge.questionmark",
+                        String(localized: "Album of another account", bundle: .module),
+                        systemImage: "person.crop.circle.badge.questionmark",
                         description: Text("Switch back to the account the album belongs to, to see it here.", bundle: .module))
                 }
             } else {

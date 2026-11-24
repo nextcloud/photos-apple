@@ -472,8 +472,10 @@ struct MediaGridScreen<Accessory: View>: View {
     func albumMenuAction(title: String) -> GridMenuAction {
         var children: [GridMenuAction] = [
             GridMenuAction(
-                id: "album.new", title: PlatformWording.title(
-                    mac: LocalizedStringResource("New Album…", bundle: .module), other: LocalizedStringResource("New album…", bundle: .module)),
+                id: "album.new",
+                title: PlatformWording.title(
+                    mac: LocalizedStringResource("New Album…", bundle: .module),
+                    other: LocalizedStringResource("New album…", bundle: .module)),
                 systemImage: "plus.rectangle.on.rectangle"
             ) { ids in
                 withItems(ids) { newAlbumItems = PickedItems(items: $0) }
@@ -482,24 +484,30 @@ struct MediaGridScreen<Accessory: View>: View {
         let recent: [Album] = recentAlbums
         for (index, album) in recent.enumerated() {
             children.append(
-                GridMenuAction(id: "album.\(album.id)", title: album.title, systemImage: "rectangle.stack", startsGroup: index == 0) { ids in
+                GridMenuAction(id: "album.\(album.id)", title: album.title, systemImage: "rectangle.stack", startsGroup: index == 0) {
+                    ids in
                     add(ids, to: album)
                 })
         }
         if albums.count > recent.count {
             children.append(
                 GridMenuAction(
-                    id: "album.all", title: PlatformWording.title(
-                        mac: LocalizedStringResource("All Albums…", bundle: .module, comment: "Add to Album submenu: choose from every album."),
-                        other: LocalizedStringResource("All albums…", bundle: .module, comment: "Add to Album submenu: choose from every album.")),
+                    id: "album.all",
+                    title: PlatformWording.title(
+                        mac: LocalizedStringResource(
+                            "All Albums…", bundle: .module, comment: "Add to Album submenu: choose from every album."),
+                        other: LocalizedStringResource(
+                            "All albums…", bundle: .module, comment: "Add to Album submenu: choose from every album.")),
                     systemImage: "rectangle.stack", startsGroup: true
                 ) { ids in
                     withItems(ids) { albumPicker = PickedItems(items: $0) }
                 })
         }
-        return GridMenuAction(id: "album", title: title, systemImage: "rectangle.stack.badge.plus", startsGroup: true, handler: { ids in
-            withItems(ids) { albumPicker = PickedItems(items: $0) }
-        }, children: children)
+        return GridMenuAction(
+            id: "album", title: title, systemImage: "rectangle.stack.badge.plus", startsGroup: true,
+            handler: { ids in
+                withItems(ids) { albumPicker = PickedItems(items: $0) }
+            }, children: children)
     }
 
     func canEditMetadata(_ summary: SelectionSummary) -> Bool {
@@ -583,6 +591,13 @@ struct MediaGridScreen<Accessory: View>: View {
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(
             GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { ids in withItems(ids) { export($0) } })
+        // Edit ▸ Copy is only in the Mac's menu bar and on a hardware keyboard: here too, as in Photos.
+        if let items = info.items, !items.isEmpty {
+            actions.append(
+                GridMenuAction(id: "copy", title: String(localized: "Copy", bundle: .module), systemImage: "doc.on.doc") { _ in
+                    copy(items)
+                })
+        }
         // The system's Share menu with the originals (downloaded when a service asks for them); a loaded selection only.
         if let items = info.items, !items.isEmpty, let services = session.services {
             actions.append(
@@ -628,6 +643,19 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "edit", title: String(localized: "Edit…", bundle: .module), systemImage: "slider.horizontal.3") { _ in
                     editedItem = item
+                })
+        }
+        // Image ▸ Rotate in the context menu as well (iPhone and iPad have no menu bar); only for photos that may be changed.
+        if let items = info.items, PhotoRotation.canRotate(items) {
+            actions.append(
+                GridMenuAction(id: "rotate.left", title: String(localized: "Rotate Left", bundle: .module), systemImage: "rotate.left") {
+                    ids in
+                    rotate(ids, clockwise: false)
+                })
+            actions.append(
+                GridMenuAction(id: "rotate.right", title: String(localized: "Rotate Right", bundle: .module), systemImage: "rotate.right") {
+                    ids in
+                    rotate(ids, clockwise: true)
                 })
         }
         if canEditMetadata(summary) {

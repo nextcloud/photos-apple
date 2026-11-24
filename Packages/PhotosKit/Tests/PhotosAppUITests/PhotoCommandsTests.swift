@@ -3,8 +3,8 @@
 
 import Foundation
 import PhotosModel
-import UniformTypeIdentifiers
 import Testing
+import UniformTypeIdentifiers
 
 @testable import PhotosAppUI
 

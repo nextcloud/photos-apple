@@ -222,7 +222,8 @@ struct DuplicateAlbumNote {
             let names = albums.map { "“\($0.title)”" }.formatted(.list(type: .and))
             parts.append(
                 String(
-                    localized: "The copies to be deleted are in albums the kept copy is not in: \(names). Deleting them takes the photo out of these albums.",
+                    localized:
+                        "The copies to be deleted are in albums the kept copy is not in: \(names). Deleting them takes the photo out of these albums.",
                     bundle: .module, comment: "Duplicates: warning in the delete confirmation. The names are album titles in quotes."))
             if !kept.isOwnStorage {
                 parts.append(
@@ -234,7 +235,8 @@ struct DuplicateAlbumNote {
         if unchecked > 0 {
             parts.append(
                 String(
-                    localized: "\(unchecked) albums haven't been opened on this device yet; whether the copies are in them couldn't be checked.",
+                    localized:
+                        "\(unchecked) albums haven't been opened on this device yet; whether the copies are in them couldn't be checked.",
                     bundle: .module, comment: "Duplicates: albums whose content is not known to the app."))
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
