@@ -84,7 +84,7 @@ public struct PreviewImage: View {
         if let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: etag, upTo: bucket) { image = cached }
         let request = ImagePipeline.Request(
             fileId: fileId, etag: etag, bucket: bucket, hasPreview: hasPreview, mimeType: mimeType,
-            originalURL: path.map { services.connection.filesURL($0) })
+            originalURL: path.map { services.connection.originalURL(path: $0) })
         if let loaded = await services.images.preview(request) { image = loaded }
     }
 }

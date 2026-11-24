@@ -46,6 +46,16 @@ public struct ShareExtensionView: View {
     var account: Account? { registry.accounts.first { $0.id == accountId } ?? registry.activeAccount }
 
     public var body: some View {
+        // With app lock on, the accounts, album names and the upload need the same unlock as the app (SPEC §8).
+        AppLockGate(
+            cancel: {
+                SharedItems.remove(copies)
+                cancel()
+            }, inPlace: true
+        ) { form }
+    }
+
+    var form: some View {
         NavigationStack {
             Form {
                 if registry.accounts.isEmpty {

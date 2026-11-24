@@ -4,7 +4,8 @@
   SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
   SPDX-License-Identifier: MIT
 
-  Privacy manifest of PhotosAppUI: settings in UserDefaults (AppStorage); event timestamps on macOS.
+  Privacy manifest of PhotosAppUI: settings in UserDefaults (AppStorage; app lock in the App Group); event timestamps on macOS;
+  modification times of the share extension's own temporary copies.
   The reasons are explained in docs/PRIVACY-AND-EXPORT.md; keep both in step with the code.
 -->
 <plist version="1.0">
@@ -23,6 +24,7 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 		<dict>
@@ -31,6 +33,14 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>35F9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
 			</array>
 		</dict>
 	</array>

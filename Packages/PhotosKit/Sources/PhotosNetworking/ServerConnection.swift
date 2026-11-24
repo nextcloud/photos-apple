@@ -59,6 +59,10 @@ public struct ServerConnection: Sendable, Hashable {
     /// `/remote.php/dav/files/<uid><path>`
     public func filesURL(_ path: String) -> URL { davURL("files/\(userId)/\(path)") }
 
+    /// Where the original of an item is: a path in the user's files (`/Photos/a.jpg`), or the DAV path of a collection child
+    /// (`photos/<uid>/sharedalbums/<album>/<child>`, without a leading slash; `MediaItem.collectionChildMountType`).
+    public func originalURL(path: String) -> URL { path.hasPrefix("/") ? filesURL(path) : davURL(path) }
+
     /// DAV href (relative to the DAV root) of a user file, used in SEARCH scopes: `/files/<uid><path>`.
     public func filesHref(_ path: String) -> String {
         let clean = path.hasPrefix("/") ? path : "/" + path

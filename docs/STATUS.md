@@ -38,21 +38,39 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 - Logout, account removal and remote wipe share one clean-up (`AccountPurge`): database, caches, offline files, app password, push
   key and registration, backup options of that account; trusted and client certificates go with the last account on their host.
   Push is unregistered before the app password is revoked. ✅ unit-tested, logout ✅ in the Mac app; remote wipe 🟡 (no server-side test).
-- Logging in to an `http://` server asks for confirmation first (not for localhost) ✅.
+  Also cleared (round 3): the account's delivered notifications, the widgets (timelines reloaded), shared diagnostics reports,
+  the window's stored place when it names the removed account's album (`NavigationSnapshot.account`), and certificates of
+  hosts without an account (trusted in a login that was cancelled or ended on another server; also swept at launch).
+  ✅ unit-tested except the notification and widget calls (system services, 🟡).
+- Logging in to an `http://` server asks for confirmation first (not for localhost) ✅. The Login Flow keeps `https://` for the
+  login page and the poll when the typed address is `https://` (a proxy without `overwriteprotocol` names itself with http);
+  the same host returned with `http://` stays on https; a refused http server gets its fresh app password revoked over the
+  typed https address ✅ unit-tested (stubbed server), not run against a misconfigured proxy.
+- QR codes and login links show "Log in to <host> as <user>?" before anything is sent ✅ compiled (iOS scanner 🟡 not run).
+- Keychain items are `AfterFirstUnlockThisDeviceOnly` (not in backups or on other devices); existing items are switched once
+  at launch 🟡 (signed builds only; unsigned Mac builds use the file store).
 - ⬜ MDM / AppConfig keys (§5.1.9).
 - QR code login 🟡: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
   only where it is supported; camera access is asked for first, without it the link can be pasted). Compiles for iOS, not
   run (no simulator runtime, no device). The Mac and Vision Pro offer "Log in with a link".
 - Account state over a cached library ✅ (Mac app, against a proxy in front of the test server): the banner at the bottom of
   every grid says "Couldn't sync" with the reason and Retry, "Signed out" with "Log in again", and "The server's certificate
-  changed" with "Review…" (the trust dialog of the login); Settings › Server shows the same. A refused certificate makes every
+  changed" with "Review…"; Settings › Server shows the same. Review shows the previous and the new certificate (subject,
+  SHA-256). Only a host whose certificate the user had trusted before (renewed self-signed) can be trusted in place, after
+  a confirmation switch; a host the system trusted needs "Log in again…". Nothing is sent with the new certificate before
+  that. The state ends on the next answered request (also over a connection that stayed open) ✅ unit-tested; the sheet 🟡
+  compiled, not run. A refused certificate makes every
   request on the connection report the certificate (`HTTPClient`, unit-tested), so the sync fails visibly instead of
   stopping as "cancelled". The HTTP/2 case (several requests on one refused connection) is only unit-tested.
 - Diagnostics ✅ (Mac app): Settings › Server › "Export diagnostics…" writes the app's log entries of this run (at most
   the last 48 hours; the system only gives an app the log of its running process), app, system and server versions and
   the detected features into a text file (backup passes and their phase changes are logged too: names and
   counts only) — save panel on the Mac, share sheet elsewhere (🟡 not run). Account names,
-  addresses, paths, file names and tokens are removed (unit-tested). ⬜ The rotating log file of SPEC §4.5 (logs across launches).
+  addresses, paths, file names and tokens are removed (unit-tested). Log across launches ✅ unit-tested, 🟡 in the app: the
+  app copies its entries, redacted, into `Library/Logs/diagnostics.log` (256 KB, two older files) every 5 minutes and when it
+  goes to the background; the export adds the earlier runs. "Keep log across restarts" in Settings › Diagnostics (on by
+  default; off deletes the files). iOS: the exported report is deleted when the share sheet closes.
+- Settings › About › Licences: the MIT texts of the app and GRDB.swift ✅ compiled.
 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
@@ -175,7 +193,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Every destination has its own navigation path (`MainView.paths`); selected destination and open album are restored per
   scene (`NavigationSnapshot`) ✅ on the Mac.
 - Deep links `nextcloudphotos://<destination>`, `…/album/<name>` (`…/album/shared/<name>`), `…/photo/<fileId>` ✅ parsing unit-tested,
-  destination and album links ✅ in the Mac app, photo links 🟡. ⬜ The account part and the other routes of §4.8
+  destination and album links ✅ in the Mac app, photo links 🟡. Links wait while the app is locked and open after the
+  unlock; photo links only open photos the library shows (not archived, not the video half of a Live Photo, not unknown
+  ids) ✅ policy unit-tested, 🟡 not run. ⬜ The account part and the other routes of §4.8
   (`places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`), web URLs of the server.
 - Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
   Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
@@ -288,6 +308,13 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 ## M4 Discover — 🟡
 Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
 memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
+- App lock (round 3) 🟡 compiled for iOS, macOS and visionOS, state machine unit-tested, not run: one lock state for the
+  process (`AppLock`), setting in the App Group. Locked windows don't show their content at all (the viewer and sheets close);
+  on iPhone and iPad the cover is a window of its own above the app (covers the full-screen viewer, sheets and the app
+  switcher snapshot). The Mac Settings window and the share extension need the unlock too. Widgets show a lock placeholder
+  while app lock is on and redact photo, place and date on a locked device (`privacySensitive`).
+- Shared albums: photos of other users are fetched through the album's DAV child (`MediaItem.collectionChildMountType`),
+  never by their name in the user's root folder ✅ parsing unit-tested.
 - Push: permission is asked after login (on iPhone/iPad after the backup offer) or when the Notifications switch is turned on, not at first launch; the switch unregisters
   and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
   needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
@@ -319,7 +346,8 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   haptics for selection, favourite and delete. Checked on the Mac through the accessibility tree; iOS only compiled.
   Server feature names in Settings › Server features come from the PhotosAppUI catalog. Every key of every catalog has a comment for translators.
   ⬜ Transifex: no `.tx/config` yet, the proposed setup waits for the localization team ([LOCALIZATION.md](LOCALIZATION.md)).
-- Release readiness 🟡: privacy manifests for the app, the extensions and the package targets; push entitlement
+- Release readiness 🟡: privacy manifests for the app, the extensions and the package targets (disk space `E174.1` added for
+  backup's free-space check; audited in round 3, see PRIVACY-AND-EXPORT.md); push entitlement
   (`aps-environment`); export-compliance and ATS reasoning with the App Review note ([PRIVACY-AND-EXPORT.md](PRIVACY-AND-EXPORT.md));
   build number settable from CI; unsigned Release archives in CI and a release workflow without signing. Nothing was
   signed, uploaded or validated by App Store Connect.

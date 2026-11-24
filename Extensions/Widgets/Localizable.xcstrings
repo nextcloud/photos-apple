@@ -27,6 +27,9 @@
     "Favorites" : {
       "comment" : "Name of the widget that shows favorite photos, in the widget gallery and as the widget's title."
     },
+    "Locked" : {
+      "comment" : "Widget: shown instead of the photo while app lock is on or the device is locked; also the VoiceOver label of the lock symbol."
+    },
     "Nextcloud Photos" : {
       "comment" : "The app's name, shown in a widget that has no photo to show. Do not translate."
     },

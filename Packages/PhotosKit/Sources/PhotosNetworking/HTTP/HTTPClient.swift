@@ -44,6 +44,7 @@ public final class HTTPClient: Sendable {
     private func sendOnce(_ request: HTTPRequest) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.data(for: request.urlRequest)
+            delegate.didReceiveResponse(from: request.url)
             return Self.makeResponse(response, data: data)
         } catch {
             throw mapError(error, url: request.url)
@@ -54,6 +55,7 @@ public final class HTTPClient: Sendable {
     public func download(_ request: HTTPRequest) async throws -> (URL, HTTPResponse) {
         do {
             let (location, response) = try await session.download(for: request.urlRequest)
+            delegate.didReceiveResponse(from: request.url)
             let target = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             try FileManager.default.moveItem(at: location, to: target)
             return (target, Self.makeResponse(response, data: Data()))
@@ -73,6 +75,7 @@ public final class HTTPClient: Sendable {
     private func uploadOnce(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.upload(for: request.urlRequest, fromFile: file)
+            delegate.didReceiveResponse(from: request.url)
             return Self.makeResponse(response, data: data)
         } catch {
             throw mapError(error, url: request.url)
@@ -126,6 +129,16 @@ final class SessionDelegate: NSObject, URLSessionTaskDelegate, Sendable {
         rejectedHosts.withLock { hosts in
             guard let rejected = hosts[host.lowercased()] else { return false }
             return now.timeIntervalSince(rejected) <= Self.rejectionWindow
+        }
+    }
+
+    /// A request to this URL got an answer over TLS: the connection it used presented an acceptable certificate (a request
+    /// on a connection that was already open asks no new trust question). That ends a refusal of the host, so the "certificate
+    /// changed" state does not stay while requests go through.
+    func didReceiveResponse(from url: URL) {
+        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased() else { return }
+        rejectedHosts.withLock { hosts in
+            if hosts[host] != nil { hosts[host] = nil }
         }
     }
 

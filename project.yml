@@ -133,6 +133,8 @@ targets:
       properties:
         CFBundleDisplayName: Nextcloud Photos
         PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        # With app lock on, sharing to the app needs the same unlock as the app (SPEC §8).
+        NSFaceIDUsageDescription: Nextcloud Photos uses this to unlock the app and your archived photos.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

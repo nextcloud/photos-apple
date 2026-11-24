@@ -69,6 +69,14 @@ public enum DeepLink: Hashable, Sendable {
         }
     }
 
+    /// Whether a `photo/<fileId>` link may open this item. File ids are small numbers that are easy to guess, and a link can
+    /// come from any app: it only opens what the library shows anyway. Archived photos need the Archive's own unlock, and the
+    /// video half of a Live Photo is never shown on its own; a file the app doesn't know is not looked up.
+    public static func mayOpen(_ item: MediaItem?) -> Bool {
+        guard let item else { return false }
+        return !item.isArchived && !item.isLivePhotoVideo
+    }
+
     /// Compact form for `AppModel.requestedDestination`; `DeepLink(request:)` reads it back.
     public var request: String {
         switch self {
@@ -83,16 +91,31 @@ public enum DeepLink: Hashable, Sendable {
 public struct NavigationSnapshot: Codable, Equatable, Sendable {
     public var destination: String
     public var routes: [AppRoute]
+    /// The account the window showed (`AccountID.rawValue`). The snapshot names albums of that account: it is only restored for
+    /// it, and dropped when the account is removed (nil: written by an earlier version).
+    public var account: String?
 
-    public init(destination: String, routes: [AppRoute] = []) {
+    public init(destination: String, routes: [AppRoute] = [], account: String? = nil) {
         self.destination = destination
         // A single photo is not restored: the viewer needs the list it was opened from.
         self.routes = routes.filter { if case .album = $0 { true } else { false } }
+        self.account = account
     }
 
     public init?(stored: String) {
         guard !stored.isEmpty, let value = try? JSONDecoder().decode(NavigationSnapshot.self, from: Data(stored.utf8)) else { return nil }
-        self = NavigationSnapshot(destination: value.destination, routes: value.routes)
+        self = NavigationSnapshot(destination: value.destination, routes: value.routes, account: value.account)
+    }
+
+    /// Whether a window may restore this snapshot while it shows `account`.
+    public func belongs(to account: String) -> Bool { self.account == nil || self.account == account }
+
+    /// Whether the stored snapshot must be dropped because it may name a removed account's albums. One of an earlier version,
+    /// which doesn't say whose it is, is dropped too.
+    public static func isStale(_ stored: String, accounts: [String]) -> Bool {
+        guard let snapshot = NavigationSnapshot(stored: stored) else { return false }
+        guard let account = snapshot.account else { return true }
+        return !accounts.contains(account)
     }
 
     public var stored: String {

@@ -160,7 +160,7 @@ The app never writes to the Files app's App Group: NextcloudKit (used by Files) 
 
 ### 4.5 Logging and diagnostics
 
-`os.Logger` with subsystems per package (implemented). *Not implemented yet:* a rotating log file in the app container (off by default, enabled in Settings → Advanced → Logging) that the user can export. Logs never contain passwords, tokens, full URLs with tokens, or file names unless "detailed logging" is on. No third-party crash or analytics SDKs.
+`os.Logger` with subsystems per package (implemented). A rotating log file in the app container that the user can export (implemented: `PhotosCore/DiagnosticsLog.swift`): the app's own entries, redacted when written (no account names, hosts, URLs, paths, file names or tokens), at most 256 KB per file with two older files, written every few minutes and when the app goes to the background, added to "Export diagnostics…". *Deviation:* it is on by default (Settings → Diagnostics → "Keep log across restarts"), because a log of a run that crashed is only useful when it was already being kept; it never leaves the device unless the user exports it. Logs never contain passwords, tokens, full URLs with tokens, or file names. No third-party crash or analytics SDKs.
 
 ### 4.6 Error handling
 
@@ -681,7 +681,10 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 
 - Credentials only in the keychain (own access group); per-account keys for push in the keychain; never in logs, never in the database, never in App Group UserDefaults.
 - TLS everywhere; ATS exceptions only for user-approved http/self-signed hosts. *Implementation:* the exception is app-wide (`NSAllowsArbitraryLoads`), because the hosts are typed in by the user and unknown at build time; the app asks before it uses http or trusts an unknown certificate (see [PRIVACY-AND-EXPORT.md](PRIVACY-AND-EXPORT.md)).
-- App lock with LocalAuthentication (`deviceOwnerAuthentication`, so passcode fallback works); privacy cover in the app switcher when locked or while viewing the Archive; widgets and notifications never show archived content; optional "Hide photo content in notifications".
+- App lock with LocalAuthentication (`deviceOwnerAuthentication`, so passcode fallback works); privacy cover in the app switcher when locked or while viewing the Archive; widgets and notifications never show archived content; optional "Hide photo content in notifications". *Implementation:* while locked nothing of the account is shown in any window (also the Mac Settings window and the share extension), the cover on iPhone/iPad is a window above presentations, links from outside wait for the unlock, and widgets show a placeholder while app lock is on and redact their content on a locked device.
+- A changed server certificate is never accepted in two taps: the dialog compares old and new fingerprints; only a certificate that replaces one the user trusted before can be accepted in place (with an explicit confirmation); a server the system trusted needs a new login. Nothing is sent over the new certificate before.
+- Login links and QR codes show the server and user before logging in; the Login Flow stays on https when the user typed https, and a granted app password is revoked when the app refuses the server afterwards.
+- Keychain items are `…ThisDeviceOnly`; copied share links are local-only (no Universal Clipboard) and expire after 10 minutes on iOS.
 - Remote wipe and app-password revocation (§5.1).
 - Data protection class `completeUntilFirstUserAuthentication` for databases and caches (background uploads need it); offline originals the same.
 - Privacy manifest (`PrivacyInfo.xcprivacy`, one per app/extension bundle and per package target that needs one) declaring required-reason APIs; no tracking, no analytics, no third-party SDKs that phone home.

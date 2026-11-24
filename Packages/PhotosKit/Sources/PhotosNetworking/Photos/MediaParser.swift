@@ -159,8 +159,24 @@ public enum MediaParser {
         guard !resource.isCollection, let fileId = resource.int64(DAVProp.fileId) else { return nil }
         let childName = resource.lastPathComponent
         let ownerPath = resource.string(DAVProp.collectionFileOriginalFilename)
-        let path = ownerPath ?? "/" + (resource.string(DAVProp.fileName) ?? childName)
-        guard let item = mediaItem(from: resource, fileId: fileId, path: path) else { return nil }
+        // A file of someone else (a shared album) has no path in the user's files: it is fetched through the collection, never
+        // by its name in the user's root folder, where a different file of the same name may be (SPEC §8).
+        let childPath = ownerPath == nil ? davPath(fromHref: resource.href) : nil
+        guard let path = ownerPath ?? childPath, var item = mediaItem(from: resource, fileId: fileId, path: path) else { return nil }
+        if childPath != nil {
+            // The child is named `<fileid>-<file name>`.
+            let prefix = "\(fileId)-"
+            let shortName = childName.hasPrefix(prefix) ? String(childName.dropFirst(prefix.count)) : childName
+            item.name = resource.string(DAVProp.fileName) ?? shortName
+            item.mountType = MediaItem.collectionChildMountType
+        }
         return CollectionChild(item: item, childName: childName, origin: resource.string(DAVProp.albumFileOrigin), ownerPath: ownerPath)
+    }
+
+    /// The path below the DAV root of a decoded href (`/nextcloud/remote.php/dav/photos/alice/…` → `photos/alice/…`).
+    static func davPath(fromHref href: String) -> String? {
+        guard let range = href.range(of: "/remote.php/dav/") else { return nil }
+        let path = String(href[range.upperBound...])
+        return path.isEmpty ? nil : path
     }
 }

@@ -157,3 +157,46 @@ let connection = ServerConnection(
         #expect(features.photosAppVersion == "9.1.0")
     }
 }
+
+/// A photo of someone else's shared album is fetched through the album, never by its name in the user's own files.
+@Suite struct SharedAlbumChildTests {
+    static let xml = """
+        <?xml version="1.0"?>
+        <d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+        <d:response><d:href>/nextcloud/remote.php/dav/photos/alice/sharedalbums/Trip%20(bob)/731-IMG_1234.JPG</d:href>
+        <d:propstat><d:prop>
+         <d:getcontentlength>1000</d:getcontentlength><d:getcontenttype>image/jpeg</d:getcontenttype>
+         <d:getetag>"e1"</d:getetag><d:resourcetype/><oc:fileid>731</oc:fileid><nc:has-preview>true</nc:has-preview>
+         <nc:photos-album-file-origin>user</nc:photos-album-file-origin>
+        </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+        <d:propstat><d:prop><nc:photos-collection-file-original-filename/><nc:file-name/></d:prop>
+        <d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+        </d:multistatus>
+        """
+
+    @Test func itsOriginalIsTheAlbumChild() throws {
+        let resource = try #require(try MultiStatus.parse(Data(Self.xml.utf8)).first)
+        let child = try #require(MediaParser.collectionChild(from: resource))
+        #expect(child.ownerPath == nil)
+        #expect(child.item.name == "IMG_1234.JPG")
+        #expect(child.item.isCollectionChild)
+        #expect(!child.item.isOwnStorage)
+        #expect(child.item.path == "photos/alice/sharedalbums/Trip (bob)/731-IMG_1234.JPG")
+        let url = connection.originalURL(path: child.item.path)
+        #expect(url.host() == "example.com")
+        #expect(url.path(percentEncoded: false) == "/nextcloud/remote.php/dav/photos/alice/sharedalbums/Trip (bob)/731-IMG_1234.JPG")
+        // Not /files/alice/IMG_1234.JPG, where Alice may have a different photo of the same name.
+        #expect(!url.absoluteString.contains("/files/"))
+        // The user's own files keep their path.
+        let own = connection.originalURL(path: "/Photos/a.jpg").absoluteString
+        #expect(own == "https://example.com/nextcloud/remote.php/dav/files/alice/Photos/a.jpg")
+    }
+
+    @Test func anOwnFileKeepsItsPath() throws {
+        let resources = try MultiStatus.parse(fixture("album-children.xml"))
+        let child = try #require(MediaParser.collectionChild(from: resources[1]))
+        #expect(child.item.path == "/Photos/Test library/Travel/Lisbon/Lisbon (54269600073).jpg")
+        #expect(child.item.isOwnStorage)
+        #expect(!child.item.isCollectionChild)
+    }
+}

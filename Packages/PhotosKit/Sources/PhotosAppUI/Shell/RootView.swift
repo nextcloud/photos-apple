@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import SwiftUI
 
@@ -9,6 +10,8 @@ import SwiftUI
 public struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.scenePhase) private var scenePhase
+    /// The window's place (`NavigationSnapshot`, used by `MainView`). Kept here, where it outlives the account it belongs to.
+    @SceneStorage("navigation") private var storedNavigation = ""
 
     public init() {}
 
@@ -18,7 +21,7 @@ public struct RootView: View {
                 LoginView()
             } else if let session = app.session {
                 AppLockGate {
-                    MainView()
+                    MainView(storedNavigation: $storedNavigation)
                         .environment(session)
                         .id(session.account.id)
                 }
@@ -35,7 +38,14 @@ public struct RootView: View {
         .tint(Design.accent)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { app.session?.didBecomeActive() }
-            if phase == .background { app.session?.services?.didEnterBackground() }
+            if phase == .background {
+                app.session?.services?.didEnterBackground()
+                Task { await Diagnostics.persistLog(app: app) }
+            }
+        }
+        // A removed account's album names don't stay in the window's restoration data.
+        .onChange(of: app.accounts.map(\.id.rawValue), initial: true) { _, accounts in
+            if NavigationSnapshot.isStale(storedNavigation, accounts: accounts) { storedNavigation = "" }
         }
     }
 }
