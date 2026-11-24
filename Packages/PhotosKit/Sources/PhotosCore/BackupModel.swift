@@ -306,6 +306,8 @@ public final class BackupModel {
         authorization = PhotoLibrarySource.authorization
         runningPasses += 1
         await engine.run(settings, dryRun: !settings.isEnabled, retryFailed: retryFailed)
+        // Opt-in: backed-up photos of picked device albums go into Nextcloud albums (`BackupModel+AlbumMirror.swift`).
+        if settings.isEnabled { await mirrorAlbums() }
         runningPasses -= 1
         let final = box.value
         if self.engine === engine { status = final }
@@ -353,7 +355,7 @@ public final class BackupModel {
 
     /// Services of the backup account: those of the active session when it is the same account (one database connection
     /// pool per account), otherwise services of its own.
-    private func services(for account: Account) -> AccountServices? {
+    func services(for account: Account) -> AccountServices? {
         guard let app, !account.isSignedOut else { return nil }
         if let session = app.session, session.account.id == account.id {
             guard !session.account.isSignedOut else { return nil }
