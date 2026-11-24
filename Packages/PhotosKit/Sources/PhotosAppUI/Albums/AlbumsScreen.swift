@@ -49,6 +49,7 @@ struct AlbumsScreen: View {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
+                    .opensAlbumInWindow(album.id)
                 }
             }
             .padding()
@@ -265,6 +266,8 @@ struct AlbumRouteScreen: View {
                 ProgressView()
             }
         }
+        // File ▸ Open in New Window.
+        .focusedSceneValue(\.shownAlbum, album == nil ? nil : AlbumWindowValue(account: session.account.id.rawValue, albumId: albumId))
         .task(id: albumId) {
             guard album == nil else { return }
             if let found = try? session.services?.collections.album(id: albumId) {

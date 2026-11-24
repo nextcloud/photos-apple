@@ -265,6 +265,8 @@ struct AlbumPickerSheet: View {
     }
 
     func add(to album: Album) async {
+        // It comes first in the "Add to Album" submenus next time.
+        RecentAlbumsStore.note(album, account: session.account.id)
         await session.addToAlbum(items, album: album)
         dismiss()
     }

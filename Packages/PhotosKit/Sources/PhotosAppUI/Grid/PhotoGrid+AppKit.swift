@@ -459,15 +459,40 @@
                 callbacks.selectionChanged(ids)
             }
             let targets = Array(ids)
-            let menu = NSMenu()
-            for action in callbacks.menu(targets) {
-                if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
-                let item = MenuActionItem(title: action.title, handler: { action.handler(targets) })
-                item.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: nil)
-                menu.addItem(item)
-            }
+            let menu = Self.menu(callbacks.menu(targets), targets: targets)
             return menu.items.isEmpty ? nil : menu
         }
+
+        /// The actions as menu items; submenus for actions with children, the system's Share menu for sharing.
+        static func menu(_ actions: [GridMenuAction], targets: [FileID]) -> NSMenu {
+            let menu = NSMenu()
+            for action in actions {
+                if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
+                let item: NSMenuItem
+                if let share = action.share {
+                    item = NSSharingServicePicker(items: share()).standardShareMenuItem
+                } else if !action.children.isEmpty {
+                    item = NSMenuItem(title: action.title, action: nil, keyEquivalent: "")
+                    item.submenu = Self.menu(action.children, targets: targets)
+                } else {
+                    item = MenuActionItem(title: action.title, handler: { action.handler(targets) })
+                }
+                if action.share == nil {
+                    item.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: nil)
+                }
+                menu.addItem(item)
+            }
+            return menu
+        }
+
+        /// Edit ▸ Copy (⌘C) while the grid has the focus.
+        func copySelection() {
+            let ids = currentSelection()
+            guard !ids.isEmpty else { return }
+            callbacks?.copy?(Array(ids))
+        }
+
+        var canCopy: Bool { callbacks?.copy != nil && !currentSelection().isEmpty }
 
         // MARK: Drag out (Finder, Mail…): file promises download the original only when dropped.
 
@@ -585,6 +610,17 @@
             owner?.clearSelection()
         }
 
+        /// Edit ▸ Copy: the standard menu item reaches the grid through the responder chain.
+        @objc func copy(_ sender: Any?) {
+            owner?.copySelection()
+        }
+
+        /// Copy is offered while something is selected.
+        @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+            if item.action == #selector(copy(_:)) { return owner?.canCopy ?? false }
+            return true
+        }
+
         override func menu(for event: NSEvent) -> NSMenu? {
             let point = convert(event.locationInWindow, from: nil)
             guard let indexPath = indexPathForItem(at: point) else { return nil }
@@ -668,7 +704,7 @@
         /// The context menu actions (favourite, archive, delete…) as accessibility actions.
         override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
             guard let fileId, let actions = actions?(), !actions.isEmpty else { return nil }
-            return actions.map { action in
+            return GridMenuAction.flattened(actions).map { action in
                 NSAccessibilityCustomAction(name: action.title) {
                     action.handler([fileId])
                     return true

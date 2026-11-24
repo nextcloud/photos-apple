@@ -60,6 +60,18 @@ struct NextcloudPhotosApp: App {
             PhotosCommands()
         }
 
+        // An album in a window of its own (File ▸ Open in New Window, ⌥-click, the album's context menu). It takes no
+        // links: those go to the main window.
+        WindowGroup(id: AlbumWindowValue.sceneId, for: AlbumWindowValue.self) { $value in
+            AlbumWindowView(value: $value)
+                .environment(app)
+        }
+        .handlesExternalEvents(matching: [])
+        #if os(macOS)
+            .defaultSize(width: 1000, height: 700)
+            .windowToolbarStyle(.unified)
+        #endif
+
         #if os(macOS)
             Settings {
                 MacSettingsView()

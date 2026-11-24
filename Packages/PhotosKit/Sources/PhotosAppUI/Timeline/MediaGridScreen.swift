@@ -50,6 +50,13 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var deletions = 0
     /// Export… / Save to Photos, with its progress and result.
     @State private var saver = MediaSaveModel()
+    /// Image ▸ Rotate and Edit ▸ Copy, with their progress and result.
+    @State private var photoTasks = PhotoTaskModel()
+    /// Own albums, for the "Add to Album" submenus; the ones used last in this app (`RecentAlbumsStore`) come first.
+    @State private var albums: [Album] = []
+    @State private var usedAlbums: [String] = []
+    /// "Add to Album ▸ New Album…": a new album with these items.
+    @State private var newAlbumItems: PickedItems?
     /// The zoom transition into the viewer and back (iPhone, iPad): the tile it starts from and where that tile is.
     @Namespace private var zoomNamespace
     @State private var tileLocator = GridTileLocator()
@@ -95,6 +102,7 @@ struct MediaGridScreen<Accessory: View>: View {
                         : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module))
             }
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
+            .sheet(item: $newAlbumItems) { picked in AlbumEditor(album: nil, items: picked.items) }
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
@@ -130,6 +138,8 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             .mediaViewer($viewerStart, zoom: zoomSource)
             .mediaSaveStatus(saver)
+            .photoTaskStatus(photoTasks)
+            .task { await observeAlbums() }
             .task(id: isInitialSync) { if isInitialSync { await session.loadInitialSyncTotal() } }
             .alert(
                 String(localized: "Something went wrong", bundle: .module),
@@ -163,7 +173,8 @@ struct MediaGridScreen<Accessory: View>: View {
                     columnsChanged: { columns = $0 },
                     cancelSelection: { endSelection() },
                     beginSelection: { isSelecting = true },
-                    tileLocator: tileLocator
+                    tileLocator: tileLocator,
+                    copy: { ids in withItems(ids) { copy($0) } }
                 )
             )
             .ignoresSafeArea(edges: .bottom)
@@ -299,12 +310,20 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
                 .help(favoriteTitle(remove: allFavorite))
                 Menu {
-                    ForEach(menuActions(info).filter { $0.id != "delete" }, id: \.id) { action in
+                    // Without Delete and Share: both are buttons of their own in the toolbar.
+                    ForEach(menuActions(info).filter { $0.id != "delete" && $0.share == nil }, id: \.id) { action in
                         if action.startsGroup { Divider() }
-                        Button(role: action.isDestructive ? .destructive : nil) {
-                            action.handler(Array(selection))
-                        } label: {
-                            Label(action.title, systemImage: action.systemImage)
+                        if action.children.isEmpty {
+                            menuButton(action)
+                        } else {
+                            Menu {
+                                ForEach(action.children, id: \.id) { child in
+                                    if child.startsGroup { Divider() }
+                                    menuButton(child)
+                                }
+                            } label: {
+                                Label(action.title, systemImage: action.systemImage)
+                            }
                         }
                     }
                 } label: {
@@ -319,6 +338,14 @@ struct MediaGridScreen<Accessory: View>: View {
                 .help(String(localized: "Delete", bundle: .module))
                 .disabled(info.summary.deletable == 0)
             }
+        }
+    }
+
+    func menuButton(_ action: GridMenuAction) -> some View {
+        Button(role: action.isDestructive ? .destructive : nil) {
+            action.handler(Array(selection))
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
         }
     }
 
@@ -404,8 +431,75 @@ struct MediaGridScreen<Accessory: View>: View {
                 ? { withItems(Array(selected)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) } } : nil,
             export: summary.count == 0 ? nil : { withItems(Array(selected)) { export($0) } },
             shareItems: info.shareItems,
-            shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module)
+            shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module),
+            rotate: info.items.map(PhotoRotation.canRotate) == true ? { clockwise in rotate(Array(selected), clockwise: clockwise) } : nil,
+            recentAlbums: summary.count == 0 ? [] : recentAlbums,
+            addToRecentAlbum: { album in add(Array(selected), to: album) },
+            addToNewAlbum: { withItems(Array(selected)) { newAlbumItems = PickedItems(items: $0) } }
         )
+    }
+
+    /// The albums the "Add to Album" submenus list.
+    var recentAlbums: [Album] { RecentAlbums.pick(albums, used: usedAlbums) }
+
+    func observeAlbums() async {
+        guard let services = session.services else { return }
+        usedAlbums = RecentAlbumsStore.used(session.account.id)
+        do {
+            for try await value in services.collections.observeAlbums(.own) { albums = value }
+        } catch {}
+    }
+
+    /// "Add to Album ▸ <album>": remembered as used, so it stays at the top of the submenu.
+    func add(_ ids: [FileID], to album: Album) {
+        RecentAlbumsStore.note(album, account: session.account.id)
+        usedAlbums = RecentAlbums.noting(album.id, in: usedAlbums)
+        withItems(ids) { items in Task { await session.addToAlbum(items, album: album) } }
+    }
+
+    /// Image ▸ Rotate Left/Right: saved as a new version of each photo that may be changed (SPEC §6.2).
+    func rotate(_ ids: [FileID], clockwise: Bool) {
+        withItems(ids) { photoTasks.rotate($0, clockwise: clockwise, session: session) }
+    }
+
+    /// Edit ▸ Copy: the originals on the pasteboard.
+    func copy(_ items: [MediaItem]) {
+        guard let services = session.services else { return }
+        photoTasks.copy(items, services: services)
+    }
+
+    /// "Add to Album" as a submenu: the recent albums, "New Album…", and "All Albums…" for the full list.
+    func albumMenuAction(title: String) -> GridMenuAction {
+        var children: [GridMenuAction] = [
+            GridMenuAction(
+                id: "album.new", title: PlatformWording.title(
+                    mac: LocalizedStringResource("New Album…", bundle: .module), other: LocalizedStringResource("New album…", bundle: .module)),
+                systemImage: "plus.rectangle.on.rectangle"
+            ) { ids in
+                withItems(ids) { newAlbumItems = PickedItems(items: $0) }
+            }
+        ]
+        let recent: [Album] = recentAlbums
+        for (index, album) in recent.enumerated() {
+            children.append(
+                GridMenuAction(id: "album.\(album.id)", title: album.title, systemImage: "rectangle.stack", startsGroup: index == 0) { ids in
+                    add(ids, to: album)
+                })
+        }
+        if albums.count > recent.count {
+            children.append(
+                GridMenuAction(
+                    id: "album.all", title: PlatformWording.title(
+                        mac: LocalizedStringResource("All Albums…", bundle: .module, comment: "Add to Album submenu: choose from every album."),
+                        other: LocalizedStringResource("All albums…", bundle: .module, comment: "Add to Album submenu: choose from every album.")),
+                    systemImage: "rectangle.stack", startsGroup: true
+                ) { ids in
+                    withItems(ids) { albumPicker = PickedItems(items: $0) }
+                })
+        }
+        return GridMenuAction(id: "album", title: title, systemImage: "rectangle.stack.badge.plus", startsGroup: true, handler: { ids in
+            withItems(ids) { albumPicker = PickedItems(items: $0) }
+        }, children: children)
     }
 
     func canEditMetadata(_ summary: SelectionSummary) -> Bool {
@@ -476,12 +570,9 @@ struct MediaGridScreen<Accessory: View>: View {
             }
         }
         let albumTitle: String = PlatformWording.title(
-            mac: LocalizedStringResource("Add to Album…", bundle: .module),
-            other: LocalizedStringResource("Add to album…", bundle: .module))
-        actions.append(
-            GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { ids in
-                withItems(ids) { albumPicker = PickedItems(items: $0) }
-            })
+            mac: LocalizedStringResource("Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album…."),
+            other: LocalizedStringResource("Add to album", bundle: .module, comment: "Submenu with the recent albums and New album…."))
+        actions.append(albumMenuAction(title: albumTitle))
         if session.features.has(.systemtags) {
             actions.append(
                 GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { ids in
@@ -492,6 +583,14 @@ struct MediaGridScreen<Accessory: View>: View {
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(
             GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { ids in withItems(ids) { export($0) } })
+        // The system's Share menu with the originals (downloaded when a service asks for them); a loaded selection only.
+        if let items = info.items, !items.isEmpty, let services = session.services {
+            actions.append(
+                GridMenuAction(
+                    id: "share", title: String(localized: "Share…", bundle: .module), systemImage: "square.and.arrow.up",
+                    handler: { _ in },
+                    share: { MediaItemProviders.make(items, services: services) }))
+        }
         if let item = single, item.permissions.canShare {
             actions.append(
                 GridMenuAction(
