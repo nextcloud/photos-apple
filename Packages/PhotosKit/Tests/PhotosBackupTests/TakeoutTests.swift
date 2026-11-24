@@ -66,6 +66,14 @@ struct TakeoutFixture {
 
     func remove() { try? FileManager.default.removeItem(at: root) }
 
+    /// ZIPs are made with the Mac's `zip` and `ditto`; elsewhere (iOS Simulator) the tests that need one are left out and
+    /// the importer reads the unpacked export.
+    #if os(macOS)
+        static let canZip = true
+    #else
+        static let canZip = false
+    #endif
+
     @discardableResult
     func write(_ path: String, _ content: Data) throws -> URL {
         let url = root.appending(path: path)
@@ -104,20 +112,24 @@ struct TakeoutFixture {
 
     /// Packs the export into a ZIP with `ditto` (deflate), `zip -0` (stored) or `zip -fz` (ZIP64 records).
     func zip(stored: Bool = false, zip64: Bool = false) throws -> URL {
-        let target = root.deletingLastPathComponent().appending(path: "takeout-\(UUID().uuidString).zip")
-        let process = Process()
-        if stored || zip64 {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-            process.arguments = ["-q", "-r", stored ? "-0" : "-fz", target.path, "."]
-            process.currentDirectoryURL = root
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            process.arguments = ["-c", "-k", "--sequesterRsrc", root.path, target.path]
-        }
-        try process.run()
-        process.waitUntilExit()
-        #expect(process.terminationStatus == 0)
-        return target
+        #if os(macOS)
+            let target = root.deletingLastPathComponent().appending(path: "takeout-\(UUID().uuidString).zip")
+            let process = Process()
+            if stored || zip64 {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+                process.arguments = ["-q", "-r", stored ? "-0" : "-fz", target.path, "."]
+                process.currentDirectoryURL = root
+            } else {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                process.arguments = ["-c", "-k", "--sequesterRsrc", root.path, target.path]
+            }
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            return target
+        #else
+            throw CocoaError(.featureUnsupported)
+        #endif
     }
 }
 
@@ -141,6 +153,7 @@ struct TakeoutFixture {
         #expect(plan.items.first { $0.name == "VID_0002.mp4" }?.kind == .video)
         #expect(plan.items.first { $0.name == "VID_0002.mp4" }?.metadata?.description == "Beach")
         // The same export gives the same key (resume), whether unpacked or zipped.
+        guard TakeoutFixture.canZip else { return }
         let zipped = try TakeoutPlan.build(try TakeoutSource.open([try fixture.zip()]))
         #expect(zipped.key == plan.key)
         #expect(zipped.items.map(\.name) == plan.items.map(\.name))
@@ -155,7 +168,7 @@ struct TakeoutFixture {
     }
 }
 
-@Suite struct ZipReaderTests {
+@Suite(.enabled(if: TakeoutFixture.canZip)) struct ZipReaderTests {
     @Test(arguments: ["deflate", "stored", "zip64"]) func readsDeflatedStoredAndZip64Entries(format: String) throws {
         let stored = format == "stored"
         let fixture = try TakeoutFixture()
@@ -256,7 +269,7 @@ final class FakeTakeoutRemote: TakeoutRemote {
 }
 
 @Suite struct TakeoutImporterTests {
-    func makePlan(_ fixture: TakeoutFixture, zipped: Bool = true) throws -> (TakeoutSource, TakeoutPlan) {
+    func makePlan(_ fixture: TakeoutFixture, zipped: Bool = TakeoutFixture.canZip) throws -> (TakeoutSource, TakeoutPlan) {
         try fixture.standardExport()
         let source = try TakeoutSource.open([zipped ? try fixture.zip() : fixture.root])
         return (source, try TakeoutPlan.build(source))
@@ -378,7 +391,7 @@ final class FakeTakeoutRemote: TakeoutRemote {
 
 /// Imports a small export into a real server (PHOTOS_IT_SERVER/USER/PASSWORD), checks dates, albums and comments, imports it
 /// again without uploading anything, and removes what it created.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil && TakeoutFixture.canZip))
 struct TakeoutIntegrationTests {
     @Test func importsAndFindsTheSecondTimeThatEverythingIsThere() async throws {
         let env = ProcessInfo.processInfo.environment
