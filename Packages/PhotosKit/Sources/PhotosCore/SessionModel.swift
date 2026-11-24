@@ -4,6 +4,7 @@
 import Foundation
 import OSLog
 import Observation
+import PhotosDomain
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -20,6 +21,8 @@ public final class SessionModel {
     public private(set) var featureDetectionError: String?
     /// How many items the first sync will find, when the server can tell (`loadInitialSyncTotal()`).
     public internal(set) var initialSyncTotal: Int?
+    /// The month counts behind `initialSyncTotal`: the timeline's shape while the first sync loads it (`TimelineSkeleton`).
+    public internal(set) var initialSyncSkeleton: TimelineSkeleton?
     /// The server presents a certificate the app does not trust (`SessionModel+State.swift`).
     public internal(set) var certificateProblem: CertificateProblem?
     /// The last undoable change, for the confirmation banner (`SessionModel+Undo.swift`).

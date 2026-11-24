@@ -62,6 +62,8 @@ enum PlatformWording {
 public struct PhotosCommands: Commands {
     @FocusedValue(\.mainActions) private var main
     @FocusedValue(\.gridActions) private var grid
+    /// View ▸ Square Tiles: the same setting as Settings › On this device › Square tiles (`TileStyle`).
+    @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
 
     public init() {}
 
@@ -110,6 +112,8 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Zoom to Fit", bundle: .module)) { grid?.zoomToFit?() }
                 .keyboardShortcut("0")
                 .disabled(grid?.zoomToFit == nil)
+            Toggle(String(localized: "Square Tiles", bundle: .module), isOn: $squareTiles)
+                .keyboardShortcut("s", modifiers: [.command, .option])
             Divider()
             Button(String(localized: "Sync Now", bundle: .module)) { main?.syncNow() }
                 .keyboardShortcut("r")

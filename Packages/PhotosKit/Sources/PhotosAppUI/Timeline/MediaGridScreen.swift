@@ -34,7 +34,7 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var selectionInfo = GridSelectionInfo()
     @State private var isSelecting = false
     @State private var viewerStart: ViewerStart?
-    @State private var confirmDelete: [MediaItem]?
+    @State private var confirmDelete: DeleteConfirmation?
     @State private var infoItem: MediaItem?
     @State private var showingInfo = false
     @State private var actionError: String?
@@ -56,6 +56,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var zoomTile: FileID?
     @State private var zoomFrame: CGRect?
     @Environment(\.showInFolder) private var showInFolder
+    /// Square tiles or the aspect ratio grid (Settings, View ▸ Square Tiles).
+    @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
 
     struct PickedItems: Identifiable {
         let id = UUID()
@@ -81,7 +83,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 titleVisibility: .visible
             ) {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                    if let items = confirmDelete {
+                    if let items = confirmDelete?.items {
                         deletions += 1
                         let undoManager = undoManager
                         Task { await session.perform(.delete(items), undoManager: undoManager) }
@@ -89,10 +91,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     endSelection()
                 }
             } message: {
-                Text(
-                    session.features.has(.trashbin)
-                        ? String(localized: "The items are moved to the trash bin of your Nextcloud.", bundle: .module)
-                        : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module))
+                Text(deleteMessage)
             }
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
@@ -141,13 +140,15 @@ struct MediaGridScreen<Accessory: View>: View {
     }
 
     @ViewBuilder var content: some View {
-        if let services = session.services, !feed.items.isEmpty {
+        // Items, or the placeholder tiles of the first sync's skeleton (`TimelineSkeleton`).
+        if let services = session.services, feed.model.hasTiles {
             PhotoGrid(
                 update: feed.update,
                 zoomStep: feed.zoomStep,
                 selection: selection,
                 isSelecting: isSelecting,
                 showsHeaders: showsHeaders,
+                squareTiles: squareTiles,
                 services: services,
                 callbacks: GridCallbacks(
                     open: { id in openViewer(at: id) },
@@ -269,7 +270,35 @@ struct MediaGridScreen<Accessory: View>: View {
     }
 
     var deleteTitle: String {
-        String(localized: "Delete \(confirmDelete?.count ?? 0) items?", bundle: .module)
+        String(localized: "Delete \(confirmDelete?.items.count ?? 0) items?", bundle: .module)
+    }
+
+    /// Where deleted items go, and how many of them are stacked behind the selected tiles (SPEC TL-6).
+    var deleteMessage: String {
+        let trash: String =
+            session.features.has(.trashbin)
+            ? String(localized: "The items are moved to the trash bin of your Nextcloud.", bundle: .module)
+            : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module)
+        guard let stacked = confirmDelete?.stacked, stacked > 0 else { return trash }
+        let copies: String = String(localized: "This also deletes \(stacked) photos stacked behind the selected ones.", bundle: .module)
+        return copies + " " + trash
+    }
+
+    /// The items of the tiles `ids` with everything stacked behind them: an action on a stack is an action on all of
+    /// it (SPEC TL-6).
+    func withStacks(_ ids: [FileID]) -> [FileID] {
+        let model = feed.model
+        return StackedSelection.members(of: ids) { model[$0]?.stack ?? [] }
+    }
+
+    /// Asks before deleting the tiles `ids` and the photos stacked behind them.
+    func requestDelete(_ ids: [FileID]) {
+        withItems(withStacks(ids)) { items in
+            let deletable = items.filter(\.permissions.canDelete)
+            guard !deletable.isEmpty else { return }
+            confirmDelete = DeleteConfirmation(
+                items: deletable, stacked: StackedSelection.hiddenCount(deletable.map(\.fileId), tiles: ids))
+        }
     }
 
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
@@ -293,7 +322,7 @@ struct MediaGridScreen<Accessory: View>: View {
                         .help(String(localized: "Share", bundle: .module))
                 }
                 Button {
-                    withItems(Array(selection)) { setFavorite($0, !allFavorite) }
+                    withItems(withStacks(Array(selection))) { setFavorite($0, !allFavorite) }
                 } label: {
                     Label(favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart")
                 }
@@ -312,7 +341,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
                 .help(String(localized: "More", bundle: .module))
                 Button(role: .destructive) {
-                    withItems(Array(selection)) { confirmDelete = $0.filter(\.permissions.canDelete) }
+                    requestDelete(Array(selection))
                 } label: {
                     Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
                 }
@@ -384,24 +413,20 @@ struct MediaGridScreen<Accessory: View>: View {
         return GridActions(
             selectionCount: summary.count,
             allFavorite: allFavorite,
-            toggleFavorite: { withItems(Array(selected)) { setFavorite($0, !allFavorite) } },
-            delete: {
-                withItems(Array(selected)) {
-                    let deletable = $0.filter(\.permissions.canDelete)
-                    if !deletable.isEmpty { confirmDelete = deletable }
-                }
-            },
+            toggleFavorite: { withItems(withStacks(Array(selected))) { setFavorite($0, !allFavorite) } },
+            delete: { requestDelete(Array(selected)) },
             toggleInfo: {
                 infoItem = info.items?.first
                 showingInfo.toggle()
             },
-            addToAlbum: { withItems(Array(selected)) { albumPicker = PickedItems(items: $0) } },
+            addToAlbum: { withItems(withStacks(Array(selected))) { albumPicker = PickedItems(items: $0) } },
             zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
             zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
             open: single.map { item in { openViewer(at: item.fileId) } },
             edit: single.flatMap { item in item.kind == .image ? { editedItem = item } : nil },
             editDateAndLocation: canEditMetadata(summary)
-                ? { withItems(Array(selected)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) } } : nil,
+                ? { withItems(withStacks(Array(selected))) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) } }
+                : nil,
             export: summary.count == 0 ? nil : { withItems(Array(selected)) { export($0) } },
             shareItems: info.shareItems,
             shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module)
@@ -480,12 +505,12 @@ struct MediaGridScreen<Accessory: View>: View {
             other: LocalizedStringResource("Add to album…", bundle: .module))
         actions.append(
             GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { ids in
-                withItems(ids) { albumPicker = PickedItems(items: $0) }
+                withItems(withStacks(ids)) { albumPicker = PickedItems(items: $0) }
             })
         if session.features.has(.systemtags) {
             actions.append(
                 GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { ids in
-                    withItems(ids) { tagEditor = PickedItems(items: $0) }
+                    withItems(withStacks(ids)) { tagEditor = PickedItems(items: $0) }
                 })
         }
         let exportTitle: String = PlatformWording.title(
@@ -506,13 +531,13 @@ struct MediaGridScreen<Accessory: View>: View {
                 id: "favorite", title: favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart",
                 startsGroup: true
             ) { ids in
-                withItems(ids) { setFavorite($0, !allFavorite) }
+                withItems(withStacks(ids)) { setFavorite($0, !allFavorite) }
             })
         if summary.archivable > 0 {
             actions.append(
                 GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { ids in
                     let undoManager = undoManager
-                    withItems(ids) { items in Task { await session.perform(.archive(items), undoManager: undoManager) } }
+                    withItems(withStacks(ids)) { items in Task { await session.perform(.archive(items), undoManager: undoManager) } }
                     endSelection()
                 })
         }
@@ -521,7 +546,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 GridMenuAction(id: "unarchive", title: String(localized: "Unarchive", bundle: .module), systemImage: "tray.and.arrow.up") {
                     ids in
                     let undoManager = undoManager
-                    withItems(ids) { items in Task { await session.perform(.unarchive(items), undoManager: undoManager) } }
+                    withItems(withStacks(ids)) { items in Task { await session.perform(.unarchive(items), undoManager: undoManager) } }
                     endSelection()
                 })
         }
@@ -537,7 +562,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 other: LocalizedStringResource("Edit date and location…", bundle: .module))
             actions.append(
                 GridMenuAction(id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock") { ids in
-                    withItems(ids) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) }
+                    withItems(withStacks(ids)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) }
                 })
         }
         // The screen's own actions (remove from album…) work on the items; a selection too large to load has none.
@@ -550,7 +575,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     id: "delete", title: String(localized: "Delete…", bundle: .module), systemImage: "trash", isDestructive: true,
                     startsGroup: true
                 ) { ids in
-                    withItems(ids) { confirmDelete = $0.filter(\.permissions.canDelete) }
+                    requestDelete(ids)
                 })
         }
         return actions
@@ -560,7 +585,7 @@ struct MediaGridScreen<Accessory: View>: View {
     var statusBanner: some View {
         VStack(spacing: 0) {
             ChangeNoticeToast()
-            GridStatusBanner(hasItems: !feed.items.isEmpty)
+            GridStatusBanner(hasItems: feed.model.hasTiles)
         }
         .animation(.default, value: session.lastChange?.id)
     }
@@ -574,6 +599,13 @@ struct GridSelectionInfo {
     var summary = SelectionSummary()
     /// The originals for the share sheet (loaded selections only).
     var shareItems: [ShareableMedia] = []
+}
+
+/// A delete that waits for its confirmation.
+struct DeleteConfirmation {
+    var items: [MediaItem]
+    /// Items among them that are stacked behind the selected tiles (copies, burst frames), not tiles of their own.
+    var stacked = 0
 }
 
 /// The action button of a grid's empty state.

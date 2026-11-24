@@ -354,7 +354,7 @@ The structure mirrors the web app's navigation (including the extended "Advanced
 - Advanced (collapsed by default): Folders, Shared with you, Archive (lock icon), Recently deleted, Duplicates, Free up space
 - Backup status row at the bottom; account switcher in the sidebar header.
 
-**macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square tiles; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
+**macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square Tiles ⌥⌘S; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
 
 **visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5).
 
@@ -364,7 +364,7 @@ Every view has: first-load skeleton, empty state with a single helpful action (e
 
 ### 6.4 Photo grid
 
-- Square tiles by default; "Aspect ratio" mode mirrors the web's `croppedLayout=false` (justified rows). The setting syncs to the server config `croppedLayout`.
+- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting is per device (Settings › On this device › Square tiles, View ▸ Square Tiles ⌥⌘S) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
 - Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and a toolbar slider. Map the density to the server config `gridDensity` (small/medium/large) where available.
 - Section headers: **month** (sticky) and **day** headers (local calendar day of the capture time, "Today", "Yesterday", weekday names within the last week), each with a select-all checkbox while selecting.
 - **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync).
@@ -391,7 +391,7 @@ Requires: core.
 - **TL-3** Memories strip at the top of "All media" when no filter is active: "N years ago" cards from the On-this-day query (§7.12), cover = first favourite or middle photo.
 - **TL-4** Filter bar / search entry (§7.7) applies to the timeline; "Save as smart album" and "Create album from filters" from an active filter.
 - **TL-5** Pull to refresh = incremental sync; sync status in the toolbar (spinner, "Updated just now", offline).
-- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2); (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation.
+- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2) *(decided, round 4: only bursts the camera marked in the file names (`BURST` + number, `COVER` frame shown) are stacked; iPhone bursts need Apple's BurstUUID, which stock servers do not report, and the time rule also stacks quick single shots, which Apple Photos never does)*; (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation *(decided, round 4: delete, favourite, archive, add to album, tags and date/location apply to all members, the delete confirmation counts them; open, info, edit, share and export use the shown copy, as Apple Photos does with RAW + JPEG)*.
 - **TL-7** Source folders: Settings → Library → "Timeline folders" edits `photosSourceFolders` (folder picker over the user's files) and writes the server config; changing it triggers a re-index.
 
 ### 7.2 Viewer — M1
@@ -685,7 +685,7 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 
 ### 7.25 Settings — M1 (grows per milestone)
 
-- **Library (server, synced with the web app)**: Timeline folders (`photosSourceFolders`), Upload folder (`photosLocation`), Square tiles (`croppedLayout`), Grid size (`gridDensity`, Nextcloud ≥ 35), Album sort orders (extended), On this day notifications (extended). Written with `PUT /index.php/apps/photos/api/v1/config/<key>` body `{"value":"<string>"}` and `OCS-APIRequest: true`; read via §5.3 step 2.
+- **Library (server, synced with the web app)**: Timeline folders (`photosSourceFolders`), Upload folder (`photosLocation`), Square tiles (`croppedLayout`; *decided, round 4: a setting of this device, see §6.4*), Grid size (`gridDensity`, Nextcloud ≥ 35), Album sort orders (extended), On this day notifications (extended). Written with `PUT /index.php/apps/photos/api/v1/config/<key>` body `{"value":"<string>"}` and `OCS-APIRequest: true`; read via §5.3 step 2.
 - **App**: stack similar photos, show RAW files, play Live Photos in the grid, load originals automatically (Wi-Fi/always/never), accent colour from server theme, app lock (+ timeout: immediately, 1, 5, 15 min), Backup (§7.18), Notifications, Storage (§7.19), Accounts, Advanced (logging, re-index library, server features list for support), About (version, licences of dependencies, source code link, privacy).
 
 ---

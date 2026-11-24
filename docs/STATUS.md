@@ -154,12 +154,35 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   tile in Library, Photos, Videos and Favorites (`CopyStacks`, `TimelineStacking`, off the main actor; 150 000 items ~90 ms in a
   debug build). The tile shows the JPEG (or the copy with a preview), with a stack badge and "2 copies" for VoiceOver; the viewer's
   "Show 2 copies" (bar above the photo and More menu) adds the other copies as pages. Settings › On this device › "Stack copies of a
-  photo" (on by default). ⬜ Bursts: the server reports no burst identifier, and stacking frames by time alone (the web's 3 s rule in
-  `PhotosDomain/Stacks.swift`) was left out as too aggressive. ⬜ Actions on a stacked tile apply to the tile's copy only (deleting
-  it brings the other copy back as a tile).
-- ⬜ Timeline skeleton from `timelineDays` during the first sync (a plain placeholder grid is shown instead).
-- ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles; the "Square tiles" switch is gone from Settings until
-  the mode exists.
+  photo" (on by default).
+- TL-6 bursts 🟡 (unit-tested, `BurstStacksTests`; not seen on screen, the test servers have no burst): only bursts the camera
+  named as one are stacked — `…_BURST001_COVER.jpg`/`…_BURST002.jpg` (Google Camera), `00000IMG_00000_BURST<time>_COVER.jpg`
+  (Pixel 2), `PXL_….BURST-01.COVER.jpg`: same marker, images, same folder, within 60 s; the `COVER` frame is shown, VoiceOver says
+  "Burst of 5 photos"; copies of burst frames (RAW + JPEG) belong to the burst (`BurstStacks`, `TimelineStacks`). ⬜ iPhone bursts
+  and time-based bursts, by decision: Apple marks a burst only in its maker note (BurstUUID), which stock servers do not hand out
+  (no EXIF in the timeline's SEARCH; `photos-exif` keeps entries up to 1000 bytes and the maker note only as an opaque blob, if at
+  all), and the web's "≤ 3 s apart" rule (`PhotosDomain/Stacks.swift`) also folds quick series of single shots, which Photos never
+  does. Would need the server to report the burst identifier (or the client to read EXIF of every photo).
+- Actions on a stacked tile 🟡 (logic unit-tested, `TimelineGridTests`; the confirmation dialog not looked at on screen, the Mac was
+  locked): as in Photos, where RAW + JPEG are one photo and a burst one item, delete, favourite, archive/unarchive, add to album,
+  tags and date/location apply to everything behind the tile (context menu, selection toolbar, menu bar); the delete confirmation
+  counts all items ("Delete 3 items?") and says "This also deletes 2 photos stacked behind the selected ones."; the undo toast
+  counts all. Open, Get Info, Edit, Share, Export and Share via Nextcloud stay with the copy the tile shows. (Albums are not
+  stacked: an album then shows both copies.)
+- Timeline skeleton during the first sync 🟡 (extended servers; ✅ Mac, run against the 8091 test server with a sync slowed down
+  locally, screenshots `ios-fix-shots/r4-timeline/04…08`; iOS compiled, not run): the day counts of `timelineDays` are summed into
+  months (`TimelineSkeleton`); the library grid gets a section of placeholder tiles for every month older than the oldest one
+  loaded, and the rest of that month as placeholder tiles after its photos (`GridModel`, `GridSection.placeholders`), so the
+  scroll height, date scrubber and year index (iOS section index) cover the whole library from the first page on; pages of the
+  sync are batch updates of the tail. Placeholder tiles cannot be selected, opened or dragged; VoiceOver says "Loading…". Only for
+  the unfiltered library (what the counts are of); stock servers (no counts) keep the plain placeholder grid and show what has
+  loaded. The counts are UTC days and leave out shared folders: only the tail is estimated, and it is replaced as photos arrive.
+- "Aspect ratio" grid 🟡 (✅ Mac, run: View ▸ Square Tiles ⌥⌘S toggles it, screenshots `01`/`02`; iOS/iPad compiled, not run):
+  Settings › On this device › "Square tiles" (on by default) and View ▸ Square Tiles (⌥⌘S, also the iPad keyboard shortcut). Off,
+  every grid fits each photo whole into its square cell, centred, as Photos' "Aspect Ratio Grid"; badges, the selection ring and
+  mark go with the picture, and previews are requested for the long edge (smaller for wide photos). The layout and its budgets are
+  unchanged (`GridModelTests`, 100 000 items). Decisions in SPEC §6.4: letterboxed cells, not the web's justified rows, and a
+  setting of this device that does not follow or write the web's `croppedLayout`.
 - Undo ✅ (Mac app): favourite, archive, remove from album and delete register with the undo manager of the window they
   were made in (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
   ("Archived 3 items · Undo"), in the grids and in the viewer (favourite, archive, delete; an undo there brings the

@@ -39,6 +39,8 @@ final class GridFeed {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var pending: (items: [GridMedia], flat: Bool)?
     @ObservationIgnored private var granularity = TimelineGranularity.day
+    /// Month counts that complete the timeline during the first sync (`TimelineSkeleton`); nil otherwise.
+    @ObservationIgnored private var skeleton: TimelineSkeleton?
     @ObservationIgnored private var generation = 0
 
     func observe(_ observation: @escaping @Sendable () -> GridStream, flat: Bool) {
@@ -55,7 +57,7 @@ final class GridFeed {
 
     func apply(_ items: [GridMedia], flat: Bool) {
         if worker == nil, items.count <= Self.inlineLimit {
-            let model = GridModel(items: items, sectioning: sectioning(flat: flat))
+            let model = GridModel(items: items, sectioning: sectioning(flat: flat), skeleton: skeleton)
             publish(model, change: model.change(from: update.model))
             return
         }
@@ -68,17 +70,18 @@ final class GridFeed {
                 guard let self, let next = self.pending else { break }
                 self.pending = nil
                 let sectioning = self.sectioning(flat: next.flat)
+                let skeleton = self.skeleton
                 let base = self.update
                 let built = await Task.detached(priority: .userInitiated) { () -> (GridModel, GridModel.Change) in
-                    let model = GridModel(items: next.items, sectioning: sectioning)
+                    let model = GridModel(items: next.items, sectioning: sectioning, skeleton: skeleton)
                     return (model, model.change(from: base.model))
                 }.value
                 guard !Task.isCancelled else { break }
                 if self.update.revision == base.revision {
                     self.publish(built.0, change: built.1)
                 } else {
-                    // The granularity changed while the model was built.
-                    self.publish(built.0.resectioned(self.sectioning(flat: next.flat)), change: .structure)
+                    // The granularity or the skeleton changed while the model was built.
+                    self.publish(built.0.resectioned(self.sectioning(flat: next.flat), skeleton: self.skeleton), change: .structure)
                 }
                 try? await Task.sleep(for: Self.coalesceInterval)
             }
@@ -104,6 +107,16 @@ final class GridFeed {
         guard case .timeline = update.model.sectioning else { return }
         let model = update.model.resectioned(.timeline(granularity))
         publish(model, change: .structure)
+    }
+
+    /// Completes the timeline with placeholder tiles from the server's month counts while the first sync runs; nil when
+    /// it is over or the server has no counts (stock servers). Cheap: only the sections are rebuilt.
+    func setSkeleton(_ skeleton: TimelineSkeleton?) {
+        guard skeleton != self.skeleton else { return }
+        self.skeleton = skeleton
+        guard case .timeline = update.model.sectioning else { return }
+        let model = update.model.resectioned(update.model.sectioning, skeleton: skeleton)
+        publish(model, change: model.change(from: update.model))
     }
 
     private func sectioning(flat: Bool) -> GridSectioning {
