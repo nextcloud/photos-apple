@@ -63,6 +63,14 @@ public final class AppModel {
         Diagnostics.removeExports()
         // Uploads of shares whose extension has ended go on in the app (SPEC §7.24).
         if Bundle.main.bundleURL.pathExtension == "app" { ShareUploads.resumeAbandoned(layout: layout, keychain: keychain) }
+        // The backup widget, the Control Center controls and the Live Activity follow the backup; the Mac's desktop
+        // pictures go on rotating (SPEC §15.4).
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            BackupPresence.shared.start(backup)
+            #if os(macOS)
+                DesktopPictures.shared.attach(self)
+            #endif
+        }
         // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
         // background, `RootView`), so a crash loses at most the last few minutes.
         Task { [weak self] in

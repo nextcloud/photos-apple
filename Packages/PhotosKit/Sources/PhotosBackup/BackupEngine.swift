@@ -40,6 +40,8 @@ public struct BackupStatus: Sendable, Equatable {
     public var failed = 0
     /// Why the most recent of them failed.
     public var lastFailure: String?
+    /// The size of what is still to upload (`pending`), as far as the photo library told it; 0 when unknown.
+    public var pendingBytes: Int64 = 0
     /// Items left out because their original is only in iCloud and "Download originals from iCloud" is off.
     public var skipped = 0
     /// The app may only see the photos the user selected ("limited access"); everything else is not backed up.
@@ -1483,7 +1485,7 @@ public actor BackupEngine {
     /// The counts of the status are those of the ledger: what failed stays "failed" (and not "up to date") until it is
     /// uploaded, also across passes that do not touch it because it waits for its next attempt.
     func refreshCounts() throws {
-        let (counts, lastFailure) = try database.writer.read { db in
+        let (counts, lastFailure, pendingBytes) = try database.writer.read { db in
             let counts = try Row.fetchAll(db, sql: "SELECT state, count(*) AS n FROM backupAsset GROUP BY state").reduce(
                 into: [String: Int]()
             ) {
@@ -1492,7 +1494,11 @@ public actor BackupEngine {
             let lastFailure = try String.fetchOne(
                 db, sql: "SELECT lastError FROM backupAsset WHERE state = ? AND lastError IS NOT NULL ORDER BY updatedAt DESC LIMIT 1",
                 arguments: [BackupItemState.failed.rawValue])
-            return (counts, lastFailure)
+            // The stored resources say how large they are (`BackupResource.byteSize`), for "1.2 GB left" (SPEC §15.4).
+            let bytes = try Int64.fetchOne(
+                db, sql: "SELECT sum(json_extract(resource, '$.byteSize')) FROM backupAsset WHERE state = ? AND resource IS NOT NULL",
+                arguments: [BackupItemState.pending.rawValue])
+            return (counts, lastFailure, bytes ?? 0)
         }
         status.uploaded = counts[BackupItemState.uploaded.rawValue] ?? 0
         status.matched = counts[BackupItemState.matched.rawValue] ?? 0
@@ -1500,6 +1506,7 @@ public actor BackupEngine {
         status.pending = counts[BackupItemState.pending.rawValue] ?? 0
         status.skipped = counts[BackupItemState.skipped.rawValue] ?? 0
         status.lastFailure = lastFailure
+        status.pendingBytes = pendingBytes
     }
 
     /// Removes entries of resources that are no longer there to upload (the photo was deleted on the device, the options
