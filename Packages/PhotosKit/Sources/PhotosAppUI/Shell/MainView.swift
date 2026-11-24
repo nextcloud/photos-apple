@@ -151,6 +151,8 @@ struct MainView: View {
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
+    /// File › Import from Google Takeout… (Mac).
+    @State private var importingTakeout = false
 
     /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
     static var debugDestination: AppDestination? {
@@ -198,11 +200,15 @@ struct MainView: View {
                     },
                     upload: { importingFiles = true },
                     openPublicLink: { openingLink = true },
-                    syncNow: { Task { await session.syncNow(forceReconcile: true) } }
+                    syncNow: { Task { await session.syncNow(forceReconcile: true) } },
+                    importTakeout: { importingTakeout = true }
                 )
             )
             .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
             .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
+            #if os(macOS)
+                .sheet(isPresented: $importingTakeout) { TakeoutImportSheet() }
+            #endif
             .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
                 guard case .success(let urls) = result else { return }
                 session.transfers.upload(UploadSources.copies(of: urls))
