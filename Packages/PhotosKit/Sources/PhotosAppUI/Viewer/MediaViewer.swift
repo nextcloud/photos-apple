@@ -55,6 +55,8 @@ struct MediaViewer: View {
     /// Haptic triggers (iPhone, iPad).
     @State private var favoriteToggles = 0
     @State private var deletions = 0
+    /// Ratings and flags given here (SPEC §15.2).
+    @State private var culling = CullingModel()
     @Environment(SessionModel.self) private var session
     /// The window's undo manager: favourite, archive and delete made here are undone with Edit › Undo (⌘Z, shake).
     @Environment(\.undoManager) private var undoManager
@@ -236,6 +238,7 @@ struct MediaViewer: View {
                 perform(key)
                 return .handled
             }
+            .viewerCulling(culling, ids: cullingIds, chromeHidden: chromeHidden) { step(1) }
             #if os(macOS)
                 // Escape also has to work while the info inspector (or anything else in the window) has the focus.
                 .background {
@@ -270,6 +273,15 @@ struct MediaViewer: View {
         if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
         actions.shareTitle = item.name
         actions.slideshow = { playSlideshow() }
+        if session.features.has(.systemtags) {
+            let ids = cullingIds
+            actions.cull = { command in culling.apply(command, ids: ids, session: session, undoManager: undoManager) }
+        }
+        #if os(macOS)
+            if isImage, !item.isCollectionChild {
+                actions.editWith = EditWithTarget(item: item) { app in ExternalEditCenter.shared.open(item, with: app, session: session) }
+            }
+        #endif
         return actions
     }
 
@@ -394,6 +406,12 @@ struct MediaViewer: View {
         favoriteToggles += 1
         let undoManager = undoManager
         Task { await session.perform(.favorite([item], value: !item.isFavorite), undoManager: undoManager) }
+    }
+
+    /// The files a rating or flag goes to: the photo shown, or every copy of a stacked tile (as in the grid).
+    var cullingIds: [FileID] {
+        if let current, let members = stacks[current], members.count > 1 { return members.filter { !removed.contains($0) } }
+        return currentFileId.map { [$0] } ?? []
     }
 
     func toggleInfo() {
@@ -576,6 +594,12 @@ struct MediaViewer: View {
                 editingMetadata = item
             } label: {
                 Label(String(localized: "Edit date and location", bundle: .module), systemImage: "calendar.badge.clock")
+            }
+        }
+        if session.features.has(.systemtags) {
+            Divider()
+            CullingMenuItems { command in
+                culling.apply(command, ids: cullingIds, session: session, undoManager: undoManager)
             }
         }
         if item.isOwnStorage && item.permissions.canDelete {

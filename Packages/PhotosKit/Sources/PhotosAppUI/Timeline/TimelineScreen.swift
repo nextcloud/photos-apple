@@ -22,10 +22,15 @@ struct TimelineScreen: View {
     @State private var memories: [Memory] = []
     /// "Show in library" from elsewhere: the Library scrolls to the photo and highlights it.
     @Environment(\.timelineReveal) private var reveal
+    /// Picks, rejected, star ratings… (SPEC §15.2).
+    @State private var cullingFilter: CullingFilter = .all
+    @State private var deleteRejected: DeleteRejectedConfirmation?
+    @State private var nothingRejected = false
+    @Environment(\.undoManager) private var undoManager
 
     /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
     var showsMemoriesStrip: Bool {
-        filter == .all && mediaKind == .all && showsMemories && !gridSelection.isSelecting
+        filter == .all && mediaKind == .all && cullingFilter == .all && showsMemories && !gridSelection.isSelecting
     }
 
     /// What the grid observes: the media kind, whether copies of a photo are stacked and which partner folders are
@@ -34,17 +39,19 @@ struct TimelineScreen: View {
         var kind: MediaFilter
         var stacksCopies: Bool
         var hiddenPartnerFolders: [String] = []
+        var culling: CullingFilter = .all
     }
 
     var query: Query {
-        Query(kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [])
+        Query(
+            kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [], culling: cullingFilter)
     }
 
     /// While the first sync runs, the whole library's shape from the server's month counts (extended Photos API): the
     /// grid and its year index reach back to the oldest photo before it is loaded. Only for the unfiltered library,
     /// which is what the counts are of. Stock servers have no counts: the grid shows what is loaded.
     var skeleton: TimelineSkeleton? {
-        guard mediaKind == .all, case .initialSync = session.syncStatus else { return nil }
+        guard mediaKind == .all, cullingFilter == .all, case .initialSync = session.syncStatus else { return nil }
         return session.initialSyncSkeleton
     }
 
@@ -123,6 +130,36 @@ struct TimelineScreen: View {
         }
         // Pull to refresh reconciles only when the last walk through the library is a while ago ("Sync now" always does).
         .refreshable { await session.syncNow(reconcile: .refresh) }
+        .confirmationDialog(
+            deleteRejected?.title ?? "", isPresented: Binding(get: { deleteRejected != nil }, set: { if !$0 { deleteRejected = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Delete", bundle: .module), role: .destructive) {
+                if let items = deleteRejected?.items {
+                    let undoManager = undoManager
+                    Task { await session.perform(.delete(items), undoManager: undoManager) }
+                }
+            }
+        } message: {
+            Text(
+                session.features.has(.trashbin)
+                    ? String(localized: "The items are moved to the trash bin of your Nextcloud.", bundle: .module)
+                    : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module))
+        }
+        .alert(DeleteRejectedConfirmation.nothingTitle, isPresented: $nothingRejected) {
+        } message: {
+            Text(DeleteRejectedConfirmation.nothingMessage)
+        }
+    }
+
+    /// "Delete Rejected…": every rejected photo of the library (own or with delete permission), after a confirmation.
+    func requestDeleteRejected() {
+        let items = session.rejectedItems().filter(\.permissions.canDelete)
+        if items.isEmpty {
+            nothingRejected = true
+        } else {
+            deleteRejected = DeleteRejectedConfirmation(items: items)
+        }
     }
 
     var grid: some View {
@@ -135,9 +172,14 @@ struct TimelineScreen: View {
             columns: $columns,
             waitsForFirstSync: true,
             reveal: filter == .all ? reveal : nil,
-            isLibrary: filter == .all
+            isLibrary: filter == .all,
+            deleteRejected: session.features.has(.systemtags) ? { requestDeleteRejected() } : nil
         ) {
             TransfersIndicator()
+            PhotographerStatusItems()
+            if session.features.has(.systemtags) {
+                CullingFilterMenu(filter: $cullingFilter) { requestDeleteRejected() }
+            }
             UploadMenu()
             PartnerFilterButton()
             #if os(macOS)
@@ -173,9 +215,10 @@ struct TimelineScreen: View {
         let library = services.library
         let excluded = session.excludedFolders + (session.partners?.hiddenFolders ?? [])
         let kind = mediaKind
+        let culling = cullingFilter
         // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.
         let query: @Sendable () -> GridStream = {
-            library.observeGrid(kind, excludedFolders: excluded, coalescing: .milliseconds(300))
+            library.observeGrid(kind, excludedFolders: excluded, culling: culling, coalescing: .milliseconds(300))
         }
         feed.observe(stackCopies ? TimelineStacking.stacked(query) : query, flat: false)
     }
@@ -186,6 +229,9 @@ struct TimelineScreen: View {
         case .offline(lastSync: nil): return String(localized: "You're offline", bundle: .module)
         case .failed(_, lastSync: nil): return String(localized: "Couldn't load your library", bundle: .module)
         default: break
+        }
+        if cullingFilter != .all {
+            return String(localized: "No matching photos", bundle: .module, comment: "Library filtered by rating or flag: nothing matches.")
         }
         switch mediaKind {
         case .favorites: return String(localized: "No favorites yet", bundle: .module)
@@ -200,6 +246,11 @@ struct TimelineScreen: View {
             return String(localized: "Your library is loaded as soon as the server can be reached.", bundle: .module)
         case .failed(let message, lastSync: nil): return message
         default: break
+        }
+        if cullingFilter != .all {
+            return String(
+                localized: "No photos match “\(CullingWording.filterTitle(cullingFilter))”.", bundle: .module,
+                comment: "Library filtered by rating or flag: nothing matches. The placeholder is the filter, e.g. Picks.")
         }
         let folders = session.features.userConfig.photosSourceFolders.joined(separator: ", ")
         return String(localized: "Photos and videos in \(folders) on your Nextcloud appear here.", bundle: .module)

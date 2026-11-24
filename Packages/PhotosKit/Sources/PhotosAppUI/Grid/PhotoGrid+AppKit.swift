@@ -51,6 +51,8 @@
         private var refreshWork: DispatchWorkItem?
         private var selected = GridSelectionTracker()
         private lazy var promiseDelegate = FilePromiseDelegate(services: services)
+        /// Ratings and flags shown on the tiles (SPEC §15.2).
+        let culling: GridCullingObserver
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -60,7 +62,9 @@
         init(services: AccountServices) {
             self.services = services
             core = GridCore(services: services, headerMetrics: GridHeaderMetrics(titleHeight: 26, subtitleHeight: 16))
+            culling = GridCullingObserver(services: services)
             super.init(frame: .zero)
+            culling.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
             collectionView.collectionViewLayout = makeLayout()
             collectionView.isSelectable = true
             collectionView.allowsMultipleSelection = true
@@ -472,6 +476,34 @@
             if next != zoomStep { callbacks?.columnsChanged(next) }
         }
 
+        /// P, X, U, 0–5 rate the selection and C compares it (SPEC §15.2); without modifiers only, so ⌘C and the
+        /// like keep their meaning.
+        func handleCullingKey(_ event: NSEvent) -> Bool {
+            guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+                let character = event.charactersIgnoringModifiers?.lowercased().first, !collectionView.selectionIndexPaths.isEmpty
+            else { return false }
+            let ids = collectionView.selectionIndexPaths.sorted().compactMap { fileId(at: $0) }
+            if character == "c", let compare = callbacks?.compare, (2...CompareLayout.maxPhotos).contains(ids.count) {
+                compare(ids)
+                return true
+            }
+            guard let command = CullingCommand(key: character), let cull = callbacks?.cull else { return false }
+            cull(command, ids)
+            if ids.count == 1, CullingSettings.autoAdvance { selectNext() }
+            return true
+        }
+
+        /// Auto-advance: the tile after the selected one becomes the selection.
+        func selectNext() {
+            guard let current = collectionView.selectionIndexPaths.max(),
+                let next = GridNavigation.indexPath(after: current, sectionCount: model.sections.count, itemCount: model.numberOfItems)
+            else { return }
+            collectionView.selectionIndexPaths = [next]
+            selected.reset(Set([fileId(at: next)].compactMap { $0 }))
+            callbacks?.selectionChanged(currentSelection())
+            collectionView.scrollToItems(at: [next], scrollPosition: .nearestHorizontalEdge)
+        }
+
         func menuActions(for id: FileID) -> [GridMenuAction] {
             callbacks?.menu([id]) ?? []
         }
@@ -621,6 +653,7 @@
 
         override func keyDown(with event: NSEvent) {
             let command = event.modifierFlags.contains(.command)
+            if let owner, owner.handleCullingKey(event) { return }
             switch event.charactersIgnoringModifiers {
             case "\r", " ": owner?.openSelection()
             case "\u{1b}": owner?.clearSelection()
@@ -687,6 +720,9 @@
                     "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125),
                     "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
                     "return": ("\r", 36), "space": (" ", 49), "escape": ("\u{1b}", 53),
+                    // Culling (SPEC §15.2).
+                    "p": ("p", 35), "x": ("x", 7), "u": ("u", 32), "c": ("c", 8), "0": ("0", 29), "1": ("1", 18), "2": ("2", 19),
+                    "3": ("3", 20), "4": ("4", 21), "5": ("5", 23),
                 ]
                 guard let (characters, code) = table[key] else { return nil }
                 let arrow = (123...126).contains(Int(code))
@@ -782,6 +818,10 @@
         private let partnerIcon = NSImageView(
             image: NSImage(systemSymbolName: GridTileBadges.partnerSymbol, accessibilityDescription: nil)!)
         private let selectionRing = NSView()
+        /// Rating and flag (SPEC §15.2).
+        private let cullingBadge = CullingBadgeView()
+        /// Rejected: the picture is dimmed.
+        private var isDimmed = false
         /// Loads the preview and says what to draw; shared with the UIKit grid.
         private let picture = GridTilePicture()
         var fileId: FileID? { picture.fileId }
@@ -828,7 +868,7 @@
             stackIcon.shadow = stackShadow
             [
                 photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon,
-                selectionRing,
+                cullingBadge, selectionRing,
             ].forEach {
                 container.addSubview($0)
             }
@@ -856,7 +896,10 @@
             }
             videoIcon.frame = CGRect(x: right - 16, y: y + 4, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: x + 5, y: y + 4, width: 13, height: 12)
-            liveIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 20, width: 16, height: 16)
+            // The flag and stars take the top leading corner; the Live Photo badge follows them.
+            let cullingWidth = cullingBadge.fittingWidth
+            cullingBadge.frame = CGRect(x: x + 5, y: bounds.maxY - 19, width: cullingWidth, height: 15)
+            liveIcon.frame = CGRect(x: x + 4 + (cullingWidth > 0 ? cullingWidth + 4 : 0), y: bounds.maxY - 20, width: 16, height: 16)
             stackIcon.frame = CGRect(x: bounds.maxX - 20, y: bounds.maxY - 20, width: 16, height: 16)
             // Both in the top trailing corner: the partner badge moves left of the stack badge.
             let partnerRight = stackIcon.isHidden ? bounds.maxX - 4 : stackIcon.frame.minX - 3
@@ -866,9 +909,13 @@
         override var isSelected: Bool {
             didSet {
                 selectionRing.isHidden = !isSelected
-                photoView.alphaValue = isSelected ? 0.8 : 1
+                updateAlpha()
                 tileView.isTileSelected = isSelected
             }
+        }
+
+        private func updateAlpha() {
+            photoView.alphaValue = (isSelected ? 0.8 : 1) * (isDimmed ? 0.4 : 1)
         }
 
         /// Shows `item`. Called again for the same item when its badges, the zoom or the screen scale change: the
@@ -882,6 +929,11 @@
             }
             photoView.isHidden = false
             updateBadges(item, owner: owner)
+            let culling = CullingTileBadge(owner.culling.mark(item.fileId), tileSide: tileSide)
+            cullingBadge.show(culling)
+            isDimmed = culling.isDimmed
+            updateAlpha()
+            if let text = culling.accessibilityText { tileView.label += ", " + text }
             picture.configure(
                 item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
                 source: GridTilePicture.Source(services: services))
@@ -891,8 +943,10 @@
         func showPlaceholder() {
             picture.reset()
             square = true
-            let badges: [NSView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, shade]
+            let badges: [NSView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, shade, cullingBadge]
             for badge in badges { badge.isHidden = true }
+            isDimmed = false
+            updateAlpha()
             tileView.fileId = nil
             tileView.label = String(localized: "Loading…", bundle: .module)
             tileView.onPress = nil

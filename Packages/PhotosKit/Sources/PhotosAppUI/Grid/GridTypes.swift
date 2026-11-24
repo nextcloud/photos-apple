@@ -78,6 +78,10 @@ struct GridCallbacks {
     var tileLocator: GridTileLocator?
     /// Edit ▸ Copy (⌘C) with the selection; nil: the grid does not copy.
     var copy: (@MainActor ([FileID]) -> Void)? = nil
+    /// A rating or flag key (P, X, U, 0–5) with the selection (SPEC §15.2); nil: the grid does not rate.
+    var cull: (@MainActor (CullingCommand, [FileID]) -> Void)? = nil
+    /// C with 2–4 selected: the compare view (SPEC §15.2); nil: the grid does not compare.
+    var compare: (@MainActor ([FileID]) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from

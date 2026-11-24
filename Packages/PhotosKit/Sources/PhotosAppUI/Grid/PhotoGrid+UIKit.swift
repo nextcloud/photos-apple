@@ -63,6 +63,8 @@
         private var isSelecting = false
         private var pinchHandled = false
         private var selected = GridSelectionTracker()
+        /// Ratings and flags shown on the tiles (SPEC §15.2).
+        let culling: GridCullingObserver
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -72,7 +74,9 @@
         init(services: AccountServices) {
             self.services = services
             core = GridCore(services: services, headerMetrics: Self.currentHeaderMetrics)
+            culling = GridCullingObserver(services: services)
             super.init(nibName: nil, bundle: nil)
+            culling.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
         }
 
         required init?(coder: NSCoder) { fatalError() }
@@ -372,7 +376,35 @@
 
         override var keyCommands: [UIKeyCommand]? {
             guard isSelecting else { return nil }
-            return [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(cancelSelection))]
+            var commands = [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(cancelSelection))]
+            // Hardware keyboard: rate and flag the selection, C compares it (SPEC §15.2).
+            if !selected.ids.isEmpty {
+                for key in CullingCommand.keys + ["c"] {
+                    let command = UIKeyCommand(input: String(key), modifierFlags: [], action: #selector(cullingKey(_:)))
+                    command.wantsPriorityOverSystemBehavior = true
+                    commands.append(command)
+                }
+            }
+            return commands
+        }
+
+        @objc func cullingKey(_ command: UIKeyCommand) {
+            guard let character = command.input?.first else { return }
+            let ids = (collectionView.indexPathsForSelectedItems ?? []).sorted().compactMap { fileId(at: $0) }
+            if character == "c" {
+                if (2...CompareLayout.maxPhotos).contains(ids.count) { callbacks?.compare?(ids) }
+                return
+            }
+            guard let cull = CullingCommand(key: character), !ids.isEmpty else { return }
+            callbacks?.cull?(cull, ids)
+            if ids.count == 1, CullingSettings.autoAdvance, let current = collectionView.indexPathsForSelectedItems?.first,
+                let next = GridNavigation.indexPath(after: current, sectionCount: model.sections.count, itemCount: model.numberOfItems)
+            {
+                collectionView.deselectItem(at: current, animated: false)
+                collectionView.selectItem(at: next, animated: false, scrollPosition: .centeredVertically)
+                selected.reset(currentSelection())
+                callbacks?.selectionChanged(selected.ids)
+            }
         }
 
         /// Escape: leave the selection mode.
@@ -629,6 +661,10 @@
         private let partnerIcon = UIImageView(image: UIImage(systemName: GridTileBadges.partnerSymbol))
         private let checkmark = UIImageView()
         private let gradient = CAGradientLayer()
+        /// Rating and flag (SPEC §15.2); rejected photos are dimmed.
+        private let cullingBadge = CullingBadgeView()
+        private var isDimmed = false
+        private var isTileSelected = false
         /// Loads the preview and says what to draw; shared with the AppKit grid.
         private let tilePicture = GridTilePicture()
         var fileId: FileID? { tilePicture.fileId }
@@ -675,7 +711,9 @@
             stackIcon.layer.shadowRadius = 1.5
             stackIcon.layer.shadowOffset = .zero
             stackIcon.isHidden = true
-            [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, checkmark].forEach { contentView.addSubview($0) }
+            [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge, checkmark].forEach {
+                contentView.addSubview($0)
+            }
             // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
             hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
             tilePicture.show = { [weak self] display in self?.show(display) }
@@ -715,7 +753,10 @@
             }
             videoIcon.frame = CGRect(x: right - 16, y: bounds.maxY - 16, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 16, width: 13, height: 12)
-            liveIcon.frame = CGRect(x: x + 4, y: y + 4, width: 16, height: 16)
+            // The flag and stars take the top leading corner; the Live Photo badge follows them.
+            let cullingWidth = cullingBadge.fittingWidth
+            cullingBadge.frame = CGRect(x: x + 5, y: y + 5, width: cullingWidth, height: 15)
+            liveIcon.frame = CGRect(x: x + 4 + (cullingWidth > 0 ? cullingWidth + 4 : 0), y: y + 4, width: 16, height: 16)
             stackIcon.frame = CGRect(x: bounds.maxX - 20, y: y + 4, width: 16, height: 16)
             // Both in the top trailing corner: the partner badge moves left of the stack badge.
             let partnerRight = stackIcon.isHidden ? bounds.maxX - 4 : stackIcon.frame.minX - 3
@@ -743,7 +784,8 @@
                 : UIImage(systemName: "circle")
             // Selected: a white tick on the accent colour (the view's inherited tint). Not selected: a white ring.
             checkmark.tintColor = selected ? nil : .white
-            imageView.alpha = selected ? 0.75 : 1
+            isTileSelected = selected
+            imageView.alpha = (selected ? 0.75 : 1) * (isDimmed ? 0.4 : 1)
             if selected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
             // The badges make room for the mark.
             if wasHidden != checkmark.isHidden { setNeedsLayout() }
@@ -759,6 +801,11 @@
                 setNeedsLayout()
             }
             updateBadges(item, owner: owner)
+            let culling = CullingTileBadge(owner.culling.mark(item.fileId), tileSide: tileSide)
+            cullingBadge.show(culling)
+            isDimmed = culling.isDimmed
+            imageView.alpha = (isTileSelected ? 0.75 : 1) * (isDimmed ? 0.4 : 1)
+            if let text = culling.accessibilityText { accessibilityLabel = (accessibilityLabel ?? "") + ", " + text }
             setNeedsUpdateConfiguration()
             tilePicture.configure(
                 item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
@@ -769,8 +816,9 @@
         func showPlaceholder() {
             tilePicture.reset()
             square = true
-            let badges: [UIView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon]
+            let badges: [UIView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge]
             for badge in badges { badge.isHidden = true }
+            isDimmed = false
             gradient.isHidden = true
             menuActions = nil
             accessibilityLabel = String(localized: "Loading…", bundle: .module)

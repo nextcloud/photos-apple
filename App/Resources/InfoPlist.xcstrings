@@ -72,6 +72,18 @@
           }
         }
       }
+    },
+    "NSRemovableVolumesUsageDescription" : {
+      "comment" : "Privacy - Removable Volumes Usage Description (Mac): asked before the import reads a memory card.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Nextcloud Photos reads the photos and videos on memory cards you import from."
+          }
+        }
+      }
     }
   },
   "version" : "1.1"
