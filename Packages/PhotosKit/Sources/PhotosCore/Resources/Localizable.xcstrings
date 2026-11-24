@@ -203,6 +203,9 @@
     "Only the photos you selected for Nextcloud Photos are backed up." : {
       "comment" : "Added to the result of a backup run when the user gave the app access to selected photos only (limited Photos access). \"Nextcloud Photos\" is the app's name."
     },
+    "Only your own photos can be added to an album." : {
+      "comment" : "Error when saving a memory as an album: none of its photos is the user's own (all are in shared folders)."
+    },
     "Only your own photos can be shared by link." : {
       "comment" : "Error message when the user tries to create a share link for photos that someone else shared with them."
     },
