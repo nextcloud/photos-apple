@@ -218,7 +218,32 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
 - Background tasks, silent pushes and the "Back up now" intent find the app model after a launch without a window
   (`AppHost`) 🟡 compiled for iOS, not run on a device.
-- ⬜ §7.18.8 remove backed-up photos from the device.
+- 🟡 §7.18.8 "Free up space on this iPhone/iPad" (Backup screen, iOS/iPadOS only): offers only assets whose every file the
+  backup keeps (original, edited version, RAW, Live Photo motion) is uploaded or matched in the ledger with a server path and
+  is listed by the server right now (one `PROPFIND` per folder) with exactly the device's size and, when both are known, the
+  same file id; nothing converted to JPEG, matched by name only, recorded by the Files app without a path, or with an
+  edited Live Photo motion. Photos of the last 30 days only with a switch. Count and size, a confirmation, a second server
+  check right before, then `PHAssetChangeRequest.deleteAssets` (the system confirms; Recently Deleted). Verification logic
+  and the server listing ✅ unit-tested; compiled for iOS, **not run on a device** (PhotoKit sizes, deletion).
+- 🟡 After the first login on iPhone/iPad, backup is offered once (full-screen step) before the notification permission:
+  photo access, "N photos and videos on this iPhone", then a dry run that shows "X already on your Nextcloud · Y to
+  upload" as it counts (per asset, from the ledger), and Start backup / Not now. The Files-app question is part of the
+  step only when the Files app is installed (`nextcloud://`) or left data in its App Group, pre-answered "switch" when it
+  uploaded for this account. The Mac sets up backup in Settings › Backup with the same step (no offer after login).
+  Policies ✅ unit-tested; the iOS step compiled, **not run** (no simulator); the Mac step not looked at (screen locked).
+- 🟡 Backup folder: chosen with the server folder browser instead of a text field; a folder the timeline folders don't
+  cover asks "Back up here and show in library" (adds it to `photosSourceFolders`) or another folder; an existing folder
+  outside them shows a warning with "Show this folder in your library" and "Back up to /Photos instead". Path logic ✅
+  unit-tested; UI compiled, not looked at.
+- 🟡 iOS: "Back up now" and the first backup run as a `BGContinuedProcessingTask` (identifier
+  `<bundle id>.backup.continued`, wildcard in `BGTaskSchedulerPermittedIdentifiers`) when it is the first pass or ≥ 50 items
+  wait: system progress (looking, checking, uploading N of M), the system's Stop interrupts the pass; refresh/processing
+  expirations and the short background time no longer interrupt such a pass. Falls back to a normal pass when the system
+  refuses or doesn't start it within 10 s. "Keep screen on while backing up" turns the idle timer off only while a pass
+  runs and the app is active. Compiled, **not run on a device**.
+- 🟡 "Not backed up yet" on the Backup screen (iOS, iPadOS, macOS): the device's photos the options select that the ledger
+  doesn't have completely on the server, newest first, as PhotoKit thumbnails with a badge for failed / only in iCloud.
+  Classification ✅ unit-tested; UI compiled, not looked at.
 - ⬜ Most-compatible video conversion (HEVC → H.264); images only.
 - ✅ Run state machine unit-tested with a fake library and server: pause and resume (Wi-Fi, Low Data, Low Power, lost connection),
   stop on full quota / invalid login / refused upload (`BackupStatus.blocker`), retry delays for failing files, skipping assets the
@@ -263,7 +288,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 ## M4 Discover — 🟡
 Places ✅, map 🟡, people 🟡 (no Recognize on test servers), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
 memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
-- Push: permission is asked after login or when the Notifications switch is turned on, not at first launch; the switch unregisters
+- Push: permission is asked after login (on iPhone/iPad after the backup offer) or when the Notifications switch is turned on, not at first launch; the switch unregisters
   and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
   needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
   pushes reach `AppModel.handleBackgroundPush` through the app delegates (`remote-notification` background mode).
@@ -280,7 +305,7 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 - ⬜ Free-form crop (aspect presets only).
 - Free up space works on the **server** (title "Free up server space"): screenshots by file name or PNG with a phone-screen size and no
   location — never every PNG (`PhotosDomain/Cleanup.swift`); the confirmation names the server, all devices and trash bin vs. permanent.
-  Freeing device storage is §7.18.8 (Backup), ⬜.
+  Freeing device storage is §7.18.8 (Backup), 🟡.
 - Duplicates: suggested copy to keep (favorite, own file, oldest upload) with the reason shown, user can pick another one.
   ⬜ Warning when a deleted copy is in an album.
 - ⬜ Spotlight indexing of albums/people/places; App Intent entities (albums, people) and search intent.
