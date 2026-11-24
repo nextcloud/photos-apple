@@ -29,7 +29,15 @@ struct GridUpdatePlan: Equatable {
     /// The sections are laid out again (and the scroll position restored).
     var relayouts: Bool { layoutChanged || change == .structure }
     /// The data has to be reloaded, not just the layout invalidated.
-    var reloads: Bool { change == .structure }
+    var reloads: Bool {
+        if case .sections = change { return layoutChanged }
+        return change == .structure
+    }
+    /// The sections to update in place (a batch update of the collection view); `nil` when nothing or everything is.
+    var sectionChanges: GridModel.SectionChanges? {
+        guard !relayouts, case .sections(let changes) = change else { return nil }
+        return changes
+    }
 
     /// - Parameters:
     ///   - revision: revision of the update that came in.
@@ -39,6 +47,25 @@ struct GridUpdatePlan: Equatable {
         guard revision != shown else { return GridUpdatePlan(layoutChanged: layoutChanged, change: .none) }
         // After skipped revisions the change says nothing about what the grid shows: everything is reloaded.
         return GridUpdatePlan(layoutChanged: layoutChanged, change: revision == shown + 1 ? change : .structure)
+    }
+}
+
+/// The selection of a grid as file ids, kept up to date from what the collection view reports as selected and
+/// deselected (work in proportion to the change), instead of being rebuilt from every selected index path on each update:
+/// with a whole library selected, that rebuild was 150 000 lookups per SwiftUI update.
+struct GridSelectionTracker {
+    private(set) var ids: Set<FileID> = []
+
+    mutating func insert(_ new: some Sequence<FileID>) { ids.formUnion(new) }
+    mutating func remove(_ gone: some Sequence<FileID>) { ids.subtract(gone) }
+    mutating func reset(_ ids: Set<FileID>) { self.ids = ids }
+
+    /// Whether the collection view has to be given `selection`. SwiftUI hands back the set the grid reported unless it
+    /// changed the selection itself; that comparison is cheap (the same storage). After a model change the selected
+    /// items may be at other places (or gone).
+    func needsApply(_ selection: Set<FileID>, modelChanged: Bool) -> Bool {
+        if modelChanged { return !(selection.isEmpty && ids.isEmpty) }
+        return selection != ids
     }
 }
 

@@ -123,8 +123,10 @@ import Testing
         library = LibraryStore(database: database)
     }
 
-    func engine(reconcileInterval: TimeInterval = 0) -> SyncEngine {
-        SyncEngine(api: server.api, database: database, features: features, reconcileInterval: reconcileInterval)
+    func engine(reconcileInterval: TimeInterval = 0, confirmationDelay: TimeInterval = 0) -> SyncEngine {
+        SyncEngine(
+            api: server.api, database: database, features: features, reconcileInterval: reconcileInterval,
+            massDeleteConfirmationDelay: confirmationDelay)
     }
 
     func file(_ id: FileID, _ path: String? = nil, time: Double, mime: String = "image/jpeg") -> FakeDAVServer.File {
@@ -209,7 +211,8 @@ import Testing
         #expect(try library.count() == 30)
         #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) != nil)
 
-        // The files are really gone: the confirming pass (any next sync, the root ETag need not change) removes them.
+        // The files are really gone: the confirming pass (any next sync once the confirmation delay is over, the root
+        // ETag need not change) removes them.
         server.clearRequests()
         await engine.sync()
         #expect(try ids() == Array(21...30))
@@ -239,6 +242,114 @@ import Testing
         remove(1...10)
         await engine.sync()
         #expect(try ids() == Array(11...30))
+    }
+
+    /// The second listing confirms only what the first one lacked too, and not before the confirmation delay.
+    @Test func secondListingTooSoonRemovesNothing() async throws {
+        fill(30)
+        let engine = engine(confirmationDelay: 3600)
+        await engine.sync()
+        remove(1...20)
+        await engine.sync(forceReconcile: true)
+        await engine.sync(forceReconcile: true)  // seconds later: pull to refresh, the forced sync after an undo
+        #expect(try library.count() == 30)
+        // An ordinary sync does not even walk the library for it before the delay is over.
+        server.clearRequests()
+        await engine.sync()
+        #expect(server.requests(.indexByModified).isEmpty)
+
+        // An hour later the next sync confirms.
+        try database.setSyncValue(SyncEngine.Key.suspectedMassDelete, String(Date().timeIntervalSince1970 - 3601))
+        await engine.sync()
+        #expect(try ids() == Array(21...30))
+        #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) == nil)
+    }
+
+    /// Files of a mounted storage that both listings lack are removed; those that came back stay.
+    @Test func onlyWhatBothListingsLackIsRemoved() async throws {
+        server.state.withLock { state in
+            for id in FileID(1)...30 {
+                var file = file(id, id <= 10 ? "/Photos/Share/\(id).jpg" : nil, time: 1000 + Double(id) * 10)
+                if id <= 10 { file.mountType = "shared" }
+                state.files[id] = file
+            }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        let engine = engine()
+        await engine.sync()
+        #expect(try library.count() == 30)
+        let shared = server.state.withLock { state in state.files.filter { $0.key <= 5 } }
+
+        // Not many, but on mounted storage: kept until another listing agrees.
+        remove(1...10)
+        await engine.sync()
+        #expect(try library.count() == 30)
+        #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) != nil)
+
+        server.state.withLock { state in
+            for (id, file) in shared { state.files[id] = file }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        await engine.sync()
+        #expect(try ids() == Array(1...5) + Array(11...30))
+        #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) == nil)
+    }
+
+    /// An external storage that is not available makes the whole library vanish from the listings; however often that
+    /// is seen, the index keeps it, and it is all there again when the storage is back.
+    @Test func unavailableExternalStorageNeverEmptiesTheIndex() async throws {
+        server.state.withLock { state in
+            state.folders.insert("/Photos/External")
+            for id in FileID(1)...30 {
+                var file = file(id, "/Photos/External/\(id).jpg", time: 1000 + Double(id) * 10)
+                file.mountType = "external"
+                state.files[id] = file
+            }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        let engine = engine()
+        await engine.sync()
+        #expect(try library.count() == 30)
+
+        server.state.withLock { state in
+            state.unavailable = ["/Photos/External"]
+            FakeDAVServer.bumpRoot(&state)
+        }
+        for _ in 0..<3 { await engine.sync(forceReconcile: true) }
+        #expect(try library.count() == 30)
+        // The server was asked whether the files are gone, and its error kept them.
+        #expect(server.requests(.propfind).contains { $0.path.hasPrefix("/Photos/External/") })
+
+        server.state.withLock { state in
+            state.unavailable = []
+            FakeDAVServer.bumpRoot(&state)
+        }
+        await engine.sync()
+        #expect(try library.count() == 30)
+        #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) == nil)
+
+        // Files really deleted there go after the second listing.
+        remove(1...3)
+        await engine.sync()
+        #expect(try library.count() == 30)
+        await engine.sync()
+        #expect(try ids() == Array(4...30))
+    }
+
+    /// Files a search leaves out but that are still there by path (a search that came back short) are not removed.
+    @Test func filesStillThereByPathAreNotRemoved() async throws {
+        fill(30)
+        let engine = engine()
+        await engine.sync()
+        server.state.withLock { state in
+            state.hiddenFromSearch = Set(1...20)
+            FakeDAVServer.bumpRoot(&state)
+        }
+        await engine.sync()
+        await engine.sync()
+        await engine.sync(forceReconcile: true)
+        #expect(try library.count() == 30)
+        #expect(try database.syncValue(SyncEngine.Key.suspectedMassDelete) != nil)
     }
 
     // MARK: Throttle (8)
@@ -287,6 +398,142 @@ import Testing
         server.delete(1)
         await engine.sync(forceReconcile: true)
         #expect(try ids() == [2, 3, 4, 5])
+    }
+
+    /// Pull to refresh does not walk the library again right after a walk; after the interval it does, even when no root
+    /// ETag changed.
+    @Test func pullToRefreshReconcilesOnlyAfterTheInterval() async throws {
+        fill(5)
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync()
+        server.delete(1, changingRootETag: false)
+        server.clearRequests()
+        await engine.sync(reconcile: .refresh)
+        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(try ids() == [1, 2, 3, 4, 5])
+
+        try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 601))
+        await engine.sync(reconcile: .refresh)
+        #expect(try ids() == [2, 3, 4, 5])
+    }
+
+    /// While a backup uploads, the reconciliation its uploads made due waits; "Sync now" and an overdue one do not.
+    @Test func reconcileWaitsWhileABackupUploads() async throws {
+        fill(5)
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync()
+        let uploading = Mutex(true)
+        await engine.setReconcileDeferral { uploading.withLock { $0 } }
+        server.delete(1)
+        try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 601))
+        server.clearRequests()
+        await engine.sync()
+        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(try ids() == [1, 2, 3, 4, 5])
+
+        // Overdue: a day without a reconciliation.
+        try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 25 * 3600))
+        await engine.sync()
+        #expect(try ids() == [2, 3, 4, 5])
+
+        server.delete(2)
+        try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 601))
+        await engine.sync()
+        #expect(try ids() == [2, 3, 4, 5])
+        uploading.withLock { $0 = false }
+        await engine.sync()
+        #expect(try ids() == [3, 4, 5])
+    }
+
+    @Test func largeLibrariesAreWalkedLessOften() async throws {
+        let engine = engine(reconcileInterval: 600)
+        #expect(await engine.interval(forIndexOf: 1000) == 600)
+        #expect(await engine.interval(forIndexOf: 150_000) == 3600)
+        #expect(await self.engine(reconcileInterval: 0).interval(forIndexOf: 150_000) == 0)
+    }
+
+    // MARK: Resumable reconciliation
+
+    /// A walk that is cut off goes on from the page it reached at the next sync instead of starting again, and does not
+    /// remove a file whose modification time moved past its cursor meanwhile.
+    @Test func interruptedWalkResumesWhereItStopped() async throws {
+        fill(4500)
+        let engine = engine()
+        await engine.sync()
+        #expect(try library.count() == 4500)
+        server.delete(4400, changingRootETag: false)  // on the first page (newest first)
+        server.delete(10, changingRootETag: false)  // on the last page
+
+        // The second page of the walk never answers; the sync is cancelled while it waits.
+        server.clearRequests()
+        server.gate.withLock {
+            $0 = { request in
+                if request.kind == .indexByModified, request.body.contains("<d:lt>"), !request.body.contains("<d:gte>") {
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            }
+        }
+        let task = Task { await engine.sync(forceReconcile: true) }
+        #expect(
+            await eventually { server.requests(.indexByModified).contains { $0.body.contains("<d:lt>") && !$0.body.contains("<d:gte>") } })
+        task.cancel()
+        await task.value
+        server.gate.withLock { $0 = nil }
+        #expect(try database.syncValue(SyncEngine.Key.reconcileWalk) != nil)
+        #expect(try database.syncValue(SyncEngine.Key.reconcileCursor) != nil)
+        #expect(try library.count() == 4500)
+
+        // Meanwhile an old file is edited: its modification time is now newer than the walk's cursor.
+        server.state.withLock { state in
+            state.files[20]?.modified = Date().timeIntervalSince1970
+            state.files[20]?.etag = "edited"
+            FakeDAVServer.bumpRoot(&state)
+        }
+        server.clearRequests()
+        await engine.sync()
+        // Resumed: no request for the first page (the one without a cursor).
+        let walk = server.requests(.indexByModified).filter { !$0.body.contains("<d:gte>") }
+        #expect(!walk.isEmpty)
+        #expect(walk.allSatisfy { $0.body.contains("<d:lt>") })
+        #expect(try library.count() == 4498)
+        #expect(try library.item(4400) == nil)
+        #expect(try library.item(10) == nil)
+        #expect(try library.item(20)?.etag == "edited")
+        #expect(try database.syncValue(SyncEngine.Key.reconcileWalk) == nil)
+        #expect(try await database.writer.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM reconcileUnseen") } == 0)
+    }
+
+    // MARK: Recent uploads (27)
+
+    /// Recent uploads are read again when they reach a checkpoint since the last look, not on every sync, and only while
+    /// their place is still unknown.
+    @Test func recentUploadsAreReadAgainAtCheckpoints() async throws {
+        let engine = engine()
+        let now = 2_000_000_000.0
+        func row(_ id: FileID, uploaded: Double, place: String? = nil) -> MediaItem {
+            var item = MediaItem(
+                fileId: id, path: "/Photos/\(id).jpg", mimeType: "image/jpeg", etag: "e\(id)", modifiedAt: Date(timeIntervalSince1970: 1000)
+            )
+            item.uploadedAt = Date(timeIntervalSince1970: uploaded)
+            item.place = place
+            return item
+        }
+        try library.upsert([
+            row(1, uploaded: now - 300),  // 5 minutes old: no checkpoint reached yet
+            row(2, uploaded: now - 900),  // reached 10 minutes since the last look
+            row(3, uploaded: now - 7200),  // between checkpoints
+            row(4, uploaded: now - 900, place: "Lisbon"),  // nothing left to arrive
+            row(5, uploaded: now - 49 * 3600),  // too old
+            row(6, uploaded: now - 3700),  // reached one hour
+        ])
+        // Never looked: all of them.
+        #expect(try await engine.recentUploadsToRefresh(now: now) == [1, 2, 6, 3])
+        // Looked five minutes ago: not yet again.
+        try database.setSyncValue(SyncEngine.Key.recentUploadsChecked, String(now - 300))
+        #expect(try await engine.recentUploadsToRefresh(now: now) == nil)
+        // Ten minutes ago: those that reached a checkpoint since.
+        try database.setSyncValue(SyncEngine.Key.recentUploadsChecked, String(now - 600))
+        #expect(try await engine.recentUploadsToRefresh(now: now) == [2, 6])
     }
 
     // MARK: Index rebuild (1)

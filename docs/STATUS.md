@@ -62,15 +62,24 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   a detection that cannot read the Photos settings keeps the cached timeline folders, MIME types and `.nomedia` folders
   (404 = no Photos app = defaults); `.nomedia` folders come from a files SEARCH when the Photos page is not read; a change
   of the timeline folders rebuilds the index but keeps albums; offline originals are only removed when the server said
-  their album no longer contains them. Index paging ends at an empty page only; a reconciliation that would remove more
-  than half of an index of more than 20 items waits for a second listing (the next sync); a changed root ETag leads to
-  a full reconciliation at most every 10 minutes ("Sync now" and pull-to-refresh at once). The outbox sends up to 5
-  operations at a time, never two for the same file; queued deletes and moves address the file with the path and ETag
-  the index knows (`If-Match`, one request) and look it up by its id only when that is refused; a connection problem
-  pauses the queue, a locked file (423) holds back only its own operations and is given up after 8 answers of 423; an
-  operation that failed for good or was discarded gives the local row back (only for files the timeline shows), and album
-  content read from the server keeps the album changes still queued. Bulk archive/unarchive/delete ✅ against the 8089
-  test server (`IntegrationOutboxTests`). Smart albums and album collaborators are read again before they are written.
+  their album no longer contains them. Index paging ends at an empty page only. Mass-delete guard: a listing that lacks
+  more than half of an index of more than 20 items, or any items on mounted storage (external, shares, group folders),
+  keeps them as suspects; a later listing removes only the suspects it lacks too, at least an hour after the first, and
+  only when a sample of them answers 404 by path (an external storage that is not available answers 503 and keeps
+  everything). Reconciliation is resumable (unseen rows in `reconcileUnseen`, cursor in the sync state; an interrupted
+  walk goes on from its page) and streamed page by page; a changed root ETag leads to one at most every 10 minutes,
+  longer for large libraries (150 000 items: one hour), not while a backup pass uploads (unless a day has passed);
+  pull-to-refresh reconciles only when the last walk is 10 minutes old, "Sync now" at once. Small removals are checked
+  by id before they are applied. Recent uploads are read again at checkpoints (10 min, 1 h, 6 h, 24 h, 47 h after the
+  upload) while their place is unknown, not on every sync. Opening an album asks for the album alone and reads its
+  content only when count, last photo, date range or last-modified changed (or after a day); the content is written as
+  a difference. The outbox sends up to 5 operations at a time, never two for the same file; queued deletes and moves
+  address the file with the path and ETag the index knows (`If-Match`, one request) and look it up by its id only when
+  that is refused; a connection problem pauses the queue, a locked file (423) holds back only its own operations and is
+  given up after 8 answers of 423; an operation that failed for good or was discarded gives the local row back (only for
+  files the timeline shows), and album content read from the server keeps the album changes still queued. Bulk
+  archive/unarchive/delete ✅ against the 8089 test server (`IntegrationOutboxTests`). Smart albums and album
+  collaborators are read again before they are written.
   ETags are whitelisted or hashed before they become part of a cache file name.
 - Viewer zoom (VW-1): every photo page is a real zooming scroll view (`ZoomSurface`: `UIScrollView` on iOS/visionOS,
   `NSScrollView` with magnification on the Mac) — pinch around the fingers or the pointer, double tap / double click zooms to
@@ -136,7 +145,16 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   1000-row page 65 ms, local search 0.1–10 ms (budget 100 ms), timeline 58 ms as grid rows and 13 ms as lightweight rows,
   map cells for 50 000 geotagged items 8–9 ms (budget 200 ms). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
   measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet (its observation of grid
-  rows is coalesced to one refetch per 300 ms during a sync).
+  rows is coalesced to one refetch per 300 ms, and to one per 2 s while writes keep coming: a sync, a backup, the
+  outbox). A grid update that only touches some sections (an upload, a sync page) is applied as a batch update of those
+  sections instead of a reload (checked against a real `NSCollectionView` with random changes, `GridBatchUpdateTests`);
+  more than max(64, sections/8) changed sections reload. Select all: the toolbar and menus work from a summary counted in
+  the database off the main thread (100 000 items: 43 ms, debug), the items are read only when an action runs; the
+  grids keep the selection from their own changes instead of rebuilding it on every update. Further store numbers
+  (debug, 100 000 items): a whole reconciliation walk's store side 233 ms (snapshot 20 ms) instead of a 290 ms
+  dictionary of every row; an unchanged album of 5000 read again 25 ms (one row written). The map's markers bring their
+  place names with the cell query (no reads per marker), and "Photos in this area" loads grid rows in pages of 2000.
+  The preview cache writes "last used" in batches and at most once a day per file.
 - Search index: FTS5 (trigram, `rowid = fileId`), kept current by triggers on `media`, used for free-text search (SR-3) over
   file name, place, country, caption and folder path. ⬜ Tag, person and album names are not in the index (their memberships
   are not stored locally); tag and person filters still ask the server.

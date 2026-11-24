@@ -27,7 +27,7 @@ extension SessionModel {
             return
         }
         if album.kind == .publicLink { return }
-        try await services.sync.refreshAlbumContent(album)
+        try await services.sync.refreshAlbumContent(album, force: force)
     }
 
     @discardableResult

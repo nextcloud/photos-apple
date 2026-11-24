@@ -156,7 +156,7 @@ struct AlbumRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
-struct AlbumItemRecord: Codable, FetchableRecord, PersistableRecord {
+struct AlbumItemRecord: Codable, Equatable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "albumItem"
     var albumId: String
     var fileId: Int64

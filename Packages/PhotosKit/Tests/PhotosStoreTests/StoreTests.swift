@@ -5,6 +5,7 @@ import Foundation
 import Testing
 
 @testable import PhotosModel
+@testable import PhotosNetworking
 @testable import PhotosStore
 
 @Suite struct StoreTests {
@@ -63,5 +64,58 @@ import Testing
         }
         #expect(try store.gridItems(.all).isEmpty)
         #expect(try store.gridItems(.archived).count == 1)
+    }
+
+    /// Album content read again writes only what changed (SPEC §5.4; 28): an unchanged album writes its fetch time alone.
+    @Test func albumContentIsWrittenAsADifference() async throws {
+        let database = try AccountDatabase.temporary()
+        let store = LibraryStore(database: database)
+        let collections = CollectionStore(database: database)
+        try store.upsert((1...50).map { item(FileID($0), Double($0)) })
+        try collections.upsertAlbum(Album(kind: .own, name: "Trip"))
+        func children(_ ids: [FileID]) -> [MediaParser.CollectionChild] {
+            ids.map { MediaParser.CollectionChild(item: item($0, Double($0)), childName: "\($0)-x.jpg", origin: "user", ownerPath: nil) }
+        }
+        // 60 entries, ten of them not in the index (kept for the viewer).
+        let all: [FileID] = Array(1...60)
+        try collections.replaceAlbumContent(albumId: "own:Trip", children: children(all))
+        func changes(_ body: () throws -> Void) async throws -> Int {
+            let before = try await database.writer.write { db in db.totalChangesCount }
+            try body()
+            return try await database.writer.write { db in db.totalChangesCount } - before
+        }
+        #expect(try await changes { try collections.replaceAlbumContent(albumId: "own:Trip", children: children(all)) } == 1)
+        // The last one removed, one added (not in the index): its row and its item, the removed row, and the album.
+        let next = Array(all.dropLast()) + [61]
+        #expect(try await changes { try collections.replaceAlbumContent(albumId: "own:Trip", children: children(next)) } == 4)
+        #expect(try collections.albumItems(albumId: "own:Trip").map(\.fileId) == next)
+        #expect(try collections.album(id: "own:Trip")?.itemCount == 60)
+    }
+
+    /// The selection's summary is counted in the database and says the same as the items themselves.
+    @Test func selectionSummaryMatchesTheItems() async throws {
+        let database = try AccountDatabase.temporary()
+        let store = LibraryStore(database: database)
+        var items = (1...12).map { item(FileID($0), Double($0), favorite: $0 % 3 == 0) }
+        items[0].permissions = Permissions(rawValue: "RGDNVW")
+        items[1].permissions = Permissions(rawValue: "RG")
+        items[2].mountType = "shared"
+        items[2].permissions = Permissions(rawValue: "RGDNVW")
+        items[3] = item(4, 4, path: "/.archive/Photos/4.jpg")
+        items[3].permissions = Permissions(rawValue: "RGD")
+        try store.upsert(items)
+        // One more that only an album knows.
+        var shared = item(100, 100, favorite: true)
+        shared.permissions = Permissions(rawValue: "RGDNVW")
+        try store.storeCollectionMedia([shared])
+        let ids: [FileID] = [1, 2, 3, 4, 6, 100, 999]
+        let known = items.filter { ids.contains($0.fileId) } + [shared]
+        let summary = try await store.selectionSummary(ids)
+        #expect(summary == SelectionSummary(known))
+        #expect(summary.count == 6)
+        #expect(summary.archived == 1)
+        #expect(summary.archivable == 3)
+        #expect(!summary.allFavorite)
+        #expect(try await store.selectionSummary([3, 6]).allFavorite)
     }
 }

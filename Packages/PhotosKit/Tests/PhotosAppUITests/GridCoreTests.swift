@@ -64,6 +64,35 @@ import Testing
         #expect(zoom.relayouts)
         #expect(!zoom.reloads)
         #expect(GridUpdatePlan.plan(revision: 5, shown: 4, change: .structure, layoutChanged: false).reloads)
+
+        // An upload: the sections are updated in place, nothing is reloaded or laid out from scratch.
+        let upload = GridModel.Change.sections(.init(inserted: [0], reloaded: [0]))
+        let batch = GridUpdatePlan.plan(revision: 5, shown: 4, change: upload, layoutChanged: false)
+        #expect(!batch.relayouts && !batch.reloads)
+        #expect(batch.sectionChanges == .init(inserted: [0], reloaded: [0]))
+        // With a zoom step at the same time the counts change under a new layout: reload.
+        let zoomed = GridUpdatePlan.plan(revision: 5, shown: 4, change: upload, layoutChanged: true)
+        #expect(zoomed.relayouts && zoomed.reloads && zoomed.sectionChanges == nil)
+        // After skipped revisions it is a reload too.
+        #expect(GridUpdatePlan.plan(revision: 6, shown: 4, change: upload, layoutChanged: false).reloads)
+    }
+
+    /// The selection is kept from the grid's own changes; handing the same set back costs no work, and only a real change
+    /// (or a new model, where the selected items may have moved) is applied to the collection view.
+    @Test func selectionTrackerAppliesOnlyRealChanges() {
+        var tracker = GridSelectionTracker()
+        #expect(!tracker.needsApply([], modelChanged: false))
+        #expect(!tracker.needsApply([], modelChanged: true))
+        let all = Set((1...150_000).map { FileID($0) })
+        tracker.insert(all)
+        let reported = tracker.ids
+        #expect(!tracker.needsApply(reported, modelChanged: false))
+        #expect(tracker.needsApply(reported, modelChanged: true))
+        tracker.remove([7])
+        #expect(tracker.ids.count == 149_999)
+        #expect(tracker.needsApply(reported, modelChanged: false))
+        tracker.reset([])
+        #expect(tracker.needsApply(reported, modelChanged: false))
     }
 
     @Test func anUpdateIsTakenOverInTwoHalves() {

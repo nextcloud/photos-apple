@@ -7,6 +7,7 @@ import Testing
 
 @testable import PhotosDomain
 @testable import PhotosModel
+@testable import PhotosNetworking
 @testable import PhotosStore
 
 extension Tag {
@@ -201,7 +202,7 @@ struct LargeLibraryPerformanceTests {
         }
 
         // MARK: Other hot queries
-        let recent = try await Self.measure("recent uploads (SyncEngine.recentUploads)") {
+        let recent = try await Self.measure("recent uploads, the query before (LIMIT 500 on every sync)") {
             try await database.writer.read { db in
                 try FileID.fetchAll(
                     db, sql: "SELECT fileId FROM media WHERE uploadedAt > ? LIMIT 500", arguments: [SyntheticLibrary.newest + 3000])
@@ -222,6 +223,62 @@ struct LargeLibraryPerformanceTests {
                 return keys
             }
         }
+        // MARK: Reconciliation, store side (23): before, the whole table as a dictionary; now a snapshot table and one
+        // page of keys at a time.
+        try await Self.measure("reconcile: whole table as a dictionary of keys (before)", runs: 1) {
+            try await database.writer.read { db in
+                var map: [FileID: SyncEngine.ReconcileKey] = [:]
+                for row in try Row.fetchAll(db, sql: "SELECT fileId, etag, path, isFavorite, place, caption FROM media") {
+                    map[row["fileId"]] = SyncEngine.ReconcileKey(
+                        etag: row["etag"], path: row["path"], isFavorite: row["isFavorite"], place: row["place"] ?? "",
+                        caption: row["caption"] ?? "")
+                }
+                return map.count
+            }
+        }
+        try await Self.measure("reconcile: snapshot of the index when a walk begins", runs: 1) {
+            try await database.writer.write { db in
+                try db.execute(sql: "DELETE FROM reconcileUnseen")
+                try db.execute(sql: "INSERT INTO reconcileUnseen(fileId) SELECT fileId FROM media")
+            }
+        }
+        let walkPages = grid.value.map(\.fileId).chunked(2000).map { Array($0) }
+        let walk = try await Self.measure("reconcile: keys and progress of every page of 2000 (whole walk)", runs: 1) {
+            var compared = 0
+            for page in walkPages {
+                compared += try await SyncEngine.reconcileKeys(page, compareCaptions: true, database: database).count
+                try await database.writer.write { db in try SyncEngine.markSeen(page, db: db) }
+            }
+            return compared
+        }
+        #expect(walk.value == grid.value.count)
+        #expect(walk.milliseconds < 30_000)
+        let unseen = try await database.writer.read { db in
+            try FileID.fetchAll(db, sql: "SELECT fileId FROM reconcileUnseen WHERE fileId IN (SELECT fileId FROM media)")
+        }
+        print("PERF   left unseen (archived and Live Photo videos of the synthetic library): \(unseen.count)")
+
+        // MARK: Selection (25): select all.
+        let selectedAll = grid.value.map(\.fileId)
+        let summary = try await Self.measure("select all: summary of the selection (selectionSummary)", runs: 3) {
+            try await library.selectionSummary(selectedAll)
+        }
+        #expect(summary.value.count == selectedAll.count)
+        #expect(summary.milliseconds < 5000)
+
+        // MARK: Recent uploads (27)
+        // Never reached: only the local query is measured.
+        let connection = ServerConnection(
+            serverURL: URL(string: "http://perf.invalid")!, userId: "u", loginName: "u", appPassword: "x", userAgent: "tests")
+        let http = HTTPClient(trustStore: TrustStore(directory: nil))
+        let engine = SyncEngine(
+            api: PhotosAPI(dav: DAVClient(http: http, connection: connection), ocs: OCSClient(http: http, connection: connection)),
+            database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36)))
+        let recentCheck = try await Self.measure("recent uploads due (SyncEngine.recentUploadsToRefresh)") {
+            try await engine.recentUploadsToRefresh(now: SyntheticLibrary.newest + 3600)
+        }
+        print("PERF   \(recentCheck.value?.count ?? 0) due")
+
         // An album with 5000 items.
         try await database.writer.write { db in
             try db.execute(sql: "INSERT INTO album(id, kind, name, title) VALUES ('own:big', 'own', 'big', 'Big')")
@@ -231,6 +288,19 @@ struct LargeLibraryPerformanceTests {
                     arguments: [item.fileId, item.name, position])
             }
         }
+        // Album content read again (28): written as a difference.
+        let collections = CollectionStore(database: database)
+        let albumItems = try await library.fetchItems(Array(grid.value.prefix(5000).map(\.fileId)))
+        let children = grid.value.prefix(5000).compactMap { albumItems[$0.fileId] }.map {
+            MediaParser.CollectionChild(item: $0, childName: "\($0.fileId)-\($0.name)", origin: nil, ownerPath: nil)
+        }
+        try await Self.measure("album of 5000: content written the first time", runs: 1) {
+            try collections.replaceAlbumContent(albumId: "own:big", children: children)
+        }
+        let rewrite = try await Self.measure("album of 5000: unchanged content read again (difference only)") {
+            try collections.replaceAlbumContent(albumId: "own:big", children: children)
+        }
+        #expect(rewrite.milliseconds < 2000)
         let album = try await Self.measure("album with 5000 items, grid rows") { try library.gridItems(.album("own:big")) }
         #expect(album.value.count == 5000)
         #expect(album.milliseconds < 500)

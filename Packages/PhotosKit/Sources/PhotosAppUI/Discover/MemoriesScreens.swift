@@ -134,8 +134,6 @@ struct MapScreen: View {
     @State private var region: MKCoordinateRegion?
     @State private var position: MapCameraPosition = .automatic
     @State private var selected: Selection?
-    /// Place names of the markers' covers, for VoiceOver ("Lisbon, 12 photos").
-    @State private var places: [FileID: String] = [:]
 
     /// What the sheet lists: the items of a marker or of the visible area.
     enum Selection: Identifiable, Hashable {
@@ -186,7 +184,7 @@ struct MapScreen: View {
     var body: some View {
         Map(position: $position) {
             ForEach(cells) { cell in
-                let label = AccessibilityText.mapMarker(place: places[cell.cover.fileId], count: cell.count, newest: cell.cover.timestamp)
+                let label = AccessibilityText.mapMarker(place: cell.place, count: cell.count, newest: cell.cover.timestamp)
                 // The title ("Lisbon, 12 photos") is drawn under the marker when there is room, and it is what VoiceOver and
                 // Voice Control get for the marker: MapKit does not pass on the button's own label, and with hidden titles
                 // the markers had no name at all.
@@ -208,10 +206,10 @@ struct MapScreen: View {
         }
         .sheet(item: $selected) { selection in
             NavigationStack {
-                ItemsScreen(title: AccessibilityText.photos(selection.count)) { services in
+                MapItemsScreen(title: AccessibilityText.photos(selection.count), total: selection.count) { library, limit, offset in
                     switch selection {
-                    case .cell(let cell): try await services.library.mapItems(in: cell)
-                    case .area(let area, _): try await services.library.mapItems(in: area)
+                    case .cell(let cell): try await library.mapGridItems(in: cell, limit: limit, offset: offset)
+                    case .area(let area, _): try await library.mapGridItems(in: area, limit: limit, offset: offset)
                     }
                 }
             }
@@ -220,7 +218,8 @@ struct MapScreen: View {
         .task(id: RegionKey(region)) { await loadCells() }
     }
 
-    /// Aggregates the markers of the current region in the database, off the main thread.
+    /// Aggregates the markers of the current region in the database, off the main thread; the query also brings the
+    /// covers' place names, so nothing is read per marker.
     func loadCells() async {
         guard let key = RegionKey(region), let library = session.services?.library else { return }
         let query = Self.query(for: key)
@@ -229,12 +228,7 @@ struct MapScreen: View {
         else { return }
         // The camera has moved on; the newer region is being loaded.
         guard !Task.isCancelled else { return }
-        cells = loaded
-        var names: [FileID: String] = [:]
-        for cell in loaded {
-            if let place = (try? library.item(cell.cover.fileId))?.place, !place.isEmpty { names[cell.cover.fileId] = place }
-        }
-        places = names
+        if loaded != cells { cells = loaded }
     }
 
     func selectVisibleArea() async {
@@ -244,6 +238,62 @@ struct MapScreen: View {
             longitudeReach: key.longitudeDelta / 2)
         guard let count = try? await library.mapItemCount(in: area) else { return }
         selected = .area(area, count: count)
+    }
+}
+
+/// The photos of a map marker or of the visible area, newest first. An area can hold most of the library: the grid
+/// loads a page of rows from the index and offers the next one, instead of every item at once.
+struct MapItemsScreen: View {
+    let title: String
+    /// How many items there are (the marker's or the area's count).
+    let total: Int
+    let load: @MainActor (LibraryStore, _ limit: Int, _ offset: Int) async throws -> [GridMedia]
+
+    @Environment(SessionModel.self) private var session
+    @State private var feed = GridFeed()
+    @State private var items: [GridMedia] = []
+    @State private var loading = false
+    @State private var error: String?
+    @AppStorage("gridColumns") private var columns = GridColumns.default
+
+    static let pageSize = 2000
+
+    var body: some View {
+        MediaGridScreen(
+            feed: feed, title: title, showsHeaders: true,
+            emptyTitle: error
+                ?? (feed.loaded ? String(localized: "Nothing here", bundle: .module) : String(localized: "Loading…", bundle: .module)),
+            emptyMessage: "", columns: $columns
+        ) {
+            if items.count < total && !items.isEmpty {
+                let showMore: String = PlatformWording.title(
+                    mac: LocalizedStringResource("Show More", bundle: .module),
+                    other: LocalizedStringResource("Show more", bundle: .module))
+                Button {
+                    Task { await loadMore() }
+                } label: {
+                    Label(showMore, systemImage: "arrow.down.circle")
+                }
+                .disabled(loading)
+                .help(showMore)
+            }
+        }
+        .task { await loadMore() }
+    }
+
+    func loadMore() async {
+        guard !loading, let library = session.services?.library else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let page = try await load(library, Self.pageSize, items.count)
+            items += page
+            error = nil
+            feed.apply(items, flat: false)
+        } catch {
+            self.error = error.localizedDescription
+            feed.apply(items, flat: false)
+        }
     }
 }
 
