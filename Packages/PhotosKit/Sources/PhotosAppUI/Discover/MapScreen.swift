@@ -98,7 +98,10 @@ struct MapScreen: View {
                     }
                 }
             }
-            .frame(minWidth: 600, minHeight: 500)
+            #if os(macOS)
+                // A sheet on the Mac has no size of its own; elsewhere the sheet fills the screen.
+                .frame(minWidth: 600, minHeight: 500)
+            #endif
         }
         .task { await loadOverview() }
         .task(id: QueryKey(region: RegionKey(region), period: period)) { await loadCells() }
