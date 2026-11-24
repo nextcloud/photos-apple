@@ -121,6 +121,12 @@ final class FakeRemote: BackupRemote {
         var cleanups = 0
         /// Uploads prepared for the system and not reported yet: size and capture time by path.
         var prepared: [String: (size: Int64, capturedAt: Date)] = [:]
+        /// The conflict policy of each upload, by file name.
+        var conflicts: [String: Uploader.ConflictPolicy] = [:]
+        /// Chunked uploads: requests the app sent itself ("MKCOL <path>", "DELETE <path>").
+        var chunkedRequests: [String] = []
+        /// Chunks an earlier attempt left on the server, by destination path.
+        var leftChunks: [String: [Int: Int64]] = [:]
     }
 
     let state = Mutex(State())
@@ -144,11 +150,14 @@ final class FakeRemote: BackupRemote {
         }
     }
 
-    func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile {
+    func upload(file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy) async throws
+        -> UploadedFile
+    {
         if let hook = beforeUpload.withLock({ $0 }) { await hook(fileName) }
         let size = Int64((try? Data(contentsOf: file).count) ?? 0)
         return try state.withLock { state in
             state.attempts.append(fileName)
+            state.conflicts[fileName] = conflict
             if let error = state.uploadErrors[fileName] ?? state.uploadError { throw error }
             state.nextFileId += 1
             let path = "\(folder)/\(fileName)"
@@ -165,37 +174,100 @@ final class FakeRemote: BackupRemote {
         state.withLock { $0.cleanups += 1 }
     }
 
-    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
-        -> Uploader.Prepared
-    {
+    func prepareUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.Prepared {
         if let hook = beforeUpload.withLock({ $0 }) { await hook(fileName) }
         let size = Int64((try? Data(contentsOf: file).count) ?? 0)
         return try state.withLock { state in
             state.attempts.append(fileName)
+            state.conflicts[fileName] = conflict
             if let error = state.uploadErrors[fileName] ?? state.uploadError { throw error }
-            let base = (fileName as NSString).deletingPathExtension
-            let ext = (fileName as NSString).pathExtension
-            var name = fileName
-            var counter = 2
-            while true {
-                let path = "\(folder)/\(name)"
-                if !reserved.contains(path) {
-                    guard let existing = state.files.first(where: { $0.path == path }) else {
-                        state.prepared[path] = (size, capturedAt)
-                        return .put(
-                            path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
-                    }
-                    if existing.size == size { return .existing(UploadedFile(fileId: existing.fileId, path: path, etag: nil)) }
-                }
-                name = "\(base) (\(counter)).\(ext)"
-                counter += 1
+            switch Self.resolve(fileName, folder: folder, size: size, conflict: conflict, reserved: reserved, state: state) {
+            case .existing(let existing): return .existing(existing)
+            case .free(let path):
+                state.prepared[path] = (size, capturedAt)
+                return .put(path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
             }
         }
     }
 
-    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
-        if let error = NetworkError.from(status: response.status, data: response.data) { throw error }
-        return state.withLock { state in
+    enum Resolved {
+        case existing(UploadedFile)
+        case free(String)
+    }
+
+    /// Layer 5 like `Uploader.freeName`: the same file is found, otherwise the next free name.
+    static func resolve(
+        _ fileName: String, folder: String, size: Int64, conflict: Uploader.ConflictPolicy, reserved: Set<String>, state: State
+    ) -> Resolved {
+        let base = (fileName as NSString).deletingPathExtension
+        let ext = (fileName as NSString).pathExtension
+        var name = fileName
+        var counter = 2
+        while true {
+            let path = "\(folder)/\(name)"
+            if !reserved.contains(path) {
+                guard let existing = state.files.first(where: { $0.path == path }) else { return .free(path) }
+                if conflict.isSameFile(size: size, existingSize: existing.size, existingModified: existing.modifiedAt) {
+                    return .existing(UploadedFile(fileId: existing.fileId, path: path, etag: nil))
+                }
+            }
+            name = "\(base) (\(counter)).\(ext)"
+            counter += 1
+        }
+    }
+
+    func prepareChunkedUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.PreparedChunked {
+        if let hook = beforeUpload.withLock({ $0 }) { await hook(fileName) }
+        let size = Int64((try? Data(contentsOf: file).count) ?? 0)
+        return try state.withLock { state in
+            state.attempts.append(fileName)
+            state.conflicts[fileName] = conflict
+            if let error = state.uploadErrors[fileName] ?? state.uploadError { throw error }
+            switch Self.resolve(fileName, folder: folder, size: size, conflict: conflict, reserved: reserved, state: state) {
+            case .existing(let existing): return .existing(existing)
+            case .free(let path):
+                state.prepared[path] = (size, capturedAt)
+                state.chunkedRequests.append("MKCOL \(path)")
+                let base = URL(string: "https://fake.test/uploads")!.appending(path: String(path.hashValue.magnitude))
+                var upload = ChunkedUpload(
+                    id: UUID().uuidString, path: path, size: size, chunkSize: FakeChunkedServer.chunkSize, folder: base,
+                    destination: URL(string: "https://fake.test")!.appending(path: path), headers: [:])
+                upload.folderReady(existing: state.leftChunks[path] ?? [:])
+                return .chunked(upload)
+            }
+        }
+    }
+
+    var chunkedServer: any ChunkedUploadServer { FakeChunkedServer(remote: self) }
+
+    func prepareJobUpload(size: Int64, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+    {
+        try state.withLock { state in
+            state.attempts.append(fileName)
+            if let error = state.uploadErrors[fileName] ?? state.uploadError { throw error }
+            switch Self.resolve(fileName, folder: folder, size: size, conflict: .skipIfSameSize, reserved: reserved, state: state) {
+            case .existing(let existing): return .existing(existing)
+            case .free(let path):
+                state.prepared[path] = (size, capturedAt)
+                return .put(path: path, request: HTTPRequest(method: "PUT", url: URL(string: "https://fake.test")!.appending(path: path)))
+            }
+        }
+    }
+
+    func existingFile(at path: String, size: Int64) async throws -> UploadedFile? {
+        state.withLock { state in
+            state.files.first { $0.path == path && $0.size == size }.map { UploadedFile(fileId: $0.fileId, path: path, etag: nil) }
+        }
+    }
+
+    /// The server put a file together that the system uploaded (a PUT, or the MOVE of a chunked upload).
+    func store(path: String) -> UploadedFile {
+        state.withLock { state in
             state.nextFileId += 1
             let name = (path as NSString).lastPathComponent
             let prepared = state.prepared.removeValue(forKey: path)
@@ -208,11 +280,47 @@ final class FakeRemote: BackupRemote {
         }
     }
 
+    func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
+        if let error = NetworkError.from(status: response.status, data: response.data) { throw error }
+        return store(path: path)
+    }
+
     func linkLivePhoto(imagePath: String, imageFileId: FileID, videoPath: String, videoFileId: FileID) async throws {
         state.withLock { $0.links.append(Link(imagePath: imagePath, videoPath: videoPath)) }
     }
 
     func didUpload(_ uploaded: UploadedFile, resource: BackupResource, metadataEditing: Bool) async {}
+}
+
+/// The chunked side of `FakeRemote`: chunks of 100 bytes, requests to `https://fake.test/uploads/<n>/<chunk>`.
+struct FakeChunkedServer: ChunkedUploadServer {
+    static let chunkSize = 100
+    let remote: FakeRemote
+
+    func openFolder(_ upload: inout ChunkedUpload) async throws {
+        remote.state.withLock { $0.chunkedRequests.append("MKCOL \(upload.path)") }
+        upload.folderReady()
+    }
+
+    func request(for step: ChunkedUpload.Step, of upload: ChunkedUpload) -> HTTPRequest {
+        switch step {
+        case .chunk(let number): HTTPRequest(method: "PUT", url: upload.folder.appending(path: String(number)))
+        case .assemble: HTTPRequest(method: "MOVE", url: upload.folder.appending(path: ".file"), headers: ["Overwrite": "F"])
+        }
+    }
+
+    func finish(_ upload: ChunkedUpload, status: Int, headers: [String: String]) async throws -> UploadedFile {
+        remote.store(path: upload.path)
+    }
+
+    func assembledFile(of upload: ChunkedUpload) async throws -> UploadedFile? {
+        try await remote.existingFile(at: upload.path, size: upload.size)
+    }
+
+    func abandon(_ upload: ChunkedUpload, after error: (any Error)?) async {
+        guard error.map({ !Uploader.keepsUploadFolder(after: $0) }) ?? true else { return }
+        remote.state.withLock { $0.chunkedRequests.append("DELETE \(upload.path)") }
+    }
 }
 
 final class Clock: Sendable {

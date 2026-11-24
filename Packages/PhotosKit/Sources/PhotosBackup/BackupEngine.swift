@@ -158,6 +158,8 @@ public actor BackupEngine {
     private var isShutDown = false
     /// Set by `interrupt()` for the pass it stops.
     private var interrupting = false
+    /// Set by the user's pause: chunked uploads are not handed further to the system until the next pass.
+    private var handOverPaused = false
     var metadataEditing = false
 
     // Uploads handed to the system (SPEC §7.18.6); all nil or empty without `background`.
@@ -194,6 +196,8 @@ public actor BackupEngine {
     let filesLedger: @Sendable (AccountID) -> Set<String>
     /// Free space on this device, when it can be told.
     private var freeSpace: @Sendable () -> Int64?
+    /// "Most compatible": the file to upload for an export (`MostCompatible.convert`).
+    let convert: @Sendable (URL, BackupResource) async throws -> URL
 
     struct Resume {
         var settings: BackupSettings
@@ -230,9 +234,11 @@ public actor BackupEngine {
         library: any BackupLibrary, remote: any BackupRemote, database: AccountDatabase, accountId: AccountID,
         systemConditions: Bool = false, background: BackgroundUploads? = nil, exportDirectory: URL? = nil,
         filesLedger: @escaping @Sendable (AccountID) -> Set<String> = { FilesAppLedger.uploadedAssets(accountId: $0) },
+        convert: @escaping @Sendable (URL, BackupResource) async throws -> URL = { try await MostCompatible.convert($0, resource: $1) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.background = background
+        self.convert = convert
         self.exportDirectory = exportDirectory
         self.filesLedger = filesLedger
         freeSpace = { Self.freeDeviceSpace(at: exportDirectory ?? FileManager.default.temporaryDirectory) }
@@ -321,6 +327,8 @@ public actor BackupEngine {
     /// Call when the user changes the backup options, so that a waiting run continues with them (and at once when the
     /// change lifts what it was waiting for, e.g. "Wi-Fi only" switched off).
     public func settingsChanged(_ settings: BackupSettings) {
+        // Backup is off: large files that wait in the container for their chunks are given up.
+        if !settings.isEnabled { discardChunkedUploads() }
         guard resume != nil else { return }
         if settings.isEnabled {
             resume?.settings = settings
@@ -387,6 +395,7 @@ public actor BackupEngine {
     public func cancel() {
         if running != nil || resume != nil { logger.notice("backup: paused by the user") }
         resume = nil
+        handOverPaused = true
         running?.cancel()
         cancelBackgroundUploads()
     }
@@ -411,7 +420,7 @@ public actor BackupEngine {
         monitor = nil
         resume = nil
         running?.cancel()
-        if let background, let ids = journal.map({ Set($0.jobs.keys) }), !ids.isEmpty {
+        if let background, let ids = journal?.allJobIds, !ids.isEmpty {
             await background.transport.cancel(jobIds: ids)
         }
         await running?.value
@@ -422,6 +431,7 @@ public actor BackupEngine {
     private func perform(_ settings: BackupSettings, dryRun: Bool, retryFailed: Bool) async {
         resume = nil
         interrupting = false
+        handOverPaused = false
         settled = []
         status.blocker = nil
         status.isInterrupted = false
@@ -689,7 +699,7 @@ public actor BackupEngine {
             let isLast = unchecked.isEmpty
             let batch = isLast ? order.first + large : order.first
             // The last round waits for what the system still uploads for this pass.
-            guard !batch.isEmpty || (isLast && cleanedUp && (journal?.jobs.count ?? 0) + finishing > 0) else { continue }
+            guard !batch.isEmpty || (isLast && cleanedUp && activeBackgroundUploads > 0) else { continue }
             if !cleanedUp {
                 cleanedUp = true
                 await remote.removeStaleUploads()
@@ -782,6 +792,8 @@ public actor BackupEngine {
             missingChecked = true
             await checkForMissingUploads()
         }
+        // Large files of earlier passes whose next chunks nobody handed over (the app had no time, or no connection).
+        await driveChunkedUploads()
         // What the system reported while the server was asked is done already. Earlier rounds of the pass count too.
         let base = passUploads
         progress = (base.done + work.count { settled.contains(LedgerKey($0)) }, base.done + work.count + base.later, "")
@@ -815,7 +827,7 @@ public actor BackupEngine {
             }
             guard index < queue.count else {
                 // The pass is through when the system is.
-                guard drain, (journal?.jobs.count ?? 0) + finishing > 0 else { break }
+                guard drain, activeBackgroundUploads > 0 else { break }
                 try await waitForBackgroundUploads()
                 if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
                 if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
@@ -831,9 +843,9 @@ public actor BackupEngine {
                 continue
             }
             // With the system since an earlier pass, or reported by it since this one started.
-            if journal?.job(for: resource) != nil || settled.contains(key) { continue }
-            // The system has to have room for a file it will take; a file the app sends itself does not wait for it.
-            while !large.contains(key), backgroundIsFull(adding: resource) {
+            if journal?.isHandedOver(resource) == true || settled.contains(key) { continue }
+            // The system has to have room for a file it will take: a small one, or the chunks of a large one.
+            while large.contains(key) ? chunkedIsFull : backgroundIsFull(adding: resource) {
                 try await waitForBackgroundUploads()
                 if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
                 if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
@@ -855,22 +867,27 @@ public actor BackupEngine {
                     file = kept
                 } else {
                     // Before anything is written: a full device is not this file's fault, and the next one would not fit either.
-                    guard BackupPolicy.hasRoom(free: freeSpace(), size: resource.byteSize) else { throw BackupDeviceError.outOfSpace }
+                    guard BackupPolicy.hasRoom(free: freeSpace(), size: MostCompatible.spaceNeeded(resource, settings: settings)) else {
+                        throw BackupDeviceError.outOfSpace
+                    }
                     var written = try await library.export(resource, settings: settings, allowNetwork: mayDownload)
                     file = written
-                    if settings.format == .mostCompatible, resource.mediaKind == .image, resource.kind != .raw {
-                        written = try PhotoLibrarySource.convertToJPEG(written)
+                    if MostCompatible.mayConvert(resource, settings: settings) {
+                        // JPEG / H.264 next to the export, in the same directory: removed with it.
+                        written = try await convert(written, resource)
                         file = written
                     }
                     exported = written
                 }
+                let conflict = BackupPolicy.conflictPolicy(resource, settings: settings)
                 let name = BackupNaming.fileName(
                     originalName: resource.originalName, fileExtension: exported.pathExtension, isVideo: resource.mediaKind == .video,
                     date: resource.createdAt, naming: settings.naming)
                 let folder = BackupNaming.folder(base: settings.folder, subfolders: settings.subfolders, date: resource.createdAt)
                 // Layer 5: an existing file with the same name and size counts as uploaded; otherwise " (2)".
                 if let background, Self.size(of: exported) <= background.maxFileSize {
-                    handedOver = try await handOver(resource, file: exported, fileName: name, folder: folder, settings: settings)
+                    handedOver = try await handOver(
+                        resource, file: exported, fileName: name, folder: folder, settings: settings, conflict: conflict)
                 } else if background != nil, !large.contains(key), queue[index...].contains(where: { !large.contains(LedgerKey($0)) }) {
                     // Larger than PhotoKit said (or it did not say): after the files the system can take, like the others.
                     large.insert(key)
@@ -878,8 +895,13 @@ public actor BackupEngine {
                     file = nil
                     queue.append(resource)
                     continue
+                } else if background != nil {
+                    // In chunks, each one a request of the system's: it goes on while the app is suspended (SPEC §7.18.6).
+                    handedOver = try await handOverChunked(
+                        resource, file: exported, fileName: name, folder: folder, settings: settings, conflict: conflict)
                 } else {
-                    let uploaded = try await remote.upload(file: exported, fileName: name, folder: folder, capturedAt: resource.createdAt)
+                    let uploaded = try await remote.upload(
+                        file: exported, fileName: name, folder: folder, capturedAt: resource.createdAt, conflict: conflict)
                     try await completed(resource, uploaded: uploaded)
                 }
             } catch BackupDeviceError.needsICloudDownload where !mayDownload {
@@ -946,6 +968,22 @@ public actor BackupEngine {
     /// Uploads that are with the system, by the id it knows them by (tests).
     var backgroundJobs: [String: BackgroundUploadJob] { journal?.jobs ?? [:] }
 
+    /// Chunked uploads that are with the system, by upload id (tests).
+    var chunkedJobs: [String: ChunkedBackgroundJob] { journal?.chunked ?? [:] }
+
+    /// Uploads the system works on, and reports that are still being recorded. A chunked upload counts while it has
+    /// requests with the system; one that has none (it could not hand over its next chunks) would wait for nothing.
+    private var activeBackgroundUploads: Int {
+        guard let journal else { return finishing }
+        return journal.jobs.count + finishing + journal.chunked.values.count { !$0.upload.running.isEmpty }
+    }
+
+    /// Whether the next large file has to wait until a chunked upload has finished.
+    private var chunkedIsFull: Bool {
+        guard let background, let journal else { return false }
+        return journal.chunked.values.count { !$0.upload.running.isEmpty } >= background.maxChunkedUploads
+    }
+
     /// Whether the next file has to wait until the system has finished some of what it was given.
     private func backgroundIsFull(adding resource: BackupResource) -> Bool {
         guard let background, let journal, !journal.jobs.isEmpty || finishing > 0 else { return false }
@@ -956,13 +994,15 @@ public actor BackupEngine {
 
     /// Prepares the upload and hands the file to the system. Returns false when nothing had to be sent because the file
     /// is on the server already.
-    private func handOver(_ resource: BackupResource, file: URL, fileName: String, folder: String, settings: BackupSettings) async throws
-        -> Bool
-    {
+    private func handOver(
+        _ resource: BackupResource, file: URL, fileName: String, folder: String, settings: BackupSettings,
+        conflict: Uploader.ConflictPolicy
+    ) async throws -> Bool {
         guard let background else { return false }
         // Names of uploads that are on their way are taken, although the server has nothing there yet.
         let prepared = try await remote.prepareUpload(
-            file: file, fileName: fileName, folder: folder, capturedAt: resource.createdAt, reserved: journal?.reservedPaths ?? [])
+            file: file, fileName: fileName, folder: folder, capturedAt: resource.createdAt, conflict: conflict,
+            reserved: reservedPaths)
         switch prepared {
         case .existing(let uploaded):
             try await completed(resource, uploaded: uploaded)
@@ -990,22 +1030,17 @@ public actor BackupEngine {
     /// The system reports that an upload has ended, with the server's answer or an error. This may be long after the pass
     /// that handed it over, and in another launch of the app.
     public func backgroundUploadFinished(_ event: BackgroundUploadEvent) async {
+        if let upload = journal?.chunkedUploadId(forJob: event.jobId) {
+            await chunkReported(upload, event: event)
+            return
+        }
         guard let job = journal?.remove(event.jobId) else { return }
         missing.remove(job.id)
         guard !isShutDown else { return }
         finishing += 1
         let result = await finish(job, event: event)
         finishing -= 1
-        switch result {
-        case .done:
-            settled.insert(LedgerKey(job.resource))
-            progress?.done += 1
-        case .stillToDo:
-            settled.insert(LedgerKey(job.resource))
-        case .nameTaken:
-            // Only a running pass can prepare it again; otherwise the next one does.
-            if progress != nil { retake.append(job.resource) }
-        }
+        settle(job.resource, result)
         try? refreshCounts()
         publishProgress()
         wakeWaiters()
@@ -1029,15 +1064,141 @@ public actor BackupEngine {
             let uploaded = try await remote.finishUpload(path: job.path, response: response)
             try await completed(job.resource, uploaded: uploaded)
             return .done
-        } catch NetworkError.preconditionFailed {
-            return .nameTaken
         } catch {
-            // Taken back (the user's pause, a video that has to wait for Wi-Fi): still to do, not a failure.
-            if BackupPolicy.isCancellation(error) { return .stillToDo }
-            guard let stop = uploadFailed(job.resource, error: error) else { return .done }
-            // Only a running pass can be stopped; without one the resource simply stays to do.
-            if progress != nil, backgroundStop == nil { backgroundStop = stop }
-            return .stillToDo
+            return handedOverFailed(job.resource, error: error)
+        }
+    }
+
+    /// What the failure of an upload the system sent means.
+    private func handedOverFailed(_ resource: BackupResource, error: any Error) -> Finished {
+        if error as? NetworkError == .preconditionFailed { return .nameTaken }
+        // Taken back (the user's pause, a video that has to wait for Wi-Fi): still to do, not a failure.
+        if BackupPolicy.isCancellation(error) { return .stillToDo }
+        guard let stop = uploadFailed(resource, error: error) else { return .done }
+        // Only a running pass can be stopped; without one the resource simply stays to do.
+        if progress != nil, backgroundStop == nil { backgroundStop = stop }
+        return .stillToDo
+    }
+
+    /// Records how the report of a single or chunked upload ended for the running pass.
+    private func settle(_ resource: BackupResource, _ result: Finished) {
+        switch result {
+        case .done:
+            settled.insert(LedgerKey(resource))
+            progress?.done += 1
+        case .stillToDo:
+            settled.insert(LedgerKey(resource))
+        case .nameTaken:
+            // Only a running pass can prepare it again; otherwise the next one does.
+            if progress != nil { retake.append(resource) }
+        }
+    }
+
+    // MARK: Chunked uploads handed to the system
+
+    /// Destinations that are taken although the server has nothing there yet: what is on its way with the system.
+    private var reservedPaths: Set<String> { journal?.reservedPaths ?? [] }
+
+    private func chunkedDriver(_ background: BackgroundUploads) -> ChunkedUploadDriver {
+        ChunkedUploadDriver(transport: background.transport, uploader: remote.chunkedServer, window: background.chunkWindow)
+    }
+
+    /// Prepares a large upload (name, folder, upload folder on the server), moves the file to where it waits, and hands its
+    /// first chunks to the system. Returns false when nothing had to be sent because the file is on the server already.
+    private func handOverChunked(
+        _ resource: BackupResource, file: URL, fileName: String, folder: String, settings: BackupSettings,
+        conflict: Uploader.ConflictPolicy
+    ) async throws -> Bool {
+        guard background != nil, journal != nil else { return false }
+        let prepared = try await remote.prepareChunkedUpload(
+            file: file, fileName: fileName, folder: folder, capturedAt: resource.createdAt, conflict: conflict, reserved: reservedPaths)
+        switch prepared {
+        case .existing(let uploaded):
+            try await completed(resource, uploaded: uploaded)
+            return false
+        case .chunked(let upload):
+            let isVideo = resource.mediaKind == .video
+            let job = ChunkedBackgroundJob(
+                upload: upload, resource: resource, fileName: file.lastPathComponent,
+                allowsExpensiveNetwork: !(settings.wifiOnly || (isVideo && settings.wifiOnlyForVideos)),
+                allowsConstrainedNetwork: settings.allowLowDataMode, startedAt: now())
+            guard try journal?.stage(file, id: upload.id) != nil else { return false }
+            do {
+                try journal?.setChunked(job)
+            } catch {
+                journal?.removeChunked(upload.id)
+                throw error
+            }
+            if let progress = await advanceChunked(upload.id) { await chunkedEnded(upload.id, progress) }
+            return true
+        }
+    }
+
+    /// Hands over what a chunked upload needs next (its upload folder, chunks, the `MOVE`).
+    private func advanceChunked(_ id: String) async -> ChunkedUploadDriver.Progress? {
+        guard let background, let job = journal?.chunked[id], let files = journal?.files(of: job) else { return nil }
+        var upload = job.upload
+        let progress = await chunkedDriver(background).advance(&upload, files: files) { try self.journal?.updateChunked($0) }
+        try? journal?.updateChunked(upload)
+        return progress
+    }
+
+    /// Continues the chunked uploads that have room for more requests: after a launch, after the user's pause, or when
+    /// the app could not reach the server while it handed them over.
+    private func driveChunkedUploads() async {
+        guard !handOverPaused, !isShutDown, let ids = journal?.chunked.keys else { return }
+        for id in ids {
+            if let progress = await advanceChunked(id) { await chunkedEnded(id, progress) }
+        }
+    }
+
+    /// The system reports a request of a chunked upload.
+    private func chunkReported(_ id: String, event: BackgroundUploadEvent) async {
+        missing.remove(event.jobId)
+        guard let background, let job = journal?.chunked[id], let files = journal?.files(of: job) else { return }
+        finishing += 1
+        var upload = job.upload
+        let progress = await chunkedDriver(background).report(
+            event, upload: &upload, files: files, handOver: !handOverPaused && !isShutDown
+        ) { try self.journal?.updateChunked($0) }
+        try? journal?.updateChunked(upload)
+        finishing -= 1
+        if let progress { await chunkedEnded(id, progress) }
+        try? refreshCounts()
+        publishProgress()
+        wakeWaiters()
+    }
+
+    /// Records a chunked upload that has ended; one that goes on is left alone.
+    private func chunkedEnded(_ id: String, _ progress: ChunkedUploadDriver.Progress) async {
+        switch progress {
+        case .running:
+            return
+        case .finished(let uploaded):
+            guard let job = journal?.removeChunked(id), !isShutDown else { return }
+            do {
+                try await completed(job.resource, uploaded: uploaded)
+                settle(job.resource, .done)
+            } catch {
+                settle(job.resource, handedOverFailed(job.resource, error: error))
+            }
+        case .failed(let error):
+            guard let job = journal?.removeChunked(id), !isShutDown else { return }
+            logger.notice("backup: a chunked upload ended without the file")
+            settle(job.resource, handedOverFailed(job.resource, error: error))
+        }
+    }
+
+    /// Backup was turned off: large files that wait in the container are removed, and their chunks on the server.
+    private func discardChunkedUploads() {
+        guard let background, let jobs = journal?.chunked.values, !jobs.isEmpty else { return }
+        let ids = Set(jobs.flatMap { $0.upload.running.keys })
+        let server = remote.chunkedServer
+        let uploads = jobs.map(\.upload)
+        for job in jobs { journal?.removeChunked(job.id) }
+        Task {
+            await background.transport.cancel(jobIds: ids)
+            for upload in uploads { await server.abandon(upload, after: nil) }
         }
     }
 
@@ -1056,7 +1217,7 @@ public actor BackupEngine {
     }
 
     private func cancelBackgroundUploads() {
-        guard let background, let ids = journal.map({ Set($0.jobs.keys) }), !ids.isEmpty else { return }
+        guard let background, let ids = journal?.allJobIds, !ids.isEmpty else { return }
         Task { await background.transport.cancel(jobIds: ids) }
     }
 
@@ -1074,15 +1235,22 @@ public actor BackupEngine {
     /// given up the second time they are found missing, so a report that is just on its way is not overtaken. The
     /// resources stay to do: the next pass finds the file on the server or uploads it again.
     private func checkForMissingUploads() async {
-        guard let background, let ids = journal.map({ Set($0.jobs.keys) }), !ids.isEmpty else {
+        guard let background, let ids = journal?.allJobIds, !ids.isEmpty else {
             missing = []
             return
         }
         lastMissingCheck = Date()
         let active = await background.transport.activeJobIds()
         let gone = ids.subtracting(active)
-        for id in gone.intersection(missing) where journal?.remove(id) != nil {
-            logger.notice("an upload handed to the system was lost; it is done again")
+        for id in gone.intersection(missing) {
+            if journal?.remove(id) != nil {
+                logger.notice("an upload handed to the system was lost; it is done again")
+            } else if let upload = journal?.chunkedUploadId(forJob: id), var state = journal?.chunked[upload]?.upload {
+                // Only the request is lost: the chunk is handed over again, the others stay.
+                state.lost([id])
+                try? journal?.updateChunked(state)
+                logger.notice("a chunk handed to the system was lost; it is sent again")
+            }
         }
         missing = gone.subtracting(missing)
     }
@@ -1116,7 +1284,10 @@ public actor BackupEngine {
         timeout.cancel()
         try Task.checkCancellation()
         try throwBackgroundStop()
-        if Date().timeIntervalSince(lastMissingCheck) >= interval { await checkForMissingUploads() }
+        if Date().timeIntervalSince(lastMissingCheck) >= interval {
+            await checkForMissingUploads()
+            await driveChunkedUploads()
+        }
     }
 
     /// Links the still and the motion part of a Live Photo once both are on the server, also when they got there in different runs.
@@ -1321,7 +1492,7 @@ public actor BackupEngine {
     func removeStaleEntries(
         ledger: [LedgerKey: BackupLedgerEntry], checked: Set<String>?, seen: Set<String>, read: Set<String>, found: Set<LedgerKey>
     ) throws -> Set<LedgerKey> {
-        let handedOver = Set(journal?.jobs.values.map { LedgerKey($0.resource) } ?? [])
+        let handedOver = Set(journal?.handedOverResources.map { LedgerKey($0) } ?? [])
         var stale = Set<LedgerKey>()
         for (key, entry) in ledger where !BackupPolicy.isComplete(entry) && !handedOver.contains(key) {
             let id = key.localIdentifier
