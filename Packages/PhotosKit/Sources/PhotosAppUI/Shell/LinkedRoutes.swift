@@ -46,7 +46,7 @@ struct TagRouteScreen: View {
                     String(localized: "Tag not found", bundle: .module), systemImage: "tag.slash",
                     description: Text("It may have been renamed or deleted.", bundle: .module))
             } else {
-                ProgressView()
+                GridSkeleton(zoomStep: GridColumns.default, showsHeader: false)
             }
         }
         .task(id: name) {

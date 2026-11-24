@@ -79,7 +79,7 @@ struct TagEditorSheet: View {
             }
             .overlay {
                 if !loaded {
-                    ProgressView()
+                    SkeletonRows(count: 6, thumbnail: 0).frame(maxHeight: .infinity, alignment: .top)
                 } else if tags.isEmpty {
                     ContentUnavailableView(
                         String(localized: "No tags yet", bundle: .module), systemImage: "tag",

@@ -32,7 +32,7 @@ public struct RootView: View {
                     }
                 #endif
             } else {
-                ProgressView()
+                DelayedSpinner()
             }
         }
         .tint(Design.accent)

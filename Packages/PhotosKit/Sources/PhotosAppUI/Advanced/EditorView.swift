@@ -140,7 +140,9 @@ struct EditorView: View {
                     showOriginal = $0
                 }
         } else {
-            ProgressView().tint(.white)
+            // The preview the grid and viewer already have (or its BlurHash) until the original is decoded.
+            PreviewImage(item: item, bucket: 1024, contentMode: .fit)
+                .accessibilityHidden(true)
         }
     }
 

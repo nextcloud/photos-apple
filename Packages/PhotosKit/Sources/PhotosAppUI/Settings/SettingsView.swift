@@ -506,7 +506,7 @@ struct ServerFolderList: View {
         }
         .overlay {
             if !loaded {
-                ProgressView()
+                SkeletonRows(count: 6, thumbnail: 24).frame(maxHeight: .infinity, alignment: .top)
             } else if let error {
                 ContentUnavailableView(
                     String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle",

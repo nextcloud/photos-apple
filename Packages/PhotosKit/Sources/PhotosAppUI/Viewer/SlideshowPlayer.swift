@@ -178,7 +178,7 @@ struct SlideshowPlayer: View {
             } else if loaded {
                 ContentUnavailableView(String(localized: "No photos to show", bundle: .module), systemImage: "photo.on.rectangle.angled")
             } else {
-                ProgressView().tint(.white)
+                DelayedSpinner(tint: .white)
             }
         }
     }
