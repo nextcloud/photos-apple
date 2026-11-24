@@ -49,6 +49,10 @@ server ──► SyncEngine ──► AccountDatabase (SQLite) ──► Library
   a reconciliation pass finds deletes and moves. Albums, places and other collections are refreshed when they are shown.
 - **Writes** (favourite, delete, album changes, metadata…) are applied to the database at once and queued in the
   `Outbox`, which sends them in order, retries with a growing delay and wakes up when the network comes back.
+- **Search labels**: after a sync, `LabelSync` copies tag and people memberships (file ids only, changed ones only) into
+  the store, and the opt-in `ContentLabeler` adds words Vision recognised in cached previews (background maintenance time
+  only, never uploaded); triggers put both into the full-text index. The same pass compares album listings to note new
+  photos in shared albums (`SharedAlbumActivity`).
 - **Previews and originals** go through `ImagePipeline`: memory cache, disk cache, then the server; loads nobody waits
   for any more are cancelled, the caches are trimmed (least recently used first).
 

@@ -18,6 +18,7 @@ struct MediaViewer: View {
     @State private var editingMetadata: MediaItem?
     @State private var extractingText: MediaItem?
     @State private var addingToAlbum: MediaItem?
+    @State private var tagging: MediaItem?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -123,6 +124,7 @@ struct MediaViewer: View {
             .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
+            .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
             .mediaSaveStatus(saver)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
@@ -473,6 +475,13 @@ struct MediaViewer: View {
             addingToAlbum = item
         } label: {
             Label(albumTitle, systemImage: "rectangle.stack.badge.plus")
+        }
+        if session.features.has(.systemtags) {
+            Button {
+                tagging = item
+            } label: {
+                Label(TagWording.menuTitle, systemImage: "tag")
+            }
         }
         Button {
             save(item)

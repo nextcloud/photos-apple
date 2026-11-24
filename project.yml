@@ -97,7 +97,7 @@ targets:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
-        BGTaskSchedulerPermittedIdentifiers: [com.nextcloud.photos.refresh, com.nextcloud.photos.processing]
+        BGTaskSchedulerPermittedIdentifiers: [com.nextcloud.photos.refresh, com.nextcloud.photos.processing, com.nextcloud.photos.labels]
         UIBackgroundModes: [fetch, processing, remote-notification]
   ShareExtension:
     type: app-extension

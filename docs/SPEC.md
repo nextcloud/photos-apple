@@ -432,6 +432,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SH-4** **Quick share** a selection: create album "Shared on <date>" (suffix (2), (3)… if taken), copy the photos in, add a public link, present the share sheet with the link; roll back on failure (`photos-extended-api.md` quick-share-selection).
 - **SH-5** Comments on own and shared albums when `albumComments` (comments DAV `/remote.php/dav/comments/photos_album/<albumId>`): list, post, delete own; not for public links.
 - **SH-6** **Public album viewer**: open a public link (pasted, from the share sheet, or deep link) anonymously via `/remote.php/dav/photospublic/<token>` with `Authorization: Basic base64("<token>:")`, previews via `publicPreview`; read-only grid, viewer, slideshow, download/export. Does not need an account.
+- **SH-7** **Activity in shared albums**, without server changes: every listing of the albums (opening Albums, and after a sync at most every 15 minutes) is compared with the stored one; an album shared with the user, or an own album shared with people, that has more photos than before, and an album newly shared with the user, become an entry of a local activity list ("New in shared albums" row above the albums, list with "Mark all as seen"; opening the album marks it seen). Photos added in this app are not reported (the outbox raises the stored count first). Found by a background refresh while the app is not in front, it is also announced with a local notification (Settings › Shared albums, only if notifications are allowed; opens Shared albums). Instant push ("Anna added 12 photos") needs the server to send it (companion S5); the Photos server reports no adder either.
 
 ### 7.7 Search, filters and smart albums — M4 (basic filter bar in M1)
 
@@ -441,6 +442,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SR-4** **Ask your photos** (natural language, e.g. "beach photos from summer 2023 in Italy"): turn the sentence into filters, never into an answer text. (a) If `taskText2Text` is available, use the server's TaskProcessing exactly as the web app does (prompt with today's date and the place/tag vocabulary, JSON reply, validation; `photos-extended-api.md` ask-your-photos). (b) Otherwise, if Apple Intelligence is available on the device, use the on-device **Foundation Models** framework with guided generation into the same filter struct. (c) Otherwise hide the feature.
 - **SR-5** **Smart albums** (saved filters): "Save as smart album" from active filters; list in Collections/sidebar. Stored in the server user config `smartAlbums` when the companion config read API exists (so it syncs with the web app); otherwise stored locally and labelled "On this device".
 - **SR-6** Spotlight & Shortcuts surface search (§7.23).
+- **SR-7** **On-device labels** (opt-in, Settings › Search): Vision's image classifier labels the previews already in the cache (no downloads for it) with English words ("dog", "beach"), which go into the FTS index (SR-3). Stored only in the account's database on the device, never uploaded; turning it off deletes them. Runs only when the system grants maintenance time: a `BGProcessingTask` that requires external power on iPhone/iPad, an `NSBackgroundActivityScheduler` activity of background quality on the Mac (deferred in Low Power Mode); not on Vision Pro. Where the extended server's caption search exists it is used as before.
 
 ### 7.8 Places and Map — M4
 
@@ -464,6 +466,7 @@ Requires: `recognize` and a Recognize API key (`photos-server-api.md` §13).
 ### 7.10 Tags — M4
 
 Requires: `systemtags`. List of tags used on images with counts and covers; tag content (REPORT `oc:filter-files`, filter MIME locally); assign / unassign / create tags from the info panel and the selection menu. Tag colours if the server provides them.
+Assigning and removing go through the outbox (`PendingOperation.tag`, PUT/DELETE `systemtags-relations/files/<fileId>/<tagId>`), so they work offline and show in search at once; creating a tag needs the server (it assigns the id; an existing tag of the same name is reused). Tag and people memberships are copied into the local store (`LabelSync`: one listing every 30 minutes, the files of a tag or person only when its count changed, everything once a day; never while changes wait in the outbox) for search (SR-3) and for tag/person filters and tag browsing without a connection.
 
 ### 7.11 Folders and "Shared with you" — M4
 

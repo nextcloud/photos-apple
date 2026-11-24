@@ -45,6 +45,7 @@ public struct CollectionStore: Sendable {
         let now = Date()
         try database.writer.write { db in
             let existing = try AlbumRecord.filter(Column("kind") == kind.rawValue).fetchAll(db)
+            try SharedAlbumActivity.record(existing: existing.map(\.album), incoming: albums, kind: kind, db: db, now: now)
             let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             let keep = Set(albums.map(\.id))
             for record in existing where !keep.contains(record.id) { _ = try record.delete(db) }

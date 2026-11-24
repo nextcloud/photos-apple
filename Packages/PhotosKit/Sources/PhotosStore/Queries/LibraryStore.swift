@@ -157,7 +157,8 @@ public struct TimelineRow: Hashable, Sendable, Identifiable {
 /// A search over the index (SPEC SR-2/SR-3): AND between the kinds of criteria, OR within places, dates and albums.
 public struct LibrarySearch: Hashable, Sendable {
     /// Free text. Every word must occur (as a substring, ignoring case and diacritics) in the file name, place, country,
-    /// caption or folder path.
+    /// caption or folder path, or in the names of the file's tags and people or the labels recognised on this device
+    /// (`SearchLabels`).
     public var texts: [String]
     public var places: [String]
     public var dateRanges: [Range<Date>]
@@ -827,20 +828,22 @@ public struct LibraryStore: Sendable {
     /// they do not depend on the folders, and offline albums are defined by them.
     public func deleteIndex() throws {
         try database.writer.write { db in
+            try db.execute(sql: SearchLabels.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(sql: "DELETE FROM media; DELETE FROM syncState")
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchIndex.triggersSQL)
+            try db.execute(sql: SearchLabels.triggersSQL)
         }
     }
 
     public func deleteAll() throws {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.
+            try db.execute(sql: SearchLabels.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(sql: "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState")
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchIndex.triggersSQL)
+            try db.execute(sql: SearchLabels.triggersSQL)
         }
     }
 }

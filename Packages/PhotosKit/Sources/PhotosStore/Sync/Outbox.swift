@@ -17,6 +17,8 @@ public enum PendingOperation: Codable, Sendable, Hashable {
     case addToAlbum(albumId: String, albumName: String, albumKind: AlbumKind, fileId: FileID, path: String)
     case removeFromAlbum(albumId: String, albumName: String, albumKind: AlbumKind, fileId: FileID, childName: String)
     case setMetadata(fileId: FileID, path: String, capturedAt: Date?, latitude: Double?, longitude: Double?, removeLocation: Bool)
+    /// Adds or removes a system tag; self-contained in `TagChange`.
+    case tag(TagChange)
 
     var kind: String {
         switch self {
@@ -27,6 +29,7 @@ public enum PendingOperation: Codable, Sendable, Hashable {
         case .addToAlbum: "addToAlbum"
         case .removeFromAlbum: "removeFromAlbum"
         case .setMetadata: "setMetadata"
+        case .tag: "tag"
         }
     }
 
@@ -40,6 +43,7 @@ public enum PendingOperation: Codable, Sendable, Hashable {
         case .addToAlbum(let albumId, let albumName, let albumKind, let fileId, _):
             .addToAlbum(albumId: albumId, albumName: albumName, albumKind: albumKind, fileId: fileId, path: newPath)
         case .removeFromAlbum: self  // addressed by the album's child name
+        case .tag: self  // addressed by file id
         case .setMetadata(let fileId, _, let capturedAt, let latitude, let longitude, let removeLocation):
             .setMetadata(
                 fileId: fileId, path: newPath, capturedAt: capturedAt, latitude: latitude, longitude: longitude,
@@ -61,6 +65,7 @@ public enum PendingOperation: Codable, Sendable, Hashable {
         case .favorite(let fileId, _, _), .delete(let fileId, _), .archive(let fileId, _), .unarchive(let fileId, _),
             .addToAlbum(_, _, _, let fileId, _), .removeFromAlbum(_, _, _, let fileId, _), .setMetadata(let fileId, _, _, _, _, _):
             fileId
+        case .tag(let change): change.fileId
         }
     }
 }
@@ -427,6 +432,8 @@ public actor Outbox {
                 try await self.api.setMetadata(
                     userPath: $0, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: removeLocation)
             }
+        case .tag(let change):
+            try await change.execute(api: api)
         }
     }
 
@@ -504,6 +511,8 @@ public actor Outbox {
                 try db.execute(
                     sql: "UPDATE media SET latitude = ?, longitude = ? WHERE fileId = ?", arguments: [latitude, longitude, fileId])
             }
+        case .tag(let change):
+            try change.applyLocally(db: db)
         }
     }
 }

@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ shared the album with you." : {
+      "comment" : "Notification body; the title is the album's title. %@ is the display name of the owner."
+    },
     "%lld items were backed up, %lld are still waiting." : {
       "comment" : "Result of a backup run that ended before everything was uploaded, spoken or shown by the \"Back up now\" shortcut. Both numbers have plural forms.",
       "localizations" : {
@@ -54,8 +57,34 @@
         }
       }
     },
+    "%lld new photos" : {
+      "comment" : "Notification body about a shared album (its title is the title): how many photos others added.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
+    },
+    "An album was shared with you." : {
+      "comment" : "Notification body; the title is the album's title."
     },
     "Archive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
