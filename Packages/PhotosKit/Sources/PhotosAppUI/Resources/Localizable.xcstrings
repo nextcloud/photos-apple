@@ -4059,7 +4059,7 @@
       "comment" : "Title of the setting that chooses which folders of the server appear in the timeline."
     },
     "Timeline position" : {
-      "comment" : "VoiceOver label of the scrubber at the edge of the grid on the Mac that scrolls through the years."
+      "comment" : "VoiceOver label of the date scrubber at the trailing edge of the photo grid that scrolls through the years."
     },
     "Tint" : {
       "comment" : "A parameter that can be adjusted to change the color of the image.",
