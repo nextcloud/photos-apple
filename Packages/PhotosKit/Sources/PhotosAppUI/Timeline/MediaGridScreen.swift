@@ -30,6 +30,8 @@ struct MediaGridScreen<Accessory: View>: View {
     /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone.
     @Environment(\.undoManager) private var undoManager
     @State private var selection: Set<FileID> = []
+    /// What the toolbar and the menus show for the selection, loaded off the main thread when the selection changes.
+    @State private var selectionInfo = GridSelectionInfo()
     @State private var isSelecting = false
     @State private var viewerStart: ViewerStart?
     @State private var confirmDelete: [MediaItem]?
@@ -91,7 +93,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $editedItem) { item in EditorView(item: item) }
             .infoInspector(isPresented: $showingInfo) {
-                if let item = infoItem ?? selectedItems.first {
+                if let item = infoItem ?? selectionInfo.items?.first {
                     InfoPanel(item: item, inInspector: true)
                 } else {
                     ContentUnavailableView(String(localized: "No selection", bundle: .module), systemImage: "info.circle")
@@ -100,6 +102,8 @@ struct MediaGridScreen<Accessory: View>: View {
             .onChange(of: selection) { _, ids in
                 if showingInfo, let first = ids.first { infoItem = try? session.services?.library.item(first) }
             }
+            // Again when the items change (a favourite toggled on the selection changes the toolbar's title).
+            .task(id: SelectionKey(ids: selection, revision: feed.update.revision)) { await loadSelectionInfo(selection) }
             .focusedSceneValue(\.gridActions, gridActions)
             .selectionHaptic(selection, isActive: isSelecting)
             .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
@@ -237,19 +241,20 @@ struct MediaGridScreen<Accessory: View>: View {
         }
         if isSelecting && !selection.isEmpty {
             ToolbarItemGroup(placement: selectionPlacement) {
-                let items = selectedItems
-                ShareMediaButton(items: items)
-                    .help(String(localized: "Share", bundle: .module))
-                Button {
-                    setFavorite(items, !items.allSatisfy(\.isFavorite))
-                } label: {
-                    Label(
-                        favoriteTitle(remove: items.allSatisfy(\.isFavorite)),
-                        systemImage: items.allSatisfy(\.isFavorite) ? "heart.slash" : "heart")
+                let info: GridSelectionInfo = selectionInfo
+                let allFavorite: Bool = info.summary.allFavorite
+                if let items = info.items {
+                    ShareMediaButton(items: items)
+                        .help(String(localized: "Share", bundle: .module))
                 }
-                .help(favoriteTitle(remove: items.allSatisfy(\.isFavorite)))
+                Button {
+                    withItems(Array(selection)) { setFavorite($0, !allFavorite) }
+                } label: {
+                    Label(favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart")
+                }
+                .help(favoriteTitle(remove: allFavorite))
                 Menu {
-                    ForEach(menuActions(for: Array(selection)).filter { $0.id != "delete" }, id: \.id) { action in
+                    ForEach(menuActions(info).filter { $0.id != "delete" }, id: \.id) { action in
                         if action.startsGroup { Divider() }
                         Button(role: action.isDestructive ? .destructive : nil) {
                             action.handler(Array(selection))
@@ -262,12 +267,12 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
                 .help(String(localized: "More", bundle: .module))
                 Button(role: .destructive) {
-                    confirmDelete = items.filter(\.permissions.canDelete)
+                    withItems(Array(selection)) { confirmDelete = $0.filter(\.permissions.canDelete) }
                 } label: {
                     Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
                 }
                 .help(String(localized: "Delete", bundle: .module))
-                .disabled(!items.contains { $0.permissions.canDelete })
+                .disabled(info.summary.deletable == 0)
             }
         }
     }
@@ -280,38 +285,81 @@ struct MediaGridScreen<Accessory: View>: View {
         #endif
     }
 
-    var selectedItems: [MediaItem] {
-        guard let services = session.services, let map = try? services.library.items(Array(selection)) else { return [] }
-        return selection.compactMap { map[$0] }
+    struct SelectionKey: Equatable {
+        var ids: Set<FileID>
+        var revision: Int
+    }
+
+    /// Selections up to this size are loaded as items (sharing, the screen's own actions); larger ones are only counted.
+    static var eagerSelectionLimit: Int { 2000 }
+
+    /// Loads what the toolbar and menus need for `ids`, off the main thread.
+    func loadSelectionInfo(_ ids: Set<FileID>) async {
+        guard !ids.isEmpty, let services = session.services else {
+            selectionInfo = GridSelectionInfo()
+            return
+        }
+        let list = Array(ids)
+        if ids.count <= Self.eagerSelectionLimit {
+            guard let map = try? await services.library.fetchItems(list), !Task.isCancelled else { return }
+            let items = list.compactMap { map[$0] }
+            selectionInfo = GridSelectionInfo(
+                ids: ids, items: items, summary: SelectionSummary(items),
+                shareItems: items.map { ShareableMedia(item: $0, services: services) })
+        } else {
+            guard let summary = try? await services.library.selectionSummary(list), !Task.isCancelled else { return }
+            selectionInfo = GridSelectionInfo(ids: ids, items: nil, summary: summary)
+        }
+    }
+
+    /// Runs `body` with the items of `ids`: at once when they are loaded already or few, else once they are read off the
+    /// main thread (a selection of a whole library).
+    func withItems(_ ids: [FileID], _ body: @escaping @MainActor ([MediaItem]) -> Void) {
+        guard let library = session.services?.library, !ids.isEmpty else { return }
+        if let items = selectionInfo.items, selectionInfo.ids.count == ids.count, selectionInfo.ids == Set(ids) {
+            body(items)
+        } else if ids.count <= 200, let map = try? library.items(ids) {
+            body(ids.compactMap { map[$0] })
+        } else {
+            Task {
+                guard let map = try? await library.fetchItems(ids) else { return }
+                body(ids.compactMap { map[$0] })
+            }
+        }
     }
 
     /// Menu bar actions for this grid (SPEC §6.2, macOS menus).
     var gridActions: GridActions {
-        let items = selectedItems
+        let info = selectionInfo
+        let summary = info.summary
+        // Turned into a list only when an action runs: building it on every update costs as much as the selection is large.
+        let selected = selection
+        let single: MediaItem? = summary.count == 1 ? info.items?.first : nil
+        let allFavorite = summary.allFavorite
         return GridActions(
-            selectionCount: items.count,
-            allFavorite: !items.isEmpty && items.allSatisfy(\.isFavorite),
-            toggleFavorite: { setFavorite(items, !items.allSatisfy(\.isFavorite)) },
-            delete: { confirmDelete = items.filter(\.permissions.canDelete) },
+            selectionCount: summary.count,
+            allFavorite: allFavorite,
+            toggleFavorite: { withItems(Array(selected)) { setFavorite($0, !allFavorite) } },
+            delete: { withItems(Array(selected)) { confirmDelete = $0.filter(\.permissions.canDelete) } },
             toggleInfo: {
-                infoItem = items.first
+                infoItem = info.items?.first
                 showingInfo.toggle()
             },
-            addToAlbum: { albumPicker = PickedItems(items: items) },
+            addToAlbum: { withItems(Array(selected)) { albumPicker = PickedItems(items: $0) } },
             zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
             zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
-            open: items.count == 1 ? { viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: items[0].fileId) } : nil,
-            edit: items.count == 1 && items[0].kind == .image ? { editedItem = items[0] } : nil,
-            editDateAndLocation: canEditMetadata(items)
-                ? { metadataItems = PickedItems(items: items.filter(\.permissions.canWrite)) } : nil,
-            export: items.isEmpty ? nil : { export(items) },
-            shareItems: session.services.map { services in items.map { ShareableMedia(item: $0, services: services) } } ?? [],
-            shareTitle: items.count == 1 ? items[0].name : String(localized: "\(items.count) items", bundle: .module)
+            open: single.map { item in { viewerStart = ViewerStart(ids: feed.items.map(\.fileId), startId: item.fileId) } },
+            edit: single.flatMap { item in item.kind == .image ? { editedItem = item } : nil },
+            editDateAndLocation: canEditMetadata(summary)
+                ? { withItems(Array(selected)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) } } : nil,
+            export: summary.count == 0 ? nil : { withItems(Array(selected)) { export($0) } },
+            shareItems: info.shareItems,
+            shareTitle: single?.name ?? String(localized: "\(summary.count) items", bundle: .module)
         )
     }
 
-    func canEditMetadata(_ items: [MediaItem]) -> Bool {
-        session.features.has(.metadataEdit) && items.contains(where: \.permissions.canWrite)
+    func canEditMetadata(_ summary: SelectionSummary) -> Bool {
+        session.features.has(.metadataEdit) && summary.writable > 0
     }
 
     func favoriteTitle(remove: Bool) -> String {
@@ -335,13 +383,28 @@ struct MediaGridScreen<Accessory: View>: View {
         selection = []
     }
 
+    /// The context menu of the grid for `ids` (the selection, or the item that was clicked).
     func menuActions(for ids: [FileID]) -> [GridMenuAction] {
-        guard let services = session.services, let map = try? services.library.items(ids) else { return [] }
-        let items = ids.compactMap { map[$0] }
-        guard !items.isEmpty else { return [] }
+        if selectionInfo.ids.count == ids.count, selectionInfo.ids == Set(ids) { return menuActions(selectionInfo) }
+        guard let library = session.services?.library else { return [] }
+        // Not loaded yet (the selection has just changed): read it now. A context menu is opened once, not on every update.
+        if ids.count <= Self.eagerSelectionLimit {
+            guard let map = try? library.items(ids) else { return [] }
+            let items = ids.compactMap { map[$0] }
+            return menuActions(GridSelectionInfo(ids: Set(ids), items: items, summary: SelectionSummary(items)))
+        }
+        let summary = (try? library.selectionSummaryNow(ids)) ?? SelectionSummary()
+        return menuActions(GridSelectionInfo(ids: Set(ids), items: nil, summary: summary))
+    }
+
+    /// The actions for a selection; they read the selected items only when they run.
+    func menuActions(_ info: GridSelectionInfo) -> [GridMenuAction] {
+        let summary = info.summary
+        guard summary.count > 0 else { return [] }
+        let single: MediaItem? = summary.count == 1 ? info.items?.first : nil
         // Open, Get Info · Add to Album, Export · Favorite, Archive, Edit… · screen-specific actions · Delete.
         var actions: [GridMenuAction] = []
-        if items.count == 1, let item = items.first {
+        if let item = single {
             actions.append(
                 GridMenuAction(
                     id: "open", title: String(localized: "Open", bundle: .module), systemImage: "arrow.up.left.and.arrow.down.right"
@@ -360,61 +423,62 @@ struct MediaGridScreen<Accessory: View>: View {
             mac: LocalizedStringResource("Add to Album…", bundle: .module),
             other: LocalizedStringResource("Add to album…", bundle: .module))
         actions.append(
-            GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { _ in
-                albumPicker = PickedItems(items: items)
+            GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { ids in
+                withItems(ids) { albumPicker = PickedItems(items: $0) }
             })
         let exportTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(
-            GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { _ in export(items) })
-        let allFavorite = items.allSatisfy(\.isFavorite)
+            GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { ids in withItems(ids) { export($0) } })
+        let allFavorite = summary.allFavorite
         actions.append(
             GridMenuAction(
                 id: "favorite", title: favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart",
                 startsGroup: true
-            ) { _ in
-                setFavorite(items, !allFavorite)
+            ) { ids in
+                withItems(ids) { setFavorite($0, !allFavorite) }
             })
-        if items.contains(where: { $0.isOwnStorage && !$0.isArchived && $0.permissions.canDelete }) {
+        if summary.archivable > 0 {
             actions.append(
-                GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { _ in
-                    Task { await session.perform(.archive(items)) }
+                GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { ids in
+                    withItems(ids) { items in Task { await session.perform(.archive(items)) } }
                     endSelection()
                 })
         }
-        if items.contains(where: \.isArchived) {
+        if summary.archived > 0 {
             actions.append(
                 GridMenuAction(id: "unarchive", title: String(localized: "Unarchive", bundle: .module), systemImage: "tray.and.arrow.up") {
-                    _ in
-                    Task { await session.perform(.unarchive(items)) }
+                    ids in
+                    withItems(ids) { items in Task { await session.perform(.unarchive(items)) } }
                     endSelection()
                 })
         }
-        if items.count == 1, let item = items.first, item.kind == .image {
+        if let item = single, item.kind == .image {
             actions.append(
                 GridMenuAction(id: "edit", title: String(localized: "Edit…", bundle: .module), systemImage: "slider.horizontal.3") { _ in
                     editedItem = item
                 })
         }
-        if canEditMetadata(items) {
+        if canEditMetadata(summary) {
             let metadataTitle: String = PlatformWording.title(
                 mac: LocalizedStringResource("Edit Date and Location…", bundle: .module),
                 other: LocalizedStringResource("Edit date and location…", bundle: .module))
             actions.append(
-                GridMenuAction(id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock") { _ in
-                    metadataItems = PickedItems(items: items.filter(\.permissions.canWrite))
+                GridMenuAction(id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock") { ids in
+                    withItems(ids) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) }
                 })
         }
-        var extras: [GridMenuAction] = extraActions(items)
+        // The screen's own actions (remove from album…) work on the items; a selection too large to load has none.
+        var extras: [GridMenuAction] = info.items.map(extraActions) ?? []
         if !extras.isEmpty { extras[0].startsGroup = true }
         actions += extras
-        if items.contains(where: { $0.permissions.canDelete }) {
+        if summary.deletable > 0 {
             actions.append(
                 GridMenuAction(
                     id: "delete", title: String(localized: "Delete…", bundle: .module), systemImage: "trash", isDestructive: true,
                     startsGroup: true
-                ) { _ in
-                    confirmDelete = items.filter(\.permissions.canDelete)
+                ) { ids in
+                    withItems(ids) { confirmDelete = $0.filter(\.permissions.canDelete) }
                 })
         }
         return actions
@@ -428,6 +492,16 @@ struct MediaGridScreen<Accessory: View>: View {
         }
         .animation(.default, value: session.lastChange?.id)
     }
+}
+
+/// The selection of a grid as its toolbar and menus need it.
+struct GridSelectionInfo {
+    var ids: Set<FileID> = []
+    /// The items, for selections up to `MediaGridScreen.eagerSelectionLimit`; `nil` for larger ones.
+    var items: [MediaItem]? = []
+    var summary = SelectionSummary()
+    /// The originals for the share sheet (loaded selections only).
+    var shareItems: [ShareableMedia] = []
 }
 
 /// The action button of a grid's empty state.

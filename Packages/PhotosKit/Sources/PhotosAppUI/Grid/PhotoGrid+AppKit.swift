@@ -42,6 +42,7 @@
         private let scrubber = GridScrubberView()
         private var sectionOffsets: [Double] = []
         private var refreshWork: DispatchWorkItem?
+        private var selected = GridSelectionTracker()
         private lazy var promiseDelegate = FilePromiseDelegate(services: services)
 
         var model: GridModel { core.model }
@@ -127,14 +128,40 @@
                 core.noteLayout(width: gridWidth)
                 refreshVisibleTiles()
                 reloadScrubber()
+            } else if let changes = plan.sectionChanges {
+                apply(changes, model: update.model)
             } else if case .content(let ids) = plan.change {
                 core.show(update.model, relayout: false)
                 refreshVisibleTiles(only: ids)
             }
-            apply(selection: selection)
+            apply(selection: selection, modelChanged: plan.relayouts || plan.sectionChanges != nil)
             #if DEBUG
                 if !model.isEmpty { GridDebugKeys.runOnce(in: collectionView) }
             #endif
+        }
+
+        /// Some sections came, went or changed (an upload, a sync page): only those are updated, in one batch, instead
+        /// of reloading and laying out every section of the library.
+        private func apply(_ changes: GridModel.SectionChanges, model: GridModel) {
+            guard window != nil else {
+                // Not on screen: nothing to animate or keep in place.
+                core.show(model, relayout: true)
+                collectionView.reloadData()
+                reloadScrubber()
+                return
+            }
+            let anchor = anchorItem()
+            // The collection view must know the old sections before the batch (it may not have asked yet).
+            _ = collectionView.numberOfSections
+            core.show(model, relayout: true)
+            collectionView.performBatchUpdates {
+                collectionView.deleteSections(changes.deleted)
+                collectionView.insertSections(changes.inserted)
+                collectionView.reloadSections(changes.reloaded)
+            }
+            restore(anchor)
+            if !changes.content.isEmpty { refreshVisibleTiles(only: changes.content) }
+            reloadScrubber()
         }
 
         /// Reconfigures the tiles on screen: badges, and a preview that fits the current tile size. A tile keeps the
@@ -148,23 +175,28 @@
             }
         }
 
-        private func apply(selection: Set<FileID>) {
-            guard currentSelection() != selection else { return }
+        private func apply(selection: Set<FileID>, modelChanged: Bool) {
+            guard selected.needsApply(selection, modelChanged: modelChanged) else { return }
             var paths: Set<IndexPath> = []
+            paths.reserveCapacity(selection.count)
+            var found: Set<FileID> = []
             for id in selection {
-                if let position = model.position(of: id) { paths.insert(IndexPath(item: position.item, section: position.section)) }
+                guard let position = model.position(of: id) else { continue }
+                paths.insert(IndexPath(item: position.item, section: position.section))
+                found.insert(id)
             }
-            collectionView.selectionIndexPaths = paths
-            if paths.count != selection.count {
+            if collectionView.selectionIndexPaths != paths { collectionView.selectionIndexPaths = paths }
+            if found.count != selection.count {
+                selected.reset(found)
                 // Selected items that are gone (deleted, filtered out): tell SwiftUI, outside of its view update.
-                let remaining = currentSelection()
-                DispatchQueue.main.async { [weak self] in self?.callbacks?.selectionChanged(remaining) }
+                DispatchQueue.main.async { [weak self] in self?.callbacks?.selectionChanged(found) }
+            } else {
+                selected.reset(selection)
             }
         }
 
-        func currentSelection() -> Set<FileID> {
-            Set(collectionView.selectionIndexPaths.compactMap { fileId(at: $0) })
-        }
+        /// The selected items (as last reported to SwiftUI).
+        func currentSelection() -> Set<FileID> { selected.ids }
 
         func fileId(at indexPath: IndexPath) -> FileID? { core.fileId(at: indexPath) }
 
@@ -389,6 +421,7 @@
         func clearSelection() {
             guard !collectionView.selectionIndexPaths.isEmpty else { return }
             collectionView.deselectAll(nil)
+            selected.reset([])
             callbacks?.selectionChanged([])
             callbacks?.cancelSelection()
         }
@@ -403,6 +436,7 @@
             }
             guard let indexPath = first ?? visible.first else { return }
             collectionView.selectionIndexPaths = [indexPath]
+            selected.reset(Set([fileId(at: indexPath)].compactMap { $0 }))
             callbacks?.selectionChanged(currentSelection())
         }
 
@@ -421,6 +455,7 @@
             if !ids.contains(id) {
                 collectionView.selectionIndexPaths = [indexPath]
                 ids = [id]
+                selected.reset(ids)
                 callbacks.selectionChanged(ids)
             }
             let targets = Array(ids)
@@ -451,10 +486,12 @@
         }
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+            selected.insert(indexPaths.lazy.compactMap { self.fileId(at: $0) })
             callbacks?.selectionChanged(currentSelection())
         }
 
         func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            selected.remove(indexPaths.lazy.compactMap { self.fileId(at: $0) })
             callbacks?.selectionChanged(currentSelection())
         }
 

@@ -155,19 +155,103 @@ public struct GridModel: Sendable {
         case none
         /// Same items in the same sections; these changed their content (favourite, etag…): reconfigure them.
         case content(Set<FileID>)
-        /// Items or sections were added, removed or moved: reload.
+        /// Some sections came, went or hold other items; all others are as before. A collection view applies this as a
+        /// batch update of those sections instead of reloading everything (an upload adds a photo to today's section).
+        case sections(SectionChanges)
+        /// Too much changed, or the sectioning did: reload.
         case structure
     }
 
-    public func change(from old: GridModel) -> Change {
-        guard old.items.count == items.count, old.sections == sections else { return .structure }
-        var changed: Set<FileID> = []
-        for index in items.indices {
-            let before = old.items[index]
-            let after = items[index]
-            if before.fileId != after.fileId { return .structure }
-            if before != after { changed.insert(after.fileId) }
+    /// The sections that differ between two models with the same sectioning.
+    public struct SectionChanges: Sendable, Equatable {
+        /// Sections of the old model that are gone (old indexes).
+        public var deleted: IndexSet
+        /// Sections of the new model that are new (new indexes).
+        public var inserted: IndexSet
+        /// Sections of both whose items or header changed (old indexes, as a batch update wants them).
+        public var reloaded: IndexSet
+        /// Items whose content changed in sections that are otherwise the same.
+        public var content: Set<FileID>
+
+        public init(deleted: IndexSet = [], inserted: IndexSet = [], reloaded: IndexSet = [], content: Set<FileID> = []) {
+            self.deleted = deleted
+            self.inserted = inserted
+            self.reloaded = reloaded
+            self.content = content
         }
-        return changed.isEmpty ? .none : .content(changed)
+
+        public var sectionCount: Int { deleted.count + inserted.count + reloaded.count }
+    }
+
+    /// Above this many changed sections a reload is not slower than the batch update and easier on the view.
+    static func maxSectionChanges(sections: Int) -> Int { max(64, sections / 8) }
+
+    public func change(from old: GridModel) -> Change {
+        if old.items.count == items.count, old.sections == sections {
+            var changed: Set<FileID> = []
+            var same = true
+            for index in items.indices {
+                let before = old.items[index]
+                let after = items[index]
+                if before.fileId != after.fileId {
+                    same = false
+                    break
+                }
+                if before != after { changed.insert(after.fileId) }
+            }
+            if same { return changed.isEmpty ? .none : .content(changed) }
+        }
+        return sectionChange(from: old)
+    }
+
+    /// Compares the sections by id. Both lists are in display order, so their ids go strictly down (dates, newest first)
+    /// and one merge pass finds what came, went or changed.
+    func sectionChange(from old: GridModel) -> Change {
+        guard old.sectioning == sectioning, !old.sections.isEmpty, !sections.isEmpty, Self.idsDescend(old.sections),
+            Self.idsDescend(sections)
+        else { return .structure }
+        var changes = SectionChanges()
+        let limit = Self.maxSectionChanges(sections: sections.count)
+        var oldIndex = 0
+        var newIndex = 0
+        while oldIndex < old.sections.count || newIndex < sections.count {
+            if oldIndex < old.sections.count, newIndex < sections.count, old.sections[oldIndex].id == sections[newIndex].id {
+                let before = old.sections[oldIndex]
+                let after = sections[newIndex]
+                if before.kind != after.kind || before.date != after.date || before.startsMonth != after.startsMonth
+                    || before.year != after.year || before.range.count != after.range.count
+                {
+                    changes.reloaded.insert(oldIndex)
+                } else {
+                    var reload = false
+                    var content: [FileID] = []
+                    for offset in 0..<after.range.count {
+                        let previous = old.items[before.range.lowerBound + offset]
+                        let next = items[after.range.lowerBound + offset]
+                        if previous.fileId != next.fileId {
+                            reload = true
+                            break
+                        }
+                        if previous != next { content.append(next.fileId) }
+                    }
+                    if reload { changes.reloaded.insert(oldIndex) } else { changes.content.formUnion(content) }
+                }
+                oldIndex += 1
+                newIndex += 1
+            } else if newIndex >= sections.count || (oldIndex < old.sections.count && old.sections[oldIndex].id > sections[newIndex].id) {
+                changes.deleted.insert(oldIndex)
+                oldIndex += 1
+            } else {
+                changes.inserted.insert(newIndex)
+                newIndex += 1
+            }
+            if changes.sectionCount > limit { return .structure }
+        }
+        if changes.sectionCount == 0 { return changes.content.isEmpty ? .none : .content(changes.content) }
+        return .sections(changes)
+    }
+
+    static func idsDescend(_ sections: [GridSection]) -> Bool {
+        zip(sections, sections.dropFirst()).allSatisfy { $0.id > $1.id }
     }
 }

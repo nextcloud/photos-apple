@@ -91,4 +91,31 @@ import Testing
         #expect(try collections.albumItems(albumId: "own:Trip").map(\.fileId) == next)
         #expect(try collections.album(id: "own:Trip")?.itemCount == 60)
     }
+
+    /// The selection's summary is counted in the database and says the same as the items themselves.
+    @Test func selectionSummaryMatchesTheItems() async throws {
+        let database = try AccountDatabase.temporary()
+        let store = LibraryStore(database: database)
+        var items = (1...12).map { item(FileID($0), Double($0), favorite: $0 % 3 == 0) }
+        items[0].permissions = Permissions(rawValue: "RGDNVW")
+        items[1].permissions = Permissions(rawValue: "RG")
+        items[2].mountType = "shared"
+        items[2].permissions = Permissions(rawValue: "RGDNVW")
+        items[3] = item(4, 4, path: "/.archive/Photos/4.jpg")
+        items[3].permissions = Permissions(rawValue: "RGD")
+        try store.upsert(items)
+        // One more that only an album knows.
+        var shared = item(100, 100, favorite: true)
+        shared.permissions = Permissions(rawValue: "RGDNVW")
+        try store.storeCollectionMedia([shared])
+        let ids: [FileID] = [1, 2, 3, 4, 6, 100, 999]
+        let known = items.filter { ids.contains($0.fileId) } + [shared]
+        let summary = try await store.selectionSummary(ids)
+        #expect(summary == SelectionSummary(known))
+        #expect(summary.count == 6)
+        #expect(summary.archived == 1)
+        #expect(summary.archivable == 3)
+        #expect(!summary.allFavorite)
+        #expect(try await store.selectionSummary([3, 6]).allFavorite)
+    }
 }

@@ -52,6 +52,7 @@
         private let core: GridCore
         private var isSelecting = false
         private var pinchHandled = false
+        private var selected = GridSelectionTracker()
 
         var model: GridModel { core.model }
         private var zoomStep: Int { core.zoomStep }
@@ -185,6 +186,8 @@
                 }
                 core.noteLayout(width: gridWidth)
                 refreshVisibleTiles()
+            } else if let changes = plan.sectionChanges {
+                apply(changes, model: update.model)
             } else if case .content(let ids) = plan.change {
                 core.show(update.model, relayout: false)
                 refreshVisibleTiles(only: ids)
@@ -193,7 +196,31 @@
             if isSelecting != self.isSelecting, isSelecting || !multiSelectInteraction {
                 setSelecting(isSelecting)
             }
-            syncSelection(selection)
+            syncSelection(selection, modelChanged: plan.relayouts || plan.sectionChanges != nil)
+        }
+
+        /// Some sections came, went or changed (an upload, a sync page): only those are updated, in one batch, instead
+        /// of reloading and laying out every section of the library.
+        private func apply(_ changes: GridModel.SectionChanges, model: GridModel) {
+            guard view.window != nil else {
+                // Not on screen: nothing to keep in place.
+                core.show(model, relayout: true)
+                collectionView.reloadData()
+                return
+            }
+            let anchor = anchorItem()
+            // The collection view must know the old sections before the batch (after a reload it may not have asked yet).
+            _ = collectionView.numberOfSections
+            core.show(model, relayout: true)
+            UIView.performWithoutAnimation {
+                collectionView.performBatchUpdates {
+                    collectionView.deleteSections(changes.deleted)
+                    collectionView.insertSections(changes.inserted)
+                    collectionView.reloadSections(changes.reloaded)
+                }
+            }
+            restore(anchor)
+            if !changes.content.isEmpty { refreshVisibleTiles(only: changes.content) }
         }
 
         private func setSelecting(_ selecting: Bool) {
@@ -214,8 +241,10 @@
             }
         }
 
-        func syncSelection(_ selection: Set<FileID>) {
+        func syncSelection(_ selection: Set<FileID>, modelChanged: Bool = false) {
+            guard self.selected.needsApply(selection, modelChanged: modelChanged) else { return }
             let selected = currentSelection()
+            defer { self.selected.reset(currentSelection()) }
             guard selected != selection else { return }
             for id in selected.subtracting(selection) {
                 if let indexPath = indexPath(for: id) { collectionView.deselectItem(at: indexPath, animated: false) }
@@ -316,6 +345,7 @@
 
         /// Escape: leave the selection mode.
         @objc func cancelSelection() {
+            selected.reset([])
             callbacks?.selectionChanged([])
             callbacks?.cancelSelection()
         }
@@ -373,7 +403,8 @@
         func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
             guard let id = fileId(at: indexPath) else { return }
             if isSelecting {
-                callbacks?.selectionChanged(currentSelection())
+                selected.insert([id])
+                callbacks?.selectionChanged(selected.ids)
             } else {
                 collectionView.deselectItem(at: indexPath, animated: false)
                 callbacks?.open(id)
@@ -381,7 +412,9 @@
         }
 
         func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
-            if isSelecting { callbacks?.selectionChanged(currentSelection()) }
+            guard isSelecting else { return }
+            if let id = fileId(at: indexPath) { selected.remove([id]) }
+            callbacks?.selectionChanged(selected.ids)
         }
 
         func collectionView(_ collectionView: UICollectionView, canFocusItemAt indexPath: IndexPath) -> Bool { true }
@@ -408,7 +441,8 @@
 
         func collectionViewDidEndMultipleSelectionInteraction(_ collectionView: UICollectionView) {
             multiSelectInteraction = false
-            callbacks?.selectionChanged(currentSelection())
+            selected.reset(currentSelection())
+            callbacks?.selectionChanged(selected.ids)
         }
 
         func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint)
