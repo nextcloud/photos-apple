@@ -22,6 +22,8 @@ final class FakeDAVServer: Sendable {
         var place: String?
         var caption: String?
         var mime = "image/jpeg"
+        /// `nc:mount-type`: empty for the user's own storage, "external", "shared", "group"…
+        var mountType = ""
     }
 
     enum Kind: Sendable, Equatable {
@@ -51,6 +53,11 @@ final class FakeDAVServer: Sendable {
         var requests: [Request] = []
         /// When true, every request fails as if the device were offline.
         var offline = false
+        /// Folders on a storage that is not available right now (an external storage that is not mounted): searches
+        /// leave their files out, and a PROPFIND below them answers 503 like Nextcloud's `StorageNotAvailableException`.
+        var unavailable: Set<String> = []
+        /// Files every search leaves out although they exist (a search that came back short).
+        var hiddenFromSearch: Set<FileID> = []
         var generation = 1
     }
 
@@ -59,8 +66,12 @@ final class FakeDAVServer: Sendable {
     let state = Mutex(State())
     /// Runs before a request is answered; can suspend to hold a request back.
     let gate = Mutex<(@Sendable (Request) async -> Void)?>(nil)
+    /// Answers a request with this status instead of handling it (a locked file, a refused delete).
+    let statusOverride = Mutex<(@Sendable (Request) -> Int?)?>(nil)
     /// Runs after a response was computed (the response does not include what it changes).
     let afterResponse = Mutex<(@Sendable (Request, inout State) -> Void)?>(nil)
+    /// Answers requests the fake does not model itself (system tags, Recognize); nil lets the fake answer.
+    let responder = Mutex<(@Sendable (Request) -> Response?)?>(nil)
 
     init() {
         StubURLProtocol.servers.withLock { $0[host] = self }
@@ -153,8 +164,12 @@ final class FakeDAVServer: Sendable {
         state.withLock { $0.requests.append(request) }
         if let gate = gate.withLock({ $0 }) { await gate(request) }
         let after = afterResponse.withLock { $0 }
+        let forcedStatus = statusOverride.withLock { $0 }?(request)
+        let custom = responder.withLock { $0 }?(request)
         return state.withLock { state in
             if state.offline { return .failure(.notConnectedToInternet) }
+            if let forcedStatus { return .http(status: forcedStatus, body: "") }
+            if let custom { return custom }
             let response = respond(to: request, headers: headers, state: &state)
             after?(request, &state)
             return response
@@ -184,6 +199,12 @@ final class FakeDAVServer: Sendable {
     private func respond(to request: Request, headers: [String: String], state: inout State) -> Response {
         switch request.kind {
         case .propfind:
+            if state.unavailable.contains(where: { request.path == $0 || request.path.hasPrefix($0 + "/") }) {
+                return .http(status: 503, body: "")
+            }
+            if let file = state.files.values.first(where: { $0.path == request.path }) {
+                return .http(status: 207, body: Self.multistatus(xml(file)))
+            }
             guard state.folders.contains(request.path) else { return .http(status: 404, body: "") }
             let body =
                 "<d:response><d:href>/remote.php/dav/files/\(user)\(request.path)/</d:href><d:propstat><d:prop><d:getetag>&quot;\(state.rootETag)&quot;</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
@@ -196,11 +217,13 @@ final class FakeDAVServer: Sendable {
                 "<d:response><d:href>/remote.php/dav/files/\(user)\(request.path)</d:href><d:propstat><d:prop><oc:favorite/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
             return .http(status: 207, body: Self.multistatus(body))
         case .delete:
+            if let refused = Self.precondition(headers, request.path, state) { return refused }
             guard let id = state.files.values.first(where: { $0.path == request.path })?.id else { return .http(status: 404, body: "") }
             state.files[id] = nil
             Self.bumpRoot(&state)
             return .http(status: 204, body: "")
         case .move:
+            if let refused = Self.precondition(headers, request.path, state) { return refused }
             guard let id = state.files.values.first(where: { $0.path == request.path })?.id,
                 let destination = headers["Destination"].flatMap(URL.init(string:))?.path(percentEncoded: false),
                 let range = destination.range(of: "/files/\(user)")
@@ -240,12 +263,20 @@ final class FakeDAVServer: Sendable {
         }
     }
 
+    /// `If-Match` as Nextcloud answers it: 412 unless the file at the path has that ETag (also when there is no file).
+    static func precondition(_ headers: [String: String], _ path: String, _ state: State) -> Response? {
+        guard let match = headers.first(where: { $0.key.lowercased() == "if-match" })?.value else { return nil }
+        let etag = state.files.values.first { $0.path == path }?.etag
+        return etag.map { "\"\($0)\"" } == match ? nil : .http(status: 412, body: "")
+    }
+
     private func search(
         _ request: Request, state: State, limit: Int? = nil, order: ((File) -> Double?)? = nil, where include: (File) -> Bool
     ) -> Response {
         let scopes = request.body.matches(of: /<d:scope><d:href>([^<]*)<\/d:href>/).map { String($0.1.dropFirst("/files/\(user)".count)) }
         var files = state.files.values.filter { file in
             include(file) && scopes.contains { $0.isEmpty || file.path.hasPrefix($0 + "/") }
+                && !state.unavailable.contains { file.path.hasPrefix($0 + "/") } && !state.hiddenFromSearch.contains(file.id)
         }
         files.sort { (order?($0) ?? $0.modified, $0.id) > (order?($1) ?? $1.modified, $1.id) }
         if let limit { files = Array(files.prefix(limit)) }
@@ -257,6 +288,7 @@ final class FakeDAVServer: Sendable {
         props += "<d:getetag>&quot;\(file.etag)&quot;</d:getetag>"
         props += "<d:getlastmodified>\(HTTPDate.format(Date(timeIntervalSince1970: file.modified)))</d:getlastmodified>"
         props += "<oc:favorite>\(file.favorite ? 1 : 0)</oc:favorite><oc:permissions>RGDNVW</oc:permissions>"
+        if !file.mountType.isEmpty { props += "<nc:mount-type>\(file.mountType)</nc:mount-type>" }
         if let uploaded = file.uploaded { props += "<nc:upload_time>\(Int(uploaded))</nc:upload_time>" }
         if let captured = file.captured {
             props += "<nc:metadata-photos-original_date_time>\(Int(captured))</nc:metadata-photos-original_date_time>"

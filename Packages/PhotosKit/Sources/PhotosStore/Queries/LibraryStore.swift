@@ -21,7 +21,7 @@ public enum MediaFilter: Hashable, Sendable {
 }
 
 /// Lightweight row for grids (keeps 100k items cheap in memory).
-public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
+public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord, CopyStackCandidate {
     public var id: FileID { fileId }
     public var fileId: FileID
     public var timestamp: Date
@@ -37,6 +37,9 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
     public var directory: String
     public var mimeType: String
     public var isArchived: Bool
+    /// The copies of one shot this tile stands for, the one it shows first (`CopyStacks`); empty when it is not a stack.
+    /// Set by the screen that stacks its grid, never by the store.
+    public var stack: [FileID] = []
 
     public init(row: Row) throws {
         fileId = row["fileId"]
@@ -110,6 +113,10 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord {
     }
 }
 
+extension GridMedia {
+    public var isVideo: Bool { kind == .video }
+}
+
 /// A row of the timeline with only what laying out, sectioning and badging the grid needs (about 40 bytes, no strings).
 /// Details of the tiles on screen come from `LibraryStore.gridMedia(_:)`.
 public struct TimelineRow: Hashable, Sendable, Identifiable {
@@ -157,7 +164,8 @@ public struct TimelineRow: Hashable, Sendable, Identifiable {
 /// A search over the index (SPEC SR-2/SR-3): AND between the kinds of criteria, OR within places, dates and albums.
 public struct LibrarySearch: Hashable, Sendable {
     /// Free text. Every word must occur (as a substring, ignoring case and diacritics) in the file name, place, country,
-    /// caption or folder path.
+    /// caption or folder path, or in the names of the file's tags and people or the labels recognised on this device
+    /// (`SearchLabels`).
     public var texts: [String]
     public var places: [String]
     public var dateRanges: [Range<Date>]
@@ -238,10 +246,42 @@ public struct MapCell: Hashable, Sendable, Identifiable {
     public var cover: GridMedia
     public var latitude: Double
     public var longitude: Double
+    /// The place name of the cover ("Lisbon"), for the marker's label.
+    public var place: String?
     /// The query this cell came from; `LibraryStore.mapItems(in:)` uses it to list the cell's items.
     public var region: MapRegion
     public var cellLatitude: Double
     public var cellLongitude: Double
+}
+
+/// What the actions of a selection need to know about it (which actions apply, their titles), without the items: a
+/// whole library can be selected.
+public struct SelectionSummary: Sendable, Equatable {
+    /// The selected items that are known (index or collection media).
+    public var count = 0
+    public var favorites = 0
+    public var deletable = 0
+    public var writable = 0
+    /// On the user's own storage, not archived and deletable: can be archived.
+    public var archivable = 0
+    public var archived = 0
+
+    public init() {}
+
+    public init(_ items: [MediaItem]) {
+        for item in items { add(item) }
+    }
+
+    mutating func add(_ item: MediaItem) {
+        count += 1
+        if item.isFavorite { favorites += 1 }
+        if item.permissions.canDelete { deletable += 1 }
+        if item.permissions.canWrite { writable += 1 }
+        if item.isOwnStorage && !item.isArchived && item.permissions.canDelete { archivable += 1 }
+        if item.isArchived { archived += 1 }
+    }
+
+    public var allFavorite: Bool { count > 0 && favorites == count }
 }
 
 /// The memories of a library (SPEC §7.12).
@@ -410,8 +450,15 @@ public struct LibraryStore: Sendable {
         return result
     }
 
+    /// While the tables keep changing (more than `busyRefetches` refetches within `busyWindow`: a sync storing page after
+    /// page, a backup uploading photo after photo, the outbox working through a large selection), a coalesced observation
+    /// refetches at most this often. A change after a quiet moment still refetches at once.
+    static let busyInterval = Duration.seconds(2)
+    static let busyWindow = Duration.seconds(5)
+    static let busyRefetches = 3
+
     /// Observes the tables `sql` reads and refetches with `fetch` when they change, at most once per `interval` during a
-    /// burst. Equal values are not delivered twice.
+    /// burst, and at most once per `busyInterval` while the burst goes on. Equal values are not delivered twice.
     func observeCoalesced<Value: Sendable & Equatable>(
         sql: String, arguments: StatementArguments, interval: Duration, fetch: @escaping @Sendable (Database) throws -> Value
     ) -> AsyncThrowingStream<Value, any Error> {
@@ -426,13 +473,17 @@ public struct LibraryStore: Sendable {
                 do {
                     var last = try await writer.read(fetch)
                     var fetchedAt = ContinuousClock.now
+                    var recent: [ContinuousClock.Instant] = []
                     continuation.yield(last)
                     for await _ in changes {
-                        let wait = interval - (ContinuousClock.now - fetchedAt)
+                        let busy = recent.count >= Self.busyRefetches && ContinuousClock.now - recent[0] < Self.busyWindow
+                        let wait = (busy ? max(interval, Self.busyInterval) : interval) - (ContinuousClock.now - fetchedAt)
                         if wait > .zero { try await Task.sleep(for: wait) }
                         try Task.checkCancellation()
                         let value = try await writer.read(fetch)
                         fetchedAt = .now
+                        recent.append(fetchedAt)
+                        if recent.count > Self.busyRefetches { recent.removeFirst(recent.count - Self.busyRefetches) }
                         if value != last {
                             last = value
                             continuation.yield(value)
@@ -493,6 +544,44 @@ public struct LibraryStore: Sendable {
             for record in try CollectionMediaRecord.fetchAll(db, keys: missing) { result[record.fileId] = record.item }
         }
         return result
+    }
+
+    /// Counts what the actions of a selection depend on, in the database: no item of a selection of 150 000 is loaded.
+    public func selectionSummary(_ fileIds: [FileID]) async throws -> SelectionSummary {
+        try await database.writer.read { db in try Self.selectionSummary(fileIds, db: db) }
+    }
+
+    /// `selectionSummary` for callers that must answer at once (a context menu that opens before the summary arrived).
+    public func selectionSummaryNow(_ fileIds: [FileID]) throws -> SelectionSummary {
+        try database.writer.read { db in try Self.selectionSummary(fileIds, db: db) }
+    }
+
+    static func selectionSummary(_ fileIds: [FileID], db: Database) throws -> SelectionSummary {
+        var summary = SelectionSummary()
+        for chunk in fileIds.chunked(5000) {
+            let list = chunk.map { String($0) }.joined(separator: ",")
+            let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*), TOTAL(isFavorite), TOTAL(instr(permissions, 'D') > 0), TOTAL(instr(permissions, 'W') > 0),
+                        TOTAL(mountType = '' AND isArchived = 0 AND instr(permissions, 'D') > 0), TOTAL(isArchived)
+                    FROM media WHERE fileId IN (\(list))
+                    """)
+            if let row {
+                summary.count += row[0] as Int
+                summary.favorites += Int(row[1] as Double)
+                summary.deletable += Int(row[2] as Double)
+                summary.writable += Int(row[3] as Double)
+                summary.archivable += Int(row[4] as Double)
+                summary.archived += Int(row[5] as Double)
+            }
+            // Items of shared albums and other collections are not in the index.
+            let indexed = row.map { $0[0] as Int } ?? 0
+            guard indexed < chunk.count else { continue }
+            let found = Set(try FileID.fetchAll(db, sql: "SELECT fileId FROM media WHERE fileId IN (\(list))"))
+            for record in try CollectionMediaRecord.fetchAll(db, keys: chunk.filter { !found.contains($0) }) { summary.add(record.item) }
+        }
+        return summary
     }
 
     /// All visible items as full rows. This is the whole table: only for work that really needs every item (duplicates,
@@ -745,11 +834,11 @@ public struct LibraryStore: Sendable {
             let rows = try Row.fetchAll(db, sql: sql, arguments: [cellLatitude, cellLongitude] + Self.arguments(region))
             let coverIds: [FileID] = rows.map { $0[3] }
             let covers = try Self.gridMedia(db, coverIds)
-            var coordinates: [FileID: (Double, Double)] = [:]
+            var coordinates: [FileID: (Double, Double, String?)] = [:]
             for chunk in coverIds.chunked(500) {
                 let list = chunk.map { String($0) }.joined(separator: ",")
-                for row in try Row.fetchAll(db, sql: "SELECT fileId, latitude, longitude FROM media WHERE fileId IN (\(list))") {
-                    coordinates[row[0]] = (row[1], row[2])
+                for row in try Row.fetchAll(db, sql: "SELECT fileId, latitude, longitude, place FROM media WHERE fileId IN (\(list))") {
+                    coordinates[row[0]] = (row[1], row[2], row[3])
                 }
             }
             return rows.compactMap { row -> MapCell? in
@@ -757,7 +846,8 @@ public struct LibraryStore: Sendable {
                 guard let cover = covers[coverId], let coordinate = coordinates[coverId] else { return nil }
                 return MapCell(
                     row: row[0], column: row[1], count: row[2], cover: cover, latitude: coordinate.0, longitude: coordinate.1,
-                    region: region, cellLatitude: cellLatitude, cellLongitude: cellLongitude)
+                    place: coordinate.2.flatMap { $0.isEmpty ? nil : $0 }, region: region, cellLatitude: cellLatitude,
+                    cellLongitude: cellLongitude)
             }
         }
     }
@@ -775,6 +865,22 @@ public struct LibraryStore: Sendable {
     public func mapItems(in region: MapRegion) async throws -> [MediaItem] {
         let sql = "SELECT media.* FROM media WHERE \(Self.located) AND \(Self.inRegion) \(Self.displayOrder)"
         return try await database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: Self.arguments(region)) }
+    }
+
+    /// A page of the items of a map cell as grid rows, newest first ("Photos in this area" can be most of the library).
+    public func mapGridItems(in cell: MapCell, limit: Int, offset: Int = 0) async throws -> [GridMedia] {
+        let sql =
+            "SELECT \(Self.gridColumns) FROM media WHERE \(Self.located) AND \(Self.inRegion) AND \(Self.cellRow) = ? AND \(Self.cellColumn) = ? \(Self.displayOrder) LIMIT ? OFFSET ?"
+        var arguments = Self.arguments(cell.region)
+        arguments += [cell.cellLatitude, cell.row, cell.cellLongitude, cell.column, limit, offset]
+        return try await database.writer.read { [arguments] db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
+    }
+
+    /// A page of the geotagged items of a region as grid rows, newest first.
+    public func mapGridItems(in region: MapRegion, limit: Int, offset: Int = 0) async throws -> [GridMedia] {
+        let sql = "SELECT \(Self.gridColumns) FROM media WHERE \(Self.located) AND \(Self.inRegion) \(Self.displayOrder) LIMIT ? OFFSET ?"
+        let arguments = Self.arguments(region) + [limit, offset]
+        return try await database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
     }
 
     public func mapItemCount(in region: MapRegion) async throws -> Int {
@@ -823,13 +929,29 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    /// Empties the timeline index and the sync state (the timeline folders changed). Albums and their content stay:
+    /// they do not depend on the folders, and offline albums are defined by them.
+    public func deleteIndex() throws {
+        try database.writer.write { db in
+            try db.execute(sql: SearchLabels.dropTriggersSQL)
+            try db.execute(sql: SearchIndex.dropSQL)
+            try db.execute(sql: "DELETE FROM media; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect")
+            try db.execute(sql: SearchIndex.createSQL)
+            try db.execute(sql: SearchLabels.triggersSQL)
+        }
+    }
+
     public func deleteAll() throws {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.
+            try db.execute(sql: SearchLabels.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
-            try db.execute(sql: "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState")
+            try db.execute(
+                sql:
+                    "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect"
+            )
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchIndex.triggersSQL)
+            try db.execute(sql: SearchLabels.triggersSQL)
         }
     }
 }

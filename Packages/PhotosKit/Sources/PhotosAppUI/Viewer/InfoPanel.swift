@@ -12,6 +12,8 @@ struct InfoPanel: View {
     let item: MediaItem
     /// Shown as an inspector (sidebar) rather than a sheet: no Done button.
     var inInspector = false
+    /// The photo as a thumbnail on top. Left out in the viewer, where the panel sits beside the photo itself.
+    var showsPreview = true
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var exif: [String: String] = [:]
@@ -21,10 +23,12 @@ struct InfoPanel: View {
     var body: some View {
         Form {
             Section {
-                PreviewImage(item: item, bucket: 256)
-                    .frame(height: 160)
-                    .clipShape(.rect(cornerRadius: 8))
-                    .listRowInsets(EdgeInsets())
+                if showsPreview {
+                    PreviewImage(item: item, bucket: 256)
+                        .frame(height: 160)
+                        .clipShape(.rect(cornerRadius: 8))
+                        .listRowInsets(EdgeInsets())
+                }
                 row(String(localized: "Name", bundle: .module), item.name)
                 row(String(localized: "Taken", bundle: .module), CaptureTime.format(item.timestamp, offset: captureOffset))
                 if let caption = item.caption { row(String(localized: "Description", bundle: .module), caption) }
@@ -115,7 +119,7 @@ struct InfoPanel: View {
 
     var camera: [(String, String)] {
         var rows: [(String, String)] = []
-        let model = [exif["Make"], exif["Model"]].compactMap { $0 }.joined(separator: " ")
+        let model: String = Self.cameraName(make: exif["Make"], model: exif["Model"])
         if !model.isEmpty { rows.append((String(localized: "Camera", bundle: .module), model)) }
         if let lens = exif["LensModel"] { rows.append((String(localized: "Lens", bundle: .module), lens)) }
         var exposure: [String] = []
@@ -129,6 +133,18 @@ struct InfoPanel: View {
         if let iso = exif["ISOSpeedRatings"] ?? exif["PhotographicSensitivity"] { exposure.append("ISO \(iso)") }
         if !exposure.isEmpty { rows.append((String(localized: "Exposure", bundle: .module), exposure.joined(separator: " · "))) }
         return rows
+    }
+
+    /// "Canon EOS 6D", not "Canon Canon EOS 6D": most cameras repeat the maker in the model name, some only its first
+    /// word ("NIKON CORPORATION" / "NIKON D750"). The maker is put in front only where the model does not say it.
+    nonisolated static func cameraName(make: String?, model: String?) -> String {
+        let make: String = (make ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let model: String = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !make.isEmpty else { return model }
+        guard !model.isEmpty else { return make }
+        let brand: String = make.split(whereSeparator: { $0 == " " || $0 == "," }).first.map(String.init) ?? make
+        if model.range(of: brand, options: [.caseInsensitive, .anchored]) != nil { return model }
+        return "\(make) \(model)"
     }
 
     /// EXIF values come as `"28/10"` or plain numbers.

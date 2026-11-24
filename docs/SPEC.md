@@ -2,7 +2,12 @@
 
 Version 1.0 · 2026-11-22 · Status: ready for implementation
 
-This document specifies a new native Apple app, **Nextcloud Photos**. It is written for the engineer (human or Claude) who will build it. It records decisions that were already made with the product owner (Frank Karlitschek). **Do not re-open the decisions in §2**; if something in this spec turns out to be wrong or impossible, change the spec in the same PR that changes the behaviour and say why.
+> **This is the target, not the state.** The spec describes the app as it is meant to become; parts of it are not built yet
+> (for example the log file of §4.5, the MDM keys, the PhotoKit background-upload extension, most of the UI tests of §11).
+> What exists today, and how it was verified, is in [STATUS.md](STATUS.md). The layout of the code is in
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
+This document specifies a new native Apple app, **Nextcloud Photos**. It is written for the engineer (human or AI-assisted) who will build it. It records decisions that were already made with the product owner. **Do not re-open the decisions in §2**; if something in this spec turns out to be wrong or impossible, change the spec in the same PR that changes the behaviour and say why.
 
 ## 0. Documents in this folder
 
@@ -11,10 +16,10 @@ This document specifies a new native Apple app, **Nextcloud Photos**. It is writ
 | `SPEC.md` | This document: product, architecture, features, milestones. The source of truth. |
 | `SERVER-COMPANION.md` | Optional server-side additions to the Photos server app (nextcloud/photos) that make the client faster and more complete. The app must work without them. |
 | `reference/photos-server-api.md` | Exact wire formats of the Photos server app on upstream master (WebDAV trees, SEARCH bodies, properties, previews, faces, tags, version matrix NC33–36). **Read it before writing any networking code.** |
-| `reference/photos-extended-api.md` | The API added by ~60 unmerged feature branches (`deploy/devel-all`, running on the devel server), plus the client-side algorithms of the web app with all their constants. |
+| `reference/photos-extended-api.md` | The API added by ~60 unmerged feature branches (an integration branch that runs on the extended test server), plus the client-side algorithms of the web app with all their constants. |
 | `reference/nextcloud-ios-and-nextcloudkit.md` | How the Nextcloud Files iOS app and NextcloudKit do login, accounts, keychain, push, auto upload, previews; identifiers of the Files app. |
 
-The reference files are research notes with file:line pointers into local clones (`~/aloha-work/photos`, `~/aloha-work/photos-wt/deploy`, server core). When this spec and a reference disagree, this spec wins for *behaviour* and the reference wins for *wire format*; fix whichever is wrong.
+The reference files are research notes with file:line pointers into local clones of the Photos app, its integration branch and server core. When this spec and a reference disagree, this spec wins for *behaviour* and the reference wins for *wire format*; fix whichever is wrong.
 
 ---
 
@@ -64,7 +69,7 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 | Push | **Yes, via the Nextcloud push proxy** (same mechanism as Files/Talk). |
 | Privacy | **Optional app lock** (Face ID / Touch ID / Optic ID / passcode) and **archived ("hidden") photos always require authentication**. |
 | Delivery | **Milestones M0–M5** (§13), each shippable and testable. |
-| Test servers | **devel** (extended features) for manual/UI checks and a **local server on upstream master** (and an NC 33 container) for automated integration tests and fallbacks. |
+| Test servers | **An extended test server** (all extended features) for manual/UI checks and a **local server on upstream master** (and an NC 33 container) for automated integration tests and fallbacks. |
 
 ---
 
@@ -87,29 +92,36 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 
 ```
 photos-ios/
-  NextcloudPhotos.xcodeproj
-  App/                      # multiplatform app target (iOS, iPadOS, macOS, visionOS destinations)
-    Shared/                 # app entry, scenes, navigation, settings
-    iOS/  macOS/  visionOS/ # platform-specific scenes, commands, ornaments
+  project.yml               # XcodeGen: the Xcode project, Info.plists and build settings are generated from it
+  Config/                   # Base.xcconfig (team, bundle id, version), Local.xcconfig (git-ignored, your own signing)
+  App/
+    Shared/                 # app entry point, app delegates, background tasks, App Intents
+    Resources/              # asset catalog, string catalogs, privacy manifest
+    *.entitlements
   Extensions/
     ShareExtension/         # iOS + macOS
-    Widgets/                # iOS, macOS, visionOS (WidgetKit + AppIntents configuration)
+    Widgets/                # iOS, macOS, visionOS
     NotificationService/    # iOS + macOS, decrypts push payloads
-    BackgroundUpload/       # iOS/iPadOS PhotoKit background-upload extension (com.apple.photos.background-upload)
-  Packages/
-    PhotosModel/            # value types, IDs, feature flags; no I/O
-    PhotosNetworking/       # HTTP client, Photos DAV client, XML builders/parsers, feature detection
-    PhotosStore/            # GRDB schema, migrations, queries, sync engine, outbox
-    PhotosDomain/           # pure algorithms: grouping, stacking, bursts, memories, duplicates, cleanup, search parsing
-    PhotosMedia/            # preview cache, image pipeline, video/live-photo loading, editing pipeline
-    PhotosBackup/           # PhotoKit scanning, reconciliation, upload engine
-    PhotosCore/             # composition root: accounts, keychain, per-account services, app/session models
-    PhotosAppUI/            # shared SwiftUI components (not "PhotosUI": that name is Apple's framework), grid, viewer, design tokens
-  Tests/ (per package) + UITests/
-  LICENSE (MIT, exists)  LICENSES/  REUSE.toml  .swift-format  .github/workflows/
+  Packages/PhotosKit/       # one local Swift package; everything else is a target of it
+    Sources/
+      PhotosModel/          # value types, IDs, feature flags; no I/O
+      PhotosDomain/         # pure algorithms: grouping, stacking, memories, duplicates, cleanup, search parsing
+      PhotosNetworking/     # HTTP client, DAV/OCS clients, XML builders/parsers, login, feature detection, upload
+      PhotosStore/          # GRDB schema, migrations, queries, sync engine, outbox
+      PhotosMedia/          # preview cache, image pipeline, video/Live Photo loading, editing pipeline
+      PhotosBackup/         # PhotoKit scanning, reconciliation, upload engine
+      PhotosCore/           # composition root: accounts, keychain, per-account services, app/session models
+      PhotosAppUI/          # SwiftUI screens, grid, viewer (not "PhotosUI": that name is Apple's framework)
+    Tests/<target>Tests/    # Swift Testing, fixtures recorded from servers
+  UITests/                  # XCUITest smoke tests (need a test server)
+  scripts/                  # test server, string catalog helper
+  docs/  LICENSE  LICENSES/  REUSE.toml  .swift-format  .github/
 ```
 
-In the implementation these are targets of one local package, `Packages/PhotosKit`, and the Xcode project is generated from `project.yml` with XcodeGen. Packages depend downwards only: `PhotosAppUI → PhotosCore → PhotosBackup/PhotosMedia/PhotosStore → PhotosNetworking → PhotosModel`; `PhotosDomain` depends only on `PhotosModel` and is fully unit-testable on macOS without a server.
+Not there yet: platform folders under `App/` (the platform differences live in `PhotosAppUI`), and the PhotoKit
+background-upload extension (`Extensions/BackgroundUpload`, §7.18.6). The Xcode project is not checked in. Targets depend
+downwards only, see [ARCHITECTURE.md](ARCHITECTURE.md); `PhotosDomain` depends only on `PhotosModel` and is fully
+unit-testable on macOS without a server.
 
 ### 4.2 Targets and identifiers
 
@@ -148,7 +160,7 @@ The app never writes to the Files app's App Group: NextcloudKit (used by Files) 
 
 ### 4.5 Logging and diagnostics
 
-`os.Logger` with subsystems per package. A rotating log file in the app container (off by default, enabled in Settings → Advanced → Logging) that the user can export. Logs never contain passwords, tokens, full URLs with tokens, or file names unless "detailed logging" is on. No third-party crash or analytics SDKs.
+`os.Logger` with subsystems per package (implemented). A rotating log file in the app container that the user can export (implemented: `PhotosCore/DiagnosticsLog.swift`): the app's own entries, redacted when written (no account names, hosts, URLs, paths, file names or tokens), at most 256 KB per file with two older files, written every few minutes and when the app goes to the background, added to "Export diagnostics…". *Deviation:* it is on by default (Settings → Diagnostics → "Keep log across restarts"), because a log of a run that crashed is only useful when it was already being kept; it never leaves the device unless the user exports it. Logs never contain passwords, tokens, full URLs with tokens, or file names. No third-party crash or analytics SDKs.
 
 ### 4.6 Error handling
 
@@ -254,7 +266,7 @@ The app keeps a **complete local index** of the user's media metadata (not the f
 | `tag` | `id` PK, `name`, `visible`, `assignable`, `count`, `coverFileId` |
 | `tagItem` | `tagId`, `fileId` |
 | `smartAlbum` | `id`, `name`, `filters` (JSON), `origin` (server/local) |
-| `operation` | outbox: `id`, `kind`, `payload` JSON, `state`, `attempts`, `lastError`, `createdAt` |
+| `operation` | outbox: `id`, `kind`, `payload` JSON, `fileId`, `etag` (of the file when queued), `state`, `attempts`, `lockedAttempts`, `lastError`, `createdAt`, `nextAttemptAt` |
 | `offlinePin`, `offlineFile` | pinned albums/photos; downloaded originals (`fileId`, `etag`, `localPath`, `bytes`) |
 | `previewCache` | `fileId`, `etag`, `bucket`, `bytes`, `lastUsed` (LRU bookkeeping; files on disk) |
 | `faceDetections` | `fileId`, JSON, `fetchedAt` |
@@ -283,13 +295,13 @@ Triggered on foreground, pull-to-refresh, every 5 min while the app is open and 
 2. Otherwise:
    1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when files below are added, changed, moved or deleted — but **not** when a favourite is set or the server fills in place/caption). Read it once, before anything is fetched, and store that value only after the sync is through, so a change made while syncing is seen by the next sync. Unchanged → only the favourites check: one SEARCH for the file ids with `oc:favorite = 1`, compared with the store.
    2. Changed → SEARCH for items with `d:getlastmodified > lastDeltaSync − 10 min` **or** `nc:upload_time > lastDeltaSync − 10 min` (covers new uploads with old mtimes) → upsert.
-   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h on each sync, and run a full **reconciliation** (step 4) whenever a root ETag changed (the delta SEARCH cannot see deletes and moves), on pull-to-refresh / "Sync now", and otherwise at most once a day.
-   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due.
+   3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h whose place is still unknown when they reach a checkpoint (10 min, 1 h, 6 h, 24 h, 47 h after the upload; looked at no more than every 10 minutes), and run a full **reconciliation** (step 4) after a root ETag changed (the delta SEARCH cannot see deletes and moves) but at most every 10 minutes (longer for large libraries: about one request per thousand items, so 150 000 items once an hour) and not while a backup pass uploads, on pull-to-refresh only when the last one is 10 minutes old, at once on "Sync now", and otherwise once a day.
+   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due, and it is resumable: the rows it has not met yet are kept in a table and its cursor in the sync state, so the next sync goes on from the page it reached; only one page and its stored rows are in memory. A listing that lacks more than half of an index of more than 20 items, or items on mounted storage (external storage, shares, group folders), is not applied at once (a storage that is not mounted looks the same as a mass delete): those items are kept as suspects, and a later listing removes only the suspects it lacks too, at least an hour after the first, and only when a sample of them answers 404 by path. Smaller removals are checked by file id first.
 3. **Collections**: album list PROPFIND is expensive on the server (every album resolves all its files). Refresh the album list when the Albums view appears if older than 10 min, after own album writes, and in background daily; refresh one album's content when it is opened. Places/tags/people: when their view appears if older than 30 min. If the companion album change tag (`SERVER-COMPANION.md` §S7) exists, use it to skip unchanged albums.
 
 #### 5.4.5 Conflict rules
 
-Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs operations strictly in the order they were queued; while the oldest one waits for a retry (transient error, exponential backoff up to 1 h) nothing behind it runs, and it is retried when the backoff ends or the network comes back. If an outbox operation fails with 403/404/409 (file gone, no permission, already in album), drop it and refresh the affected item; 409 on album add means "already there" and is a success.
+Server wins for everything except operations still in the outbox: a sync does not touch the rows of files with queued operations. The outbox runs up to 5 operations at the same time, but never two for the same file: an operation waits for every operation queued before it for its file. A connection problem (offline, timeout, 5xx, 429) pauses the whole queue with exponential backoff up to 1 h; it resumes when the backoff ends or the network comes back. Queued deletes and moves send the path and ETag the index has with `If-Match` (one request); when the server answers 412 or 404 (the file was moved, changed or replaced meanwhile) they look the file up by its id and act on the path the server reports, so a file that was moved meanwhile is found and another file at the old path is not touched; the other operations do the same when their path answers 404, and a completed move rewrites the paths of the operations still queued for that file. 423 (locked) is retried like a transient error, but holds back only the operations for that file, and is given up after 8 answers of 423 (failures for other reasons do not count). Album content read from the server is shown with the album operations still queued applied on top. When rows are read again after a failed or discarded operation, only files the timeline shows (or already has rows for) are written to the index. If an outbox operation fails for good with 403/404/409 (file gone, no permission, already in album), or the user discards it, refresh the affected item so the optimistic change is undone; 409 on album add means "already there" and is a success.
 
 ### 5.5 Previews, originals, video
 
@@ -395,6 +407,8 @@ Requires: core.
 
 Favourite / unfavourite, add to album, share (system share sheet with originals, or "Share link" = quick share §7.6.4), export (save to device Photos library — `PHPhotoLibrary` add-only permission — or Files/Finder), delete (to the server trash; confirm with count; explain when the trash bin is disabled that deletion is permanent), archive, edit date & location (§7.16.3), tags, download for offline. All writes go through the outbox with optimistic UI; bulk operations run with at most 5 concurrent requests and report per-item failures.
 
+Undo (Edit › Undo, ⌘Z, shake, and the Undo button of the confirmation) covers favourite, archive, remove from album and delete. A change is registered with the undo manager of the window it was made in; the confirmation's Undo only takes back its own change (a second tap while it runs does nothing), and everything is forgotten when the account is switched or removed. Undoing a delete takes the deletes that have not been sent yet out of the queue and puts their photos back at once (offline too), waits for the ones being sent, and restores only what reached the server from the trash bin (any file type), putting the photos back into the albums they were in (the server takes a deleted file out of every album). A delete the server refused is not reported as "couldn't be restored": nothing was deleted. Deleting a photo shared with the user offers no Undo (it does not land in the user's trash bin).
+
 ### 7.4 Info panel — M1 (people/caption parts in M4/M5)
 
 Sheet on iPhone (swipe up in the viewer), inspector on iPad/Mac/visionOS. Shows: file name (rename allowed if the user owns the file), capture date & time with time zone, camera make/model, lens, focal length, aperture, shutter, ISO, flash, dimensions & megapixels, file size & format, map snippet with place and country (MapKit), path in Nextcloud (tap → Folders), owner (for shared files), albums containing it (own albums known locally), tags, people in the photo (face crops from `nc:face-detections`, show only detections with `clusterId ≥ 0` and a title, ordered left to right), AI caption (if present). Layout as an aligned two-column list (label / value), like the extended web dialog.
@@ -420,6 +434,9 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SH-4** **Quick share** a selection: create album "Shared on <date>" (suffix (2), (3)… if taken), copy the photos in, add a public link, present the share sheet with the link; roll back on failure (`photos-extended-api.md` quick-share-selection).
 - **SH-5** Comments on own and shared albums when `albumComments` (comments DAV `/remote.php/dav/comments/photos_album/<albumId>`): list, post, delete own; not for public links.
 - **SH-6** **Public album viewer**: open a public link (pasted, from the share sheet, or deep link) anonymously via `/remote.php/dav/photospublic/<token>` with `Authorization: Basic base64("<token>:")`, previews via `publicPreview`; read-only grid, viewer, slideshow, download/export. Does not need an account.
+- **SH-7** **Share via Nextcloud** (photo or folder): Nextcloud's own sharing through the OCS Files Sharing API (`/ocs/v2.php/apps/files_sharing/api/v1/shares`, recipients from `…/sharees`), on every server without a Photos change. Recipients: users, groups, users and groups on other servers (federation), email addresses, Teams, Talk conversations (when the `spreed` capability is there); what is offered follows `capabilities.files_sharing`. Public links with password, expiry date (enforced limits respected), permissions (folders: view, view and upload, file drop), hide download, label and note. Existing shares are listed and can be changed or removed. Albums keep SH-1/SH-2: the Photos server shares albums only with users, groups and one public link; the album sharing sheet says that other servers, email and Talk work for photos and folders, not for albums (that would need a server change). All links are shown and copied through one view (`SharedLinkView`, warns for http).
+- **SH-8** **Partner sharing**: Settings › Partner sharing lists folders shared with the user (received user/group shares); turning one on indexes it with the timeline folders (only that folder is read, no rebuild) and its photos get a partner badge; a toolbar button and a switch hide or show them in the timeline. "Share my photos with a partner…" opens SH-7 for the upload folder. Stored per account on the device; the server and the web app's timeline folders are not changed.
+- **SH-9** **Activity in shared albums**, without server changes: every listing of the albums (opening Albums, and after a sync at most every 15 minutes) is compared with the stored one; an album shared with the user, or an own album shared with people, that has more photos than before, and an album newly shared with the user, become an entry of a local activity list ("New in shared albums" row above the albums, list with "Mark all as seen"; opening the album marks it seen). Photos added in this app are not reported (the outbox raises the stored count first). Found by a background refresh while the app is not in front, it is also announced with a local notification (Settings › Shared albums, only if notifications are allowed; opens Shared albums). Instant push ("Anna added 12 photos") needs the server to send it (companion S5); the Photos server reports no adder either.
 
 ### 7.7 Search, filters and smart albums — M4 (basic filter bar in M1)
 
@@ -429,6 +446,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SR-4** **Ask your photos** (natural language, e.g. "beach photos from summer 2023 in Italy"): turn the sentence into filters, never into an answer text. (a) If `taskText2Text` is available, use the server's TaskProcessing exactly as the web app does (prompt with today's date and the place/tag vocabulary, JSON reply, validation; `photos-extended-api.md` ask-your-photos). (b) Otherwise, if Apple Intelligence is available on the device, use the on-device **Foundation Models** framework with guided generation into the same filter struct. (c) Otherwise hide the feature.
 - **SR-5** **Smart albums** (saved filters): "Save as smart album" from active filters; list in Collections/sidebar. Stored in the server user config `smartAlbums` when the companion config read API exists (so it syncs with the web app); otherwise stored locally and labelled "On this device".
 - **SR-6** Spotlight & Shortcuts surface search (§7.23).
+- **SR-7** **On-device labels** (opt-in, Settings › Search): Vision's image classifier labels the previews already in the cache (no downloads for it) with English words ("dog", "beach"), which go into the FTS index (SR-3). Stored only in the account's database on the device, never uploaded; turning it off deletes them. Runs only when the system grants maintenance time: a `BGProcessingTask` that requires external power on iPhone/iPad, an `NSBackgroundActivityScheduler` activity of background quality on the Mac (deferred in Low Power Mode); not on Vision Pro. Where the extended server's caption search exists it is used as before.
 
 ### 7.8 Places and Map — M4
 
@@ -452,6 +470,7 @@ Requires: `recognize` and a Recognize API key (`photos-server-api.md` §13).
 ### 7.10 Tags — M4
 
 Requires: `systemtags`. List of tags used on images with counts and covers; tag content (REPORT `oc:filter-files`, filter MIME locally); assign / unassign / create tags from the info panel and the selection menu. Tag colours if the server provides them.
+Assigning and removing go through the outbox (`PendingOperation.tag`, PUT/DELETE `systemtags-relations/files/<fileId>/<tagId>`), so they work offline and show in search at once; creating a tag needs the server (it assigns the id; an existing tag of the same name is reused). Tag and people memberships are copied into the local store (`LabelSync`: one listing every 30 minutes, the files of a tag or person only when its count changed, everything once a day; never while changes wait in the outbox) for search (SR-3) and for tag/person filters and tag browsing without a connection.
 
 ### 7.11 Folders and "Shared with you" — M4
 
@@ -527,6 +546,8 @@ Optional; off by default; on iOS, iPadOS and macOS (PhotoKit library); not on vi
    - **Yes, keep using Files** → Photos backup stays off; the Backup screen shows a read-only **backup status** (which device photos are already on the server, via reconciliation §7.18.4), so the user still sees what is missing.
 3. Choose account, folder, options; then a first reconciliation pass runs before any upload, showing "X photos are already on your server, Y will be uploaded".
 
+On iPhone and iPad this flow is offered once, as a full-screen step right after the first login and before the notification permission is asked ("Back up the photos of this iPhone?" · Start backup / Not now). The Files question is only part of it when the Files app is installed or has left data in its App Group. On the Mac, backup is set up in Settings › Backup with the same step; there is no offer after the login. The destination folder is chosen from the server's folders and must be one the timeline shows (`photosSourceFolders` or below); otherwise the app offers to add it to the timeline folders, and warns about an earlier folder outside them.
+
 #### 7.18.2 Options
 
 | Option | Default |
@@ -548,6 +569,12 @@ Deleting a photo on the device never deletes it on the server (backup is additiv
 #### 7.18.3 Ledger
 
 `backupAsset(localIdentifier, resourceKind (photo/video/pairedVideo/edited/raw), fingerprint, state, serverPath, serverFileId, serverEtag, matchedBy, attempts, lastError, assetModificationDate)`. States: `pending → reconciling → matched | queued → uploading → uploaded | failed | skipped`. `matchedBy` ∈ `ownUpload | filesLedger | serverHash | serverTimeSize | serverTimeName | user`. A PhotoKit change observer (`PHPhotoLibraryChangeObserver` + persistent change tokens `PHPersistentChangeToken`) finds new and modified assets incrementally.
+
+Incremental passes (a library of 150 000 photos with 40 000 to upload must not spend a background wake on rereading it):
+- A pass looks only at the assets the persistent change history names since the token taken before the last scan. The whole library is looked at when there is no usable token (none yet, expired history, too many changes, a change of an album the backup is limited to), when the selection (photos/videos, from date, hidden, albums, limited access) or the resource options change, when the user asks ("Back up now", "Try again"), and once a day — then after the pass has uploaded what it already knew of.
+- Of the assets looked at, only those the ledger does not know completely are read (`PHAssetResource` is the expensive part).
+- A resource that is not on the server keeps its description in the ledger (`resource`, JSON) and when the server was last asked about it (`checkedAt`). Later passes upload it from the ledger without reading the library, and without asking the server again for 7 days (layer 5 still checks the destination before each upload); the asset changing, or the user's "Back up now", asks again.
+- The server is asked a batch (≤ 200 resources) at a time, and what that batch did not find is uploaded before the next batch is asked, so uploads start after one request and an interrupted pass goes on where it stopped. Files larger than the system's background uploads take stay at the end of the pass.
 
 #### 7.18.4 Duplicate protection (the core requirement)
 
@@ -586,15 +613,24 @@ If the identifiers from §4.2 change or Apple rejects the extra App Groups, drop
 
 - Primary: the **PhotoKit background-upload extension** (iOS/iPadOS 27, extension point `com.apple.photos.background-upload`, `PHBackgroundResourceUploadJobExtension`; the Files app's implementation is a reference: `nextcloud-ios-and-nextcloudkit.md` §4.5). The app creates upload jobs only **after** reconciliation, one per resource, with the destination `PUT` request (headers: auth, user agent, `X-OC-MTime`, `X-OC-CTime`, `OC-Checksum`, `X-NC-WebDAV-Auto-Mkcol: 1`). Success = response has `OC-FileId`. Resources > 100 MB are handed back to the app for chunked upload. Check whether the extension point exists on macOS 27; if not, macOS uses the next mechanism.
 - Fallback / complement: background `URLSession` upload tasks, `BGProcessingTask` (`com.nextcloud.photos.processing`, requires network, prefers power) for reconciliation, hashing, Live Photo linking and metadata fix-ups, and `BGAppRefreshTask` for scanning new assets. No location-change or audio tricks.
+- A backup the user starts (the first one, or "Back up now" with many items waiting) runs as a `BGContinuedProcessingTask` on iOS/iPadOS: it shows system progress and goes on when the user leaves the app. Option "Keep screen on while backing up": the idle timer is off only while a pass runs and the app is in front.
 - After uploads: link Live Photo parts, PROPPATCH missing capture date/GPS where possible (`metadataEdit`), add to the local index immediately (the file appears in the timeline before the next sync).
 
 #### 7.18.7 Backup UI
 
-Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". Grid badge for device photos not yet backed up is not needed (the timeline shows server content).
+Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". Grid badge for device photos not yet backed up is not needed (the timeline shows server content); instead the Backup screen lists them ("Not backed up yet", local thumbnails, with failed / only-in-iCloud marks).
 
 #### 7.18.8 Free up device space (M5)
 
-"Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
+"Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before: the server lists the file with exactly the device's size, and the same file id when known; converted or name-only matches never qualify; RAW, edited version and Live Photo motion are required), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
+
+#### 7.18.9 Mirror device albums (iOS, iPadOS)
+
+Opt-in, for the albums the user picks (Backup › Albums): after each pass, backed-up photos (ledger `uploaded`/`matched`) of a picked device album are added to the Nextcloud album of the same name (created when missing; `/` becomes `-`). The edited rendition is preferred. Only adds: a photo taken out of the device album, or removed from the Nextcloud album, is not touched again (what was added is remembered per album).
+
+#### 7.18.10 Import from Google Takeout (Mac)
+
+File › Import from Google Takeout…: pick the unpacked export, its ZIP parts (read in place, ZIP64, no unpacking) or a folder holding them. JSON sidecars are matched with the server's rules (`TakeoutSidecarService`: truncated names, `(1)` copies, `supplemental-metadata`, edited copies and Live Photo videos); `photoTakenTime` is sent as `X-OC-MTime`, the file itself is uploaded unchanged (EXIF stays), the position is set by PROPPATCH where the file has none (Nextcloud 35+), captions become file comments. Files already on the server are skipped with the backup matcher (§7.18.4); copies in album folders are imported once; album folders become Photos albums; the trash folder is left out. Destination: a folder below a timeline folder (default `<upload folder>/Google Photos/<year>`). Resumable through a journal per export in the account's directory; progress, stop and resume.
 
 ### 7.19 Offline — M2
 
@@ -657,11 +693,14 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 ## 8. Security and privacy
 
 - Credentials only in the keychain (own access group); per-account keys for push in the keychain; never in logs, never in the database, never in App Group UserDefaults.
-- TLS everywhere; ATS exceptions only for user-approved http/self-signed hosts. Development builds may allow `http://devel` via a Debug-only ATS exception.
-- App lock with LocalAuthentication (`deviceOwnerAuthentication`, so passcode fallback works); privacy cover in the app switcher when locked or while viewing the Archive; widgets and notifications never show archived content; optional "Hide photo content in notifications".
+- TLS everywhere; ATS exceptions only for user-approved http/self-signed hosts. *Implementation:* the exception is app-wide (`NSAllowsArbitraryLoads`), because the hosts are typed in by the user and unknown at build time; the app asks before it uses http or trusts an unknown certificate (see [PRIVACY-AND-EXPORT.md](PRIVACY-AND-EXPORT.md)).
+- App lock with LocalAuthentication (`deviceOwnerAuthentication`, so passcode fallback works); privacy cover in the app switcher when locked or while viewing the Archive; widgets and notifications never show archived content; optional "Hide photo content in notifications". *Implementation:* while locked nothing of the account is shown in any window (also the Mac Settings window and the share extension), the cover on iPhone/iPad is a window above presentations, links from outside wait for the unlock, and widgets show a placeholder while app lock is on and redact their content on a locked device.
+- A changed server certificate is never accepted in two taps: the dialog compares old and new fingerprints; only a certificate that replaces one the user trusted before can be accepted in place (with an explicit confirmation); a server the system trusted needs a new login. Nothing is sent over the new certificate before.
+- Login links and QR codes show the server and user before logging in; the Login Flow stays on https when the user typed https, and a granted app password is revoked when the app refuses the server afterwards.
+- Keychain items are `…ThisDeviceOnly`; copied share links are local-only (no Universal Clipboard) and expire after 10 minutes on iOS.
 - Remote wipe and app-password revocation (§5.1).
 - Data protection class `completeUntilFirstUserAuthentication` for databases and caches (background uploads need it); offline originals the same.
-- Privacy manifest (`PrivacyInfo.xcprivacy`) declaring required-reason APIs; no tracking, no analytics, no third-party SDKs that phone home.
+- Privacy manifest (`PrivacyInfo.xcprivacy`, one per app/extension bundle and per package target that needs one) declaring required-reason APIs; no tracking, no analytics, no third-party SDKs that phone home.
 - Public album access sends no account credentials.
 - The initial-state scraper only reads `initial-state-photos-*` inputs and discards the rest of the page.
 
@@ -692,41 +731,41 @@ Add XCTest performance tests for the store queries and domain algorithms with a 
 
 ### 11.1 Automated
 
-- **Unit tests** for every package. `PhotosDomain` gets **parity tests** that port the web app's spec cases (e.g. `src/services/memories.spec.ts`, burst/stack/day-grouping/duplicates/cleanup/search-suggestion tests in `~/aloha-work/photos-wt/deploy/src/**/*.spec.ts`) so the same input gives the same groups as the web app.
-- **XML tests**: request builders compared against golden bodies from the reference docs; parsers tested with captured responses (store fixtures under `Tests/Fixtures/<server-version>/`).
-- **Integration tests** (opt-in scheme `IntegrationTests`, needs env vars for server URL and app password; never commit credentials):
-  - **Upstream master server** — the local server-core worktree with Photos master (`~/aloha-work/photos-srv`, port 8089, see the Photos notes in `~/aloha-work/photos-tools/`) or a Docker `nextcloud` image — to verify all fallbacks (no capability, no extended props).
+- **Unit tests** for every package. `PhotosDomain` gets **parity tests** that port the web app's spec cases (e.g. `src/services/memories.spec.ts`, burst/stack/day-grouping/duplicates/cleanup/search-suggestion tests in `src/**/*.spec.ts` of the Photos integration branch) so the same input gives the same groups as the web app.
+- **XML tests**: request builders compared against golden bodies from the reference docs; parsers tested with captured responses (fixtures under `Tests/<target>/Fixtures/<server>/`).
+- **Integration tests** (opt-in through the `PHOTOS_IT_*` environment variables, see [TESTING.md](TESTING.md); never commit credentials):
+  - **Upstream master server** — a local server-core checkout with Photos master, a release archive (`scripts/test-server.sh`) or a Docker `nextcloud` image — to verify all fallbacks (no capability, no extended props).
   - **Nextcloud 33 container** (`nextcloud:33`) for the oldest supported version: login, timeline, albums, sharing, places, upload, initial-state scraping.
-  - **devel** (`http://devel`, Nextcloud 36-dev with Photos `deploy/devel-all` = all extended features; test library in the user's `Photos/Test library`, ~Wikimedia Commons photos with EXIF). Note: devel has no Recognize and no Assistant/TaskProcessing provider; test People and AI features on a server that has them (ask Frank which).
-- **UI tests** (XCUITest) on iPhone, iPad and Mac for: login (with a stub server), timeline scroll & open viewer, create album and add photos, share link, backup first run with a seeded simulator photo library (`xcrun simctl addmedia`), offline mode (network link conditioner / airplane), app lock.
+  - **The extended test server** (Nextcloud 36-dev with the Photos integration branch = all extended features; a test library of Wikimedia Commons photos with EXIF). It has no Recognize and no Assistant/TaskProcessing provider; test People and AI features on a server that has them.
+- **UI tests** (XCUITest, target `NextcloudPhotosUITests`; today three smoke tests: launch, viewer, Albums — see [TESTING.md](TESTING.md)) on iPhone, iPad and Mac. Target: login (with a stub server), timeline scroll & open viewer, create album and add photos, share link, backup first run with a seeded simulator photo library (`xcrun simctl addmedia`), offline mode (network link conditioner / airplane), app lock.
 - **Backup dedup tests**: fixtures with burst sequences, Files-style names, JPEG-converted copies, shifted EXIF times; assert no duplicate uploads and no missed uploads.
 
 - **Debug login:** Debug builds sign in without a browser when launched with `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'` (used for screenshots and UI tests).
 
 ### 11.2 Manual test plan
 
-A checklist per milestone in `docs/test-plan.md` (to be written in M0) covering all platforms, light/dark, VoiceOver, large libraries, slow network, server in maintenance, expired app password, remote wipe.
+[test-plan.md](test-plan.md): a checklist for devices covering all platforms, light/dark, VoiceOver, large libraries, slow network, server in maintenance, expired app password, remote wipe.
 
 ## 12. Engineering conventions
 
-- Repo **https://github.com/nextcloud/photos-ios** (exists, public, default branch `main`, contains only the MIT `LICENSE` as of 2026-11-22). Local clone on the Mac at `~/aloha-work/photos-ios` (**not** on the `/Volumes/frank` SMB share: git writes fail there). This spec stays in `/Volumes/frank/photos-ios` and is also copied into the repo as `docs/SPEC.md` in M0; from then on the repo copy is the one to update.
+- Repo **https://github.com/nextcloud/photos-ios** (exists, public, default branch `main`, contains only the MIT `LICENSE` as of 2026-11-22). The copy of this spec in the repo (`docs/SPEC.md`) is the one to update.
 - Work in small PRs (one feature or fix each), stacked when they depend on each other; conventional commit subjects (`feat(timeline): …`, `fix(backup): …`); DCO sign-off (`Signed-off-by`); SPDX header in every source file (`SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors`, `SPDX-License-Identifier: MIT`).
 - Deliver all work as PRs against `main`; never push to `main` directly.
-- CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Docker Nextcloud.
-- Server-side work for `SERVER-COMPANION.md` happens in the Photos server repo following its `AGENTS.md` (agents prepare local branches in `~/aloha-work/photos-wt/<name>`; Frank opens the PRs).
+- CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Nextcloud installed on the runner (macOS runners have no Docker).
+- Server-side work for `SERVER-COMPANION.md` happens in the Photos server repo following its `AGENTS.md` (one small branch per item; a maintainer opens the PRs).
 - The Photos DAV helpers live in this app; offering them upstream as a `NextcloudKit+Photos.swift` is optional and decided later (it would not add a dependency here).
 
 ## 13. Milestones
 
-Each milestone ends with: all its requirements implemented on all four platforms (unless marked), tests green, manual test plan done on devel + NC 33, a TestFlight build, and a short demo note with screenshots per platform.
+Each milestone ends with: all its requirements implemented on all four platforms (unless marked), tests green, manual test plan done on the extended test server + NC 33, a TestFlight build, and a short demo note with screenshots per platform.
 
 ### M0 — Foundation
 Repo, project, packages, CI, lint, REUSE, licence files; design tokens; Brand; login (Login Flow v2, QR, self-signed trust, client certificates), accounts (add/switch/remove with revocation, wipe), user agent, MDM keys; feature detection incl. initial-state scraper; networking layer with DAV builders/parsers; store schema & migrations; logging; empty app shell with platform navigation (tabs/sidebar), Settings skeleton.
-**Accept:** log in to devel, NC 33 and a self-signed server on iPhone, iPad, Mac, Vision Pro simulator; Settings → Advanced shows the detected server features correctly for each server.
+**Accept:** log in to the extended test server, NC 33 and a self-signed server on iPhone, iPad, Mac, Vision Pro simulator; Settings → Advanced shows the detected server features correctly for each server.
 
 ### M1 — Browse and view
 Local index (initial + incremental sync + reconciliation), timeline TL-1–TL-7 (stacks may land late in M1), grid with sections, scrubber, zoom, selection, previews & caches, viewer VW-1–VW-6 (Live Text in M5), Live Photos, video, info panel (without people/caption), favourite, delete, export/share, basic filter bar (date/place), Settings library section.
-**Accept:** 100k synthetic-index performance tests pass; the devel test library is browsable offline after the first sync; favourites/deletes made offline sync later.
+**Accept:** 100k synthetic-index performance tests pass; the test library is browsable offline after the first sync; favourites/deletes made offline sync later.
 
 ### M2 — Albums, sharing, upload, offline
 Albums AL-1–AL-8, sharing SH-1–SH-6, manual upload §7.17, share extension, drag & drop, export to device library, offline albums §7.19.
@@ -738,20 +777,20 @@ Albums AL-1–AL-8, sharing SH-1–SH-6, manual upload §7.17, share extension, 
 
 ### M4 — Discover
 Places & map, people, tags, folders & shared with you, memories & On this day, search & filters & smart albums, archive & app lock, push notifications, widgets.
-**Accept:** feature parity with the web app on devel for all these views (side-by-side checklist), graceful hiding on NC 33.
+**Accept:** feature parity with the web app on the extended test server for all these views (side-by-side checklist), graceful hiding on NC 33.
 
 ### M5 — Advanced and polish
 Editing (§7.16), metadata editing, recently deleted, duplicates, free up space, free up device space, ask your photos, extract text / Live Text / Visual Look Up, captions in UI, video renditions, App Intents/Siri/Spotlight, visionOS spatial/immersive extras, accessibility & localisation audit, App Store assets and review notes.
 **Accept:** full parity matrix (Appendix A) green; accessibility audit has no blockers; App Store submission ready.
 
-## 14. Prerequisites and open items (need Frank / Nextcloud GmbH)
+## 14. Prerequisites and open items (need Nextcloud GmbH)
 
 1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-ios) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".
 2. Provisioning profiles for the app, extensions and the two Files App Groups under team NKUJUXUJ3B.
 3. **Push proxy**: `push-notifications.nextcloud.com` must know the new app's APNs topic (bundle id) — needed before M4 push works.
 4. **Notification filtering**: either the notifications app supports an app type for this client (only `photos` notifications) or request Apple's notification filtering entitlement.
 5. App icon and App Store artwork (trademarked Nextcloud assets).
-6. A test server with Recognize and an Assistant/TaskProcessing provider (devel has neither).
+6. A test server with Recognize and an Assistant/TaskProcessing provider (the current test servers have neither).
 7. Decide which companion server APIs (`SERVER-COMPANION.md`) to build and when; S1 (capability + config read) and S4 (Recognize key) have the highest value per effort.
 
 ---

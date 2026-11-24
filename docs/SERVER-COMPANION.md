@@ -6,7 +6,7 @@ Optional additions to the **Photos server app** (github.com/nextcloud/photos), p
 
 Where they live: new code in the Photos app (`lib/Capabilities.php`, controllers under `lib/Controller/`, OCS routes in `appinfo/routes.php`). They ship with Photos 9.x+ (Nextcloud 36+). Servers 33–35 will never get them, so the fallbacks are permanent for those versions.
 
-Work process: follow the Photos repo's `AGENTS.md` — prepare one small branch per item in `~/aloha-work/photos-wt/<name>` (see the existing feature branches), with tests (PHPUnit + Psalm), no built `js/`/`css/`. Frank opens the PRs.
+Work process: follow the Photos repo's `AGENTS.md` — prepare one small branch per item, with tests (PHPUnit + Psalm), no built `js/`/`css/`. A maintainer opens the PRs.
 
 Apps and services touched:
 

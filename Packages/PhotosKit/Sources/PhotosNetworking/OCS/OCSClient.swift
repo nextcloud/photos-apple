@@ -40,9 +40,10 @@ public struct OCSClient: Sendable {
         query: [URLQueryItem] = [],
         json: (any Encodable & Sendable)? = nil,
         form: [String: String]? = nil,
-        as type: T.Type = T.self
+        as type: T.Type = T.self,
+        serverMessages: Bool = false
     ) async throws -> T {
-        let response = try await raw(method, path, query: query, json: json, form: form)
+        let response = try await raw(method, path, query: query, json: json, form: form, serverMessages: serverMessages)
         do {
             return try JSONDecoder().decode(Envelope<T>.self, from: response.data).ocs.data
         } catch {
@@ -51,12 +52,16 @@ public struct OCSClient: Sendable {
     }
 
     /// Sends an OCS request and returns the raw response after status checks.
+    ///
+    /// - Parameter serverMessages: a 404 that carries the server's own message is thrown as `NetworkError.ocs` with that
+    ///   message instead of `.notFound` (the sharing API answers 404 for "no such user", not only for a missing route).
     public func raw(
         _ method: String = "GET",
         _ path: String,
         query: [URLQueryItem] = [],
         json: (any Encodable & Sendable)? = nil,
-        form: [String: String]? = nil
+        form: [String: String]? = nil,
+        serverMessages: Bool = false
     ) async throws -> HTTPResponse {
         var items = query
         if !items.contains(where: { $0.name == "format" }) { items.append(URLQueryItem(name: "format", value: "json")) }
@@ -78,6 +83,9 @@ public struct OCSClient: Sendable {
         }
         if !response.isSuccess {
             let meta = try? JSONDecoder().decode(MetaOnly.self, from: response.data).ocs.meta
+            if serverMessages, response.status == 404, let message = meta?.message, !message.isEmpty, let code = meta?.statuscode {
+                throw NetworkError.ocs(statusCode: code, message: message)
+            }
             if response.status == 404 { throw NetworkError.notFound }
             if response.status == 503 { throw NetworkError.maintenance }
             if let code = meta?.statuscode { throw NetworkError.ocs(statusCode: code, message: meta?.message) }

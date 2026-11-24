@@ -305,7 +305,13 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
             sourceFolders: ["/Photos"], mimeTypes: ["image/jpeg"], properties: DAVProp.mediaIndex + DAVProp.mediaIndexExtended,
             before: nil)
         #expect(page.items.count == 14)
-        #expect(page.next == nil)
+        // A short page is not the end (the server may have left entries out); the page after it is. The recorded
+        // server ignores the cursor and repeats itself, which must end the listing too.
+        let cursor = try #require(page.next)
+        let rest = try await server.api.indexPage(
+            sourceFolders: ["/Photos"], mimeTypes: ["image/jpeg"], properties: DAVProp.mediaIndex + DAVProp.mediaIndexExtended,
+            before: cursor)
+        #expect(rest.next == nil)
         // The recorded server still has `photos-place-country` in its file metadata from an earlier deployment of the
         // feature branches, and core serves any metadata key; the app only asks for it when `placeCountry` is detected.
         for item in page.items {
@@ -324,7 +330,7 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
         let server = RecordedServer("stock-master")
         let features = try await server.detector.detect()
         let database = try AccountDatabase.temporary()
-        let engine = SyncEngine(api: server.api, database: database, features: features)
+        let engine = SyncEngine(api: server.api, database: database, features: features, reconcileInterval: 0)
         let library = LibraryStore(database: database)
         let detection = server.lines.count
 
@@ -337,6 +343,15 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
         let lisbon = try #require(try collections.albums(.own).first { $0.name == "Lisbon 2025" })
         try await engine.refreshAlbumContent(lisbon)
         #expect(try collections.albumItems(albumId: lisbon.id).count == 10)
+        // Opened again: the album alone is asked for, and its content is not read again while the album says nothing
+        // changed.
+        let albumLine = "PROPFIND /remote.php/dav/photos/admin/albums/Lisbon 2025/"
+        let reads = server.lines.filter { $0 == albumLine }.count
+        try await engine.refreshAlbumContent(lisbon)
+        #expect(server.lines.filter { $0 == albumLine }.count == reads + 1)
+        #expect(try collections.albumItems(albumId: lisbon.id).count == 10)
+        try await engine.refreshAlbumContent(lisbon, force: true)
+        #expect(server.lines.filter { $0 == albumLine }.count == reads + 3)
         try await engine.refreshPlaces()
         #expect(try await database.writer.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM place") } == 36)
 

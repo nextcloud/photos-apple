@@ -49,15 +49,46 @@ public struct BackupSettings: Codable, Hashable, Sendable {
     public var since: Date?
     /// Local identifiers of device albums to back up (empty = whole library).
     public var albumIdentifiers: [String] = []
-    public var includeSharedLibrary = true
+    /// Also back up photos the user has hidden in the Photos app. Off: what is hidden stays on this device only.
+    public var includeHidden = false
     public var wifiOnlyForVideos = true
     public var wifiOnly = false
     public var allowLowDataMode = false
     public var pauseInLowPowerMode = true
+    /// Download originals that are only in iCloud ("Optimise Storage"), on Wi-Fi. Off: such items are skipped.
     public var downloadFromICloud = true
     public var filesAppMode: FilesAppMode = .notUsed
 
     public init() {}
+
+    /// Options that a stored file does not have yet (written by an earlier version) keep their default, so a new option
+    /// never resets the backup. Options that no longer exist are ignored.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        func read<Value: Decodable>(_ key: CodingKeys, _ fallback: Value) throws -> Value {
+            try values.decodeIfPresent(Value.self, forKey: key) ?? fallback
+        }
+        let defaults = BackupSettings()
+        isEnabled = try read(.isEnabled, defaults.isEnabled)
+        accountId = try values.decodeIfPresent(AccountID.self, forKey: .accountId)
+        folder = try read(.folder, defaults.folder)
+        subfolders = try read(.subfolders, defaults.subfolders)
+        naming = try read(.naming, defaults.naming)
+        format = try read(.format, defaults.format)
+        edits = try read(.edits, defaults.edits)
+        livePhotos = try read(.livePhotos, defaults.livePhotos)
+        photos = try read(.photos, defaults.photos)
+        videos = try read(.videos, defaults.videos)
+        since = try values.decodeIfPresent(Date.self, forKey: .since)
+        albumIdentifiers = try read(.albumIdentifiers, defaults.albumIdentifiers)
+        includeHidden = try read(.includeHidden, defaults.includeHidden)
+        wifiOnlyForVideos = try read(.wifiOnlyForVideos, defaults.wifiOnlyForVideos)
+        wifiOnly = try read(.wifiOnly, defaults.wifiOnly)
+        allowLowDataMode = try read(.allowLowDataMode, defaults.allowLowDataMode)
+        pauseInLowPowerMode = try read(.pauseInLowPowerMode, defaults.pauseInLowPowerMode)
+        downloadFromICloud = try read(.downloadFromICloud, defaults.downloadFromICloud)
+        filesAppMode = try read(.filesAppMode, defaults.filesAppMode)
+    }
 
     /// The Files app's default folder layout and naming, used when switching from Files (SPEC §7.18.5).
     public mutating func adoptFilesAppDefaults(_ files: FilesAppSettings) {

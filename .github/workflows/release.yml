@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: MIT
+#
+# Skeleton of the release build: started by hand, numbers the build after the run and archives the Release
+# configuration. The archives are NOT signed yet; everything marked TODO(signing) is missing. What has to exist in the
+# Apple developer account before signing can work is listed in the README ("Release builds").
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version (empty: MARKETING_VERSION from Config/Base.xcconfig)"
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  archive:
+    runs-on: xcode-27
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [iOS, macOS, visionOS]
+    env:
+      # App Store Connect wants a build number that grows with every upload of a version.
+      BUILD_NUMBER: ${{ github.run_number }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+
+      # TODO(signing): import the distribution certificate into a temporary keychain and install the provisioning
+      # profiles of the app and its three extensions, or (simpler) pass an App Store Connect API key to xcodebuild:
+      #   -allowProvisioningUpdates -authenticationKeyPath … -authenticationKeyID … -authenticationKeyIssuerID …
+      # Secrets this needs (none exist yet): APP_STORE_CONNECT_KEY, APP_STORE_CONNECT_KEY_ID,
+      # APP_STORE_CONNECT_ISSUER_ID, or DISTRIBUTION_CERTIFICATE_P12 + its password + the profiles.
+
+      - name: Archive
+        run: |
+          SETTINGS="PHOTOS_BUILD_NUMBER=$BUILD_NUMBER"
+          if [ -n "$VERSION" ]; then SETTINGS="$SETTINGS MARKETING_VERSION=$VERSION"; fi
+          # TODO(signing): remove CODE_SIGNING_ALLOWED=NO once the secrets above exist.
+          # shellcheck disable=SC2086
+          xcodebuild archive -project NextcloudPhotos.xcodeproj -scheme NextcloudPhotos -configuration Release \
+            -destination 'generic/platform=${{ matrix.platform }}' \
+            -archivePath "$RUNNER_TEMP/NextcloudPhotos-${{ matrix.platform }}.xcarchive" \
+            $SETTINGS CODE_SIGNING_ALLOWED=NO
+      - name: Version of the archive
+        run: |
+          PLIST="$RUNNER_TEMP/NextcloudPhotos-${{ matrix.platform }}.xcarchive/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleShortVersionString" "$PLIST"
+          FOUND=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$PLIST")
+          echo "### ${{ matrix.platform }}: build $FOUND (unsigned)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$FOUND" != "$BUILD_NUMBER" ]; then
+            echo "::error::The archive has build number $FOUND, expected $BUILD_NUMBER."
+            exit 1
+          fi
+
+      # TODO(signing): export and upload, with the push entitlement switched to production by the export:
+      #   xcodebuild -exportArchive -archivePath … -exportOptionsPlist ExportOptions.plist -exportPath …
+      #   (method app-store-connect, destination upload), then tag the commit with the version and build number.
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: NextcloudPhotos-${{ matrix.platform }}-${{ github.run_number }}-unsigned
+          path: ${{ runner.temp }}/NextcloudPhotos-${{ matrix.platform }}.xcarchive
+          retention-days: 7

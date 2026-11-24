@@ -10,7 +10,7 @@ import Testing
 @testable import PhotosStore
 
 /// The sync engine against a stubbed DAV layer (`FakeDAVServer`).
-@Suite struct SyncEngineTests {
+@Suite(.timeLimit(.minutes(1))) struct SyncEngineTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore
@@ -20,7 +20,8 @@ import Testing
         database = try AccountDatabase.temporary()
         library = LibraryStore(database: database)
         engine = SyncEngine(
-            api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36), enabled: [.captions]))
+            api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36), enabled: [.captions]),
+            reconcileInterval: 0)
         server.put(
             file(1, "/Photos/a.jpg", time: 1000), file(2, "/Photos/b.jpg", time: 2000), file(3, "/Photos/2026/c.jpg", time: 3000))
     }
@@ -42,6 +43,11 @@ import Testing
             if case .byIds(let ids) = request.kind { return ids.sorted() }
             return nil
         }
+    }
+
+    /// How often the library was walked: the first page of a walk has no cursor (the walk ends with an empty page).
+    var reconcileWalks: Int {
+        server.requests(.indexByModified).filter { !$0.body.contains("<d:lt>") && !$0.body.contains("<d:gte>") }.count
     }
 
     func ids() throws -> [FileID] { try library.gridItems(.all).map(\.fileId).sorted() }
@@ -105,7 +111,7 @@ import Testing
         await engine.sync()
         #expect(try ids() == [2, 3])
         #expect(try library.item(3)?.path == "/Photos/Trips/c.jpg")
-        #expect(server.requests(.indexByModified).count == 1)
+        #expect(reconcileWalks == 1)
     }
 
     @Test func refreshReconcilesEvenIfTheRootETagLooksUnchanged() async throws {
@@ -144,7 +150,7 @@ import Testing
         await forced.value
 
         #expect(try ids() == [2, 3])
-        #expect(server.requests(.indexByModified).count == 1)
+        #expect(reconcileWalks == 1)
     }
 
     // MARK: Boundary ETag (12)
@@ -159,7 +165,8 @@ import Testing
         let added = Mutex(false)
         server.afterResponse.withLock {
             $0 = { request, state in
-                guard request.kind == .indexByModified,
+                // The page after the last item is the walk's last look.
+                guard request.kind == .indexByModified, request.body.contains("<d:lt>"), !request.body.contains("<d:gte>"),
                     added.withLock({
                         let first = !$0; $0 = true; return first
                     })
@@ -211,6 +218,17 @@ import Testing
         #expect(try ids() == [2, 3])
     }
 
+    /// "Sync now" while offline: the reconciliation it asked for is still due once the server can be reached.
+    @Test func syncNowThatFailedOfflineStaysDue() async throws {
+        try await initialSync()
+        server.delete(1, changingRootETag: false)
+        server.setOffline(true)
+        await engine.sync(forceReconcile: true)
+        server.setOffline(false)
+        await engine.sync()
+        #expect(try ids() == [2, 3])
+    }
+
     @Test func alreadyCancelledCallerDoesNotStartASync() async throws {
         try await initialSync()
         let engine = self.engine
@@ -231,8 +249,9 @@ import Testing
         try await outbox.enqueue([
             .favorite(fileId: 2, path: "/Photos/b.jpg", value: true), .delete(fileId: 1, path: "/Photos/a.jpg"),
         ])
-        #expect(await eventually { !server.requests(.proppatch).isEmpty })
-        #expect(await eventually { try await outbox.nextRetryDate() != nil })
+        await outbox.waitUntilIdle()
+        #expect(!server.requests(.proppatch).isEmpty)
+        #expect(try await outbox.nextRetryDate() != nil)
         server.setOffline(false)
 
         // The server still has the old state; a reconciliation must not undo what the user did.
@@ -241,7 +260,8 @@ import Testing
         #expect(try ids() == [2, 3])
 
         await outbox.kickNow()
-        #expect(await eventually { try await outbox.pendingCount() == 0 })
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
         #expect(server.file(2)?.favorite == true)
         #expect(server.file(1) == nil)
     }

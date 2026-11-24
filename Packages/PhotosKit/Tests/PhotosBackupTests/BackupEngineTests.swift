@@ -26,31 +26,74 @@ final class FakeLibrary: BackupLibrary {
         var scans: [[String]] = []
         var exports: [String] = []
         var exportErrors: [String: any Error] = [:]
+        /// Names of resources whose data is only in iCloud.
+        var cloudOnly: Set<String> = []
+        /// Whether each export was allowed to use the network.
+        var networkAllowed: [Bool] = []
+        var isLimited = false
+        /// Size of the file an export writes, when it is not what the resource says.
+        var exportedSizes: [String: Int] = [:]
+        /// Assets a scan looked at (whether their resources were read or not), per scan.
+        var lookedAt: [[String]] = []
+        /// The library hands out change tokens and tells what changed since (PhotoKit's persistent changes).
+        var tracksChanges = false
+        /// The change history no longer reaches back to the tokens handed out.
+        var historyLost = false
+        /// The assets' modification dates when each token was handed out.
+        var snapshots: [[String: Date?]] = []
     }
 
     let state = Mutex(State())
     var isAuthorized: Bool { true }
+    var isLimited: Bool { state.withLock { $0.isLimited } }
 
     var lastScan: [String] { state.withLock { $0.scans.last ?? [] } }
     var exports: [String] { state.withLock { $0.exports } }
 
-    func scan(_ settings: BackupSettings, needsScan: (String, Date?) -> Bool) -> [BackupResource] {
-        let assets = state.withLock { $0.assets }
+    var lookedAt: [String] { state.withLock { $0.lookedAt.last ?? [] } }
+
+    func scan(_ settings: BackupSettings, assets only: Set<String>?, needsScan: (String, Date?) -> Bool) -> [BackupResource] {
+        let assets = state.withLock { $0.assets }.filter { only?.contains($0.id) ?? true }
         let wanted = assets.filter { needsScan($0.id, $0.modifiedAt) }
-        state.withLock { $0.scans.append(wanted.map(\.id)) }
+        state.withLock {
+            $0.scans.append(wanted.map(\.id))
+            $0.lookedAt.append(assets.map(\.id))
+        }
         return wanted.flatMap(\.resources)
     }
 
-    func export(_ resource: BackupResource, settings: BackupSettings) async throws -> URL {
-        let error = state.withLock { state -> (any Error)? in
+    var changeToken: Data? {
+        state.withLock { state in
+            guard state.tracksChanges else { return nil }
+            state.snapshots.append(Dictionary(uniqueKeysWithValues: state.assets.map { ($0.id, $0.modifiedAt) }))
+            return Data(String(state.snapshots.count - 1).utf8)
+        }
+    }
+
+    func changedAssets(since token: Data, settings: BackupSettings) -> Set<String>? {
+        state.withLock { state in
+            guard !state.historyLost, let index = Int(String(decoding: token, as: UTF8.self)), state.snapshots.indices.contains(index)
+            else { return nil }
+            let then = state.snapshots[index]
+            let now = Dictionary(uniqueKeysWithValues: state.assets.map { ($0.id, $0.modifiedAt) })
+            var changed = Set(then.keys).symmetricDifference(now.keys)
+            for (id, modifiedAt) in now where then[id] != nil && then[id]! != modifiedAt { changed.insert(id) }
+            return changed
+        }
+    }
+
+    func export(_ resource: BackupResource, settings: BackupSettings, allowNetwork: Bool) async throws -> URL {
+        let (error, size) = state.withLock { state -> ((any Error)?, Int?) in
             state.exports.append(resource.originalName)
-            return state.exportErrors[resource.originalName]
+            state.networkAllowed.append(allowNetwork)
+            if state.cloudOnly.contains(resource.originalName), !allowNetwork { return (BackupDeviceError.needsICloudDownload, nil) }
+            return (state.exportErrors[resource.originalName], state.exportedSizes[resource.originalName])
         }
         if let error { throw error }
         let directory = FileManager.default.temporaryDirectory.appending(path: "BackupTests/\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appending(path: resource.originalName)
-        try Data(repeating: 7, count: Int(resource.byteSize ?? 10)).write(to: file)
+        try Data(repeating: 7, count: size ?? Int(resource.byteSize ?? 10)).write(to: file)
         return file
     }
 }
@@ -71,6 +114,9 @@ final class FakeRemote: BackupRemote {
         var uploadError: NetworkError?
         var uploadErrors: [String: NetworkError] = [:]
         var searchErrors: [NetworkError] = []
+        /// Reconciliation requests, and how many uploads had been tried when each came.
+        var searches = 0
+        var uploadsAtSearch: [Int] = []
         var nextFileId: Int64 = 100
         var cleanups = 0
         /// Uploads prepared for the system and not reported yet: size and capture time by path.
@@ -86,10 +132,13 @@ final class FakeRemote: BackupRemote {
     var uploads: [String] { state.withLock { $0.uploads } }
     var attempts: [String] { state.withLock { $0.attempts } }
     var links: [Link] { state.withLock { $0.links } }
+    var searches: Int { state.withLock { $0.searches } }
 
     func candidates(from start: Date, to end: Date) async throws -> [RemoteCandidate] {
         if let hook = beforeCandidates.withLock({ $0 }) { await hook() }
         return try state.withLock { state in
+            state.searches += 1
+            state.uploadsAtSearch.append(state.attempts.count)
             if !state.searchErrors.isEmpty { throw state.searchErrors.removeFirst() }
             return state.files
         }
@@ -179,7 +228,7 @@ final class StatusLog: Sendable {
 
 // MARK: - Tests
 
-@Suite struct BackupEngineTests {
+@Suite(.timeLimit(.minutes(1))) struct BackupEngineTests {
     let library = FakeLibrary()
     let remote = FakeRemote()
     let clock = Clock()
@@ -289,7 +338,7 @@ final class StatusLog: Sendable {
         #expect(library.lastScan == [])
     }
 
-    @Test func assetsWithResourcesStillWaitingAreScannedAgain() async throws {
+    @Test func resourcesStillWaitingAreTakenFromTheLedger() async throws {
         // The photo uploads, the video waits for Wi-Fi: the asset is not "complete".
         library.state.withLock {
             $0.assets = [.init(id: "0001", modifiedAt: t0, resources: [resource("0001"), resource("0001", .pairedVideo)])]
@@ -299,8 +348,15 @@ final class StatusLog: Sendable {
         #expect(remote.uploads == ["IMG_0001.heic"])
         #expect(try await entry("0001", .pairedVideo)?.state == BackupItemState.pending.rawValue)
         await engine.cancel()
+        // The ledger kept the video and that the server does not have it: the next pass uploads it without reading the
+        // library or asking the server again.
+        let searches = remote.searches
+        await engine.setNetwork(BackupNetwork())
         await engine.run(settings)
-        #expect(library.lastScan == ["0001"])
+        #expect(library.lastScan == [])
+        #expect(remote.searches == searches)
+        #expect(remote.uploads == ["IMG_0001.heic", "IMG_0001.mov"])
+        #expect(status.phase == .upToDate)
     }
 
     // MARK: Pause and resume (review point 3)

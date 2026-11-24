@@ -87,26 +87,52 @@ import Testing
         favourite[4] = media(5, date(2025, 1, 1), etag: "new")
         #expect(GridModel(items: favourite, sectioning: .timeline(.day), calendar: calendar).change(from: old) == .content([3, 5]))
 
+        func change(_ items: [GridMedia]) -> GridModel.Change {
+            GridModel(items: items, sectioning: .timeline(.day), calendar: calendar).change(from: old)
+        }
+        // An upload of today: a new section at the top, and yesterday's header no longer starts the month.
         let added = [media(9, date(2026, 11, 23))] + sample
-        #expect(GridModel(items: added, sectioning: .timeline(.day), calendar: calendar).change(from: old) == .structure)
-        #expect(GridModel(items: Array(sample.dropLast()), sectioning: .timeline(.day), calendar: calendar).change(from: old) == .structure)
+        #expect(change(added) == .sections(.init(inserted: [0], reloaded: [0])))
+        // Into an existing day: only that section.
+        let sameDay = [media(9, date(2026, 11, 22, 23))] + sample
+        #expect(change(sameDay) == .sections(.init(reloaded: [0])))
+        // The last day emptied.
+        #expect(change(Array(sample.dropLast())) == .sections(.init(deleted: [3])))
 
         // Same count, another item in the place of one.
         var replaced = sample
         replaced[4] = media(6, date(2025, 1, 1))
-        #expect(GridModel(items: replaced, sectioning: .timeline(.day), calendar: calendar).change(from: old) == .structure)
+        #expect(change(replaced) == .sections(.init(reloaded: [3])))
 
-        // An item moved to another day keeps the count but not the sections.
+        // An item moved to another day: its old day goes, the new day comes; with a favourite elsewhere at the same time.
         var moved = sample
         moved[2] = media(3, date(2026, 11, 4))
-        #expect(GridModel(items: moved, sectioning: .timeline(.day), calendar: calendar).change(from: old) == .structure)
+        moved[0] = media(1, date(2026, 11, 22, 23), favorite: true)
+        #expect(change(moved) == .sections(.init(deleted: [1], inserted: [1], content: [1])))
 
         #expect(old.resectioned(.timeline(.month), calendar: calendar).change(from: old) == .structure)
+        let flat = GridModel(items: sample, sectioning: .flat)
+        #expect(flat.change(from: GridModel(items: Array(sample.dropLast()), sectioning: .flat)) == .sections(.init(reloaded: [0])))
+        #expect(GridModel(items: sample, sectioning: .flat).change(from: .empty) == .structure)
+    }
+
+    /// A sync that changes much of the library reloads instead of batching hundreds of sections.
+    @Test func manyChangedSectionsReload() {
+        let days = (0..<400).map { media(FileID($0 + 1), date(2026, 1, 1).addingTimeInterval(-Double($0) * 86_400)) }
+        let old = GridModel(items: days, sectioning: .timeline(.day), calendar: calendar)
+        let everyOther = days.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        let thinned = GridModel(items: everyOther, sectioning: .timeline(.day), calendar: calendar)
+        #expect(thinned.change(from: old) == .structure)
+        let one = GridModel(items: Array(days.dropFirst()), sectioning: .timeline(.day), calendar: calendar)
+        #expect(one.change(from: old) == .sections(.init(deleted: [0])))
     }
 
     /// SPEC §10: what one database change costs for a 100 000-item library — building the model (sections and index
     /// by id) and finding out what changed. Runs off the main actor in the app. Prints the times.
-    @Test func modelPerformance100k() {
+    @Test(
+        .tags(.performance),
+        .enabled(if: ProcessInfo.processInfo.environment["PHOTOS_SKIP_PERFORMANCE"] == nil, "PHOTOS_SKIP_PERFORMANCE is set"))
+    func modelPerformance100k() {
         var seed: UInt64 = 7
         func random() -> Double {
             seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
@@ -130,8 +156,20 @@ import Testing
         let next = GridModel(items: changed, sectioning: .timeline(.day), calendar: calendar)
         var change = GridModel.Change.none
         for _ in 0..<3 { diff = min(diff, clock.measure { change = next.change(from: model) }) }
-        print("PERF GridModel 100k: build \(build), resection \(resection), change detection \(diff), sections \(model.sections.count)")
+        // An upload: one new photo of today.
+        let uploaded = GridModel(items: [media(200_000, now)] + items, sectioning: .timeline(.day), calendar: calendar)
+        var uploadChange = GridModel.Change.none
+        var uploadDiff = Duration.seconds(1000)
+        for _ in 0..<3 { uploadDiff = min(uploadDiff, clock.measure { uploadChange = uploaded.change(from: model) }) }
+        print(
+            "PERF GridModel 100k: build \(build), resection \(resection), change detection \(diff), upload diff \(uploadDiff), sections \(model.sections.count)"
+        )
         #expect(change == .content([changed[50_000].fileId]))
+        if case .sections(let sections) = uploadChange {
+            #expect(sections.sectionCount <= 2)
+        } else {
+            Issue.record("an upload reloads the grid: \(uploadChange)")
+        }
         #expect(model.sections.count > 2900)
         #expect(build < .milliseconds(1500))
         #expect(resection < .milliseconds(250))

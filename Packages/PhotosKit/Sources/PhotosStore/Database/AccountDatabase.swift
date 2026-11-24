@@ -274,6 +274,43 @@ public final class AccountDatabase: Sendable {
             // Album content in album order.
             try db.create(index: "albumItem_position", on: "albumItem", columns: ["albumId", "position"])
         }
+        // Outbox (SPEC §5.4.5): operations on different files run side by side, so the file of each operation is a column;
+        // the ETag lets deletes and moves address the file without looking it up first; 423 has its own give-up counter.
+        migrator.registerMigration("v3-outbox") { db in
+            try db.alter(table: "operation") { t in
+                t.add(column: "fileId", .integer)
+                t.add(column: "etag", .text)
+                t.add(column: "lockedAttempts", .integer).notNull().defaults(to: 0)
+            }
+            let decoder = JSONDecoder()
+            for row in try Row.fetchAll(db, sql: "SELECT id, payload FROM operation") {
+                let payload: String = row["payload"]
+                guard let operation = try? decoder.decode(PendingOperation.self, from: Data(payload.utf8)) else { continue }
+                let id: Int64 = row["id"]
+                try db.execute(sql: "UPDATE operation SET fileId = ? WHERE id = ?", arguments: [operation.fileId, id])
+            }
+            try db.create(index: "operation_file", on: "operation", columns: ["fileId", "id"])
+        }
+        // Resumable reconciliation (`SyncEngine.reconcile`). Tables of their own, so that a walk through the library never
+        // writes `media` (and never wakes the grids) just to remember how far it got.
+        migrator.registerMigration("v3-reconcile-walk") { db in
+            // The rows of the index a running walk has not met on the server yet (a snapshot taken when the walk began).
+            try db.create(table: "reconcileUnseen") { t in t.primaryKey("fileId", .integer) }
+            // The rows a listing found missing that were not removed yet: the mass-delete guard waits for a second listing.
+            try db.create(table: "reconcileSuspect") { t in t.primaryKey("fileId", .integer) }
+        }
+        // Incremental backup passes (SPEC §7.18.3): a resource that is not on the server yet keeps what the library said
+        // about it, so a later pass can upload it without reading the library again, and when the server was last asked.
+        migrator.registerMigration("v3-backup-incremental") { db in
+            try db.alter(table: "backupAsset") { t in
+                t.add(column: "resource", .text)
+                t.add(column: "checkedAt", .double)
+            }
+        }
+        // Tag, people and on-device labels in the search index (SPEC SR-3).
+        migrator.registerMigration("v3-search-labels") { db in try SearchLabels.migrate(db) }
+        // What is new in shared albums, noticed while syncing (SPEC SH-9).
+        migrator.registerMigration("v3-album-activity") { db in try SharedAlbumActivity.migrate(db) }
         return migrator
     }
 }
@@ -299,6 +336,8 @@ enum SearchIndex {
         return "concat_ws(' ', \(row).name, \(row).place, \(row).placeCountry, \(row).caption, \(folder))"
     }
 
+    /// The triggers as `v2-large-library` installs them; `v3-search-labels` replaces them with `SearchLabels.triggersSQL`,
+    /// which is what the index is rebuilt with now. Kept unchanged for that migration.
     static let triggersSQL = """
         CREATE TRIGGER media_search_insert AFTER INSERT ON media BEGIN
             INSERT INTO searchIndex(rowid, text) VALUES (NEW.fileId, \(textSQL("NEW")));

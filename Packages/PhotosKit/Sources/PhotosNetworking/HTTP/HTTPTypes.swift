@@ -109,10 +109,10 @@ public enum NetworkError: Error, Sendable, Equatable, LocalizedError {
         }
     }
 
-    /// Errors worth retrying later (offline, timeouts, 5xx).
+    /// Errors worth retrying later (offline, timeouts, 5xx, a file that is locked right now).
     public var isTransient: Bool {
         switch self {
-        case .offline, .timedOut, .transport, .maintenance, .rateLimited: true
+        case .offline, .timedOut, .transport, .maintenance, .rateLimited, .locked: true
         case .http(let status, _): status >= 500
         default: false
         }

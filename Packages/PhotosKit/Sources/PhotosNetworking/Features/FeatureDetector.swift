@@ -16,7 +16,10 @@ public struct FeatureDetector: Sendable {
 
     var connection: ServerConnection { dav.connection }
 
-    public func detect() async throws -> ServerFeatures {
+    /// - Parameter cached: the features of the last detection. When the Photos settings cannot be read this time
+    ///   (the request failed; not: the server has no such API), the cached settings are kept instead of defaults:
+    ///   wrong timeline folders would make the sync engine rebuild the index for folders the user never chose.
+    public func detect(cached: ServerFeatures? = nil) async throws -> ServerFeatures {
         // 1. Capabilities
         let capabilities: JSONValue = try await ocs.request("GET", "ocs/v2.php/cloud/capabilities")
         let versionString = capabilities["version", "string"]?.string ?? capabilities["version", "major"]?.string ?? "0"
@@ -33,11 +36,38 @@ public struct FeatureDetector: Sendable {
             Self.applyPhotosCapability(photosCapability, to: &features)
         }
 
-        // 2. Photos bootstrap: config API, else initial-state scrape, else defaults.
-        if features.has(.configAPI), let config = try? await fetchConfigAPI() {
-            for (key, value) in config { features.userConfig.apply(key: key, rawValue: value) }
-        } else if let state = try? await InitialStateScraper.fetch(http: dav.http, connection: connection) {
-            Self.applyInitialState(state, to: &features)
+        // 2. Photos bootstrap: config API, else initial-state scrape, else defaults (no Photos app) or, when the
+        // requests failed, what the last detection found.
+        var bootstrap = Bootstrap.absent
+        if features.has(.configAPI) {
+            do {
+                for (key, value) in try await fetchConfigAPI() { features.userConfig.apply(key: key, rawValue: value) }
+                bootstrap = .configAPI
+            } catch {
+                bootstrap = Self.isMissingAPI(error) ? .absent : .failed
+            }
+        }
+        if bootstrap != .configAPI {
+            do {
+                let state = try await InitialStateScraper.fetch(http: dav.http, connection: connection)
+                Self.applyInitialState(state, to: &features)
+                // A page without any Photos state is not the Photos page (a redirect, an error page answered with 200).
+                bootstrap = state.isEmpty ? .failed : .scraped
+            } catch {
+                if !Self.isMissingAPI(error) { bootstrap = .failed }
+            }
+        }
+        if bootstrap == .failed, let cached { Self.carryOverBootstrap(from: cached, to: &features) }
+
+        // `.nomedia` folders: the scraped page lists them; otherwise one core SEARCH (no Photos API involved).
+        if bootstrap != .scraped {
+            do {
+                features.nomediaPaths = try await PhotosAPI(dav: dav, ocs: ocs).nomediaFolders()
+            } catch NetworkError.notFound {
+                features.nomediaPaths = []
+            } catch {
+                features.nomediaPaths = cached?.nomediaPaths ?? []
+            }
         }
 
         // 3. Probes for what is still unknown.
@@ -140,6 +170,31 @@ public struct FeatureDetector: Sendable {
     }
 
     // MARK: Bootstrap
+
+    /// Where the Photos settings (timeline folders, MIME types, `.nomedia` folders) of a detection came from.
+    enum Bootstrap: Equatable {
+        case configAPI, scraped
+        /// The server has neither source (no Photos app): defaults apply.
+        case absent
+        /// A source exists or may exist, but could not be read this time.
+        case failed
+    }
+
+    /// Keeps the settings of the last detection after a failed bootstrap. MIME types the capabilities already gave
+    /// stay; values of features this detection did not find are dropped like `ServerFeatures.removing(_:)` does.
+    static func carryOverBootstrap(from cached: ServerFeatures, to features: inout ServerFeatures) {
+        features.userConfig = cached.userConfig
+        if !features.has(.configAPI) {
+            features.userConfig.smartAlbums = nil
+            features.userConfig.albumsSortOrder = nil
+            features.userConfig.albumPhotosSortOrder = nil
+        }
+        if !features.has(.onThisDayNotifications) { features.userConfig.onThisDayNotifications = nil }
+        if !features.has(.photosCapability) {
+            features.imageMimeTypes = cached.imageMimeTypes
+            features.videoMimeTypes = cached.videoMimeTypes
+        }
+    }
 
     func fetchConfigAPI() async throws -> [String: String] {
         let config: JSONValue = try await ocs.request("GET", "ocs/v2.php/apps/photos/api/v1/config")

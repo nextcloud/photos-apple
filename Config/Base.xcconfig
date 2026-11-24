@@ -7,4 +7,14 @@
 DEVELOPMENT_TEAM = NKUJUXUJ3B
 PHOTOS_BUNDLE_ID = com.nextcloud.photos
 
+// Version of the app and all its extensions. The build number is set per build in CI
+// (`xcodebuild … PHOTOS_BUILD_NUMBER=123`, see .github/workflows/release.yml).
+MARKETING_VERSION = 0.1.0
+PHOTOS_BUILD_NUMBER = 1
+CURRENT_PROJECT_VERSION = $(PHOTOS_BUILD_NUMBER)
+
+// Debug builds are signed without entitlements, so that any team can sign them. YES signs them like a Release build
+// (App Group, keychain group, push), which needs an App ID that has all of this: see "Signing" in the README.
+PHOTOS_DEBUG_ENTITLEMENTS = NO
+
 #include? "Local.xcconfig"

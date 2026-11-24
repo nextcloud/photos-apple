@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import OSLog
 import Observation
 import Photos
 import PhotosBackup
@@ -31,11 +32,17 @@ public enum BackupOutcome: Sendable, Equatable {
 
     /// The system stopped the pass before its end (the background time ran out); it goes on at the next opportunity.
     case interrupted(uploaded: Int)
+    /// Everything that may be uploaded is, but this many items were left out: their originals are only in iCloud and
+    /// "Download originals from iCloud" is off.
+    case skipped(Int)
 
     /// Derives the outcome from the engine's status after a pass.
     public init(status: BackupStatus) {
         switch status.phase {
-        case .upToDate: self = .upToDate
+        case .upToDate: self = status.skipped > 0 ? .skipped(status.skipped) : .upToDate
+        // The pass ran to its end, but items failed (now or in an earlier pass, still waiting for their next attempt).
+        case .incomplete(let failed):
+            self = .finished(uploaded: status.uploadedThisPass, remaining: status.pending, failed: failed)
         // A pause is the final state of a pass now: the engine keeps it until the run continues (by itself when the
         // network or power state allows it, or with the next pass after the user's pause).
         case .paused(let reason): self = .paused(reason)
@@ -46,6 +53,21 @@ public enum BackupOutcome: Sendable, Equatable {
         case .idle, .scanning, .reconciling, .uploading:
             // What this pass uploaded, not the ledger's count of everything that was ever uploaded.
             self = .finished(uploaded: status.uploadedThisPass, remaining: status.pending, failed: status.failed)
+        }
+    }
+
+    /// The outcome for the log: its name and counts, no messages (they can name the account or the server).
+    public var logName: String {
+        switch self {
+        case .upToDate: "up to date"
+        case .finished(let uploaded, let remaining, let failed): "finished: uploaded \(uploaded), remaining \(remaining), failed \(failed)"
+        case .paused: "paused"
+        case .failed: "failed"
+        case .blocked(let blocker): "blocked (\(blocker))"
+        case .notAuthorized: "not authorized"
+        case .unavailable: "unavailable"
+        case .interrupted(let uploaded): "interrupted after \(uploaded) uploads"
+        case .skipped(let count): "up to date, \(count) skipped"
         }
     }
 
@@ -80,9 +102,32 @@ public enum BackupOutcome: Sendable, Equatable {
             case .unauthorized: String(localized: "Backup stopped: log in to your Nextcloud again.", bundle: .module)
             case .forbidden: String(localized: "Backup stopped: the server does not allow uploads to the backup folder.", bundle: .module)
             case .serverTrust: String(localized: "Backup stopped: the connection to your Nextcloud is not trusted.", bundle: .module)
+            case .deviceStorageFull:
+                #if os(macOS)
+                    String(localized: "Backup stopped: free up space on this Mac.", bundle: .module)
+                #else
+                    String(localized: "Backup stopped: free up space on this device.", bundle: .module)
+                #endif
             }
+        case .skipped(let count):
+            String(
+                localized:
+                    "Backup finished. \(count) items that are only in iCloud were not backed up, because downloading from iCloud is turned off.",
+                bundle: .module)
         case .notAuthorized: String(localized: "Nextcloud Photos has no access to your photos.", bundle: .module)
         case .unavailable(let reason): reason
+        }
+    }
+
+    /// The sentence for the user, with what the outcome cannot know: with access to selected photos only, "your photos
+    /// are backed up" would promise too much.
+    public func message(limitedAccess: Bool) -> String {
+        guard limitedAccess else { return message }
+        switch self {
+        case .notAuthorized, .unavailable: return message
+        default:
+            let note = String(localized: "Only the photos you selected for Nextcloud Photos are backed up.", bundle: .module)
+            return message + " " + note
         }
     }
 }
@@ -121,6 +166,29 @@ public final class BackupModel {
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored let settingsFile: URL
+    /// State changes of the backup, for Settings › Export diagnostics. No account names, servers or paths in public
+    /// strings; the engine logs its phases under the same category.
+    @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "backup")
+    /// The first check before backup is turned on (`preview`), while it runs.
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
+    public private(set) var isPreviewing = false
+    /// A pass runs in a continued processing task with system progress (iOS, `startBackup`).
+    public internal(set) var isInContinuedTask = false
+    /// "Keep screen on while backing up" (iOS): the screen doesn't lock while a pass runs and the app is in front. A
+    /// preference of this device, kept in the app's defaults.
+    public var keepScreenOn = false {
+        didSet {
+            app?.defaults.set(keepScreenOn, forKey: Self.keepScreenOnKey)
+            #if os(iOS)
+                updateIdleTimer()
+            #endif
+        }
+    }
+    static let keepScreenOnKey = "backup.keepScreenOn"
+    #if os(iOS)
+        /// The idle timer is off because of the backup (and only then is it turned on again here).
+        @ObservationIgnored var holdsIdleTimer = false
+    #endif
 
     init(settingsFile: URL = AppPaths.layout.backupSettingsFile) {
         self.settingsFile = settingsFile
@@ -131,6 +199,10 @@ public final class BackupModel {
     func attach(_ app: AppModel) {
         self.app = app
         if let id = settings.accountId, !app.accounts.contains(where: { $0.id == id }) { forgetSettings() }
+        keepScreenOn = app.defaults.bool(forKey: Self.keepScreenOnKey)
+        #if os(iOS)
+            observeIdleTimer()
+        #endif
         #if os(iOS)
             // A pass that a background task had to give up goes on as soon as the app is in front again. The model lives
             // as long as the app, so the observer is never removed.
@@ -160,7 +232,10 @@ public final class BackupModel {
     /// account has the record of what it was. Without an engine (the account is signed out) the report is dropped; the
     /// record is then found stale by the next pass and the file is looked up on the server.
     func backgroundUploadFinished(_ event: BackgroundUploadEvent) async {
-        guard let engine = await configuredEngine() else { return }
+        guard let engine = await configuredEngine() else {
+            logger.notice("backup: an upload the system finished is dropped, the backup account is not available")
+            return
+        }
         await engine.backgroundUploadFinished(event)
     }
 
@@ -189,7 +264,9 @@ public final class BackupModel {
     }
 
     public func update(_ change: (inout BackupSettings) -> Void) {
+        let wasEnabled = settings.isEnabled
         change(&settings)
+        if settings.isEnabled != wasEnabled { logger.notice("backup: turned \(self.settings.isEnabled ? "on" : "off", privacy: .public)") }
         try? settings.save(to: settingsFile)
         guard let engine else { return }
         let settings = settings
@@ -205,9 +282,20 @@ public final class BackupModel {
         authorization = await PhotoLibrarySource.requestAuthorization()
     }
 
+    /// Only the photos the user selected can be seen (and backed up).
+    public var hasLimitedAccess: Bool { authorization == .limited }
+
+    /// Reads the access again (the user comes back from Settings).
+    public func refreshAuthorization() {
+        authorization = PhotoLibrarySource.authorization
+    }
+
     /// Turns backup on for the active account and runs the first pass.
     public func enable(mode: BackupSettings.FilesAppMode) async {
         guard let session = app?.session else { return }
+        // The first check stops; what it found is in the ledger, and the first pass goes on from there.
+        await cancelPreview()
+        logger.notice("backup: set up, Files app mode \(String(describing: mode), privacy: .public)")
         update {
             $0.accountId = session.account.id
             $0.filesAppMode = mode
@@ -218,7 +306,54 @@ public final class BackupModel {
             }
             $0.isEnabled = mode != .keepFiles
         }
-        await runNow()
+        await startBackup()
+    }
+
+    // MARK: First run (SPEC §7.18.1 step 3)
+
+    /// Checks which photos of this device are already on the server before backup is turned on: a dry run for the
+    /// active account that records what it finds in the ledger (`assetCounts()`), so that the first pass does not ask
+    /// the server again. `status` reports its progress. Returns when it has ended or was stopped by `enable`.
+    ///
+    /// - Parameter includeFilesApp: also count what the Nextcloud Files app uploaded (SPEC §7.18.5).
+    public func preview(includeFilesApp: Bool) async {
+        guard !settings.isEnabled, settings.filesAppMode != .keepFiles, previewTask == nil, let session = app?.session else { return }
+        // Backup is not set up: it belongs to the account on screen.
+        if settings.accountId != session.account.id { update { $0.accountId = session.account.id } }
+        let task = Task { [weak self] in
+            guard let self, let engine = await self.configuredEngine() else { return }
+            var dryRun = self.settings
+            dryRun.filesAppMode = includeFilesApp ? .switchedFromFiles : .notUsed
+            let box = self.statusBox
+            self.authorization = PhotoLibrarySource.authorization
+            self.runningPasses += 1
+            self.logger.notice("backup: first check before it is turned on")
+            await engine.run(dryRun, dryRun: true)
+            self.runningPasses -= 1
+            if self.engine === engine { self.status = box.value }
+        }
+        previewTask = task
+        isPreviewing = true
+        await task.value
+        if previewTask == task {
+            previewTask = nil
+            isPreviewing = false
+        }
+    }
+
+    /// Stops a running `preview` and waits until it has ended.
+    public func cancelPreview() async {
+        guard let task = previewTask else { return }
+        await engine?.cancel()
+        await task.value
+        previewTask = nil
+        isPreviewing = false
+    }
+
+    /// The services of the backup account, for reads beside the engine (the server check before photos are removed
+    /// from the device).
+    func backupServices() -> AccountServices? {
+        account.flatMap { services(for: $0) }
     }
 
     public func disable() {
@@ -235,16 +370,23 @@ public final class BackupModel {
         }
         guard let engine = await configuredEngine() else {
             let reason = unavailableReason
+            logger.notice("backup: paused, the backup account is signed out or cannot be opened")
             status.phase = .paused(reason)
             return .unavailable(reason)
         }
         let box = statusBox
+        // The user may have changed the access in Settings since the app asked.
+        authorization = PhotoLibrarySource.authorization
         runningPasses += 1
         await engine.run(settings, dryRun: !settings.isEnabled, retryFailed: retryFailed)
+        // Opt-in: backed-up photos of picked device albums go into Nextcloud albums (`BackupModel+AlbumMirror.swift`).
+        if settings.isEnabled { await mirrorAlbums() }
         runningPasses -= 1
         let final = box.value
         if self.engine === engine { status = final }
-        return BackupOutcome(status: final)
+        let outcome = BackupOutcome(status: final)
+        logger.info("backup: pass returned \(outcome.logName, privacy: .public)")
+        return outcome
     }
 
     /// Why no engine is available: the backup account is signed out or cannot be opened.
@@ -267,6 +409,7 @@ public final class BackupModel {
     /// Continues a pass the system interrupted. Called when the app becomes active.
     public func resumeIfInterrupted() async {
         guard settings.isEnabled, status.isInterrupted, !isPassRunning else { return }
+        logger.notice("backup: the interrupted pass resumes")
         await runNow()
     }
 
@@ -285,7 +428,7 @@ public final class BackupModel {
 
     /// Services of the backup account: those of the active session when it is the same account (one database connection
     /// pool per account), otherwise services of its own.
-    private func services(for account: Account) -> AccountServices? {
+    func services(for account: Account) -> AccountServices? {
         guard let app, !account.isSignedOut else { return nil }
         if let session = app.session, session.account.id == account.id {
             guard !session.account.isSignedOut else { return nil }
@@ -363,6 +506,7 @@ public final class BackupModel {
     /// more. Backup options that belong to it are forgotten (`AccountPurge` deletes the file).
     func accountWillBeRemoved(_ id: AccountID) async {
         if settings.accountId == id {
+            logger.notice("backup: the backup account is removed, its backup options are forgotten")
             debounce?.cancel()
             forgetSettings()
         }
@@ -381,6 +525,7 @@ public final class BackupModel {
     /// The account's app password stopped working: its backup cannot continue until the user logs in again.
     func accountSignedOut(_ id: AccountID) {
         guard engineServices?.account.id == id || ownServices?.account.id == id else { return }
+        logger.notice("backup: stopped, the backup account was signed out")
         dropEngine()
         ownServices = nil
         if settings.isEnabled { status.phase = .paused(unavailableReason) }
@@ -398,6 +543,7 @@ public final class BackupModel {
 
     func libraryChanged() {
         guard settings.isEnabled else { return }
+        logger.debug("backup: the photo library changed, a pass follows")
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))

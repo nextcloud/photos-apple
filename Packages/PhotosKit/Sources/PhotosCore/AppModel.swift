@@ -8,6 +8,10 @@ import PhotosModel
 import PhotosNetworking
 import Security
 
+#if canImport(WidgetKit)
+    import WidgetKit
+#endif
+
 /// App-wide state: accounts, the active session, login.
 @MainActor
 @Observable
@@ -18,6 +22,10 @@ public final class AppModel {
     public var requestedDestination: String?
     /// The Notifications switch in Settings. Change it with `setPushEnabled(_:)`.
     public private(set) var pushEnabled: Bool
+    /// After the first login on iPhone and iPad: the app offers backup before it asks for notifications. The UI shows the
+    /// offer while this is true and calls `finishBackupOffer()`.
+    public private(set) var offersBackup = false
+    @ObservationIgnored private var asksForNotificationsAfterOffer = false
     @ObservationIgnored private var deviceToken: Data?
     @ObservationIgnored private var unauthorizedChecks: Set<AccountID> = []
     /// Sessions that were replaced and are still shutting down.
@@ -32,19 +40,34 @@ public final class AppModel {
     @ObservationIgnored let backgroundUploads: (any BackgroundUploading)?
     @ObservationIgnored let layout: StorageLayout
     @ObservationIgnored let defaults: UserDefaults
+    /// Notifications and widgets: what an account leaves outside the app's files.
+    @ObservationIgnored let system: SystemTraces
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "app")
 
     public convenience init(appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0") {
         self.init(
             appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard,
-            backgroundUploads: AppModel.systemBackgroundUploads)
+            backgroundUploads: AppModel.systemBackgroundUploads, system: .live)
+        keychain.restrictToThisDevice(defaults: .standard)
+        Diagnostics.removeExports()
+        // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
+        // background, `RootView`), so a crash loses at most the last few minutes.
+        Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await Diagnostics.persistLog(app: self)
+                try? await Task.sleep(for: .seconds(300))
+            }
+        }
         #if DEBUG
             // Development and UI tests: PHOTOS_DEBUG_LOGIN=nc://login/server:…&user:…&password:… signs in without a browser
             // (and without the notification permission prompt).
             if registry.accounts.isEmpty, let link = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_LOGIN"],
                 let credentials = LoginService.parseLoginURL(link)
             {
-                Task { try? await self.addAccount(credentials, askForNotifications: false) }
+                // PHOTOS_DEBUG_OFFER_BACKUP=1 shows the backup offer of a first login (UI tests don't want it).
+                let offer = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_OFFER_BACKUP"] != nil
+                Task { try? await self.addAccount(credentials, askForNotifications: false, offerBackup: offer) }
             }
         #endif
     }
@@ -53,9 +76,10 @@ public final class AppModel {
     init(
         appVersion: String, layout: StorageLayout, keychain: Keychain, defaults: UserDefaults,
         httpConfiguration: URLSessionConfiguration = HTTPClient.defaultConfiguration(),
-        backgroundUploads: BackgroundUploadsFactory? = nil
+        backgroundUploads: BackgroundUploadsFactory? = nil, system: SystemTraces = .none
     ) {
         self.appVersion = appVersion
+        self.system = system
         self.userAgent = UserAgent.make(appVersion: appVersion)
         self.keychain = keychain
         self.layout = layout
@@ -64,7 +88,10 @@ public final class AppModel {
         let credentials: ClientCredentialProvider = { host in AppModel.clientCredential(host: host, keychain: keychain) }
         self.http = AppModel.makeHTTPClient(layout: layout, keychain: keychain, configuration: httpConfiguration)
         self.backgroundUploads = backgroundUploads?(http.trustStore, credentials)
-        self.registry = AccountRegistry.load(from: layout.accountsFile)
+        let registry = AccountRegistry.load(from: layout.accountsFile)
+        self.registry = registry
+        // Certificates trusted in a login that never became an account (the app was quit during it).
+        AccountPurge(layout: layout, keychain: keychain, trustStore: http.trustStore).removeUnusedCertificates(remaining: registry.accounts)
         self.backup = BackupModel(settingsFile: layout.backupSettingsFile)
         if let transport = self.backgroundUploads { backup.attachBackgroundUploads(transport) }
         backup.attach(self)
@@ -128,7 +155,10 @@ public final class AppModel {
     ///
     /// - Parameter askForNotifications: ask for the notification permission now that there is an account to notify about
     ///   (the system only prompts the first time; nothing is asked at first launch).
-    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true) async throws {
+    /// - Parameter offerBackup: offer backup first when it is not set up yet (`offersBackup`).
+    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true, offerBackup: Bool = true)
+        async throws
+    {
         let status = try await loginService().status(serverURL: credentials.serverURL)
         let provisional = ServerConnection(
             serverURL: credentials.serverURL, userId: credentials.loginName, loginName: credentials.loginName,
@@ -142,12 +172,30 @@ public final class AppModel {
         registry.activeAccountID = account.id
         saveRegistry()
         activate(account)
+        let offer = offerBackup && BackupOffer.shouldOffer(backup: backup, defaults: defaults)
+        if offer { offersBackup = true }
+        system.reloadWidgets()
         if pushEnabled {
-            if askForNotifications {
+            if askForNotifications && offer {
+                // Asked when the backup offer is answered: one question at a time.
+                asksForNotificationsAfterOffer = true
+            } else if askForNotifications {
                 Task { await PushNotifications.requestAuthorization() }
             } else if let deviceToken {
                 registerForPush(account, deviceToken: deviceToken)
             }
+        }
+    }
+
+    /// The backup offer after the first login was answered ("Back up" or "Not now"): it is not shown again, and the
+    /// notification permission is asked now if the login wanted to.
+    public func finishBackupOffer() {
+        guard offersBackup else { return }
+        offersBackup = false
+        defaults.set(true, forKey: BackupOffer.offeredKey)
+        if asksForNotificationsAfterOffer {
+            asksForNotificationsAfterOffer = false
+            Task { await PushNotifications.requestAuthorization() }
         }
     }
 
@@ -156,7 +204,21 @@ public final class AppModel {
         registry.activeAccountID = id
         saveRegistry()
         activate(account)
+        system.reloadWidgets()
     }
+
+    /// Takes back the trust in certificates of these hosts unless an account uses the host: they were trusted in a login that
+    /// was cancelled or ended on another server (SPEC §8).
+    public func forgetUnusedTrust(_ hosts: Set<String>) {
+        let used = Set(registry.accounts.compactMap(AccountPurge.host(of:)))
+        for host in hosts where !used.contains(host.lowercased()) {
+            http.trustStore.removeTrust(for: host)
+            logger.notice("certificate: trust from an unfinished login removed")
+        }
+    }
+
+    /// Widgets show the active account's photos; they are rendered again when that, or app lock, changes.
+    public func reloadWidgets() { system.reloadWidgets() }
 
     /// Signs out and removes all local data of an account; revokes its app password on the server.
     public func removeAccount(_ id: AccountID) async {
@@ -190,7 +252,12 @@ public final class AppModel {
         for task in Array(retiring.values) { await task.value }
         await removed?.shutdown(closeDatabase: true)
         AccountPurge(layout: layout, keychain: keychain, trustStore: http.trustStore).purge(account, remaining: registry.accounts)
+        // Outside the account's files: its notifications, the diagnostics reports that were shared, and the widgets, which
+        // would keep showing its photos until their next refresh.
+        await system.removeNotifications(id)
+        Diagnostics.removeExports()
         if session == nil, let next = registry.activeAccount { activate(next) }
+        system.reloadWidgets()
     }
 
     /// Marks an account as signed out after a confirmed 401 (local data is kept until the account is removed, SPEC §5.1.6).
@@ -200,6 +267,7 @@ public final class AppModel {
         registry.upsert(account)
         saveRegistry()
         if session?.account.id == id { session?.account = account }
+        logger.notice("account signed out: the server no longer accepts its app password")
         backup.accountSignedOut(id)
     }
 
@@ -366,4 +434,21 @@ public final class AppModel {
         try keychain.set(data, for: Keychain.clientCertificateKey(host.lowercased()))
         try keychain.set(password, for: Keychain.clientCertificatePasswordKey(host.lowercased()))
     }
+}
+
+/// What removing an account clears outside the app's files: delivered notifications and widget timelines. These are system
+/// services an app has only one of, so unit tests use `.none`.
+struct SystemTraces: Sendable {
+    var removeNotifications: @Sendable (AccountID) async -> Void
+    var reloadWidgets: @Sendable () -> Void
+
+    static let none = SystemTraces(removeNotifications: { _ in }, reloadWidgets: {})
+
+    static let live = SystemTraces(
+        removeNotifications: { id in await PushNotifications.removeDelivered(.removeAllDelivered, account: id) },
+        reloadWidgets: {
+            #if canImport(WidgetKit)
+                WidgetCenter.shared.reloadAllTimelines()
+            #endif
+        })
 }

@@ -31,6 +31,54 @@ struct UploadIntegrationTests {
         return file
     }
 
+    /// `If-None-Match: *` on the PUT of a new file: the server refuses to overwrite a file that appeared after the name check.
+    @Test func aNewFileDoesNotOverwriteOneThatAppearedMeanwhile() async throws {
+        let file = try makeFile(size: 2_000)
+        let other = try makeFile(size: 3_000)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: other)
+        }
+        let uploader = Uploader(dav: dav)
+        do {
+            guard
+                case .put(let path, let request) = try await uploader.prepare(
+                    file: file, fileName: "race.bin", folder: folder, capturedAt: nil, conflict: .skipIfSameSize)
+            else {
+                Issue.record("the file cannot be there yet")
+                return
+            }
+            // Another client is faster.
+            _ = try await dav.put(dav.connection.filesURL(path), file: other)
+            await #expect(throws: NetworkError.preconditionFailed) {
+                _ = try await dav.put(request.url, file: file, headers: request.headers)
+            }
+            let (kept, _) = try await dav.download(dav.connection.filesURL(path))
+            defer { try? FileManager.default.removeItem(at: kept) }
+            #expect(try Uploader.sha256(of: kept) == (try Uploader.sha256(of: other)))
+            // Preparing again finds the next free name; the same content is found as uploaded.
+            guard
+                case .put(let second, _) = try await uploader.prepare(
+                    file: file, fileName: "race.bin", folder: folder, capturedAt: nil, conflict: .skipIfSameSize)
+            else {
+                Issue.record("another size is another file")
+                return
+            }
+            #expect(second == "\(folder)/race (2).bin")
+            guard
+                case .existing = try await uploader.prepare(
+                    file: other, fileName: "race.bin", folder: folder, capturedAt: nil, conflict: .skipIfSameSize)
+            else {
+                Issue.record("the same size counts as uploaded")
+                return
+            }
+        } catch {
+            try? await dav.delete(dav.connection.filesURL(folder))
+            throw error
+        }
+        try await dav.delete(dav.connection.filesURL(folder))
+    }
+
     @Test func aChunkedUploadThatWasInterruptedIsContinued() async throws {
         let file = try makeFile(size: 1_000_000)
         defer { try? FileManager.default.removeItem(at: file) }

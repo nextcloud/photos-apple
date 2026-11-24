@@ -18,11 +18,24 @@ public final class SessionModel {
     public private(set) var syncStatus: SyncStatus = .idle(lastSync: nil)
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
+    /// How many items the first sync will find, when the server can tell (`loadInitialSyncTotal()`).
+    public internal(set) var initialSyncTotal: Int?
+    /// The server presents a certificate the app does not trust (`SessionModel+State.swift`).
+    public internal(set) var certificateProblem: CertificateProblem?
+    /// The last undoable change, for the confirmation banner (`SessionModel+Undo.swift`).
+    public internal(set) var lastChange: ChangeNotice?
+    /// Undo bookkeeping (`SessionModel+Undo.swift`): where the last change can be undone, and the undo managers this
+    /// session registered with.
+    @ObservationIgnored var undoState = UndoState()
     public let transfers = TransferQueue()
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
     public private(set) var offline: OfflineManager?
+    /// A partner's shared photos in this account's timeline (SPEC SH-8).
+    public private(set) var partners: PartnerTimelineModel?
     @ObservationIgnored var albumsRefreshedAt: Date?
+    /// `afterSync()` runs (`SessionModel+Labels.swift`).
+    @ObservationIgnored var afterSyncRunning = false
     @ObservationIgnored weak var app: AppModel?
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -52,6 +65,7 @@ public final class SessionModel {
         }
         transfers.session = self
         if let services {
+            partners = PartnerTimelineModel(services: services)
             let offline = OfflineManager(services: services)
             self.offline = offline
             // Weak: the offline manager owns the services, whose image pipeline would otherwise own the manager.
@@ -70,9 +84,18 @@ public final class SessionModel {
 
     func start() {
         guard let services, !isStopped else { return }
+        _ = ForegroundState.shared  // follows the app's activation from now on (shared-album notifications)
         track { [weak self] in
             await services.sync.setStatusHandler { status in
-                Task { @MainActor in self?.syncStatus = status }
+                Task { @MainActor in
+                    let previous = self?.syncStatus
+                    self?.syncStatus = status
+                    self?.syncStatusChanged(from: previous, to: status)
+                }
+            }
+            // Walks through the whole library wait while a backup pass uploads (it changes the root ETag all the time).
+            await services.sync.setReconcileDeferral { [weak self] in
+                await MainActor.run { self?.backup.isPassRunning ?? false }
             }
             await self?.refreshFeatures()
             await self?.syncNow()
@@ -102,6 +125,8 @@ public final class SessionModel {
     func stop() {
         isStopped = true
         tasks.values.forEach { $0.cancel() }
+        // Nothing of this account can be undone any more (account switch, removal).
+        clearUndo()
     }
 
     /// Stops everything this session runs for its account and waits until it has stopped: its own tasks, manual uploads,
@@ -139,7 +164,8 @@ public final class SessionModel {
     private func detectFeatures() async {
         guard let services else { return }
         do {
-            let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect()
+            // The cached features go along: a detection that cannot read the Photos settings this time keeps them.
+            let detected = try await FeatureDetector(dav: services.dav, ocs: services.ocs).detect(cached: features)
             guard !isStopped else { return }  // nothing is written for a session that was switched away from or removed
             featureDetectionError = nil
             fingerprintCheckedAt = Date()
@@ -200,10 +226,19 @@ public final class SessionModel {
     }
 
     public func syncNow(forceReconcile: Bool = false) async {
+        await syncNow(reconcile: forceReconcile ? .now : .ifDue)
+    }
+
+    /// Syncs; `.refresh` is pull-to-refresh (reconciles only if the last reconciliation is a while ago), `.now` is
+    /// "Sync now".
+    public func syncNow(reconcile: ReconcileRequest) async {
         guard let services, !isStopped else { return }
-        await services.sync.sync(forceReconcile: forceReconcile)
+        await services.sync.sync(reconcile: reconcile)
         await services.outbox.kick()
         await refreshFailedOperations()
+        // Beside, not before, what the caller does next (a background task's backup pass): labels for search and
+        // shared-album activity are throttled extras.
+        if !afterSyncRunning { track { [weak self] in await self?.afterSync() } }
     }
 
     /// Called when the app comes to the foreground.
@@ -220,7 +255,9 @@ public final class SessionModel {
 
     public func refreshFailedOperations() async {
         guard let services else { return }
-        failedOperations = (try? await services.outbox.failedOperations()) ?? []
+        let failed = (try? await services.outbox.failedOperations()) ?? []
+        if failed.count != failedOperations.count { logger.notice("outbox: \(failed.count) failed operations") }
+        failedOperations = failed
     }
 
     public func retryFailedOperations() async {
@@ -234,24 +271,11 @@ public final class SessionModel {
     }
 
     // MARK: Actions (optimistic, via outbox)
+    // Favourite and archive go through `perform(_:)` (SessionModel+Undo), so that they can be undone.
 
-    public func setFavorite(_ items: [MediaItem], _ value: Bool) async {
-        await enqueue(items.map { .favorite(fileId: $0.fileId, path: $0.path, value: value) })
-    }
-
+    /// A delete that is not offered for undo (duplicates, free up space: the user confirmed a list of files).
     public func delete(_ items: [MediaItem]) async {
         await enqueue(items.filter(\.permissions.canDelete).map { .delete(fileId: $0.fileId, path: $0.path) })
-    }
-
-    public func archive(_ items: [MediaItem]) async {
-        await enqueue(
-            items.filter { $0.isOwnStorage && $0.permissions.canDelete && !$0.isArchived }.map {
-                .archive(fileId: $0.fileId, path: $0.path)
-            })
-    }
-
-    public func unarchive(_ items: [MediaItem]) async {
-        await enqueue(items.filter(\.isArchived).map { .unarchive(fileId: $0.fileId, path: $0.path) })
     }
 
     public func add(_ items: [MediaItem], to album: Album) async {
@@ -273,7 +297,7 @@ public final class SessionModel {
     }
 
     func enqueue(_ operations: [PendingOperation]) async {
-        guard let services, !operations.isEmpty else { return }
+        guard let services, !operations.isEmpty, !isStopped else { return }
         do {
             try await services.outbox.enqueue(operations)
         } catch {

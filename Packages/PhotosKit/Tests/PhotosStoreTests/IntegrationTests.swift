@@ -87,7 +87,9 @@ struct IntegrationSyncTests {
             // The MIME type comes from the extension; the content does not matter for the index.
             _ = try await api.dav.put(api.connection.filesURL(path), data: Data([0xFF, 0xD8, 0xFF, 0xD9]))
             let database = try AccountDatabase.temporary()
-            let engine = SyncEngine(api: api, database: database, features: features)
+            // Moves and deletes only show up in a reconciliation, which the app runs at most every 10 minutes unless
+            // asked to; here every sync may reconcile.
+            let engine = SyncEngine(api: api, database: database, features: features, reconcileInterval: 0)
             let library = LibraryStore(database: database)
             await engine.sync()
             let fileId = try #require(
@@ -284,5 +286,104 @@ struct IntegrationFeatureTests {
             throw error
         }
         try await api.dav.delete(api.connection.filesURL(folder))
+    }
+}
+
+/// The outbox against a real server: moves and deletes with `If-Match`, several at a time, and a delete taken back
+/// through the trash bin with its album place. Creates and removes its own folder, album and trash entries.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["PHOTOS_IT_SERVER"] != nil))
+struct IntegrationOutboxTests {
+    let base = IntegrationTests()
+
+    @Test func bulkActionsAndARestoredDelete() async throws {
+        let api = base.api
+        let features = try await FeatureDetector(dav: api.dav, ocs: api.ocs).detect()
+        let root = try #require(features.userConfig.photosSourceFolders.first)
+        let stamp = Int(Date().timeIntervalSince1970)
+        let folder = (root == "/" ? "" : root) + "/photos-ios-outbox-test-\(stamp)"
+        let album = Album(kind: .own, name: "Photos iOS outbox test \(stamp)")
+        let names = (1...6).map { "p\($0).jpg" } + ["t.tif"]
+        try await api.dav.mkcol(api.connection.filesURL(folder))
+        try await api.createAlbum(name: album.name)
+        func cleanUp() async {
+            try? await api.deleteAlbum(album)
+            try? await api.dav.delete(api.connection.filesURL(folder))
+            try? await api.dav.delete(api.connection.filesURL(Outbox.archivePrefix + folder))
+            // Out of the trash bin too: the files and the folders.
+            let trash = api.connection.davURL("trashbin/\(api.connection.userId)/trash/")
+            let entries = (try? await api.dav.propfind(trash, depth: 1, properties: [DAVProp.trashbinOriginalLocation])) ?? []
+            for entry in entries.dropFirst()
+            where entry.string(DAVProp.trashbinOriginalLocation)?.contains("photos-ios-outbox-test-\(stamp)") == true {
+                try? await api.dav.delete(trash.appending(path: entry.lastPathComponent))
+            }
+        }
+        do {
+            for name in names {
+                _ = try await api.dav.put(api.connection.filesURL(folder + "/" + name), data: Data([0xFF, 0xD8, 0xFF, 0xD9]))
+            }
+            let database = try AccountDatabase.temporary()
+            let engine = SyncEngine(api: api, database: database, features: features, reconcileInterval: 0)
+            let library = LibraryStore(database: database)
+            let collections = CollectionStore(database: database)
+            await engine.sync()
+            let items = try await database.writer.read { db in
+                try MediaItem.filter(sql: "path LIKE ?", arguments: [folder + "/%"]).order(sql: "path").fetchAll(db)
+            }
+            #expect(items.map(\.name) == names.sorted())
+            #expect(items.allSatisfy { !$0.etag.isEmpty })
+            let byName = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0) })
+            let first = try #require(byName["p1.jpg"])
+            let tiff = try #require(byName["t.tif"])
+            try await api.addToAlbum(album, userPath: first.path)
+            try await engine.refreshAlbums()
+            try await engine.refreshAlbumContent(album)
+            #expect(try collections.albumItems(albumId: album.id).map(\.fileId) == [first.fileId])
+
+            // The server only moves or deletes the file that has the ETag the index knows (the ETag survives a move).
+            let probe = try #require(byName["p6.jpg"])
+            await #expect(throws: NetworkError.preconditionFailed) {
+                try await api.delete(userPath: probe.path, ifMatch: "not-" + probe.etag)
+            }
+            try await api.move(userPath: probe.path, to: probe.path + ".moved", ifMatch: probe.etag)
+            try await api.move(userPath: probe.path + ".moved", to: probe.path, ifMatch: probe.etag)
+
+            let outbox = Outbox(api: api, database: database)
+            // Archive everything and take it back: several at a time, each by its known path and ETag.
+            try await outbox.enqueue(items.map { .archive(fileId: $0.fileId, path: $0.path) })
+            await outbox.waitUntilIdle()
+            #expect(try await outbox.pendingCount() == 0)
+            #expect(try await outbox.failedOperations().isEmpty)
+            for item in items { #expect(try await api.currentPath(fileId: item.fileId) == Outbox.archivePrefix + item.path) }
+            try await outbox.enqueue(items.map { .unarchive(fileId: $0.fileId, path: Outbox.archivePrefix + $0.path) })
+            await outbox.waitUntilIdle()
+            #expect(try await outbox.failedOperations().isEmpty)
+            for item in items { #expect(try await api.currentPath(fileId: item.fileId) == item.path) }
+            #expect(try library.item(first.fileId)?.path == first.path)
+
+            // Delete two, among them a TIFF and the album's photo: both are in the trash bin, and the server took the
+            // photo out of the album.
+            try await outbox.enqueue([first, tiff].map { .delete(fileId: $0.fileId, path: $0.path) })
+            await outbox.waitUntilIdle()
+            #expect(try await outbox.failedOperations().isEmpty)
+            let trashed = try await api.trash(mimeTypes: nil).filter { [first.fileId, tiff.fileId].contains($0.fileId) }
+            #expect(Set(trashed.map(\.fileId)) == [first.fileId, tiff.fileId])
+            #expect(try await api.albumContent(album).isEmpty)
+
+            // Restored (same file ids) and put back into the album.
+            for item in trashed { try await api.restore(item) }
+            try await engine.restore(fileIds: [first.fileId, tiff.fileId])
+            #expect(try library.item(first.fileId)?.path == first.path)
+            #expect(try library.item(tiff.fileId)?.path == tiff.path)
+            try await outbox.enqueue([
+                .addToAlbum(albumId: album.id, albumName: album.name, albumKind: .own, fileId: first.fileId, path: first.path)
+            ])
+            await outbox.waitUntilIdle()
+            #expect(try await outbox.failedOperations().isEmpty)
+            #expect(try await api.albumContent(album).map(\.item.fileId) == [first.fileId])
+        } catch {
+            await cleanUp()
+            throw error
+        }
+        await cleanUp()
     }
 }

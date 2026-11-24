@@ -504,12 +504,21 @@ import Testing
             // The marker shows the newest file of the cell, where it was taken.
             #expect(cell.cover.fileId == members.map(\.fileId).max())
             #expect(members.contains { $0.fileId == cell.cover.fileId && $0.latitude == cell.latitude && $0.longitude == cell.longitude })
+            #expect(cell.place == members.first { $0.fileId == cell.cover.fileId }?.place.flatMap { $0.isEmpty ? nil : $0 })
             let items = try await store.mapItems(in: cell)
             #expect(items.map(\.fileId).sorted() == members.map(\.fileId).sorted())
             #expect(items.map(\.timestamp) == items.map(\.timestamp).sorted(by: >))
+            // In pages, as the list of a marker loads them.
+            let first = try await store.mapGridItems(in: cell, limit: 3)
+            let rest = try await store.mapGridItems(in: cell, limit: 10_000, offset: first.count)
+            #expect((first + rest).map(\.fileId) == items.map(\.fileId))
         }
         #expect(try await store.mapItemCount(in: region) == inside.count)
         #expect(try await store.mapItems(in: region).count == inside.count)
+        let page = try await store.mapGridItems(in: region, limit: 100)
+        #expect(page.count == 100)
+        #expect(try await store.mapGridItems(in: region, limit: 100, offset: 100).first?.fileId != page.last?.fileId)
+        #expect(try await store.mapGridItems(in: region, limit: inside.count, offset: 0).count == inside.count)
         // Nothing in the middle of the Pacific, and nothing without a sensible cell size.
         #expect(
             try await store.mapCells(

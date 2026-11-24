@@ -40,18 +40,19 @@ public struct PhotosAPI: Sendable {
             }
         }
 
-        func value(of item: MediaItem) -> Double? {
+        /// The sort value of a raw search result (also of one that is not a media item the app can show).
+        func value(of resource: DAVResource) -> Double? {
             switch self {
-            case .captureTime: item.capturedAt?.timeIntervalSince1970
-            case .modified: item.modifiedAt.timeIntervalSince1970
+            case .captureTime: resource.unixDate(DAVProp.metadataOriginalDateTime)?.timeIntervalSince1970
+            case .modified: resource.httpDate(DAVProp.lastModified)?.timeIntervalSince1970
             }
         }
     }
 
     /// One page of the media index, newest first, with keyset paging (SPEC §5.4.3).
     ///
-    /// Returns the page and the cursor for the next page (`nil` when done). Items sharing the boundary second are
-    /// fetched completely, so no item is skipped when many share a second.
+    /// Returns the page and the cursor for the next page (`nil` when the server had nothing left). Items sharing the
+    /// boundary second are fetched completely, so no item is skipped when many share a second.
     public func indexPage(
         sourceFolders: [String],
         mimeTypes: [String],
@@ -70,9 +71,15 @@ public struct PhotosAPI: Sendable {
             orderBy: [DAVSearch.Order(order.property)],
             limit: limit
         )
-        var items = try await dav.search(search, timeout: 300).compactMap { MediaParser.mediaItem(from: $0, connection: connection) }
-        guard items.count >= limit, let last = items.last.flatMap(order.value(of:)) else { return (items, nil) }
+        let raw = try await dav.search(search, timeout: 300)
+        var items = raw.compactMap { MediaParser.mediaItem(from: $0, connection: connection) }
+        // Whether there is more is decided by what the server sent, not by what could be parsed: a page with entries
+        // the parser skips (or one the server shortened after applying the limit) is not the last one. Only an empty
+        // page ends the listing.
+        guard let last = raw.last(where: { order.value(of: $0) != nil }).flatMap(order.value(of:)) else { return (items, nil) }
         let boundary = last.rounded(.down)
+        // The cursor has to move back. A server that ignores the condition would otherwise be asked for ever.
+        if let before, boundary >= before { return (items, nil) }
         // Complete the boundary second.
         let rest = DAVSearch(
             select: properties,
@@ -143,8 +150,21 @@ public struct PhotosAPI: Sendable {
                 .eq(DAVProp.size, "0"),
             ])
         )
+        // Only what really is such a file counts, whatever the server made of the condition.
         return try await dav.search(search).compactMap { connection.userPath(fromHref: $0.href) }
+            .filter { [".nomedia", ".noimage"].contains(($0 as NSString).lastPathComponent) }
             .map { ($0 as NSString).deletingLastPathComponent }
+    }
+
+    /// Where a file is now (path relative to the user root), looked up by its id; `nil` when the user has no such file.
+    /// One small SEARCH: used before queued deletes and moves, whose stored path may be outdated or reused.
+    public func currentPath(fileId: FileID) async throws -> String? {
+        let search = DAVSearch(
+            select: [DAVProp.fileId],
+            scopes: [DAVSearch.Scope(href: connection.filesHref("/"))],
+            condition: .eq(DAVProp.fileId, String(fileId))
+        )
+        return try await dav.search(search).first { $0.int64(DAVProp.fileId) == fileId }.flatMap { connection.userPath(fromHref: $0.href) }
     }
 
     /// Timeline day counts (extended servers): `[(day "YYYY-MM-DD", count)]`.
@@ -281,16 +301,18 @@ public struct PhotosAPI: Sendable {
         try await dav.proppatch(connection.filesURL(userPath), set: [(DAVProp.favorite, .text(favorite ? "1" : "0"))])
     }
 
-    public func delete(userPath: String) async throws {
-        try await dav.delete(connection.filesURL(userPath))
+    /// - Parameter ifMatch: only when the file at the path has this ETag (`NetworkError.preconditionFailed` otherwise).
+    public func delete(userPath: String, ifMatch etag: String? = nil) async throws {
+        try await dav.delete(connection.filesURL(userPath), ifMatch: etag)
     }
 
-    public func move(userPath: String, to destination: String) async throws {
+    /// - Parameter ifMatch: only when the file at the path has this ETag (`NetworkError.preconditionFailed` otherwise).
+    public func move(userPath: String, to destination: String, ifMatch etag: String? = nil) async throws {
         do {
-            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination))
+            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination), ifMatch: etag)
         } catch NetworkError.conflict {
             try await dav.mkcolRecursive(userPath: (destination as NSString).deletingLastPathComponent)
-            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination))
+            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination), ifMatch: etag)
         }
     }
 
@@ -328,6 +350,31 @@ public struct PhotosAPI: Sendable {
     }
 
     // MARK: User config
+
+    /// The user's Photos settings as the server has them now (`key → raw value`): from the config API (extended
+    /// servers), else from the Photos page.
+    public func userConfig() async throws -> PhotosUserConfig {
+        var config = PhotosUserConfig()
+        do {
+            let values: JSONValue = try await ocs.request("GET", "ocs/v2.php/apps/photos/api/v1/config")
+            for (key, value) in values.object ?? [:] {
+                if let raw = Self.rawConfigValue(value) { config.apply(key: key, rawValue: raw) }
+            }
+        } catch let error where FeatureDetector.isMissingAPI(error) {
+            let state = try await InitialStateScraper.fetch(http: dav.http, connection: connection)
+            guard !state.isEmpty else { throw NetworkError.invalidResponse("Photos settings") }
+            for key in PhotosUserConfig.Key.allCases {
+                if let raw = state[key.rawValue].flatMap(Self.rawConfigValue) { config.apply(key: key.rawValue, rawValue: raw) }
+            }
+        }
+        return config
+    }
+
+    /// Server config values are strings; lists arrive either as JSON text or as JSON.
+    static func rawConfigValue(_ value: JSONValue) -> String? {
+        if let string = value.string { return string }
+        return (try? JSONEncoder().encode(value)).flatMap { String(data: $0, encoding: .utf8) }
+    }
 
     /// `PUT /index.php/apps/photos/api/v1/config/{key}` with `{"value": "…"}`.
     public func setUserConfig(_ key: PhotosUserConfig.Key, value: String) async throws {

@@ -18,6 +18,18 @@ public enum AppPaths {
         return support.appending(path: "NextcloudPhotos")
     }()
 
+    /// The App Group's user defaults, shared with the extensions; the app's own when the App Group is not available (unsigned
+    /// development builds, where `container` is not the group's either).
+    public static var sharedDefaults: UserDefaults {
+        usesAppGroup ? UserDefaults(suiteName: appGroup) ?? .standard : .standard
+    }
+
+    /// The container is the App Group's.
+    public static let usesAppGroup: Bool = {
+        guard let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else { return false }
+        return group.standardizedFileURL == container.standardizedFileURL
+    }()
+
     static func isWritable(_ directory: URL) -> Bool {
         let probe = directory.appending(path: "Library/.write-probe")
         do {

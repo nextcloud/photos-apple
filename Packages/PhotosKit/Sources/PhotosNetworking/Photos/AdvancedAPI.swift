@@ -20,17 +20,18 @@ public struct TrashedItem: Sendable, Hashable, Identifiable {
 extension PhotosAPI {
     // MARK: Trash bin
 
-    public func trash(mimeTypes: [String]) async throws -> [TrashedItem] {
+    /// The trash bin's files; with `mimeTypes`, only files of these types.
+    public func trash(mimeTypes: [String]?) async throws -> [TrashedItem] {
         let resources = try await dav.propfind(
             connection.davURL("trashbin/\(connection.userId)/trash/"), depth: 1,
             properties: [
                 DAVProp.fileId, DAVProp.contentType, DAVProp.size, DAVProp.trashbinFilename, DAVProp.trashbinOriginalLocation,
                 DAVProp.trashbinDeletionTime,
             ])
-        let mimes = Set(mimeTypes)
+        let mimes = mimeTypes.map(Set.init)
         return resources.dropFirst().compactMap { resource in
             guard !resource.isCollection, let fileId = resource.int64(DAVProp.fileId), let mime = resource.string(DAVProp.contentType),
-                mimes.contains(mime)
+                mimes?.contains(mime) ?? true
             else { return nil }
             return TrashedItem(
                 trashName: resource.lastPathComponent, fileId: fileId,
@@ -43,9 +44,11 @@ extension PhotosAPI {
     }
 
     public func restore(_ item: TrashedItem) async throws {
+        // `Overwrite: T` as the web client sends it: the restore folder reports every name as existing, so with
+        // `Overwrite: F` the server answers 412. Nothing is overwritten; the server renames when the place is taken.
         try await dav.move(
             connection.davURL("trashbin/\(connection.userId)/trash/\(item.trashName)"),
-            to: connection.davURL("trashbin/\(connection.userId)/restore/\(item.trashName)"))
+            to: connection.davURL("trashbin/\(connection.userId)/restore/\(item.trashName)"), overwrite: true)
     }
 
     public func deletePermanently(_ item: TrashedItem) async throws {
@@ -120,7 +123,7 @@ extension PhotosAPI {
     public func videoRendition(fileId: FileID, etag: String) async throws -> URL {
         let url = connection.url("index.php/apps/photos/api/v1/video/\(fileId)", query: [URLQueryItem(name: "etag", value: etag)])
         let (file, _) = try await dav.download(url)
-        let target = file.deletingLastPathComponent().appending(path: "\(fileId)-\(etag).mp4")
+        let target = file.deletingLastPathComponent().appending(path: "\(fileId)-\(CacheFileName.etag(etag)).mp4")
         try? FileManager.default.removeItem(at: target)
         try FileManager.default.moveItem(at: file, to: target)
         return target

@@ -25,25 +25,28 @@
       }
     },
     "Favorites" : {
-
+      "comment" : "Name of the widget that shows favorite photos, in the widget gallery and as the widget's title."
+    },
+    "Locked" : {
+      "comment" : "Widget: shown instead of the photo while app lock is on or the device is locked; also the VoiceOver label of the lock symbol."
     },
     "Nextcloud Photos" : {
-
+      "comment" : "The app's name, shown in a widget that has no photo to show. Do not translate."
     },
     "No photos yet" : {
-
+      "comment" : "Text in a widget when there is no photo to show."
     },
     "On this day" : {
-
+      "comment" : "Name of the widget that shows photos taken on today's date in earlier years, in the widget gallery and as the widget's title."
     },
     "Open the app to log in" : {
-
+      "comment" : "Text in a widget when no account is logged in in the app."
     },
     "Photos from this day in past years." : {
-
+      "comment" : "Description of the \"On this day\" widget in the widget gallery."
     },
     "Your favourite photos." : {
-
+      "comment" : "Description of the \"Favorites\" widget in the widget gallery."
     }
   },
   "version" : "1.1"

@@ -12,14 +12,51 @@ import PhotosStore
 protocol BackupLibrary: Sendable {
     var isAuthorized: Bool { get }
 
+    /// The user gave access to selected photos only.
+    var isLimited: Bool { get }
+
     /// Resources of the assets selected by the settings, oldest first.
     ///
     /// `needsScan(localIdentifier, modificationDate)` is asked for every asset before its resources are read; reading them is
     /// the expensive part of a scan, so assets the ledger already knows completely are left out.
-    func scan(_ settings: BackupSettings, needsScan: (String, Date?) -> Bool) -> [BackupResource]
+    ///
+    /// - Parameter assets: only these assets (those that changed); nil: all of them.
+    func scan(_ settings: BackupSettings, assets: Set<String>?, needsScan: (String, Date?) -> Bool) -> [BackupResource]
+
+    /// A mark of the library's current state (a persistent change token), to ask later what changed since. Nil when the
+    /// library cannot tell.
+    var changeToken: Data? { get }
+
+    /// The assets that were added, changed or deleted since `token`, as far as the settings select them. Nil when that
+    /// cannot be told (the token is too old, or what changed concerns the selection itself): then everything is looked at.
+    func changedAssets(since token: Data, settings: BackupSettings) -> Set<String>?
 
     /// Writes the resource into a file in a directory of its own (the engine deletes that directory afterwards).
-    func export(_ resource: BackupResource, settings: BackupSettings) async throws -> URL
+    ///
+    /// - Parameter allowNetwork: the data may be downloaded from iCloud. Without it a resource that is not on this device
+    ///   throws `BackupDeviceError.needsICloudDownload`.
+    func export(_ resource: BackupResource, settings: BackupSettings, allowNetwork: Bool) async throws -> URL
+}
+
+/// What keeps a resource from being read on this device.
+public enum BackupDeviceError: Error, Sendable, Equatable, LocalizedError {
+    /// Not enough free space on this device to write the file that would be uploaded.
+    case outOfSpace
+    /// The original is only in iCloud, and it may not be downloaded now.
+    case needsICloudDownload
+
+    public var errorDescription: String? {
+        switch self {
+        case .outOfSpace:
+            #if os(macOS)
+                String(localized: "There is not enough free space on this Mac to prepare the upload.", bundle: .module)
+            #else
+                String(localized: "There is not enough free space on this device to prepare the upload.", bundle: .module)
+            #endif
+        case .needsICloudDownload:
+            String(localized: "The original is only in iCloud, and downloading from iCloud is turned off.", bundle: .module)
+        }
+    }
 }
 
 /// The server as the backup engine sees it.
@@ -179,6 +216,8 @@ struct BackupNetwork: Sendable, Equatable {
 /// Why uploads wait.
 enum BackupPause: Sendable, Equatable {
     case offline, wifi, lowData, lowPower, user
+    /// Originals that are only in iCloud wait for Wi-Fi (SPEC §7.18.2); everything else went through.
+    case iCloud
 
     var message: String {
         switch self {
@@ -187,6 +226,7 @@ enum BackupPause: Sendable, Equatable {
         case .lowData: String(localized: "Paused in Low Data Mode", bundle: .module)
         case .lowPower: String(localized: "Paused in Low Power Mode", bundle: .module)
         case .user: String(localized: "Paused", bundle: .module)
+        case .iCloud: String(localized: "Waiting for Wi-Fi to download originals from iCloud", bundle: .module)
         }
     }
 }
@@ -208,6 +248,7 @@ enum BackupPolicy {
 
     /// Errors that will hit every other file as well: the run stops instead of exporting and failing the whole library.
     static func blocker(for error: any Error) -> BackupStatus.Blocker? {
+        if isOutOfDeviceSpace(error) { return .deviceStorageFull }
         guard let error = error as? NetworkError else { return nil }
         switch error {
         case .insufficientStorage: return .insufficientStorage
@@ -216,6 +257,36 @@ enum BackupPolicy {
         case .untrustedCertificate, .clientCertificateRequired: return .serverTrust
         default: return nil
         }
+    }
+
+    /// This device has no room for the file that would be uploaded: found before the export, or reported while writing.
+    static func isOutOfDeviceSpace(_ error: any Error) -> Bool {
+        if let error = error as? BackupDeviceError { return error == .outOfSpace }
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain, error.code == CocoaError.Code.fileWriteOutOfSpace.rawValue { return true }
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOSPC) { return true }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError, underlying !== error {
+            return isOutOfDeviceSpace(underlying)
+        }
+        return false
+    }
+
+    /// Room that stays free on the device beyond the exported file (the conversion to JPEG, the database, the system).
+    static let deviceSpaceReserve: Int64 = 50 * 1024 * 1024
+
+    /// Whether a resource of this size can be exported. Unknown values do not hold anything back.
+    static func hasRoom(free: Int64?, size: Int64?) -> Bool {
+        guard let free else { return true }
+        return free >= (size ?? 0) + deviceSpaceReserve
+    }
+
+    /// Whether an original that is only in iCloud may be downloaded now: with "Download originals from iCloud", and not
+    /// over a cellular connection, a personal hotspot or in Low Data Mode (SPEC §7.18.2: Wi-Fi only). An unknown network
+    /// (`nil`) does not hold it back.
+    static func allowsICloudDownload(_ settings: BackupSettings, network: BackupNetwork?) -> Bool {
+        guard settings.downloadFromICloud else { return false }
+        guard let network else { return true }
+        return !network.isExpensive && !network.isConstrained
     }
 
     static func isCancellation(_ error: any Error) -> Bool {
@@ -238,10 +309,23 @@ enum BackupPolicy {
             && now.timeIntervalSince1970 < entry.updatedAt + retryDelay(attempts: entry.attempts)
     }
 
+    /// Whether an upload's failure ends the pass instead of only this file's attempt (`blocker` aside): the transient
+    /// errors that every other file would meet as well (no connection, the server is down or busy). A locked file (423)
+    /// is transient too, but it concerns this file only: it is recorded as failed, waits for its next attempt, and the
+    /// pass goes on with the others. (The outbox keeps retrying such a file; that is `NetworkError.isTransient`.)
+    static func endsPass(_ error: NetworkError) -> Bool {
+        error.isTransient && error != .locked
+    }
+
     // MARK: Scan
 
     static func isComplete(_ entry: BackupLedgerEntry) -> Bool {
         entry.state == BackupItemState.uploaded.rawValue || entry.state == BackupItemState.matched.rawValue
+    }
+
+    /// Left out on purpose (only in iCloud, and "Download originals from iCloud" is off).
+    static func isSkipped(_ entry: BackupLedgerEntry) -> Bool {
+        entry.state == BackupItemState.skipped.rawValue
     }
 
     /// PhotoKit modification dates against what the ledger stored (seconds; both may be missing).
@@ -253,14 +337,55 @@ enum BackupPolicy {
         }
     }
 
-    /// Whether an asset's resources have to be read: not when every resource the ledger knows is done (or failed and still
-    /// backing off) and the asset has not changed since.
+    /// Whether an asset's resources have to be read: not when the asset has not changed since and the ledger has what
+    /// it needs about each of them: done, failed and still backing off, skipped, or waiting with the resource kept
+    /// (`needsRead`).
     static func needsScan(entries: [BackupLedgerEntry], modifiedAt: Date?, now: Date) -> Bool {
         if entries.isEmpty { return true }
         return entries.contains { entry in
             if isModified(modifiedAt, since: entry.assetModifiedAt) { return true }
-            return !(isComplete(entry) || isBackingOff(entry, now: now))
+            return needsRead(entry, now: now)
         }
+    }
+
+    /// An entry that will be uploaded and does not have its resource (written by an earlier version, or "Upload anyway"
+    /// on something that was matched): its asset has to be read.
+    static func needsRead(_ entry: BackupLedgerEntry, now: Date) -> Bool {
+        !(isComplete(entry) || isBackingOff(entry, now: now) || isSkipped(entry) || entry.resource != nil)
+    }
+
+    /// How long the server's "not there" holds for a resource that waits. Before its upload the destination is looked
+    /// at anyway (layer 5: same name and size counts as uploaded); this is for copies that got onto the server under
+    /// another name meanwhile (the Files app).
+    static let serverCheckValidity: TimeInterval = 7 * 24 * 3600
+
+    /// Whether the server has to be asked about a waiting resource before it is uploaded: it never was, the answer is
+    /// old, or the asset changed since.
+    static func needsServerCheck(_ entry: BackupLedgerEntry, modifiedAt: Date?, now: Date) -> Bool {
+        guard let checkedAt = entry.checkedAt, !isModified(modifiedAt, since: entry.assetModifiedAt) else { return true }
+        return now.timeIntervalSince1970 - checkedAt >= serverCheckValidity
+    }
+
+    /// How often a pass looks at the whole library instead of what changed since the last one.
+    static let fullScanInterval: TimeInterval = 24 * 3600
+
+    /// The settings that decide which assets are backed up, and whether the app may see all of them; when they change,
+    /// the whole library is looked at again (what changed since the last pass says nothing about newly selected assets).
+    static func scopeSignature(_ settings: BackupSettings, isLimited: Bool) -> String {
+        let since = settings.since.map { String($0.timeIntervalSince1970) } ?? "-"
+        let albums = settings.albumIdentifiers.sorted().joined(separator: ",")
+        return "v1|\(settings.photos)|\(settings.videos)|\(since)|\(settings.includeHidden)|\(isLimited)|\(albums)"
+    }
+
+    /// The order of uploads: oldest first; the resources of an asset in the order the library lists them.
+    static func isOlder(_ a: BackupResource, _ b: BackupResource) -> Bool {
+        if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+        if a.localIdentifier != b.localIdentifier { return a.localIdentifier < b.localIdentifier }
+        return kindOrder(a.kind) < kindOrder(b.kind)
+    }
+
+    private static func kindOrder(_ kind: BackupResourceKind) -> Int {
+        BackupResourceKind.allCases.firstIndex(of: kind) ?? 0
     }
 
     /// What a run does with one resource.
@@ -277,7 +402,11 @@ enum BackupPolicy {
         case upload
     }
 
-    static func action(for resource: BackupResource, entry: BackupLedgerEntry?, now: Date, retryFailed: Bool = false) -> Action {
+    /// - Parameter retrySkipped: also take up what was skipped because it is only in iCloud (the setting changed, or the
+    ///   user asks).
+    static func action(
+        for resource: BackupResource, entry: BackupLedgerEntry?, now: Date, retryFailed: Bool = false, retrySkipped: Bool = false
+    ) -> Action {
         guard let entry else { return .reconcile }
         let modified = isModified(resource.modifiedAt, since: entry.assetModifiedAt)
         // The server still has the previous edit under the same name and capture time, so the matcher must not be asked.
@@ -296,6 +425,9 @@ enum BackupPolicy {
             return replacesEdit ? .upload : .reconcile
         case .pending where entry.matchedBy == MatchReason.user.rawValue:
             return .upload
+        case .skipped where !retrySkipped && !retryFailed:
+            // No attempt until the setting changes; a changed asset is still the same asset in iCloud.
+            return modified ? .touch : .done
         default:
             return replacesEdit ? .upload : .reconcile
         }
@@ -313,7 +445,55 @@ enum BackupPolicy {
     }
 
     /// The settings that decide which resources an asset has; when they change, every asset is scanned again.
+    ///
+    /// "Download originals from iCloud" is part of it although it selects nothing: switching it looks at the skipped
+    /// resources again.
     static func scanSignature(_ settings: BackupSettings) -> String {
-        "v1|\(settings.edits.rawValue)|\(settings.livePhotos)"
+        "v1|\(settings.edits.rawValue)|\(settings.livePhotos)|\(settings.downloadFromICloud)"
+    }
+
+    /// The resource of each asset that the Files app's record of "uploaded" stands for (SPEC §7.18.4 layer 2): the photo or
+    /// video itself, or its edited version when only that is backed up. Files says nothing about a RAW file, an edit next
+    /// to the original or the motion part of a Live Photo; those are looked up on the server.
+    static func filesAppPrimary(_ resources: [BackupResource]) -> Set<BackupEngine.LedgerKey> {
+        var byAsset: [String: [BackupResourceKind]] = [:]
+        for resource in resources { byAsset[resource.localIdentifier, default: []].append(resource.kind) }
+        return filesAppPrimary(kinds: byAsset)
+    }
+
+    /// The same, from the kinds of resources each asset has.
+    static func filesAppPrimary(kinds byAsset: [String: [BackupResourceKind]]) -> Set<BackupEngine.LedgerKey> {
+        var result = Set<BackupEngine.LedgerKey>()
+        for (localIdentifier, kinds) in byAsset {
+            let primary = kinds.first { $0 == .photo || $0 == .video } ?? kinds.first { $0 == .edited || $0 == .editedVideo }
+            if let primary { result.insert(BackupEngine.LedgerKey(localIdentifier: localIdentifier, kind: primary.rawValue)) }
+        }
+        return result
+    }
+
+    /// Files up to the size the system uploads on its own go first, larger ones (which the app has to send itself, in
+    /// chunks, while it runs) last: one big video at the head of the queue would otherwise hold back everything behind it
+    /// whenever the app only gets a short time. Without a limit the order stays.
+    static func uploadOrder(_ work: [BackupResource], backgroundLimit: Int64?) -> (first: [BackupResource], last: [BackupResource]) {
+        guard let backgroundLimit else { return (work, []) }
+        var first: [BackupResource] = []
+        var last: [BackupResource] = []
+        for resource in work {
+            if (resource.byteSize ?? 0) > backgroundLimit { last.append(resource) } else { first.append(resource) }
+        }
+        return (first, last)
+    }
+
+    /// Exports above this size are kept when an upload is interrupted, so the next attempt does not read (or download
+    /// from iCloud) the whole file again.
+    static let keptExportMinimumSize: Int64 = 32 * 1024 * 1024
+
+    /// Kept exports nobody came back for are removed after this time.
+    static let keptExportAge: TimeInterval = 3 * 24 * 3600
+
+    /// What a pass that ran to its end leaves behind (SPEC §7.18.7): "up to date" only when nothing failed and nothing waits.
+    static func finalPhase(failed: Int, pending: Int) -> BackupStatus.Phase {
+        if failed > 0 { return .incomplete(failed: failed) }
+        return pending > 0 ? .idle : .upToDate
     }
 }

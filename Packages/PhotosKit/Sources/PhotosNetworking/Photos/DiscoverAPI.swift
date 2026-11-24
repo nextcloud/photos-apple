@@ -232,6 +232,7 @@ extension PhotosAPI {
         }
     }
 
+    /// Creates a tag; when one with this name exists already (409), that one is returned if it can be assigned.
     public func createTag(_ name: String) async throws -> SystemTag {
         struct Body: Encodable {
             var name: String
@@ -239,9 +240,15 @@ extension PhotosAPI {
             var userAssignable = true
             var canAssign = true
         }
-        let response = try await dav.send(
-            "POST", connection.davURL("systemtags/"), headers: ["Content-Type": "application/json"],
-            body: try JSONEncoder().encode(Body(name: name)))
+        let response: HTTPResponse
+        do {
+            response = try await dav.send(
+                "POST", connection.davURL("systemtags/"), headers: ["Content-Type": "application/json"],
+                body: try JSONEncoder().encode(Body(name: name)))
+        } catch NetworkError.conflict {
+            if let existing = try await allTags().first(where: { $0.name.lowercased() == name.lowercased() }) { return existing }
+            throw NetworkError.conflict
+        }
         guard let location = response.header("content-location"), let id = Int(location.split(separator: "/").last ?? "") else {
             throw NetworkError.invalidResponse("tag without id")
         }

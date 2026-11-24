@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import PhotosModel
 import Testing
 
 @testable import PhotosDomain
@@ -120,5 +121,35 @@ import Testing
     @Test func anEndBeforeTheStartIsTreatedAsOneDay() {
         let locale = Locale(identifier: "en_GB")
         #expect(DateRangeLabel.string(from: date(2024, 5, 2), to: date(2024, 5, 1), locale: locale, calendar: utc) == "2 May 2024")
+    }
+
+    /// A photo link (ids are easy to guess, any app can send one) opens only what the library shows.
+    @Test func photoLinksOnlyOpenWhatTheLibraryShows() {
+        let photo = MediaItem(fileId: 7, path: "/Photos/a.jpg", mimeType: "image/jpeg")
+        #expect(DeepLink.mayOpen(photo))
+        #expect(!DeepLink.mayOpen(nil))
+        var archived = photo
+        archived.isArchived = true
+        #expect(!DeepLink.mayOpen(archived))
+        var motion = photo
+        motion.isLivePhotoVideo = true
+        #expect(!DeepLink.mayOpen(motion))
+    }
+
+    /// The stored place of a window names an album of one account: it is not restored for another one and is dropped when
+    /// that account is removed.
+    @Test func theStoredPlaceBelongsToAnAccount() throws {
+        let snapshot = NavigationSnapshot(destination: "albums", routes: [.album(id: "own:Secret trip")], account: "alice@cloud")
+        let stored = snapshot.stored
+        #expect(NavigationSnapshot(stored: stored) == snapshot)
+        #expect(snapshot.belongs(to: "alice@cloud"))
+        #expect(!snapshot.belongs(to: "bob@cloud"))
+        #expect(!NavigationSnapshot.isStale(stored, accounts: ["alice@cloud", "bob@cloud"]))
+        #expect(NavigationSnapshot.isStale(stored, accounts: ["bob@cloud"]))
+        #expect(!NavigationSnapshot.isStale("", accounts: []))
+        // Written by an earlier version: whose it is is unknown, so it is not kept.
+        let old = #"{"destination":"albums","routes":[{"album":{"id":"own:Secret trip"}}]}"#
+        #expect(NavigationSnapshot(stored: old)?.account == nil)
+        #expect(NavigationSnapshot.isStale(old, accounts: ["alice@cloud"]))
     }
 }

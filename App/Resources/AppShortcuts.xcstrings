@@ -2,6 +2,7 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Back up my photos with ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to start a backup. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
@@ -15,6 +16,7 @@
       }
     },
     "On this day in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to see photos taken on today's date in earlier years. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
@@ -29,6 +31,7 @@
       }
     },
     "Show the photo map in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to open the map of photos. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {

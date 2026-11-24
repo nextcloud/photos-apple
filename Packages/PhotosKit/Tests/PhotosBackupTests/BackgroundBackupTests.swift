@@ -64,7 +64,7 @@ final class FakeTransport: BackgroundUploading {
     func deactivate(_ jobId: String) { state.withLock { _ = $0.active.remove(jobId) } }
 }
 
-@Suite struct BackgroundBackupTests {
+@Suite(.timeLimit(.minutes(1))) struct BackgroundBackupTests {
     let library = FakeLibrary()
     let remote = FakeRemote()
     let transport = FakeTransport()
@@ -85,13 +85,16 @@ final class FakeTransport: BackgroundUploading {
         return settings
     }
 
-    func makeEngine(maxJobs: Int = 16, maxFileSize: Int64 = 1000, maxStagedBytes: Int64 = 100_000) async -> BackupEngine {
+    func makeEngine(maxJobs: Int = 16, maxFileSize: Int64 = 1000, maxStagedBytes: Int64 = 100_000, exports: URL? = nil) async
+        -> BackupEngine
+    {
         var background = BackgroundUploads(transport: transport, directory: directory)
         background.maxJobs = maxJobs
         background.maxFileSize = maxFileSize
         background.maxStagedBytes = maxStagedBytes
         let engine = BackupEngine(
-            library: library, remote: remote, database: database, accountId: AccountID(rawValue: "test"), background: background)
+            library: library, remote: remote, database: database, accountId: AccountID(rawValue: "test"), background: background,
+            exportDirectory: exports)
         let statuses = statuses
         await engine.setStatusHandler { status in statuses.values.withLock { $0.append(status) } }
         return engine
@@ -160,6 +163,119 @@ final class FakeTransport: BackgroundUploading {
             }
             return result.sorted()
         }
+    }
+
+    // MARK: Review r2
+
+    /// Item 2: one big video at the head of the queue must not hold back what the system could already be uploading.
+    @Test func filesTheSystemCanTakeGoBeforeALargeOneAndAnInterruptedLargeExportIsKept() async throws {
+        let exports = FileManager.default.temporaryDirectory.appending(path: "BackgroundBackupTests-exports-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: exports)
+        }
+        // The oldest item is larger than what the system takes.
+        add(resource("0001", .video, at: 0, size: 5000), resource("0002", at: 3600), resource("0003", at: 7200))
+        let engine = await makeEngine(exports: exports)
+        await engine.setKeptExportMinimumSize(2000)
+        let remote = remote
+        // The app's own upload of the large file never gets through: the background time runs out first.
+        remote.beforeUpload.withLock {
+            $0 = { name in
+                guard name == "IMG_0001.mov" else { return }
+                try? await Task.sleep(for: .seconds(30))
+                if Task.isCancelled { remote.state.withLock { $0.uploadErrors[name] = .cancelled } }
+            }
+        }
+        let pass = Task { await engine.run(settings) }
+        #expect(await eventually { library.exports.contains("IMG_0001.MOV") })
+        // Both small files were with the system before the large one was even read.
+        #expect(transport.started.map(\.request.url.lastPathComponent) == ["IMG_0002.heic", "IMG_0003.heic"])
+        #expect(library.exports == ["IMG_0002.HEIC", "IMG_0003.HEIC", "IMG_0001.MOV"])
+        await engine.interrupt()
+        await pass.value
+        #expect(status.isInterrupted)
+        #expect(try await entry(engine, "0001")?.state == BackupItemState.pending.rawValue)
+        #expect(try await entry(engine, "0001")?.attempts == 0)
+        // The small ones go on without the app, and the large export waits for the next attempt.
+        #expect(await engine.backgroundJobs.count == 2)
+        #expect(Sandbox.files(in: exports).contains("IMG_0001.MOV"))
+
+        // The next launch: the export is still needed, so it is not swept, and it is not read again.
+        remote.beforeUpload.withLock { $0 = nil }
+        remote.state.withLock { $0.uploadErrors = [:] }
+        let later = await makeEngine(exports: exports)
+        let next = Task { await later.run(settings) }
+        #expect(await eventually { remote.uploads == ["IMG_0001.mov"] })
+        await report(later, "IMG_0002.heic")
+        await report(later, "IMG_0003.heic")
+        await next.value
+        #expect(library.exports.filter { $0 == "IMG_0001.MOV" }.count == 1)
+        #expect(status.phase == .upToDate)
+        #expect(Sandbox.files(in: exports).isEmpty)
+    }
+
+    /// Item 2: a file PhotoKit gave no size for, which turns out too large for the system, waits for the small ones too.
+    @Test func aFileOfUnknownSizeThatTurnsOutLargeIsPostponed() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var unknown = resource("0001", .video, at: 0)
+        unknown.byteSize = nil
+        add(unknown, resource("0002", at: 3600))
+        library.state.withLock { $0.exportedSizes["IMG_0001.MOV"] = 5000 }
+        let engine = await makeEngine()
+        let pass = Task { await engine.run(settings) }
+        #expect(await eventually { remote.uploads == ["IMG_0001.mov"] })
+        // The small one was handed over before the app started sending the large one itself; it was exported once.
+        #expect(remote.attempts == ["IMG_0002.heic", "IMG_0001.mov"])
+        #expect(library.exports == ["IMG_0001.MOV", "IMG_0002.HEIC"])
+        await report(engine, "IMG_0002.heic")
+        await pass.value
+        #expect(status.phase == .upToDate)
+    }
+
+    /// Item 6: the system's PUT was refused because the name was taken after the name check.
+    @Test func aNameThatWasTakenMeanwhileIsPreparedAgain() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        addPhotos(["0001"])
+        let engine = await makeEngine()
+        let pass = Task { await engine.run(settings) }
+        #expect(await eventually { transport.started.count == 1 })
+        let path = try #require(await engine.backgroundJobs.values.first?.path)
+        // Another client put another file there; the server answers 412 to `If-None-Match: *`.
+        remote.state.withLock {
+            $0.files.append(RemoteCandidate(fileId: 7, path: path, kind: .image, size: 999, capturedAt: nil, modifiedAt: t0))
+        }
+        await report(engine, "IMG_0001.heic", status: 412)
+        // Not a failure: the same pass prepares it again and gets the next free name.
+        #expect(await eventually { transport.started.count == 2 })
+        #expect(try await entry(engine, "0001")?.state == BackupItemState.pending.rawValue)
+        #expect(try await entry(engine, "0001")?.attempts == 0)
+        #expect(transport.started.last?.request.url.lastPathComponent == "IMG_0001 (2).heic")
+        await report(engine, "IMG_0001 (2).heic")
+        await pass.value
+        #expect(try await entry(engine, "0001")?.state == BackupItemState.uploaded.rawValue)
+        #expect(try await entry(engine, "0001")?.serverPath?.hasSuffix("/IMG_0001 (2).heic") == true)
+        #expect(status.phase == .upToDate)
+        #expect(stagedFiles.isEmpty)
+    }
+
+    /// Item 6: the file that took the name is this very file (the first answer got lost): found, not uploaded twice.
+    @Test func aNameTakenByTheSameFileCountsAsUploaded() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        addPhotos(["0001"])
+        let engine = await makeEngine()
+        let pass = Task { await engine.run(settings) }
+        #expect(await eventually { transport.started.count == 1 })
+        let path = try #require(await engine.backgroundJobs.values.first?.path)
+        remote.state.withLock {
+            $0.files.append(RemoteCandidate(fileId: 7, path: path, kind: .image, size: 10, capturedAt: nil, modifiedAt: t0))
+        }
+        await report(engine, "IMG_0001.heic", status: 412)
+        await pass.value
+        #expect(transport.started.count == 1)
+        #expect(try await entry(engine, "0001")?.state == BackupItemState.uploaded.rawValue)
+        #expect(try await entry(engine, "0001")?.serverFileId == 7)
+        #expect(status.phase == .upToDate)
     }
 
     // MARK: Handing over and recording
@@ -377,7 +493,8 @@ final class FakeTransport: BackgroundUploading {
                 await test.report(engine, "IMG_0001.heic")
             }
         }
-        let next = Task { await engine.run(settings) }
+        // The user's "Back up now" asks the server again about what waits.
+        let next = Task { await engine.run(settings, retryFailed: true) }
         // Only the second one is left for this pass, and it is with the system already.
         #expect(await eventually { status.phase == .uploading(done: 0, total: 1, current: "") })
         #expect(try await entry(engine, "0001")?.state == BackupItemState.uploaded.rawValue)
@@ -425,7 +542,10 @@ final class FakeTransport: BackgroundUploading {
         #expect(try await entry(engine, "0001")?.attempts == 1)
         #expect(try await entry(engine, "0002")?.state == BackupItemState.uploaded.rawValue)
         #expect(status.failed == 1)
-        #expect(status.phase == .upToDate)
+        // Not "up to date": one item is not on the server.
+        #expect(status.phase == .incomplete(failed: 1))
+        #expect(status.lastFailure != nil)
+        #expect(status.pending == 0)
         #expect(stagedFiles.isEmpty)
     }
 

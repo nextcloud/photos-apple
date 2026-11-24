@@ -6,6 +6,11 @@ import PhotosCore
 import PhotosNetworking
 import SwiftUI
 
+#if os(iOS)
+    import AVFoundation
+    import VisionKit
+#endif
+
 /// Login with Login Flow v2 (SPEC §5.1).
 public struct LoginView: View {
     @Environment(AppModel.self) private var app
@@ -14,10 +19,20 @@ public struct LoginView: View {
     @State private var address = ""
     @State private var phase: Phase = .idle
     @State private var error: String?
-    @State private var untrusted: UntrustedCertificate?
+    @State private var untrusted: CertificateProblem?
     @State private var loginTask: Task<Void, Never>?
     @State private var pasteLink = ""
     @State private var unencrypted: UnencryptedLogin?
+    /// The QR code scanner is open (iPhone, iPad).
+    @State private var scanning = false
+    @State private var scanError: String?
+    /// The scanner found a login link; it is confirmed once the scanner has closed.
+    @State private var scannedLink = false
+    /// A login link or QR code waiting for the user to confirm the server and user it names.
+    @State private var confirmingLink: LinkLogin?
+    /// Hosts whose certificate was trusted in this login. Unless the login ends with an account on them, the trust is taken
+    /// back when the login is cancelled or left (`AppModel.forgetUnusedTrust`).
+    @State private var trustedHosts: Set<String> = []
     var isAddingAccount = false
 
     public init(isAddingAccount: Bool = false) {
@@ -31,21 +46,35 @@ public struct LoginView: View {
         case finishing
     }
 
-    struct UntrustedCertificate: Identifiable {
-        var id: String { host }
-        var host: String
-        var certificate: Data
-    }
-
     /// A login to a plain-http server that waits for the user's confirmation.
     enum UnencryptedLogin: Equatable {
         case address(host: String)
-        case link(host: String)
+        /// A login link names the user too; confirming the unencrypted connection also confirms the server and user.
+        case link(LinkLogin)
 
         var host: String {
             switch self {
-            case .address(let host), .link(let host): host
+            case .address(let host): host
+            case .link(let link): link.host
             }
+        }
+    }
+
+    /// What a login link or QR code would add: shown before anything is sent, so a planted code can't add an account on
+    /// another server unnoticed (SPEC §5.1).
+    struct LinkLogin: Equatable, Identifiable {
+        var id: String { "\(user)@\(host)" }
+        var host: String
+        var user: String
+
+        init(_ credentials: LoginService.Credentials) {
+            let url = credentials.serverURL
+            if let name = url.host(percentEncoded: false) {
+                host = url.port.map { "\(name):\($0)" } ?? name
+            } else {
+                host = url.absoluteString
+            }
+            user = credentials.loginName
         }
     }
 
@@ -56,18 +85,19 @@ public struct LoginView: View {
                 form.frame(minHeight: proxy.size.height)
             }
         }
-        .alert(item: $untrusted) { untrusted in
-            Alert(
-                title: Text("Untrusted certificate", bundle: .module),
-                message: Text(
-                    "The certificate of \(untrusted.host) is not trusted by this device. Only trust it if you know it belongs to your server.\n\n\(TrustStore.summary(of: untrusted.certificate))",
-                    bundle: .module),
-                primaryButton: .destructive(Text("Trust and continue", bundle: .module)) {
-                    try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
-                    startLogin()
-                },
-                secondaryButton: .cancel())
+        .certificateTrustAlert($untrusted) { untrusted in
+            try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
+            trustedHosts.insert(untrusted.host.lowercased())
+            startLogin()
         }
+        .onDisappear { forgetUnusedTrust() }
+    }
+
+    /// Takes back the trust in certificates accepted during this login for hosts that did not become an account.
+    func forgetUnusedTrust() {
+        guard !trustedHosts.isEmpty else { return }
+        app.forgetUnusedTrust(trustedHosts)
+        trustedHosts = []
     }
 
     var form: some View {
@@ -133,13 +163,32 @@ public struct LoginView: View {
             Button(String(localized: "Log in anyway", bundle: .module), role: .destructive) {
                 switch pending {
                 case .address: startLogin(allowUnencrypted: true)
-                case .link: loginWithLink(allowUnencrypted: true)
+                case .link: loginWithLink(confirmed: true)
                 }
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         } message: { pending in
+            switch pending {
+            case .address:
+                Text(
+                    "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                    bundle: .module)
+            case .link(let link):
+                Text(
+                    "This link logs in to \(link.host) as \(link.user). The server uses http:// instead of https://: your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if this is your server and you trust the network between you and it.",
+                    bundle: .module)
+            }
+        }
+        .alert(
+            String(localized: "Add this account?", bundle: .module),
+            isPresented: Binding(get: { confirmingLink != nil }, set: { shown in if !shown { confirmingLink = nil } }),
+            presenting: confirmingLink
+        ) { _ in
+            Button(String(localized: "Log in", bundle: .module)) { loginWithLink(confirmed: true) }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { link in
             Text(
-                "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                "Log in to \(link.host) as \(link.user)? Your photos will be shown from this server, and backup will upload to it. Only continue if this is your own Nextcloud.",
                 bundle: .module)
         }
     }
@@ -196,25 +245,98 @@ public struct LoginView: View {
     var qrLogin: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Paste a login link (nc://login/…) from Settings › Security › Devices & sessions on the web.", bundle: .module)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                #if os(iOS)
+                    if QRCodeScanner.isSupported {
+                        Text(
+                            "Scan the QR code shown under Settings › Security › Devices & sessions on the web, or paste the login link (nc://login/…) from there.",
+                            bundle: .module
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        Button {
+                            startScanning()
+                        } label: {
+                            Label(String(localized: "Scan QR code", bundle: .module), systemImage: "qrcode.viewfinder")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(phase != .idle)
+                        if let scanError { Text(scanError).font(.footnote).foregroundStyle(.secondary) }
+                    } else {
+                        pasteHint
+                    }
+                #else
+                    pasteHint
+                #endif
                 TextField(text: $pasteLink, prompt: Text(verbatim: "nc://login/…")) { Text("Login link", bundle: .module) }
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    #if os(iOS) || os(visionOS)
+                        .textInputAutocapitalization(.never)
+                    #endif
                 Button(String(localized: "Log in with link", bundle: .module)) { loginWithLink() }
                     .disabled(pasteLink.isEmpty || phase != .idle)
             }
             .padding(.top, 8)
         } label: {
-            Text("Log in with a QR code or link", bundle: .module)
+            Text(qrLoginTitle)
         }
+        #if os(iOS)
+            // The confirmation of the scanned link comes once the scanner is gone: an alert can't be shown while the sheet
+            // is still being dismissed.
+            .sheet(
+                isPresented: $scanning,
+                onDismiss: {
+                    if scannedLink {
+                        scannedLink = false
+                        loginWithLink()
+                    }
+                }
+            ) {
+                QRCodeScannerSheet { link in
+                    pasteLink = link
+                    scannedLink = true
+                    scanning = false
+                }
+            }
+        #endif
     }
+
+    var pasteHint: some View {
+        Text("Paste a login link (nc://login/…) from Settings › Security › Devices & sessions on the web.", bundle: .module)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Only where there is a scanner is a QR code promised (iPhone and iPad with a camera).
+    var qrLoginTitle: String {
+        #if os(iOS)
+            if QRCodeScanner.isSupported { return String(localized: "Log in with a QR code or link", bundle: .module) }
+        #endif
+        return String(localized: "Log in with a link", bundle: .module)
+    }
+
+    #if os(iOS)
+        /// Asks for the camera when needed, then opens the scanner; without camera access the link can still be pasted.
+        func startScanning() {
+            scanError = nil
+            Task {
+                let granted: Bool = await AVCaptureDevice.requestAccess(for: .video)
+                if granted && QRCodeScanner.isAvailable {
+                    scanning = true
+                } else {
+                    scanError = String(
+                        localized: "The camera can't be used. Allow camera access in Settings, or paste the login link below.",
+                        bundle: .module)
+                }
+            }
+        }
+    #endif
 
     func cancel() {
         loginTask?.cancel()
         loginTask = nil
         phase = .idle
+        forgetUnusedTrust()
     }
 
     func startLogin(allowUnencrypted: Bool = false) {
@@ -241,23 +363,28 @@ public struct LoginView: View {
                         using: flow.loginURL, callbackURLScheme: "nc", preferredBrowserSession: .ephemeral)
                 }
                 defer { browser.cancel() }
-                let credentials = try await service.waitForGrant(flow)
+                var credentials = try await service.waitForGrant(flow)
                 browser.cancel()
-                // The server may name another address for itself than the one that was typed.
+                // The server may name another address for itself than the one that was typed. The same host typed with
+                // https:// stays on https://.
+                credentials.serverURL = LoginService.securedServerURL(credentials.serverURL, typed: serverURL)
                 if !allowUnencrypted, LoginService.isUnencrypted(credentials.serverURL) {
                     error = String(
                         localized:
                             "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that.",
                         bundle: .module)
+                    // The app password was already granted: it is revoked again, over the address that was typed.
+                    await service.revoke(credentials, at: serverURL)
                     return
                 }
                 phase = .finishing
                 try await app.addAccount(credentials)
+                forgetUnusedTrust()
                 if isAddingAccount { dismiss() }
             } catch is CancellationError {
             } catch let networkError as NetworkError {
                 if case .untrustedCertificate(let host, let certificate?) = networkError {
-                    untrusted = UntrustedCertificate(host: host, certificate: certificate)
+                    untrusted = CertificateProblem(host: host, certificate: certificate)
                 } else {
                     error = networkError.localizedDescription
                 }
@@ -267,11 +394,16 @@ public struct LoginView: View {
         }
     }
 
-    func loginWithLink(allowUnencrypted: Bool = false) {
+    /// - Parameter confirmed: the user saw which server and user the link names and wants to log in.
+    func loginWithLink(confirmed: Bool = false) {
         let parsed = LoginService.parseLoginURL(pasteLink) ?? LoginService.parseOnetimeLoginURL(pasteLink)
-        if !allowUnencrypted, let serverURL = parsed?.serverURL, LoginService.isUnencrypted(serverURL) {
+        if !confirmed, let parsed {
             error = nil
-            unencrypted = .link(host: serverURL.host() ?? serverURL.absoluteString)
+            if LoginService.isUnencrypted(parsed.serverURL) {
+                unencrypted = .link(LinkLogin(parsed))
+            } else {
+                confirmingLink = LinkLogin(parsed)
+            }
             return
         }
         let service = app.loginService()
@@ -295,3 +427,112 @@ public struct LoginView: View {
         }
     }
 }
+
+/// The login form as a sheet (adding an account, logging in again), with a Cancel button: on the Mac a sheet has no
+/// other way out.
+struct AddAccountSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LoginView(isAddingAccount: true)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    }
+                }
+        }
+        #if os(macOS)
+            .frame(minWidth: 420, minHeight: 560)
+        #endif
+    }
+}
+
+/// Recognises the login links a QR code can carry.
+enum LoginQRCode {
+    /// The login link in a scanned code, or nil when the code is something else.
+    static func loginLink(in payload: String) -> String? {
+        let text = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard LoginService.parseLoginURL(text) != nil || LoginService.parseOnetimeLoginURL(text) != nil else { return nil }
+        return text
+    }
+}
+
+#if os(iOS)
+    /// The system's live scanner (VisionKit), limited to QR codes.
+    struct QRCodeScanner: UIViewControllerRepresentable {
+        /// Called with the text of every QR code that comes into view.
+        let onCode: @MainActor (String) -> Void
+
+        /// The device can scan at all (it has a camera and the needed hardware).
+        static var isSupported: Bool { DataScannerViewController.isSupported }
+        /// Scanning is possible right now (camera access granted, not restricted).
+        static var isAvailable: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
+
+        func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
+
+        func makeUIViewController(context: Context) -> DataScannerViewController {
+            let scanner = DataScannerViewController(
+                recognizedDataTypes: [.barcode(symbologies: [.qr])], qualityLevel: .balanced, recognizesMultipleItems: false,
+                isHighFrameRateTrackingEnabled: false, isHighlightingEnabled: true)
+            scanner.delegate = context.coordinator
+            try? scanner.startScanning()
+            return scanner
+        }
+
+        func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {}
+
+        static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {
+            scanner.stopScanning()
+        }
+
+        @MainActor final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+            let onCode: @MainActor (String) -> Void
+
+            init(onCode: @escaping @MainActor (String) -> Void) {
+                self.onCode = onCode
+            }
+
+            func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+                for item in addedItems {
+                    if case .barcode(let code) = item, let payload = code.payloadStringValue { onCode(payload) }
+                }
+            }
+        }
+    }
+
+    /// The scanner with a Cancel button; codes that are not login links are ignored, with a hint.
+    struct QRCodeScannerSheet: View {
+        let onLink: @MainActor (String) -> Void
+        @Environment(\.dismiss) private var dismiss
+        @State private var foundOtherCode = false
+
+        var body: some View {
+            NavigationStack {
+                QRCodeScanner { payload in
+                    if let link = LoginQRCode.loginLink(in: payload) { onLink(link) } else { foundOtherCode = true }
+                }
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .bottom) {
+                    Text(
+                        foundOtherCode
+                            ? String(localized: "This QR code is not a Nextcloud login code.", bundle: .module)
+                            : String(localized: "Point the camera at the QR code.", bundle: .module)
+                    )
+                    .font(.callout)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: .capsule)
+                    .padding(.bottom, 24)
+                }
+                .navigationTitle(String(localized: "Scan QR code", bundle: .module))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+#endif

@@ -1,14 +1,32 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import Foundation
+
+enum MediaFileNaming {
+    /// `name` in `folder`, with " 2", " 3"… before the extension when a file of that name exists.
+    static func freeURL(
+        for name: String, in folder: URL, exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> URL {
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var candidate = folder.appending(path: name)
+        var counter = 2
+        while exists(candidate) {
+            candidate = folder.appending(path: ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+            counter += 1
+        }
+        return candidate
+    }
+}
+
 #if os(macOS)
     import AppKit
-    import PhotosCore
-    import PhotosModel
 
-    /// "Export…" on the Mac: the originals of the selected items are downloaded into a folder the user picks.
+    /// "Export…" on the Mac: the originals are downloaded into a folder the user picks (`MediaSaveModel` does the saving).
     enum MediaFileExport {
-        @MainActor static func exportToFolder(_ items: [MediaItem], services: AccountServices) async throws {
+        /// Asks for the folder; nil when the panel is cancelled.
+        @MainActor static func chooseFolder() async -> URL? {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
@@ -22,27 +40,8 @@
             } else {
                 response = await panel.begin()
             }
-            guard response == .OK, let folder = panel.url else { return }
-            for item in items {
-                let file = try await services.images.originals.original(
-                    fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
-                try FileManager.default.copyItem(at: file, to: freeURL(for: item.name, in: folder))
-            }
-        }
-
-        /// `name` in `folder`, with " 2", " 3"… before the extension when a file of that name exists.
-        static func freeURL(
-            for name: String, in folder: URL, exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
-        ) -> URL {
-            let base = (name as NSString).deletingPathExtension
-            let ext = (name as NSString).pathExtension
-            var candidate = folder.appending(path: name)
-            var counter = 2
-            while exists(candidate) {
-                candidate = folder.appending(path: ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
-                counter += 1
-            }
-            return candidate
+            guard response == .OK else { return nil }
+            return panel.url
         }
     }
 #endif

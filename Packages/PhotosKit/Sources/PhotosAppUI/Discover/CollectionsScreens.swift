@@ -82,6 +82,18 @@ struct PeopleScreen: View {
     @State private var people: [Person] = []
     @State private var loading = true
     @State private var error: String?
+    /// Hidden on this device (Recognize has no way to hide a person on the server).
+    @State private var hidden = HiddenPeople()
+    @State private var showsHidden = false
+    @State private var renaming: Person?
+    @State private var newName = ""
+    @State private var actionError: String?
+
+    var shown: [Person] {
+        showsHidden ? people : people.filter { !hidden.names.contains($0.name) }
+    }
+
+    var hiddenCount: Int { people.filter { hidden.names.contains($0.name) }.count }
 
     var body: some View {
         ScrollView {
@@ -90,38 +102,110 @@ struct PeopleScreen: View {
                     String(localized: "People are not available", bundle: .module), systemImage: "person.2.slash", description: Text(error))
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 16)], spacing: 20) {
-                ForEach(people) { person in
+                ForEach(shown) { person in
                     NavigationLink {
-                        PersonScreen(person: person)
+                        PersonScreen(person: person) { Task { await load() } }
                     } label: {
                         CollectionTile(
                             title: person.isUnnamed ? String(localized: "Add name", bundle: .module) : person.name,
                             subtitle: AccessibilityText.photos(person.itemCount), coverFileId: person.coverFileId,
-                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module))
+                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module)
+                        )
+                        .opacity(hidden.names.contains(person.name) ? 0.45 : 1)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { personMenu(person) }
                 }
             }
             .padding()
+            if hiddenCount > 0 { hiddenNote }
         }
         .overlay { if loading && people.isEmpty && error == nil { ProgressView() } }
         .navigationTitle(String(localized: "People", bundle: .module))
         .toolbar {
             NavigationLink {
-                ItemsScreen(title: String(localized: "Unassigned faces", bundle: .module), sectioned: false) { services in
-                    try await services.api.personPhotos(nil, key: await session.recognizeKey()).map(\.item)
-                }
+                UnassignedFacesScreen()
             } label: {
                 Label(String(localized: "Unassigned faces", bundle: .module), systemImage: "person.crop.circle.badge.questionmark")
             }
+        }
+        .alert(String(localized: "Name", bundle: .module), isPresented: isRenaming) {
+            TextField(String(localized: "Name", bundle: .module), text: $newName)
+            Button(String(localized: "Save", bundle: .module)) { if let person = renaming { rename(person, to: newName) } }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        }
+        .alert(
+            String(localized: "Something went wrong", bundle: .module),
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+        } message: {
+            Text(actionError ?? "")
         }
         .task { await load() }
         .refreshable { await load() }
     }
 
+    var isRenaming: Binding<Bool> {
+        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    @ViewBuilder func personMenu(_ person: Person) -> some View {
+        Button {
+            newName = person.isUnnamed ? "" : person.name
+            renaming = person
+        } label: {
+            Label(PeopleActions.renameTitle, systemImage: "pencil")
+        }
+        Button {
+            setHidden(person, !hidden.names.contains(person.name))
+        } label: {
+            if hidden.names.contains(person.name) {
+                Label(PeopleActions.showTitle, systemImage: "eye")
+            } else {
+                Label(PeopleActions.hideTitle, systemImage: "eye.slash")
+            }
+        }
+    }
+
+    /// Says how many people are hidden and that it is this device only, with a way to see them.
+    var hiddenNote: some View {
+        VStack(spacing: 8) {
+            Text(PeopleActions.hiddenNote(count: hiddenCount)).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button(showsHidden ? PeopleActions.hideHiddenTitle : PeopleActions.showHiddenTitle) { showsHidden.toggle() }
+                .font(.footnote)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+    }
+
+    func setHidden(_ person: Person, _ value: Bool) {
+        if value { hidden.names.insert(person.name) } else { hidden.names.remove(person.name) }
+        if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+    }
+
+    func rename(_ person: Person, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let problem = PersonName.problem(trimmed, existing: people.map(\.name), current: person.name) {
+            actionError = PersonName.message(problem)
+            return
+        }
+        guard trimmed != person.name else { return }
+        Task {
+            do {
+                try await session.services?.api.renamePerson(person.name, to: trimmed, key: await session.recognizeKey())
+                hidden = hidden.renamed(person.name, to: trimmed)
+                if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+                await load()
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
     func load() async {
         loading = true
         defer { loading = false }
+        if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) }
         guard let services = session.services else { return }
         do {
             let key = await session.recognizeKey()
@@ -136,15 +220,61 @@ struct PeopleScreen: View {
     }
 }
 
+/// Titles of the people actions: title case on the Mac, sentence case elsewhere.
+enum PeopleActions {
+    static var renameTitle: String { String(localized: "Rename…", bundle: .module) }
+
+    static var hideTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Hide Person", bundle: .module),
+            other: LocalizedStringResource("Hide person", bundle: .module))
+    }
+
+    static var showTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Show Person", bundle: .module),
+            other: LocalizedStringResource("Show person", bundle: .module))
+    }
+
+    static var moveTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Move to Another Person…", bundle: .module),
+            other: LocalizedStringResource("Move to another person…", bundle: .module))
+    }
+
+    static var showHiddenTitle: String {
+        String(localized: "Show hidden people", bundle: .module)
+    }
+
+    static var hideHiddenTitle: String {
+        String(localized: "Don't show hidden people", bundle: .module)
+    }
+
+    /// Hiding is kept on this device: the server has no way to hide a person.
+    static func hiddenNote(count: Int) -> String {
+        String(
+            localized: "\(count) people are hidden on this device. Nextcloud can't hide people on all your devices yet.", bundle: .module)
+    }
+}
+
 struct PersonScreen: View {
     let person: Person
+    /// Called after the person was renamed, merged, emptied or deleted, so the People screen loads again.
+    var changed: () -> Void = {}
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var renaming = false
     @State private var newName = ""
     @State private var merging = false
+    @State private var confirmRemove = false
     @State private var error: String?
     @State private var photos: [PersonPhoto] = []
+    @State private var moving: [MediaItem]?
+    @State private var hidden = HiddenPeople()
+    /// Counted up to load the photos again after some were moved away.
+    @State private var reloads = 0
+
+    var isHidden: Bool { hidden.names.contains(person.name) }
 
     var body: some View {
         ItemsScreen(
@@ -163,8 +293,13 @@ struct PersonScreen: View {
                                     try? await session.services?.api.removeFromPerson(person.name, childName: photo.childName, key: key)
                                 }
                             }
+                            reloads += 1
+                            changed()
                         }
-                    }
+                    },
+                    GridMenuAction(id: "movePerson", title: PeopleActions.moveTitle, systemImage: "person.2.crop.square.stack") { _ in
+                        moving = items
+                    },
                 ]
             },
             load: { services in
@@ -178,35 +313,80 @@ struct PersonScreen: View {
                     renaming = true
                 }
                 Button(String(localized: "Merge with…", bundle: .module)) { merging = true }
-                Button(String(localized: "Remove person", bundle: .module), role: .destructive) {
-                    Task {
-                        try? await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
-                        dismiss()
-                    }
-                }
+                Button(isHidden ? PeopleActions.showTitle : PeopleActions.hideTitle) { toggleHidden() }
+                Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
             }
         }
+        .id(reloads)
+        .task { if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) } }
         .alert(String(localized: "Name", bundle: .module), isPresented: $renaming) {
             TextField(String(localized: "Name", bundle: .module), text: $newName)
-            Button(String(localized: "Save", bundle: .module)) {
+            Button(String(localized: "Save", bundle: .module)) { rename() }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        }
+        .sheet(isPresented: $merging) {
+            MergePersonSheet(person: person) {
+                changed()
+                dismiss()
+            }
+        }
+        .sheet(isPresented: Binding(get: { moving != nil }, set: { if !$0 { moving = nil } })) {
+            PersonPickerSheet(title: PeopleActions.moveTitle, excluding: person.name) { name in
+                let ids = Set((moving ?? []).map(\.fileId))
+                let children: [String] = photos.filter { ids.contains($0.item.fileId) }.map(\.childName)
+                try await session.services?.api.moveFaces(children, from: person.name, to: name, key: await session.recognizeKey())
+                reloads += 1
+                changed()
+            }
+        }
+        .confirmationDialog(
+            String(localized: "Remove this person?", bundle: .module), isPresented: $confirmRemove, titleVisibility: .visible
+        ) {
+            Button(String(localized: "Remove person", bundle: .module), role: .destructive) {
                 Task {
                     do {
-                        try await session.services?.api.renamePerson(person.name, to: newName, key: await session.recognizeKey())
+                        try await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
+                        changed()
                         dismiss()
                     } catch { self.error = error.localizedDescription }
                 }
             }
-            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: {
+            Text("The person and the assignment of their photos are removed. The photos stay in your library.", bundle: .module)
         }
-        .sheet(isPresented: $merging) { MergePersonSheet(person: person) { dismiss() } }
         .alert(
             String(localized: "Something went wrong", bundle: .module),
             isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
         ) {
         } message: {
             Text(error ?? "")
+        }
+    }
+
+    func toggleHidden() {
+        if isHidden { hidden.names.remove(person.name) } else { hidden.names.insert(person.name) }
+        if let file = session.hiddenPeopleFile { hidden.save(to: file) }
+        changed()
+    }
+
+    func rename() {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != person.name else { return }
+        Task {
+            do {
+                let key = await session.recognizeKey()
+                let others: [String] = ((try? await session.services?.api.people(key: key)) ?? []).map(\.name)
+                if let problem = PersonName.problem(name, existing: others, current: person.name) {
+                    error = PersonName.message(problem)
+                    return
+                }
+                try await session.services?.api.renamePerson(person.name, to: name, key: key)
+                if let file = session.hiddenPeopleFile { HiddenPeople.load(from: file).renamed(person.name, to: name).save(to: file) }
+                changed()
+                dismiss()
+            } catch { self.error = error.localizedDescription }
         }
     }
 }
@@ -251,7 +431,7 @@ struct TagsScreen: View {
             LazyVGrid(columns: tileColumns, spacing: 20) {
                 ForEach(tags) { tag in
                     NavigationLink {
-                        ItemsScreen(title: tag.name) { services in try await services.api.tagContent(tag.id) }
+                        TagScreen(tag: tag)
                     } label: {
                         CollectionTile(
                             title: tag.name, subtitle: AccessibilityText.photos(tag.itemCount),
@@ -265,7 +445,35 @@ struct TagsScreen: View {
         }
         .navigationTitle(String(localized: "Tags", bundle: .module))
         .task {
-            do { tags = try await session.services?.api.tagsInUse() ?? [] } catch { self.error = error.localizedDescription }
+            do {
+                tags = try await session.services?.api.tagsInUse() ?? []
+            } catch {
+                // Offline: the tags known from the last refresh, with their photos in the library.
+                let local = session.services.flatMap { try? LabelStore(database: $0.database).tags() } ?? []
+                tags = local.filter { $0.itemCount != 0 }
+                if tags.isEmpty { self.error = error.localizedDescription }
+            }
+        }
+    }
+}
+
+/// The photos of one tag, with "Remove tag" for a selection.
+struct TagScreen: View {
+    let tag: SystemTag
+    @Environment(SessionModel.self) private var session
+
+    var body: some View {
+        ItemsScreen(
+            title: tag.name,
+            extraActions: { items in
+                [
+                    GridMenuAction(id: "untag", title: String(localized: "Remove tag", bundle: .module), systemImage: "tag.slash") { _ in
+                        Task { await session.setTag(tag, on: items, assigned: false) }
+                    }
+                ]
+            }
+        ) { _ in
+            try await session.tagItems(tag.id)
         }
     }
 }
@@ -277,11 +485,14 @@ struct FoldersScreen: View {
     var sharedWithYou = false
     @Environment(SessionModel.self) private var session
     @State private var folders: [FolderEntry] = []
-    @State private var items: [MediaItem] = []
+    /// The folder's own photos, shown by the grid the rest of the app uses: selection, context menu, share,
+    /// favourite, delete, keyboard and the viewer come with it.
+    @State private var feed = GridFeed()
     @State private var previews: [String: [FileID]] = [:]
     @State private var error: String?
     @State private var loaded = false
-    @State private var viewer: ViewerStart?
+    @AppStorage("gridColumns") private var columns = GridColumns.default
+    @State private var sharing: SharingTarget?
 
     var title: String {
         if path == "/" {
@@ -291,64 +502,80 @@ struct FoldersScreen: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: tileColumns, spacing: 20) {
-                ForEach(folders) { folder in
-                    NavigationLink {
-                        FoldersScreen(path: folder.path)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            FolderMosaic(fileIds: folder.previews.isEmpty ? previews[folder.path] ?? [] : folder.previews)
-                                .aspectRatio(1, contentMode: .fit)
-                                .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
-                            Label(folder.name, systemImage: "folder").font(.headline).lineLimit(1)
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(
-                            AccessibilityText.collection(
-                                title: folder.name, kind: String(localized: "folder", bundle: .module), detail: nil))
+        Group {
+            if feed.items.isEmpty {
+                // Only subfolders (or nothing yet): large tiles, as on the other collection screens.
+                ScrollView {
+                    LazyVGrid(columns: tileColumns, spacing: 20) {
+                        ForEach(folders) { folder in folderLink(folder) }
                     }
-                    .buttonStyle(.plain)
-                    .task { await loadPreviews(folder) }
+                    .padding()
+                    if let error, !folders.isEmpty { Text(error).foregroundStyle(.red).padding() }
                 }
-            }
-            .padding()
-            if !items.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 2)], spacing: 2) {
-                    ForEach(items) { item in
-                        PreviewImage(item: item, bucket: 256)
-                            .aspectRatio(1, contentMode: .fill)
-                            .clipped()
-                            .contentShape(.rect)
-                            .onTapGesture { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
-                            // A tap gesture alone is invisible to VoiceOver, Voice Control and keyboard users.
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(
-                                AccessibilityText.media(
-                                    isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp,
-                                    duration: item.duration, place: item.place, isFavorite: item.isFavorite)
-                            )
-                            .accessibilityAddTraits([.isButton, .isImage])
-                            .accessibilityAction { viewer = ViewerStart(ids: items.map(\.fileId), startId: item.fileId) }
+                .overlay { status }
+                .navigationTitle(title)
+            } else {
+                // Subfolders above the photos. The grid scrolls by itself, so they are a strip that stays in place.
+                VStack(spacing: 0) {
+                    if !folders.isEmpty {
+                        FolderStrip(folders: folders) { folder in folderLink(folder, compact: true) }
+                        Divider()
+                    }
+                    MediaGridScreen(
+                        feed: feed, title: title, showsHeaders: false,
+                        emptyTitle: String(localized: "No photos in this folder", bundle: .module), emptyMessage: "", columns: $columns
+                    ) {
+                        EmptyView()
                     }
                 }
             }
-            if let error, !folders.isEmpty || !items.isEmpty { Text(error).foregroundStyle(.red).padding() }
         }
-        .overlay { status }
-        .navigationTitle(title)
         .task { await load() }
         .refreshable { await load() }
-        #if os(iOS)
-            .fullScreenCover(item: $viewer) { start in MediaViewer(ids: start.ids, startId: start.startId).environment(session) }
-        #else
-            .navigationDestination(item: $viewer) { start in MediaViewer(ids: start.ids, startId: start.startId) }
-        #endif
+        .toolbar {
+            if path != "/" {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        sharing = SharingTarget(path: path, isFolder: true)
+                    } label: {
+                        Label(String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus")
+                    }
+                    .help(String(localized: "Share via Nextcloud…", bundle: .module))
+                }
+            }
+        }
+        .sheet(item: $sharing) { target in
+            if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
+        }
+    }
+
+    func folderLink(_ folder: FolderEntry, compact: Bool = false) -> some View {
+        NavigationLink {
+            FoldersScreen(path: folder.path)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                FolderMosaic(fileIds: folder.previews.isEmpty ? previews[folder.path] ?? [] : folder.previews)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
+                if compact {
+                    // Narrow tiles: the name may take two lines instead of ending after a few letters.
+                    Text(folder.name).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
+                } else {
+                    Label(folder.name, systemImage: "folder").font(.headline).lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                AccessibilityText.collection(
+                    title: folder.name, kind: String(localized: "folder", bundle: .module), detail: nil))
+        }
+        .buttonStyle(.plain)
+        .task { await loadPreviews(folder) }
     }
 
     /// Progress while loading, and a centred empty or error state instead of a blank screen.
     @ViewBuilder var status: some View {
-        if !folders.isEmpty || !items.isEmpty {
+        if !folders.isEmpty {
             EmptyView()
         } else if !loaded {
             ProgressView()
@@ -381,8 +608,9 @@ struct FoldersScreen: View {
             } else {
                 let result = try await services.api.folder(path, mimeTypes: session.features.allMimeTypes, nomedia: session.excludedFolders)
                 folders = result.folders
-                items = result.items
-                try? services.library.storeCollectionMedia(items)
+                // Stored for the viewer and the grid's actions; newest first like everywhere else.
+                let items: [MediaItem] = result.items.filter { !$0.isLivePhotoVideo }
+                feed.apply(await ItemsPreparation.prepare(items, library: services.library), flat: true)
             }
         } catch {
             self.error = error.localizedDescription
@@ -392,6 +620,30 @@ struct FoldersScreen: View {
     func loadPreviews(_ folder: FolderEntry) async {
         guard folder.previews.isEmpty, previews[folder.path] == nil, let services = session.services else { return }
         previews[folder.path] = (try? await services.api.folderPreviews(folder.path, mimeTypes: session.features.imageMimeTypes)) ?? []
+    }
+}
+
+/// Subfolders in one row above a folder's photos.
+struct FolderStrip<Tile: View>: View {
+    let folders: [FolderEntry]
+    @ViewBuilder var tile: (FolderEntry) -> Tile
+    /// The tiles grow with the text size, which their labels follow.
+    @ScaledMetric(relativeTo: .subheadline) private var side = 104.0
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(folders) { folder in
+                    tile(folder).frame(width: side)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .scrollIndicators(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Folders", bundle: .module))
     }
 }
 

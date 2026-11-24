@@ -13,8 +13,6 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_EMIT_LOC_STRINGS: YES
@@ -57,9 +55,16 @@ targets:
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         ENABLE_USER_SELECTED_FILES: readwrite
         ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: App/NextcloudPhotos.entitlements
+        # macOS spells the push entitlement differently (com.apple.developer.aps-environment).
+        "PHOTOS_ENTITLEMENTS_YES[sdk=macosx*]": App/NextcloudPhotos-macOS.entitlements
       configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
         Release:
-          CODE_SIGN_ENTITLEMENTS: App/NextcloudPhotos.entitlements
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
     info:
       path: App/Info.plist
       properties:
@@ -67,6 +72,8 @@ targets:
         PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only encryption that is exempt: HTTPS, the keychain, and standard algorithms of the system (RSA, SHA-2) for
+        # push notifications and checksums. Reasoning: docs/PRIVACY-AND-EXPORT.md.
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.photography
         UILaunchScreen: {}
@@ -74,17 +81,30 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
         NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
-        NSCameraUsageDescription: Nextcloud Photos uses the camera to scan login QR codes and to take photos directly to your Nextcloud.
-        NSFaceIDUsageDescription: Nextcloud Photos uses Face ID to protect the app and your archived photos.
+        NSCameraUsageDescription: Nextcloud Photos uses the camera to scan a login QR code.
+        # One text for every platform: Info.plist values cannot vary by device (a string catalog's device variations end
+        # up in InfoPlist.stringsdict, which the system does not read for Info.plist keys), and the Mac must not say
+        # Face ID. The system's own question already names Face ID or Optic ID.
+        NSFaceIDUsageDescription: Nextcloud Photos uses this to unlock the app and your archived photos.
         NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
         NSAppTransportSecurity:
-          # Nextcloud servers are self-hosted: http and self-signed certificates must be possible (user-approved per host).
+          # Nextcloud servers are self-hosted and their address is typed in by the user: plain http (home networks) and
+          # TLS setups that ATS rejects must stay possible. Per-host exceptions (SPEC §8) cannot be used, the hosts are
+          # not known at build time. The app asks before it signs in over http and before it trusts an unknown
+          # certificate. App Review justification: docs/PRIVACY-AND-EXPORT.md.
           NSAllowsArbitraryLoads: true
         CFBundleURLTypes:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
-        BGTaskSchedulerPermittedIdentifiers: [com.nextcloud.photos.refresh, com.nextcloud.photos.processing]
+        # Refresh, processing and on-device labels (`ContentLabeling`) have fixed identifiers. The last one is the
+        # user-started backup as a continued processing task (`ContinuedBackup`): its identifier must start with the bundle
+        # identifier, and the system expects a wildcard.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.nextcloud.photos.refresh
+          - com.nextcloud.photos.processing
+          - com.nextcloud.photos.labels
+          - $(PRODUCT_BUNDLE_IDENTIFIER).backup.*
         UIBackgroundModes: [fetch, processing, remote-notification]
   ShareExtension:
     type: app-extension
@@ -104,14 +124,21 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/ShareExtension/ShareExtension.entitlements
       configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
         Release:
-          CODE_SIGN_ENTITLEMENTS: Extensions/ShareExtension/ShareExtension.entitlements
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
     info:
       path: Extensions/ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: Nextcloud Photos
         PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        # With app lock on, sharing to the app needs the same unlock as the app (SPEC §8).
+        NSFaceIDUsageDescription: Nextcloud Photos uses this to unlock the app and your archived photos.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -139,9 +166,14 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/NotificationService/NotificationService.entitlements
       configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
         Release:
-          CODE_SIGN_ENTITLEMENTS: Extensions/NotificationService/NotificationService.entitlements
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
     info:
       path: Extensions/NotificationService/Info.plist
       properties:
@@ -169,9 +201,14 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/Widgets/Widgets.entitlements
       configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
         Release:
-          CODE_SIGN_ENTITLEMENTS: Extensions/Widgets/Widgets.entitlements
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
     info:
       path: Extensions/Widgets/Info.plist
       properties:
@@ -181,6 +218,20 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
+  NextcloudPhotosUITests:
+    type: bundle.ui-testing
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: UITests
+    dependencies:
+      - target: NextcloudPhotos
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).uitests
+        TEST_TARGET_NAME: NextcloudPhotos
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   NextcloudPhotos:
     build:
@@ -188,3 +239,11 @@ schemes:
         NextcloudPhotos: all
     test:
       gatherCoverageData: true
+  NextcloudPhotosUITests:
+    build:
+      targets:
+        NextcloudPhotos: all
+        NextcloudPhotosUITests: [test]
+    test:
+      targets:
+        - NextcloudPhotosUITests

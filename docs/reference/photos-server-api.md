@@ -1,7 +1,7 @@
 # Nextcloud Photos — server API inventory for a native Apple client
 
-Source of truth: `nextcloud/photos` **master @ 8258010a9** (local clone `~/aloha-work/photos`, app version `9.0.0-dev.0`).
-Cross-checked against: Nextcloud server master (`~/aloha-work/server-core` @ cea3c77bb, `36.0.0 dev`), `nextcloud/recognize` main @ 2fdc5327 (v13.2.0) plus tags v11/v12, and `nextcloud/photos` branches `stable33`/`stable34`/`stable35`.
+Source of truth: `nextcloud/photos` **master @ 8258010a9** (app version `9.0.0-dev.0`).
+Cross-checked against: Nextcloud server master (@ cea3c77bb, `36.0.0 dev`), `nextcloud/recognize` main @ 2fdc5327 (v13.2.0) plus tags v11/v12, and `nextcloud/photos` branches `stable33`/`stable34`/`stable35`.
 Sample responses were captured read-only against a local NC 36-dev test instance with Photos installed. Their shape matches the master code paths cited.
 
 Paths in `file:line` form are relative to the photos repo unless prefixed `server:` (server-core) or `recognize:` (recognize main).

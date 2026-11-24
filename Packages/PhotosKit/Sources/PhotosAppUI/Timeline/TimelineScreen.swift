@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import PhotosCore
+import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -14,6 +15,28 @@ struct TimelineScreen: View {
     @AppStorage("gridColumns") private var columns = GridColumns.default
     @State private var mediaKind: MediaFilter
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @AppStorage(TimelineDisplay.stackCopiesKey) private var stackCopies = true
+    @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
+    /// Photos are being selected: the memories strip makes room for the grid.
+    @State private var gridSelection = GridSelectionState()
+    @State private var memories: [Memory] = []
+
+    /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
+    var showsMemoriesStrip: Bool {
+        filter == .all && mediaKind == .all && showsMemories && !gridSelection.isSelecting
+    }
+
+    /// What the grid observes: the media kind, whether copies of a photo are stacked and which partner folders are
+    /// hidden (Settings › Partner sharing, or the toolbar button).
+    struct Query: Hashable {
+        var kind: MediaFilter
+        var stacksCopies: Bool
+        var hiddenPartnerFolders: [String] = []
+    }
+
+    var query: Query {
+        Query(kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [])
+    }
 
     init(filter: MediaFilter) {
         self.filter = filter
@@ -65,6 +88,29 @@ struct TimelineScreen: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if showsMemoriesStrip && !memories.isEmpty {
+                MemoriesStrip(memories: memories)
+            }
+            grid
+        }
+        .task(id: MemoriesStrip.loadKey(session.syncStatus, isShown: filter == .all && showsMemories)) {
+            guard filter == .all, showsMemories, let services = session.services else { return }
+            if let loaded = await MemoriesStrip.load(services) { memories = loaded }
+        }
+        .onPreferenceChange(GridSelectionState.Key.self) { state in
+            gridSelection = state
+        }
+        .task(id: query) { observe() }
+        .dropDestination(for: URL.self) { urls, _ in
+            session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
+            return !urls.isEmpty
+        }
+        // Pull to refresh reconciles only when the last walk through the library is a while ago ("Sync now" always does).
+        .refreshable { await session.syncNow(reconcile: .refresh) }
+    }
+
+    var grid: some View {
         MediaGridScreen(
             feed: feed,
             title: title,
@@ -76,6 +122,7 @@ struct TimelineScreen: View {
         ) {
             TransfersIndicator()
             UploadMenu()
+            PartnerFilterButton()
             #if os(macOS)
                 // Mac: zoom slider between two buttons that step, like Apple Photos. Three toolbar items, not a slider
                 // with value labels or a stack: the toolbar gives every control of an item that item's label, so the
@@ -102,21 +149,18 @@ struct TimelineScreen: View {
                 .pickerStyle(.menu)
             }
         }
-        .task(id: mediaKind) { observe() }
-        .dropDestination(for: URL.self) { urls, _ in
-            session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
-            return !urls.isEmpty
-        }
-        .refreshable { await session.syncNow(forceReconcile: true) }
     }
 
     func observe() {
         guard let services = session.services else { return }
         let library = services.library
-        let excluded = session.excludedFolders
+        let excluded = session.excludedFolders + (session.partners?.hiddenFolders ?? [])
         let kind = mediaKind
         // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.
-        feed.observe({ library.observeGrid(kind, excludedFolders: excluded, coalescing: .milliseconds(300)) }, flat: false)
+        let query: @Sendable () -> GridStream = {
+            library.observeGrid(kind, excludedFolders: excluded, coalescing: .milliseconds(300))
+        }
+        feed.observe(stackCopies ? TimelineStacking.stacked(query) : query, flat: false)
     }
 
     var emptyTitle: String {

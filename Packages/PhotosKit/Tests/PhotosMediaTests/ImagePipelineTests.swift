@@ -134,7 +134,7 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-@Suite struct ImagePipelineTests {
+@Suite(.timeLimit(.minutes(1))) struct ImagePipelineTests {
     let server = PreviewStubServer()
     let directory = FileManager.default.temporaryDirectory.appending(path: "pipeline-\(UUID().uuidString)")
 
@@ -347,7 +347,7 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-@Suite struct PreviewCacheTrimTests {
+@Suite(.timeLimit(.minutes(1))) struct PreviewCacheTrimTests {
     let directory = FileManager.default.temporaryDirectory.appending(path: "cache-\(UUID().uuidString)")
 
     /// Writes a cache file of `bytes` bytes that was last used `age` seconds ago.
@@ -396,13 +396,46 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
             cache.store(data, fileId: FileID(id), etag: "e", bucket: 256)
             let url = cache.fileURL(key: PreviewCache.key(fileId: FileID(id), etag: "e", bucket: 256))
             try FileManager.default.setAttributes(
-                [.modificationDate: Date().addingTimeInterval(-Double(4 - id) * 3600)], ofItemAtPath: url.path(percentEncoded: false))
+                [.modificationDate: Date().addingTimeInterval(-Double(4 - id) * 86_400)], ofItemAtPath: url.path(percentEncoded: false))
         }
         // 1 is the oldest file, but it was just looked at.
         cache.clearMemory()
         #expect(cache.diskImage(fileId: 1, etag: "e", bucket: 256) != nil)
         cache.trimNow(toBytes: Int64(data.count) + 1)
         #expect((1...3).filter { has(cache, FileID($0)) } == [1])
+    }
+
+    /// Reads are written as "used" in batches, and a file used again on the same day is not written at all.
+    @Test func usesAreWrittenInBatchesAtMostOncePerDay() throws {
+        let cache = PreviewCache(directory: directory)
+        let context = CGContext(
+            data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let data = ImageDecoding.jpegData(context.makeImage()!)!
+        let reference = Date()
+        let ages: [FileID: TimeInterval] = [1: 2 * 86_400, 2: 2 * 3600]
+        func modified(_ id: FileID) throws -> Date? {
+            let url = cache.fileURL(key: PreviewCache.key(fileId: id, etag: "e", bucket: 256))
+            return try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        for (id, age) in ages {
+            cache.store(data, fileId: id, etag: "e", bucket: 256)
+            let url = cache.fileURL(key: PreviewCache.key(fileId: id, etag: "e", bucket: 256))
+            try FileManager.default.setAttributes(
+                [.modificationDate: reference.addingTimeInterval(-age)], ofItemAtPath: url.path(percentEncoded: false))
+        }
+        let before = try [modified(1), modified(2)]
+        for _ in 0..<3 {
+            cache.clearMemory()
+            #expect(cache.diskImage(fileId: 1, etag: "e", bucket: 256) != nil)
+            #expect(cache.diskImage(fileId: 2, etag: "e", bucket: 256) != nil)
+        }
+        // Reading wrote nothing yet.
+        #expect(try [modified(1), modified(2)] == before)
+        cache.flushTouches(now: reference)
+        #expect(try abs(modified(1)?.timeIntervalSince(reference) ?? 99) < 1)
+        // Used two hours ago: still counts as used today.
+        #expect(try modified(2) == before[1])
     }
 
     @Test func pipelineTrimsBothCachesAndKeepsPinnedPreviewsAndOfflineFiles() async throws {

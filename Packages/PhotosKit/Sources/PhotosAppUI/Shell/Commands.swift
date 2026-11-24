@@ -13,6 +13,8 @@ public struct MainActions {
     var upload: () -> Void
     var openPublicLink: () -> Void
     var syncNow: () -> Void
+    /// Import from Google Takeout (Mac only).
+    var importTakeout: (() -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -25,6 +27,8 @@ public struct GridActions {
     var addToAlbum: () -> Void
     var zoomIn: (() -> Void)?
     var zoomOut: (() -> Void)?
+    /// Back to the whole photo (viewer only).
+    var zoomToFit: (() -> Void)? = nil
     /// Opens the selected item in the viewer (grid only).
     var open: (() -> Void)? = nil
     /// Opens the photo editor for the selected photo.
@@ -78,6 +82,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Upload Photos…", bundle: .module)) { main?.upload() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(main == nil)
+            #if os(macOS)
+                Button(String(localized: "Import from Google Takeout…", bundle: .module)) { main?.importTakeout?() }
+                    .disabled(main?.importTakeout == nil)
+            #endif
             Button(Self.exportTitle) { grid?.export?() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(grid?.export == nil || selectionCount == 0)
@@ -99,6 +107,9 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Zoom Out", bundle: .module)) { grid?.zoomOut?() }
                 .keyboardShortcut("-")
                 .disabled(grid?.zoomOut == nil)
+            Button(String(localized: "Zoom to Fit", bundle: .module)) { grid?.zoomToFit?() }
+                .keyboardShortcut("0")
+                .disabled(grid?.zoomToFit == nil)
             Divider()
             Button(String(localized: "Sync Now", bundle: .module)) { main?.syncNow() }
                 .keyboardShortcut("r")

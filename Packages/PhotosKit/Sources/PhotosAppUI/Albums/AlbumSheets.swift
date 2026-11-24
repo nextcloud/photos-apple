@@ -7,70 +7,192 @@ import PhotosModel
 import PhotosNetworking
 import PhotosStore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Pick own photos from the library to add to an album (SPEC AL-4).
+///
+/// The library's own grid in selection mode: day headers, zoom, the date scrubber on the Mac, drag and ⇧/⌘ selection
+/// (two-finger drag on iPhone and iPad), with a search field that narrows the library down. What was picked stays
+/// picked while the search changes.
 struct PhotoPickerSheet: View {
     let album: Album
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @State private var items: [GridMedia] = []
-    @State private var selection: Set<FileID> = []
-    @State private var existing: Set<FileID> = []
+    @State private var feed = GridFeed()
+    /// Own photos that are not in the album yet, newest first; nil while they are read.
+    @State private var candidates: [GridMedia]?
+    @State private var picked: Set<FileID> = []
+    @State private var query = ""
+    @State private var columns = GridColumns.default
+    @State private var adding = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 2)], spacing: 2) {
-                    ForEach(items) { item in
-                        Button {
-                            if selection.contains(item.fileId) { selection.remove(item.fileId) } else { selection.insert(item.fileId) }
-                        } label: {
-                            PreviewImage(fileId: item.fileId, etag: item.etag, bucket: 256, blurhash: item.blurhash)
-                                .aspectRatio(1, contentMode: .fill)
-                                .overlay(alignment: .bottomTrailing) {
-                                    Image(systemName: selection.contains(item.fileId) ? "checkmark.circle.fill" : "circle")
-                                        .font(.title3)
-                                        .foregroundStyle(selection.contains(item.fileId) ? AnyShapeStyle(.tint) : AnyShapeStyle(.white))
-                                        .shadow(radius: 2)
-                                        .padding(4)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(GridTile.accessibilityLabel(for: item))
-                        .accessibilityAddTraits(selection.contains(item.fileId) ? .isSelected : [])
+            VStack(spacing: 0) {
+                #if os(macOS)
+                    // A sheet on the Mac: title and search field share one row above the grid (a navigation title
+                    // and `.searchable` take two).
+                    HStack(spacing: 12) {
+                        Text(title).font(.headline).lineLimit(1)
+                        Spacer(minLength: 12)
+                        TextField(searchPrompt, text: $query)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260)
+                            .accessibilityLabel(Text("Search", bundle: .module))
                     }
-                }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider()
+                #endif
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                bottomBar
             }
-            .selectionHaptic(selection, isActive: true)
-            .navigationTitle(String(localized: "Add to “\(album.title)”", bundle: .module))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+            .selectionHaptic(picked, isActive: true)
+            #if os(iOS)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text(searchPrompt))
+            #elseif os(visionOS)
+                .navigationTitle(title)
+                .searchable(text: $query, prompt: Text(searchPrompt))
+            #endif
+            #if !os(macOS)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { cancelButton }
+                    ToolbarItem(placement: .confirmationAction) { addButton }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "Add \(selection.count)", bundle: .module)) {
-                        Task {
-                            if let services = session.services, let map = try? services.library.items(Array(selection)) {
-                                await session.addToAlbum(Array(map.values), album: album)
-                            }
-                            dismiss()
-                        }
-                    }
-                    .disabled(selection.isEmpty)
-                }
-            }
-            .task {
-                guard let services = session.services else { return }
-                existing = Set(((try? services.collections.albumItems(albumId: album.id)) ?? []).map(\.fileId))
-                // Only own files can be added to albums (the server refuses others).
-                // Read off the main thread: this is the whole timeline, 100 000 rows in a large library.
-                let all = (try? await services.library.fetchGridItems(.all, excludedFolders: session.excludedFolders)) ?? []
-                let own = Set(
-                    ((try? await services.library.fetchItems(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
-                items = all.filter { own.contains($0.fileId) && !existing.contains($0.fileId) }
-            }
+            #endif
+            .task { await load() }
+            .task(id: query) { await applyFilter() }
+            .onChange(of: columns, initial: true) { _, step in feed.setZoom(step: step) }
         }
-        .frame(minWidth: 600, minHeight: 600)
+        .frame(minWidth: 720, minHeight: 620)
+    }
+
+    var title: String { String(localized: "Add to “\(album.title)”", bundle: .module) }
+
+    var searchPrompt: String { String(localized: "Search name, place or folder", bundle: .module) }
+
+    @ViewBuilder var content: some View {
+        if let services = session.services, !feed.items.isEmpty {
+            PhotoGrid(
+                update: feed.update,
+                zoomStep: feed.zoomStep,
+                selection: PhotoPicker.shownSelection(picked: picked, isShown: { feed.model[$0] != nil }),
+                isSelecting: true,
+                showsHeaders: true,
+                services: services,
+                callbacks: GridCallbacks(
+                    // Return, Space or a double click on the Mac: the tile is selected by then, nothing to open.
+                    open: { _ in },
+                    menu: { _ in [] },
+                    selectionChanged: { ids in
+                        picked = PhotoPicker.merged(picked: picked, isShown: { feed.model[$0] != nil }, gridSelection: ids)
+                    },
+                    columnsChanged: { columns = $0 }
+                )
+            )
+        } else if candidates == nil {
+            ProgressView()
+        } else if candidates?.isEmpty == true {
+            ContentUnavailableView(
+                String(localized: "No photos to add", bundle: .module), systemImage: "photo.on.rectangle.angled",
+                description: Text("All your own photos are in this album already.", bundle: .module))
+        } else {
+            ContentUnavailableView.search(text: query)
+        }
+    }
+
+    /// The count of picked photos, always visible; on the Mac also the sheet's buttons.
+    var bottomBar: some View {
+        HStack(spacing: 12) {
+            Text(
+                picked.isEmpty
+                    ? String(localized: "Select photos to add", bundle: .module)
+                    : String(localized: "\(picked.count) selected", bundle: .module)
+            )
+            .font(.callout)
+            .foregroundStyle(picked.isEmpty ? .secondary : .primary)
+            .monospacedDigit()
+            if !picked.isEmpty {
+                Button(String(localized: "Deselect all", bundle: .module)) { picked = [] }
+                    .buttonStyle(.borderless)
+            }
+            Spacer()
+            #if os(macOS)
+                cancelButton.keyboardShortcut(.cancelAction)
+                addButton.keyboardShortcut(.defaultAction)
+            #endif
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .contain)
+    }
+
+    var cancelButton: some View {
+        Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+    }
+
+    var addButton: some View {
+        Button(String(localized: "Add \(picked.count)", bundle: .module)) { add() }
+            .disabled(picked.isEmpty || adding)
+    }
+
+    func add() {
+        adding = true
+        Task {
+            if let services = session.services, let map = try? await services.library.fetchItems(Array(picked)) {
+                await session.addToAlbum(Array(map.values), album: album)
+            }
+            dismiss()
+        }
+    }
+
+    func load() async {
+        guard let services = session.services else { return }
+        let existing = Set(((try? services.collections.albumItems(albumId: album.id)) ?? []).map(\.fileId))
+        // Only own files can be added to albums (the server refuses others).
+        // Read off the main thread: this is the whole timeline, 100 000 rows in a large library.
+        let all = (try? await services.library.fetchGridItems(.all, excludedFolders: session.excludedFolders)) ?? []
+        let own = Set(
+            ((try? await services.library.fetchItems(all.map(\.fileId))) ?? [:]).values.filter(\.isOwnStorage).map(\.fileId))
+        candidates = all.filter { own.contains($0.fileId) && !existing.contains($0.fileId) }
+        await applyFilter(debounce: false)
+    }
+
+    /// Shows the candidates the search field leaves over (the library's local search: name, place, caption, folder).
+    func applyFilter(debounce: Bool = true) async {
+        guard let services = session.services, let candidates else { return }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            feed.apply(candidates, flat: false)
+            return
+        }
+        if debounce { try? await Task.sleep(for: .milliseconds(250)) }
+        guard !Task.isCancelled else { return }
+        let matches = Set(((try? await services.library.search(LibrarySearch(texts: [text]))) ?? []).map(\.fileId))
+        guard !Task.isCancelled else { return }
+        feed.apply(PhotoPicker.filtered(candidates, matches: matches), flat: false)
+    }
+}
+
+/// Selection bookkeeping of the photo picker.
+enum PhotoPicker {
+    /// The part of the picked photos the grid can show as selected (the rest is hidden by the search).
+    static func shownSelection(picked: Set<FileID>, isShown: (FileID) -> Bool) -> Set<FileID> {
+        picked.filter(isShown)
+    }
+
+    /// The grid reports the selection among the photos it shows; photos picked earlier that the search hides now
+    /// stay picked.
+    static func merged(picked: Set<FileID>, isShown: (FileID) -> Bool, gridSelection: Set<FileID>) -> Set<FileID> {
+        picked.filter { !isShown($0) }.union(gridSelection)
+    }
+
+    static func filtered(_ candidates: [GridMedia], matches: Set<FileID>) -> [GridMedia] {
+        candidates.filter { matches.contains($0.fileId) }
     }
 }
 
@@ -164,7 +286,7 @@ struct CollaboratorsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(String(localized: "Share with people and groups", bundle: .module)) {
+                Section {
                     TextField(String(localized: "Search users or groups", bundle: .module), text: $query)
                         .autocorrectionDisabled()
                     ForEach(results) { sharee in
@@ -189,6 +311,14 @@ struct CollaboratorsSheet: View {
                             .help(String(localized: "Remove \(collaborator.label)", bundle: .module))
                         }
                     }
+                } header: {
+                    Text("Share with people and groups", bundle: .module)
+                } footer: {
+                    // Albums are shared by the Photos app on the server, which only knows users, groups and one public
+                    // link; the rest of Nextcloud's sharing works on files and folders (SPEC SH-7).
+                    Text(
+                        "Albums can be shared with people and groups on this server and by public link. The Photos app on your server cannot share an album with people on other servers, by email or in Talk. Single photos and folders can be shared that way: choose Share via Nextcloud… on a photo or a folder.",
+                        bundle: .module)
                 }
                 Section {
                     Toggle(
@@ -204,7 +334,7 @@ struct CollaboratorsSheet: View {
                     if let link = session.publicLink(of: album) {
                         Text(link.absoluteString).font(.footnote).textSelection(.enabled)
                         HStack {
-                            Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copy(link.absoluteString) }
+                            Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copyLink(link.absoluteString) }
                             ShareLink(item: link)
                         }
                         if let qr = QRCode.image(for: link.absoluteString) {
@@ -353,12 +483,27 @@ struct CommentsSheet: View {
     }
 }
 
+/// Copies text for pasting on this device only: not through Universal Clipboard to the user's other devices (SPEC §8).
 enum Clipboard {
+    /// How long a copied link stays on the pasteboard (iPhone, iPad, Vision Pro; the Mac's pasteboard has no expiry).
+    static let linkLifetime: TimeInterval = 10 * 60
+
     @MainActor static func copy(_ string: String) {
+        copy(string, expiresAfter: nil)
+    }
+
+    /// A share link: whoever has it can open the album or the files.
+    @MainActor static func copyLink(_ string: String) {
+        copy(string, expiresAfter: linkLifetime)
+    }
+
+    @MainActor static func copy(_ string: String, expiresAfter lifetime: TimeInterval?) {
         #if canImport(UIKit)
-            UIPasteboard.general.string = string
+            var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
+            if let lifetime { options[.expirationDate] = Date().addingTimeInterval(lifetime) }
+            UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: string]], options: options)
         #else
-            NSPasteboard.general.clearContents()
+            NSPasteboard.general.prepareForNewContents(with: .currentHostOnly)
             NSPasteboard.general.setString(string, forType: .string)
         #endif
     }

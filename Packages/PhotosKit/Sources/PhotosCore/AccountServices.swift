@@ -23,6 +23,8 @@ public final class AccountServices: Sendable {
     public let outbox: Outbox
     public let images: ImagePipeline
     public let layout: StorageLayout
+    /// The partner folders whose photos the timeline shows with a badge (`PartnerTimelineModel`).
+    public let partnerPaths = PartnerPaths()
 
     public init(
         account: Account,
@@ -48,8 +50,11 @@ public final class AccountServices: Sendable {
         self.database = try AccountDatabase(url: layout.database(account.id))
         self.library = LibraryStore(database: database)
         self.collections = CollectionStore(database: database)
-        self.sync = SyncEngine(api: api, database: database, features: features)
-        self.outbox = Outbox(api: api, database: database)
+        let sync = SyncEngine(api: api, database: database, features: features)
+        self.sync = sync
+        partnerPaths.set(PartnerSettings.load(database).folders.map(\.path))
+        // Failed for good or discarded: the rows the operation had changed come back from the server.
+        self.outbox = Outbox(api: api, database: database, restore: { _ = try? await sync.restoreRows() })
         let cache = PreviewCache(directory: layout.previews(account.id))
         let originals = OriginalStore(directory: layout.originals(account.id), dav: dav)
         let images = ImagePipeline(
@@ -74,8 +79,8 @@ public final class AccountServices: Sendable {
         Task.detached(priority: .utility) { [images] in await images.trimCaches() }
     }
 
-    /// DAV URL of a user file's original.
-    public func originalURL(for item: MediaItem) -> URL { connection.filesURL(item.path) }
+    /// DAV URL of an item's original: the user's file, or for a file of someone else's shared album, the album's child.
+    public func originalURL(for item: MediaItem) -> URL { connection.originalURL(path: item.path) }
 
     /// Stops everything that runs for this account and waits until it has stopped: sync, the outbox worker and image loads.
     ///
@@ -108,7 +113,9 @@ public final class AccountServices: Sendable {
 /// Per account: the database (index, outbox, offline pins, backup ledger), cached features, offline originals, the preview and
 /// original caches, the app password, the push key and the push registration. The backup options are removed when backup was
 /// set up for this account. Per host, and therefore only removed when no remaining account uses the host: the server
-/// certificate the user trusted and the client certificate with its password.
+/// certificate the user trusted and the client certificate with its password. Certificates of hosts that no account uses
+/// at all (trusted in a login that was cancelled) go as well. What lives outside the container (notifications, widgets,
+/// shared diagnostics reports) is cleared by `AppModel`.
 ///
 /// Call it after everything that uses the account has been shut down (`AccountServices.shutdown(closeDatabase: true)`).
 public struct AccountPurge: Sendable {
@@ -136,16 +143,35 @@ public struct AccountPurge: Sendable {
             try? manager.removeItem(at: layout.backupSettingsFile)
         }
 
+        let others = remaining.filter { $0.id != id }
+        defer { removeUnusedCertificates(remaining: others) }
         guard let host = Self.host(of: account) else { return }
-        let hostStillUsed = remaining.contains { $0.id != id && Self.host(of: $0) == host }
+        let hostStillUsed = others.contains { Self.host(of: $0) == host }
         if !hostStillUsed {
             keychain.delete(Keychain.clientCertificateKey(host))
             keychain.delete(Keychain.clientCertificatePasswordKey(host))
-            if let trustStore {
-                trustStore.removeTrust(for: host)
-            } else {
-                try? manager.removeItem(at: layout.certificates.appending(path: "\(host).der"))
-            }
+            removeTrust(for: host)
+        }
+    }
+
+    /// Removes the trusted server certificates of hosts that none of these accounts uses.
+    public func removeUnusedCertificates(remaining: [Account]) {
+        let used = Set(remaining.compactMap(Self.host(of:)))
+        let stored: Set<String>
+        if let trustStore {
+            stored = trustStore.trustedHosts
+        } else {
+            let files = (try? FileManager.default.contentsOfDirectory(at: layout.certificates, includingPropertiesForKeys: nil)) ?? []
+            stored = Set(files.filter { $0.pathExtension == "der" }.map { $0.deletingPathExtension().lastPathComponent })
+        }
+        for host in stored.subtracting(used) { removeTrust(for: host) }
+    }
+
+    private func removeTrust(for host: String) {
+        if let trustStore {
+            trustStore.removeTrust(for: host)
+        } else {
+            try? FileManager.default.removeItem(at: layout.certificates.appending(path: "\(host).der"))
         }
     }
 

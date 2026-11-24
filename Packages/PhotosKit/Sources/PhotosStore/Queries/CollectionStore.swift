@@ -45,6 +45,7 @@ public struct CollectionStore: Sendable {
         let now = Date()
         try database.writer.write { db in
             let existing = try AlbumRecord.filter(Column("kind") == kind.rawValue).fetchAll(db)
+            try SharedAlbumActivity.record(existing: existing.map(\.album), incoming: albums, kind: kind, db: db, now: now)
             let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             let keep = Set(albums.map(\.id))
             for record in existing where !keep.contains(record.id) { _ = try record.delete(db) }
@@ -66,21 +67,89 @@ public struct CollectionStore: Sendable {
     }
 
     /// Stores album content. Items that are not in the timeline index are kept in `collectionMedia`.
+    ///
+    /// Only what differs from the stored content is written: re-reading an unchanged album of 5000 photos writes one row
+    /// (the album's fetch time) instead of deleting and inserting 5000.
     public func replaceAlbumContent(albumId: String, children: [MediaParser.CollectionChild]) throws {
         try database.writer.write { db in
-            try db.execute(sql: "DELETE FROM albumItem WHERE albumId = ?", arguments: [albumId])
+            var stored: [FileID: AlbumItemRecord] = [:]
+            for record in try AlbumItemRecord.filter(Column("albumId") == albumId).fetchAll(db) { stored[record.fileId] = record }
+            // A file listed twice keeps its last place, as the rows inserted one after the other did.
+            var wanted: [FileID: AlbumItemRecord] = [:]
             for (position, child) in children.enumerated() {
-                try AlbumItemRecord(
+                wanted[child.item.fileId] = AlbumItemRecord(
                     albumId: albumId, fileId: child.item.fileId, childName: child.childName, origin: child.origin,
-                    ownerPath: child.ownerPath, position: position
-                ).insert(db, onConflict: .replace)
-                if try MediaItem.exists(db, key: child.item.fileId) == false {
-                    try CollectionMediaRecord(fileId: child.item.fileId, item: child.item).upsert(db)
-                }
+                    ownerPath: child.ownerPath, position: position)
+            }
+            let gone = stored.keys.filter { wanted[$0] == nil }
+            for chunk in gone.chunked(500) {
+                try db.execute(
+                    sql: "DELETE FROM albumItem WHERE albumId = ? AND fileId IN (\(chunk.map { String($0) }.joined(separator: ",")))",
+                    arguments: [albumId])
+            }
+            for record in wanted.values where stored[record.fileId] != record { try record.insert(db, onConflict: .replace) }
+            // Items that are not in the index are kept for the viewer; written only when they changed.
+            let ids = Array(wanted.keys)
+            var indexed: Set<FileID> = []
+            var kept: [FileID: MediaItem] = [:]
+            for chunk in ids.chunked(500) {
+                indexed.formUnion(
+                    try FileID.fetchAll(
+                        db, sql: "SELECT fileId FROM media WHERE fileId IN (\(chunk.map { String($0) }.joined(separator: ",")))"))
+                for record in try CollectionMediaRecord.fetchAll(db, keys: Array(chunk)) { kept[record.fileId] = record.item }
+            }
+            for child in children where !indexed.contains(child.item.fileId) && kept[child.item.fileId] != child.item {
+                try CollectionMediaRecord(fileId: child.item.fileId, item: child.item).upsert(db)
+                kept[child.item.fileId] = child.item
             }
             try db.execute(
                 sql: "UPDATE album SET contentFetchedAt = ?, itemCount = ? WHERE id = ?",
                 arguments: [Date().timeIntervalSince1970, children.count, albumId])
+            // What is still queued for the album is not on the server yet: it stays as the user left it.
+            try Outbox.reapplyPendingAlbumChanges(albumId: albumId, db: db)
+        }
+    }
+
+    /// The places of these photos in albums.
+    public func memberships(of fileIds: [FileID]) throws -> [AlbumMembership] {
+        guard !fileIds.isEmpty else { return [] }
+        return try database.writer.read { db in
+            var result: [AlbumMembership] = []
+            for start in stride(from: 0, to: fileIds.count, by: 500) {
+                let chunk = Array(fileIds[start..<min(start + 500, fileIds.count)])
+                result += try AlbumItemRecord.filter(chunk.contains(Column("fileId"))).fetchAll(db).map {
+                    AlbumMembership(
+                        albumId: $0.albumId, fileId: $0.fileId, childName: $0.childName, origin: $0.origin, ownerPath: $0.ownerPath,
+                        position: $0.position)
+                }
+            }
+            return result
+        }
+    }
+
+    /// Puts a photo back into an album it was taken out of locally (a delete that was taken back before it ran).
+    static func insert(_ member: AlbumMembership, db: Database) throws {
+        guard try AlbumRecord.exists(db, key: member.albumId) else { return }
+        try AlbumItemRecord(
+            albumId: member.albumId, fileId: member.fileId, childName: member.childName, origin: member.origin,
+            ownerPath: member.ownerPath, position: member.position
+        ).insert(db, onConflict: .ignore)
+        if db.changesCount > 0 {
+            try db.execute(sql: "UPDATE album SET itemCount = itemCount + 1 WHERE id = ?", arguments: [member.albumId])
+        }
+    }
+
+    /// Marks an album's stored content as current without rewriting it (the server says it did not change).
+    public func markAlbumContentFetched(albumId: String) throws {
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE album SET contentFetchedAt = ? WHERE id = ?", arguments: [Date().timeIntervalSince1970, albumId])
+        }
+    }
+
+    /// The number of stored content rows of an album.
+    public func albumItemCount(albumId: String) throws -> Int {
+        try database.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albumItem WHERE albumId = ?", arguments: [albumId]) ?? 0
         }
     }
 
@@ -146,6 +215,27 @@ public struct CollectionStore: Sendable {
                 try SmartAlbumRecord(id: album.id, name: album.name, filters: album.filters, isLocal: isLocal).upsert(db)
             }
         }
+    }
+}
+
+/// A photo's place in an album, as the index has it.
+public struct AlbumMembership: Hashable, Sendable {
+    public var albumId: String
+    public var fileId: FileID
+    /// Name of the photo inside the album collection.
+    public var childName: String
+    /// `filters` for a photo the album's filters put there (it cannot be removed or added by hand).
+    public var origin: String?
+    public var ownerPath: String?
+    public var position: Int
+
+    public init(albumId: String, fileId: FileID, childName: String, origin: String?, ownerPath: String?, position: Int) {
+        self.albumId = albumId
+        self.fileId = fileId
+        self.childName = childName
+        self.origin = origin
+        self.ownerPath = ownerPath
+        self.position = position
     }
 }
 

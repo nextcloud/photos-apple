@@ -44,6 +44,7 @@ public final class HTTPClient: Sendable {
     private func sendOnce(_ request: HTTPRequest) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.data(for: request.urlRequest)
+            delegate.didReceiveResponse(from: request.url)
             return Self.makeResponse(response, data: data)
         } catch {
             throw mapError(error, url: request.url)
@@ -54,6 +55,7 @@ public final class HTTPClient: Sendable {
     public func download(_ request: HTTPRequest) async throws -> (URL, HTTPResponse) {
         do {
             let (location, response) = try await session.download(for: request.urlRequest)
+            delegate.didReceiveResponse(from: request.url)
             let target = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             try FileManager.default.moveItem(at: location, to: target)
             return (target, Self.makeResponse(response, data: Data()))
@@ -73,6 +75,7 @@ public final class HTTPClient: Sendable {
     private func uploadOnce(_ request: HTTPRequest, fromFile file: URL) async throws -> HTTPResponse {
         do {
             let (data, response) = try await session.upload(for: request.urlRequest, fromFile: file)
+            delegate.didReceiveResponse(from: request.url)
             return Self.makeResponse(response, data: data)
         } catch {
             throw mapError(error, url: request.url)
@@ -91,20 +94,59 @@ public final class HTTPClient: Sendable {
     func mapError(_ error: any Error, url: URL) -> NetworkError {
         delegate.networkError(for: error, url: url)
     }
+
+    /// The certificate this client refused for a host, as long as the host has not presented an acceptable one since:
+    /// the server's certificate changed (or the user's trust in it was removed). `nil` when the host is trusted.
+    public func rejectedCertificate(for host: String) -> Data? {
+        guard delegate.isRejected(host) else { return nil }
+        return trustStore.lastFailure(for: host)
+    }
 }
 
 final class SessionDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     let trustStore: TrustStore
     let clientCredentials: ClientCredentialProvider?
-    private let rejectedHosts = Mutex<Set<String>>([])
+    /// Hosts whose certificate was refused, with the time of the last refusal. An entry stays until the host presents
+    /// a certificate that is accepted: one refusal cancels every task that shares the connection (HTTP/2), and each of
+    /// them has to report the certificate, not a plain cancellation.
+    private let rejectedHosts = Mutex<[String: Date]>([:])
+    /// How long after a refusal a cancelled task of that host counts as cancelled by it.
+    static let rejectionWindow: TimeInterval = 30
 
     init(trustStore: TrustStore, clientCredentials: ClientCredentialProvider?) {
         self.trustStore = trustStore
         self.clientCredentials = clientCredentials
     }
 
-    func didRejectTrust(for host: String) -> Bool {
-        rejectedHosts.withLock { $0.remove(host.lowercased()) != nil }
+    /// The host's certificate was refused and it has not presented an acceptable one since.
+    func isRejected(_ host: String) -> Bool {
+        rejectedHosts.withLock { $0[host.lowercased()] != nil }
+    }
+
+    /// A task of this host that ended as "cancelled" just now was cancelled by a refused certificate. The mark is not
+    /// used up: every task on the connection asks.
+    func didRejectTrust(for host: String, now: Date = Date()) -> Bool {
+        rejectedHosts.withLock { hosts in
+            guard let rejected = hosts[host.lowercased()] else { return false }
+            return now.timeIntervalSince(rejected) <= Self.rejectionWindow
+        }
+    }
+
+    /// A request to this URL got an answer over TLS: the connection it used presented an acceptable certificate (a request
+    /// on a connection that was already open asks no new trust question). That ends a refusal of the host, so the "certificate
+    /// changed" state does not stay while requests go through.
+    func didReceiveResponse(from url: URL) {
+        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased() else { return }
+        rejectedHosts.withLock { hosts in
+            if hosts[host] != nil { hosts[host] = nil }
+        }
+    }
+
+    /// Evaluates a server's certificate and remembers the outcome for its host.
+    func accepts(_ trust: SecTrust, host: String, now: Date = Date()) -> Bool {
+        let accepted = trustStore.evaluate(trust, host: host)
+        rejectedHosts.withLock { $0[host.lowercased()] = accepted ? nil : now }
+        return accepted
     }
 
     /// Maps a failure of a task of this delegate's session to a `NetworkError`.
@@ -153,10 +195,9 @@ final class SessionDelegate: NSObject, URLSessionTaskDelegate, Sendable {
         switch space.authenticationMethod {
         case NSURLAuthenticationMethodServerTrust:
             guard let trust = space.serverTrust else { return (.performDefaultHandling, nil) }
-            if trustStore.evaluate(trust, host: space.host) {
+            if accepts(trust, host: space.host) {
                 return (.useCredential, URLCredential(trust: trust))
             }
-            _ = rejectedHosts.withLock { $0.insert(space.host.lowercased()) }
             return (.cancelAuthenticationChallenge, nil)
         case NSURLAuthenticationMethodClientCertificate:
             if let credential = clientCredentials?(space.host) { return (.useCredential, credential) }

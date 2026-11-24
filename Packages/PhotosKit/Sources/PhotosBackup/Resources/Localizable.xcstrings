@@ -2,25 +2,49 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Paused" : {
-
+      "comment" : "Backup status: the user paused the backup."
     },
     "Paused in Low Data Mode" : {
-
+      "comment" : "Backup status: the backup waits because the device's Low Data Mode is on. Use the name of the setting as it appears in the system's Settings."
     },
     "Paused in Low Power Mode" : {
-
+      "comment" : "Backup status: the backup waits because the device's Low Power Mode is on. Use the name of the setting as it appears in the system's Settings."
     },
     "Photo" : {
-
+      "comment" : "First word of the file name given to a backed-up photo when file names start with the kind of file, followed by date and number, e.g. \"Photo 26-05-01 12-30-00 1234.jpg\". Keep it short and usable in a file name."
+    },
+    "The ZIP archive is encrypted." : {
+      "comment" : "Google Takeout import: a ZIP file that is protected by a password cannot be read."
+    },
+    "The ZIP archive uses a compression this app cannot read." : {
+      "comment" : "Google Takeout import: a ZIP file uses an unknown compression method."
+    },
+    "The file is not a complete ZIP archive." : {
+      "comment" : "Google Takeout import: the file is not a ZIP archive or it is cut off (download not finished)."
+    },
+    "The original is only in iCloud, and downloading from iCloud is turned off." : {
+      "comment" : "Why a photo or video was not backed up (error shown for the item on the Backup screen): its original is stored only in iCloud and the option \"Download originals from iCloud\" is off."
+    },
+    "There is not enough free space on this Mac to prepare the upload." : {
+      "comment" : "Why a photo or video could not be backed up (Mac): the app copies each photo before uploading it and the Mac's disk has no room for the copy."
+    },
+    "There is not enough free space on this device to prepare the upload." : {
+      "comment" : "Why a photo or video could not be backed up (iPhone, iPad): the app copies each photo before uploading it and the device has no room for the copy."
     },
     "Video" : {
-
+      "comment" : "First word of the file name given to a backed-up video when file names start with the kind of file, followed by date and number, e.g. \"Video 26-05-01 12-30-00 1234.mov\". Keep it short and usable in a file name."
     },
     "Waiting for Wi-Fi" : {
-
+      "comment" : "Backup status: the backup is set to Wi-Fi only and the device is on another kind of network."
+    },
+    "Waiting for Wi-Fi to download originals from iCloud" : {
+      "comment" : "Backup status: everything else is uploaded; the photos whose originals are only in iCloud wait until the device is on Wi-Fi to download them."
     },
     "Waiting for a network connection" : {
-
+      "comment" : "Backup status: the device is offline."
+    },
+    "“%@” in the ZIP archive is damaged." : {
+      "comment" : "Google Takeout import: one file inside the ZIP archive failed its checksum. The argument is its name."
     }
   },
   "version" : "1.1"

@@ -43,7 +43,7 @@ final class StubTransport: BackgroundUploading {
 }
 
 @MainActor
-@Suite struct BackgroundUploadWiringTests {
+@Suite(.timeLimit(.minutes(1))) struct BackgroundUploadWiringTests {
     let sandbox = Sandbox()
     let server = StubServer()
     let transport = StubTransport()
@@ -144,7 +144,7 @@ final class StubTransport: BackgroundUploading {
 }
 
 @MainActor
-@Suite struct SequentialUploadsTests {
+@Suite(.timeLimit(.minutes(1))) struct SequentialUploadsTests {
     struct Refused: Error {}
 
     @Test func aFailureKeepsTheRestForAnotherAttempt() async {

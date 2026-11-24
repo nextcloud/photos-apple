@@ -128,6 +128,14 @@ public struct MediaItem: Codable, Hashable, Sendable, Identifiable {
     /// True when the file is on the user's own storage (only those can be added to albums or archived).
     public var isOwnStorage: Bool { mountType.isEmpty }
 
+    /// `mountType` of a file that is known only as the child of a collection (a photo of someone else's shared album). Its
+    /// `path` is then the child's path below the DAV root (`photos/<uid>/sharedalbums/<album>/<child>`, no leading slash),
+    /// not a path in the user's files: the user may have a different file of the same name there.
+    public static let collectionChildMountType = "photos-collection"
+
+    /// The file is reached through a collection, not through the user's files (`collectionChildMountType`).
+    public var isCollectionChild: Bool { mountType == Self.collectionChildMountType }
+
     public var aspectRatio: Double {
         guard let width, let height, width > 0, height > 0 else { return 1 }
         return Double(width) / Double(height)

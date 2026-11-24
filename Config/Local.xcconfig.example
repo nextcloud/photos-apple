@@ -6,3 +6,6 @@
 
 DEVELOPMENT_TEAM = ABCDE12345
 PHOTOS_BUNDLE_ID = com.example.nextcloudphotos
+
+// Sign Debug builds with the entitlements of a Release build (App Group, keychain group, push). Your App ID needs them.
+// PHOTOS_DEBUG_ENTITLEMENTS = YES

@@ -88,24 +88,41 @@ public struct DAVClient: Sendable {
     }
 
     /// Creates every missing folder of a user path (`/a/b/c`), ignoring existing ones.
+    ///
+    /// Several requests may create the same folder at once (the outbox archives a few photos of one folder side by side):
+    /// Nextcloud answers the one that loses the race with 403 "Could not create directory". A folder that exists after a
+    /// failed `MKCOL` counts as created.
     public func mkcolRecursive(userPath: String) async throws {
         var current = ""
         for component in userPath.split(separator: "/") {
             current += "/\(component)"
+            let url = connection.filesURL(current)
             do {
-                try await mkcol(connection.filesURL(current))
+                try await mkcol(url)
             } catch NetworkError.conflict {
                 continue  // 405: exists
+            } catch {
+                guard (try? await propfind(url, depth: 0, properties: [DAVProp.resourceType]))?.isEmpty == false else { throw error }
             }
         }
     }
 
-    public func delete(_ url: URL) async throws {
-        try await send("DELETE", url)
+    /// - Parameter ifMatch: only when the resource has this ETag (412 otherwise).
+    public func delete(_ url: URL, ifMatch etag: String? = nil) async throws {
+        try await send("DELETE", url, headers: Self.ifMatch(etag))
     }
 
-    public func move(_ source: URL, to destination: URL, overwrite: Bool = false) async throws {
-        try await send("MOVE", source, headers: ["Destination": destination.absoluteString, "Overwrite": overwrite ? "T" : "F"])
+    /// - Parameter ifMatch: only when the source has this ETag (412 otherwise).
+    public func move(_ source: URL, to destination: URL, overwrite: Bool = false, ifMatch etag: String? = nil) async throws {
+        try await send(
+            "MOVE", source,
+            headers: ["Destination": destination.absoluteString, "Overwrite": overwrite ? "T" : "F"].merging(Self.ifMatch(etag)) { $1 })
+    }
+
+    /// The `If-Match` header for an ETag as the index stores it (without quotes).
+    static func ifMatch(_ etag: String?) -> [String: String] {
+        guard let etag, !etag.isEmpty else { return [:] }
+        return ["If-Match": "\"\(etag)\""]
     }
 
     public func copy(_ source: URL, to destination: URL, overwrite: Bool = false) async throws {

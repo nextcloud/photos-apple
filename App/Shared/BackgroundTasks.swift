@@ -35,9 +35,11 @@
         }
 
         /// Stops the backup pass because the background time is over. Not while the app is in front: there the pass may go on.
+        /// Not while the pass runs in a continued processing task either: that task has time of its own and ends it.
         @MainActor static func interruptBackup() async {
-            guard UIApplication.shared.applicationState != .active else { return }
-            await AppHost.model.backup.interrupt()
+            let backup = AppHost.model.backup
+            guard UIApplication.shared.applicationState != .active, !backup.isInContinuedTask else { return }
+            await backup.interrupt()
         }
 
         /// Uses the short time the system grants outside the foreground (after it reported finished uploads, or when the
@@ -90,6 +92,8 @@
                 }
             }
             BackgroundTasks.schedule()
+            // On-device recognition for search, while charging and idle (opt-in).
+            ContentLabeling.register { AppHost.model }
             // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.
             NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
                 Task { @MainActor in

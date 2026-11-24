@@ -18,9 +18,11 @@ public struct SettingsView: View {
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
-    @AppStorage("appLockEnabled") private var appLock = false
+    @State private var reviewedCertificate: CertificateProblem?
+    /// In the App Group: the widgets and the share extension follow it.
+    @AppStorage(AppLockSettings.enabledKey, store: AppLockSettings.defaults) private var appLock = false
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
-    @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
+    @AppStorage(AppLockSettings.timeoutKey, store: AppLockSettings.defaults) private var appLockTimeout = AppLockSettings.defaultTimeout
 
     /// A Settings page. iOS shows all pages in one list; the macOS Settings window shows one per tab.
     public enum Page: Hashable, Sendable {
@@ -53,7 +55,12 @@ public struct SettingsView: View {
                                     .accessibilityLabel(Text("Current account", bundle: .module))
                             } else {
                                 Button(String(localized: "Switch", bundle: .module)) { app.switchTo(account.id) }
+                                    .buttonStyle(.borderless)
                             }
+                            // Visible, not only in the context menu or behind a swipe. Asks before anything happens.
+                            Button(String(localized: "Log out…", bundle: .module), role: .destructive) { removeAccount = account }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel(Text("Log out \(account.displayName)", bundle: .module))
                         }
                         .contextMenu {
                             Button(String(localized: "Remove account", bundle: .module), role: .destructive) { removeAccount = account }
@@ -91,24 +98,15 @@ public struct SettingsView: View {
                 } footer: {
                     Text("Photos and videos in these folders of your Nextcloud appear in the library.", bundle: .module)
                 }
+                PartnerSharingSection()
                 Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
-                    Toggle(
-                        String(localized: "Square tiles", bundle: .module),
-                        isOn: Binding(
-                            get: { !session.features.userConfig.croppedLayout },
-                            set: { square in
-                                Task {
-                                    do { try await session.setUserConfig(.croppedLayout) { $0.croppedLayout = !square } } catch {
-                                        configError = error.localizedDescription
-                                    }
-                                }
-                            }))
                 } header: {
                     Text("Library", bundle: .module)
                 } footer: {
                     Text("These settings are shared with the Photos app on the web.", bundle: .module)
                 }
+                TimelineDisplaySection()
             }
 
             if shows(.general) {
@@ -139,9 +137,16 @@ public struct SettingsView: View {
                 }
             }
 
+            if shows(.general) { SearchAndActivitySettings() }
+
             if shows(.general) {
                 Section {
                     Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
+                        // Widgets show a placeholder instead of photos while app lock is on.
+                        .onChange(of: appLock) { _, _ in
+                            AppLock.shared.settingChanged()
+                            app.reloadWidgets()
+                        }
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
                             Text("Immediately", bundle: .module).tag(0.0)
@@ -205,7 +210,9 @@ public struct SettingsView: View {
                     Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
                         .disabled(session.syncStatus.isWorking)
                     syncStatusRow
+                    accountStateRows
                 }
+                DiagnosticsSection()
             }
 
             if shows(.about) {
@@ -215,8 +222,9 @@ public struct SettingsView: View {
                         String(localized: "Source code", bundle: .module),
                         destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
                     Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
+                    NavigationLink(String(localized: "Licences", bundle: .module)) { LicensesView() }
                     Text(
-                        "Nextcloud Photos is free software under the MIT licence. It uses NextcloudKit (GPL-3.0-or-later) and GRDB (MIT).",
+                        "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT).",
                         bundle: .module
                     )
                     .font(.footnote)
@@ -240,9 +248,9 @@ public struct SettingsView: View {
             cacheSize = session.services?.images.cache.totalSize() ?? 0
             pins = (try? await session.offline?.pins()) ?? []
         }
-        .sheet(isPresented: $addingAccount) {
-            NavigationStack { LoginView(isAddingAccount: true) }
-                .frame(minWidth: 420, minHeight: 560)
+        .sheet(isPresented: $addingAccount) { AddAccountSheet() }
+        .certificateReview($reviewedCertificate) { problem in
+            Task { await session.trust(problem) }
         }
         .confirmationDialog(
             String(localized: "Remove this account?", bundle: .module),
@@ -270,7 +278,34 @@ public struct SettingsView: View {
         case .reconciling(let count):
             LabeledContent(String(localized: "Checking library", bundle: .module), value: count.formatted())
         case .failed(let message, _):
-            Text(message).foregroundStyle(.red).font(.footnote)
+            LabeledContent {
+                Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
+            } label: {
+                Text("Couldn't sync", bundle: .module)
+                Text(message).foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// What is wrong with the account itself: its server's certificate changed, or its login was revoked.
+    @ViewBuilder var accountStateRows: some View {
+        if let problem = session.certificateProblem {
+            LabeledContent {
+                Button(String(localized: "Review…", bundle: .module)) { reviewedCertificate = problem }
+            } label: {
+                Label(
+                    String(localized: "The server's certificate changed", bundle: .module),
+                    systemImage: "lock.trianglebadge.exclamationmark")
+                Text("Nothing is synced until you have reviewed and trusted the new certificate.", bundle: .module)
+            }
+        }
+        if session.isSignedOut {
+            LabeledContent {
+                Button(String(localized: "Log in again", bundle: .module)) { addingAccount = true }
+            } label: {
+                Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
+                Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+            }
         }
     }
 
@@ -412,19 +447,21 @@ enum DeviceLockWording: Equatable {
     }
 }
 
-/// Picks a folder of the user's Nextcloud by browsing it (Settings → Timeline folders).
+/// Picks a folder of the user's Nextcloud by browsing it (Settings → Timeline folders, the backup folder).
 struct ServerFolderPicker: View {
     /// Folders that are already chosen; they cannot be picked again.
     var excluded: [String] = []
+    /// The confirming button; "Add This Folder" when nil.
+    var confirmTitle: String?
     let onPick: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var path: [String] = []
 
     var body: some View {
         NavigationStack(path: $path) {
-            ServerFolderList(folder: "/", excluded: excluded, pick: pick, cancel: { dismiss() })
+            ServerFolderList(folder: "/", excluded: excluded, confirmTitle: confirmTitle, pick: pick, cancel: { dismiss() })
                 .navigationDestination(for: String.self) { folder in
-                    ServerFolderList(folder: folder, excluded: excluded, pick: pick, cancel: { dismiss() })
+                    ServerFolderList(folder: folder, excluded: excluded, confirmTitle: confirmTitle, pick: pick, cancel: { dismiss() })
                 }
         }
         .frame(minWidth: 420, minHeight: 440)
@@ -440,6 +477,7 @@ struct ServerFolderPicker: View {
 struct ServerFolderList: View {
     let folder: String
     let excluded: [String]
+    var confirmTitle: String?
     let pick: (String) -> Void
     let cancel: () -> Void
     @Environment(SessionModel.self) private var session
@@ -487,7 +525,7 @@ struct ServerFolderList: View {
                 Button(String(localized: "Cancel", bundle: .module)) { cancel() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "Add This Folder", bundle: .module)) { pick(folder) }
+                Button(confirmTitle ?? String(localized: "Add This Folder", bundle: .module)) { pick(folder) }
                     .disabled(folder == "/" || excluded.contains(folder))
             }
         }
@@ -519,6 +557,11 @@ struct ServerFolderList: View {
         public init() {}
 
         public var body: some View {
+            // The Settings window is a window of its own: it needs the lock too.
+            AppLockGate { settings }
+        }
+
+        @ViewBuilder var settings: some View {
             if let session = app.session {
                 TabView {
                     Tab(String(localized: "General", bundle: .module), systemImage: "gearshape") { SettingsView(page: .general) }
@@ -530,7 +573,9 @@ struct ServerFolderList: View {
                     Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
                         NavigationStack { SettingsView(page: .server) }
                     }
-                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") { SettingsView(page: .about) }
+                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") {
+                        NavigationStack { SettingsView(page: .about) }
+                    }
                 }
                 .environment(session)
             } else {

@@ -19,6 +19,8 @@ struct RecentlyDeletedScreen: View {
     @State private var items: [TrashedItem] = []
     @State private var unlocked = false
     @State private var confirmEmpty = false
+    /// The item waiting for the confirmation of its permanent deletion.
+    @State private var confirmDelete: TrashedItem?
     @State private var error: String?
 
     var body: some View {
@@ -47,15 +49,11 @@ struct RecentlyDeletedScreen: View {
                             .buttonStyle(.borderless)
                     }
                     .swipeActions {
-                        Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                            Task { await run { try await $0.deletePermanently(item) } }
-                        }
+                        Button(String(localized: "Delete", bundle: .module), role: .destructive) { confirmDelete = item }
                     }
                     .contextMenu {
                         Button(String(localized: "Restore", bundle: .module)) { Task { await run { try await $0.restore(item) } } }
-                        Button(String(localized: "Delete permanently", bundle: .module), role: .destructive) {
-                            Task { await run { try await $0.deletePermanently(item) } }
-                        }
+                        Button(String(localized: "Delete permanently…", bundle: .module), role: .destructive) { confirmDelete = item }
                     }
                 }
             }
@@ -73,6 +71,25 @@ struct RecentlyDeletedScreen: View {
                 Task { await run { try await $0.emptyTrash() } }
             }
         }
+        .confirmationDialog(
+            String(localized: "Delete “\(confirmDelete?.originalName ?? "")” permanently?", bundle: .module),
+            isPresented: Binding(get: { confirmDelete != nil }, set: { shown in if !shown { confirmDelete = nil } }),
+            titleVisibility: .visible, presenting: confirmDelete
+        ) { (item: TrashedItem) in
+            Button(String(localized: "Delete permanently", bundle: .module), role: .destructive) {
+                Task { await run { try await $0.deletePermanently(item) } }
+            }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { _ in
+            Text("It is removed from the trash bin of your Nextcloud and cannot be restored.", bundle: .module)
+        }
+        .alert(
+            String(localized: "Something went wrong", bundle: .module),
+            isPresented: Binding(get: { error != nil }, set: { shown in if !shown { error = nil } })
+        ) {
+        } message: {
+            Text(error ?? "")
+        }
         .task { await unlock() }
         .refreshable { await load() }
     }
@@ -88,7 +105,8 @@ struct RecentlyDeletedScreen: View {
 
     func load() async {
         guard let services = session.services else { return }
-        items = (try? await services.api.trash(mimeTypes: session.features.allMimeTypes)) ?? []
+        // The types the timeline indexes, TIFF and RAW included.
+        items = (try? await services.api.trash(mimeTypes: session.features.allMimeTypes + MimeTypes.appleExtras)) ?? []
     }
 
     func run(_ action: @escaping (PhotosAPI) async throws -> Void) async {
@@ -507,6 +525,13 @@ struct AskFilters {
 }
 
 enum AskPhotos {
+    /// A language model can answer: the server's Assistant, or the one on this device.
+    @MainActor static func isAvailable(_ session: SessionModel) -> Bool {
+        if session.features.has(.taskText2Text) { return true }
+        if case .available = SystemLanguageModel.default.availability { return true }
+        return false
+    }
+
     static func prompt(question: String, places: [String], tags: [String]) -> String {
         """
         Today is \(Date().formatted(.iso8601.year().month().day())). Turn the question into photo search filters.

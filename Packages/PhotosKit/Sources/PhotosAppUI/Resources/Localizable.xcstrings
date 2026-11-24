@@ -2,10 +2,28 @@
   "sourceLanguage" : "en",
   "strings" : {
     "" : {
-
+      "comment" : "Empty label of a progress gauge. Leave empty."
+    },
+    "%@ is no longer shared with you" : {
+      "comment" : "Settings › Partner sharing: a partner folder that was removed or moved. The argument is the folder's path."
+    },
+    "%@ is not in your library" : {
+      "comment" : "Title of the question after choosing a backup folder that the timeline doesn't show. The placeholder is the folder path."
+    },
+    "%@ now presents a different certificate, which is not trusted. Only trust it if you know that the certificate of your server was replaced.\n\n%@" : {
+      "comment" : "Message of the dialog \"The server's certificate changed\" (opened from the account banner or Settings › Server). The first %@ is the server's host name, the second a summary of the new certificate (issuer, validity, fingerprint) on its own paragraph."
+    },
+    "%@ of %@" : {
+      "comment" : "Progress of the on-device recognition in Settings › Search: photos looked at of all photos, e.g. \"1,234 of 5,000\"."
+    },
+    "%@ presents a different certificate than before. This happens when the server's certificate is replaced, but it is also what someone intercepting your connection would show. Until you decide, nothing is sent to the server." : {
+      "comment" : "Explanation at the top of the sheet \"The server's certificate changed\" (opened from the account banner or Settings › Server). %@ is the server's host name."
+    },
+    "%@ uses http:// instead of https://. The album and its photos would be sent unencrypted, and anyone on the network could see them." : {
+      "comment" : "Message of the warning before opening a public album link over http://. %@ is the server's host name. \"http://\" and \"https://\" stay as they are."
     },
     "%@ uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server." : {
-
+      "comment" : "Warning before logging in to a server without encryption. %@ is the server's host name. \"http://\" and \"https://\" stay as they are."
     },
     "%@ · %@" : {
       "comment" : "A section header that displays the category title and the size of the items in that category.",
@@ -18,6 +36,32 @@
           }
         }
       }
+    },
+    "%lld albums" : {
+      "comment" : "Backup screen, Albums row: how many device albums are mirrored. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld already on your Nextcloud" : {
+      "comment" : "Backup set-up, after the check: how many of the device's photos and videos are already on the server."
     },
     "%lld changes couldn't be saved on the server." : {
       "comment" : "A banner that shows a warning that some changes couldn't be saved. The argument is the number of failed operations.",
@@ -43,7 +87,54 @@
         }
       }
     },
+    "%lld copies" : {
+      "comment" : "Part of a photo tile's VoiceOver label in the library: the tile stands for this many copies of one photo (for example HEIC and JPEG, or RAW and JPEG). Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copy"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copies"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld copies in album folders are imported once." : {
+      "comment" : "Import from Google Takeout window (Mac): Google Takeout puts album photos in the year folders too; such copies are imported only once. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copy in an album folder is imported once."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copies in album folders are imported once."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld files · %@" : {
+      "comment" : "Detail of an album that is available offline, in Settings › Storage. %lld is the number of downloaded files (with plural forms), %@ their size, e.g. \"12 files · 34 MB\".",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -74,6 +165,9 @@
           }
         }
       }
+    },
+    "%lld found so far" : {
+      "comment" : "Backup set-up, while it checks: how many of the device's photos and videos were found on the server so far."
     },
     "%lld identical copies · %@ can be freed" : {
       "comment" : "Heading of a set of duplicates: number of identical files and the size freed by deleting all but one.",
@@ -132,13 +226,286 @@
         }
       }
     },
+    "%lld items could not be exported." : {
+      "comment" : "Result after exporting originals into a folder on the Mac: %lld is the number of photos or videos that failed. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item could not be exported."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items could not be exported."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items could not be saved." : {
+      "comment" : "Result after saving originals to the device's photo library (iPhone, iPad): %lld is the number of photos or videos that failed. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item could not be saved."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items could not be saved."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items could not be uploaded" : {
+      "comment" : "Backup screen status: the backup pass ended, but %lld photos or videos failed to upload (they are tried again later). Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item could not be uploaded"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items could not be uploaded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items couldn't be restored from the trash bin." : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after undoing a delete: %lld deleted items could not be brought back from the server's trash bin. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item couldn't be restored from the trash bin."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items couldn't be restored from the trash bin."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items have no Google Photos details; they keep the date in their own metadata." : {
+      "comment" : "Import from Google Takeout window (Mac): photos without Google's JSON description file. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item has no Google Photos details; it keeps the date in its own metadata."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items have no Google Photos details; they keep the date in their own metadata."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items in the export's trash are left out." : {
+      "comment" : "Import from Google Takeout window (Mac): photos in the export's trash folder are not imported. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item in the export's trash is left out."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items in the export's trash are left out."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld new photos" : {
+      "comment" : "Entry of the shared-album activity list: how many photos others added.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld new photos in %lld albums" : {
+      "comment" : "Banner above the albums: a number of photos added by others, in a number of shared albums. Both numbers have plural forms.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in %#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg albums"
+                    }
+                  }
+                }
+              }
+            },
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld new photos in “%@”" : {
+      "comment" : "Banner above the albums: a number of photos (with plural forms) added to an album (its title) by others.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in “%2$@”"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld of %lld" : {
-      "comment" : "Accessibility: position of the photo shown in the viewer.",
+      "comment" : "Position of the photo shown in the viewer (accessibility); backup progress: uploaded files of all files.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "%lld of %lld items could not be read." : {
+      "comment" : "Note in the share extension (\"Upload to Nextcloud Photos\" from the share sheet): the first %lld is the number of shared items that could not be read, the second the number of all shared items."
+    },
+    "%lld people are hidden on this device. Nextcloud can't hide people on all your devices yet." : {
+      "comment" : "Note under the People grid. Recognize (the server) has no way to hide a person, so hiding only applies to this device. %lld is the number of hidden people. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld person is hidden on this device. Nextcloud can't hide people on all your devices yet."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld people are hidden on this device. Nextcloud can't hide people on all your devices yet."
+                }
+              }
+            }
           }
         }
       }
@@ -167,7 +534,169 @@
         }
       }
     },
+    "%lld photos and videos in the Photos library of this Mac" : {
+      "comment" : "Backup set-up (macOS): how many photos and videos the backup would cover. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video in the Photos library of this Mac"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos in the Photos library of this Mac"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos in the Photos library of this Mac are not on your Nextcloud yet." : {
+      "comment" : "Above the list of photos that are not backed up yet (macOS). Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video in the Photos library of this Mac is not on your Nextcloud yet."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos in the Photos library of this Mac are not on your Nextcloud yet."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos on this iPad" : {
+      "comment" : "Backup set-up (iPad): how many photos and videos the backup would cover. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video on this iPad"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos on this iPad"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos on this iPad are not on your Nextcloud yet." : {
+      "comment" : "Above the list of photos that are not backed up yet (iPad). Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video on this iPad is not on your Nextcloud yet."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos on this iPad are not on your Nextcloud yet."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos on this iPhone" : {
+      "comment" : "Backup set-up (iPhone): how many photos and videos the backup would cover. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video on this iPhone"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos on this iPhone"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos on this iPhone are not on your Nextcloud yet." : {
+      "comment" : "Above the list of photos that are not backed up yet (iPhone). Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video on this iPhone is not on your Nextcloud yet."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos on this iPhone are not on your Nextcloud yet."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld photos and videos were moved to Recently Deleted." : {
+      "comment" : "Free up space: result after removing. Recently Deleted is the album of Apple's Photos app. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video was moved to Recently Deleted."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos were moved to Recently Deleted."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld results" : {
+      "comment" : "Number of search results, shown below the search field or as the window subtitle.",
       "localizations" : {
         "en" : {
           "variations" : {
@@ -193,6 +722,32 @@
       "comment" : "A label that shows the number of selected items. The argument is the number of selected items.",
       "isCommentAutoGenerated" : true
     },
+    "%lld to upload" : {
+      "comment" : "Backup set-up, after the check: how many of the device's photos and videos will be uploaded."
+    },
+    "%lld waiting" : {
+      "comment" : "Number of photos that wait for backup.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld waiting"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld waiting"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld × %lld (%@ MP)" : {
       "comment" : "Width × height in pixels and megapixels.",
       "localizations" : {
@@ -205,28 +760,41 @@
       }
     },
     "1 minute" : {
-
+      "comment" : "Option of \"Lock after\" in Settings: the app locks after one minute in the background."
     },
     "15 minutes" : {
-
+      "comment" : "Option of \"Lock after\" in Settings: the app locks after 15 minutes in the background."
     },
     "5 minutes" : {
-
+      "comment" : "Option of \"Lock after\" in Settings: the app locks after 5 minutes in the background."
+    },
+    "A name can't be only digits." : {
+      "comment" : "Naming a person: Recognize uses numbers for unnamed people, so a name of digits only is refused."
+    },
+    "A photo or video has to be copied before it is uploaded, and there is no room for that. Free up space, then back up again." : {
+      "comment" : "Explanation on the Backup screen when the backup stopped because the device or Mac has no free storage left."
+    },
+    "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge. Open it to see every copy." : {
+      "comment" : "Footer of the library options of this device in Settings (the \"Stack copies of a photo\" switch)."
+    },
+    "A text file with what the app logged since it was opened (the last two days at most), its version, the system version, the server version and the detected server features. With \"Keep log across restarts\", it also contains the log of earlier runs, which the app keeps on this device (1 MB at most). It contains no account names, server addresses, file names or passwords. Attach it when you report a problem." : {
+      "comment" : "Footer of Settings › Diagnostics, under \"Export diagnostics…\". \"Keep log across restarts\" is the switch above; use the same translation."
     },
     "AI captions" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
     "About" : {
-
+      "comment" : "Title of the Settings section (and, on the Mac, the Settings tab) with version, source code and licence."
     },
     "About this album" : {
-
+      "comment" : "Button in an album that shows its description, place and collaborators."
     },
     "Account" : {
       "comment" : "A label for the account picker.",
       "isCommentAutoGenerated" : true
     },
     "Account %@ on %@" : {
+      "comment" : "VoiceOver label of the account switcher in the sidebar. The first %@ is the user's name, the second the server's host name.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -237,20 +805,23 @@
       }
     },
     "Accounts" : {
-
+      "comment" : "Title of the Settings section (and, on the Mac, the Settings tab) that lists the logged-in accounts."
+    },
+    "Add" : {
+      "comment" : "Button next to the new tag field: creates the tag and gives it to the photos."
     },
     "Add %lld" : {
       "comment" : "A button that adds the selected items to an album. The argument is the count of selected items.",
       "isCommentAutoGenerated" : true
     },
     "Add Folder…" : {
-
+      "comment" : "Button in Settings that adds a folder of the server to the folders shown in the timeline (Mac, title case)."
     },
     "Add This Folder" : {
-
+      "comment" : "Button in the folder browser that confirms the folder currently shown as a timeline folder."
     },
     "Add account…" : {
-
+      "comment" : "Button that starts the login for another Nextcloud account."
     },
     "Add name" : {
       "comment" : "Text for a button to add a name to a person.",
@@ -264,18 +835,24 @@
       "comment" : "Text displayed in a warning banner at the top of the screen when the user is not a member.",
       "isCommentAutoGenerated" : true
     },
+    "Add this account?" : {
+      "comment" : "Title of the confirmation before logging in with a scanned QR code or a pasted login link (nc://login/…)."
+    },
     "Add to Album…" : {
-
+      "comment" : "Menu command on the Mac (title case) that adds the selected photos to an album."
     },
     "Add to Favorites" : {
-
+      "comment" : "Command that marks the selected or shown photo as a favorite."
     },
     "Add to album" : {
       "comment" : "A title for a sheet that allows the user to add a photo to an album.",
       "isCommentAutoGenerated" : true
     },
+    "Add to albums on Nextcloud" : {
+      "comment" : "Backup › Albums (iPhone, iPad): mirroring device albums into Nextcloud albums. Switch that turns the mirroring on."
+    },
     "Add to album…" : {
-
+      "comment" : "Menu item on iPhone and iPad that adds the selected photos to an album."
     },
     "Add to favorites" : {
       "comment" : "Text for a grid menu action to add items to favorites.",
@@ -285,8 +862,31 @@
       "comment" : "The title of the view. The argument is the album's title.",
       "isCommentAutoGenerated" : true
     },
+    "Added %lld items to favorites" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after marking photos as favourites; it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Added %lld item to favorites"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Added %lld items to favorites"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Additional server APIs" : {
-
+      "comment" : "Heading of a group of server features in Settings › Server features: features that need an additional app on the server."
     },
     "Adjust" : {
       "comment" : "A label for the \"Adjust\" tab in the photo editor.",
@@ -312,28 +912,40 @@
       "comment" : "A server feature in the list under Settings › Server features."
     },
     "Album not found" : {
-
+      "comment" : "Title shown when a link points to an album that does not exist (any more)."
     },
     "Album options" : {
-
+      "comment" : "VoiceOver label and tooltip of the \"…\" menu button of an album."
     },
     "Albums" : {
       "comment" : "The title of the albums screen.",
       "isCommentAutoGenerated" : true
+    },
+    "Albums can be shared with people and groups on this server and by public link. The Photos app on your server cannot share an album with people on other servers, by email or in Talk. Single photos and folders can be shared that way: choose Share via Nextcloud… on a photo or a folder." : {
+      "comment" : "Footer of the album sharing sheet: what album sharing can and cannot do. “Share via Nextcloud…” is the name of a menu action; keep it identical to its translation."
+    },
+    "Albums on this device" : {
+      "comment" : "Backup › Albums (iPhone, iPad): mirroring device albums into Nextcloud albums. Header of the list of the device's own albums to choose from."
     },
     "Albums that others share with you appear here." : {
       "comment" : "The text that appears when the user has no shared albums.",
       "isCommentAutoGenerated" : true
     },
     "Albums you make available offline appear here." : {
-
+      "comment" : "Placeholder in Settings › Storage › Available offline when no album was made available offline."
     },
     "All" : {
       "comment" : "A label for the \"All\" option in the picker.",
       "isCommentAutoGenerated" : true
     },
     "All files" : {
-
+      "comment" : "Name shown for the top folder of the user's files on the server, in the folder browser."
+    },
+    "All memories" : {
+      "comment" : "Last card of the memories strip at the top of the library: opens the Memories screen."
+    },
+    "All your own photos are in this album already." : {
+      "comment" : "Description of the empty state when adding photos to an album and every photo of the user is already in it. Title: \"No photos to add\"."
     },
     "All your photos and videos, on your own Nextcloud." : {
       "comment" : "A description of the app.",
@@ -343,9 +955,24 @@
       "comment" : "A warning that the user should allow access to their photos in Settings to use backup.",
       "isCommentAutoGenerated" : true
     },
+    "Allow full access in Settings" : {
+      "comment" : "Button on the Backup screen (iPhone, iPad) when the app may only see selected photos: opens the app's page in the Settings app to allow access to all photos."
+    },
     "Already on your Nextcloud" : {
       "comment" : "A label for the number of files already on Nextcloud",
       "isCommentAutoGenerated" : true
+    },
+    "Already on your server" : {
+      "comment" : "Import from Google Takeout window (Mac): count of photos that were skipped because the server already has them."
+    },
+    "An earlier import of this export got through %lld of %lld items. It continues where it stopped." : {
+      "comment" : "Import from Google Takeout window (Mac): an interrupted import of the same export is continued. The arguments are done and total items."
+    },
+    "Another person already has this name. Use Merge to put them together." : {
+      "comment" : "Naming a person: the name is taken. \"Merge\" is the action of the person screen that joins two people."
+    },
+    "Anyone with a link can open it without an account. Protect it with a password or let it expire." : {
+      "comment" : "Sharing screen (Share via Nextcloud…): footer of the public links section."
     },
     "Anyone with the link can view the photos of this album without an account." : {
       "comment" : "A description of the public link.",
@@ -363,23 +990,46 @@
       "comment" : "A title for a screen that displays that the archive is locked.",
       "isCommentAutoGenerated" : true
     },
+    "Archived %lld items" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after archiving photos (they are hidden from the library); it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Archived %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Archived %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Archived photos always need Face ID or your passcode." : {
-
+      "comment" : "Footnote below the app lock setting on iPhone and iPad with Face ID. \"Face ID\" is Apple's name for the feature."
     },
     "Archived photos always need Optic ID or your passcode." : {
-
+      "comment" : "Footnote below the app lock setting on Apple Vision Pro. \"Optic ID\" is Apple's name for the feature."
     },
     "Archived photos always need Touch ID or your passcode." : {
-
+      "comment" : "Footnote below the app lock setting on iPhone and iPad with Touch ID. \"Touch ID\" is Apple's name for the feature."
     },
     "Archived photos always need Touch ID or your password." : {
-
+      "comment" : "Footnote below the app lock setting on a Mac with Touch ID (a Mac has a password, not a passcode)."
     },
     "Archived photos always need your passcode." : {
-
+      "comment" : "Footnote below the app lock setting on a device without Face ID or Touch ID."
     },
     "Archived photos always need your password." : {
-
+      "comment" : "Footnote below the app lock setting on a Mac without Touch ID."
     },
     "Archived photos are hidden from your library." : {
       "comment" : "A description of why the archive is locked.",
@@ -397,8 +1047,14 @@
       "comment" : "A label for the aspect ratio picker in the photo editor.",
       "isCommentAutoGenerated" : true
     },
+    "Assign to Person…" : {
+      "comment" : "Action for unassigned faces (Recognize): puts them in a person's photos. Mac menu item, title case."
+    },
+    "Assign to person…" : {
+      "comment" : "Action for unassigned faces (Recognize): puts them in a person's photos."
+    },
     "Assistant" : {
-
+      "comment" : "Nextcloud Assistant, the AI features of the server: heading of a group of server features in Settings, and name of a feature."
     },
     "Assistant: image analysis" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -414,15 +1070,30 @@
       "isCommentAutoGenerated" : true
     },
     "Available" : {
-
+      "comment" : "State of a server feature in Settings › Server features: this server offers it. Read by VoiceOver."
     },
     "Available offline" : {
       "comment" : "A description of a photo album that is only available when the device is connected to Wi-Fi.",
       "isCommentAutoGenerated" : true
     },
+    "Back up here" : {
+      "comment" : "Confirming button of the folder browser when choosing the backup folder."
+    },
+    "Back up here and show in library" : {
+      "comment" : "Choice after picking a backup folder the timeline doesn't show: use it and add it to the timeline folders."
+    },
     "Back up now" : {
       "comment" : "The label of a button that triggers a backup.",
       "isCommentAutoGenerated" : true
+    },
+    "Back up the photos of this iPad?" : {
+      "comment" : "Title of the backup offer after the first login (iPad)."
+    },
+    "Back up the photos of this iPhone?" : {
+      "comment" : "Title of the backup offer after the first login (iPhone)."
+    },
+    "Back up to %@ instead" : {
+      "comment" : "Button: changes the backup folder to one the timeline shows. The placeholder is a folder path such as /Photos."
     },
     "Back up with Nextcloud Photos instead" : {
       "comment" : "A button that starts the backup process.",
@@ -436,11 +1107,18 @@
       "comment" : "A description of a backup item that is already backed up.",
       "isCommentAutoGenerated" : true
     },
+    "Backed-up photos can also be added to albums of the same name on your Nextcloud." : {
+      "comment" : "Backup screen: footer of the Albums row that leads to album mirroring."
+    },
+    "Backed-up photos don't appear in your library" : {
+      "comment" : "Warning on the Backup screen: the backup folder is not one of the folders the timeline shows."
+    },
     "Backup" : {
       "comment" : "The title of the backup screen.",
       "isCommentAutoGenerated" : true
     },
     "Backup goes to the account %@ on %@, not to the account you are looking at." : {
+      "comment" : "Note on the Backup screen when backup belongs to another account than the one shown. The first %@ is the account's name, the second the server's host name.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -451,7 +1129,7 @@
       }
     },
     "Backup is not available on this Mac" : {
-
+      "comment" : "Title on the Backup screen of the Mac when the Photos library cannot be backed up."
     },
     "Backup is not available on this device" : {
       "comment" : "A description of why the backup is not available on this device.",
@@ -462,18 +1140,27 @@
       "isCommentAutoGenerated" : true
     },
     "Backup progress" : {
-
+      "comment" : "VoiceOver label of the progress bar on the Backup screen."
     },
     "Brightness" : {
       "comment" : "A slider for adjusting the brightness of an image.",
       "isCommentAutoGenerated" : true
     },
     "Browse" : {
-
+      "comment" : "Heading of the group of views (Photos, Videos, Favorites…) in the sidebar on iPad and Apple Vision Pro."
     },
     "Camera" : {
       "comment" : "A section for camera-related metadata.",
       "isCommentAutoGenerated" : true
+    },
+    "Can edit" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): permission of a share: the recipient may change the file or folder."
+    },
+    "Can view" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): permission of a share: the recipient may only look."
+    },
+    "Can view and upload" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): permission of a public link to a folder: visitors may also add files."
     },
     "Cancel" : {
       "comment" : "A button that dismisses the editor.",
@@ -489,12 +1176,24 @@
       "comment" : "A toggle to change the location of the photo.",
       "isCommentAutoGenerated" : true
     },
+    "Change undone" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after the user undid a change (favourite, archive, remove from album)."
+    },
     "Check that you are allowed to add files to the backup folder, or choose another folder." : {
-
+      "comment" : "Advice on the Backup screen when the server refused an upload."
+    },
+    "Checked when the app refreshes in the background, so a notification can come hours later. Instant notifications would need your Nextcloud server to send them." : {
+      "comment" : "Footer of Settings › Shared albums."
     },
     "Checking library" : {
       "comment" : "A description of the current state of the library reconciliation process.",
       "isCommentAutoGenerated" : true
+    },
+    "Checking which are already on your Nextcloud…" : {
+      "comment" : "Shown while the backup set-up compares the device's photos with the server."
+    },
+    "Checking which photos are on your Nextcloud…" : {
+      "comment" : "Free up space: shown while the server copies are checked."
     },
     "Checking your Nextcloud… %lld of %lld" : {
       "comment" : "A status message that indicates the backup is checking the user's Nextcloud for updates. The argument is the number of photos already checked, and the second argument is the total number of photos to be checked.",
@@ -508,15 +1207,33 @@
         }
       }
     },
+    "Checking…" : {
+      "comment" : "Short backup status next to \"Backup\" in the Collections list (iPhone): the app is comparing the device's photos with the server."
+    },
+    "Choose Takeout Folder or ZIP Files…" : {
+      "comment" : "Import from Google Takeout window (Mac): button that opens the file picker (Mac title case)."
+    },
+    "Choose another folder" : {
+      "comment" : "Choice after picking a backup folder the timeline doesn't show."
+    },
     "Choose where to save the originals." : {
-
+      "comment" : "Message of the Mac's folder panel when exporting photos."
+    },
+    "Choose…" : {
+      "comment" : "Button next to the backup folder: opens the server's folders."
     },
     "Clear" : {
       "comment" : "A button that clears all finished transfers.",
       "isCommentAutoGenerated" : true
     },
     "Clear cache" : {
-
+      "comment" : "Button in Settings › Storage that deletes the cached previews."
+    },
+    "Clear recent searches" : {
+      "comment" : "Accessibility label of the button that removes all recent searches, in the header of the \"Recent searches\" list on the Search screen."
+    },
+    "Clear search" : {
+      "comment" : "Button in the empty state of the Search screen (\"No results\"): removes all search filters."
     },
     "Click another copy to keep that one instead." : {
       "comment" : "Hint in the Duplicates screen on the Mac."
@@ -538,7 +1255,7 @@
       "isCommentAutoGenerated" : true
     },
     "Comments on albums aren't available on this server." : {
-
+      "comment" : "Placeholder of the comments of an album when the server does not support them."
     },
     "Connecting…" : {
       "comment" : "The title of the button that appears when the login flow is in the \"Connecting…\" state.",
@@ -555,9 +1272,18 @@
       "comment" : "A button that copies the text in a photo to the clipboard.",
       "isCommentAutoGenerated" : true
     },
+    "Copy %lld of %lld · %@" : {
+      "comment" : "Viewer, above a stacked photo whose copies are shown as pages: which copy this is (first %lld), of how many (second %lld), and its file name (%@)."
+    },
     "Copy link" : {
       "comment" : "A button that copies a link to the clipboard.",
       "isCommentAutoGenerated" : true
+    },
+    "Could not be uploaded" : {
+      "comment" : "Import from Google Takeout window (Mac): count of photos that failed."
+    },
+    "Couldn't export" : {
+      "comment" : "Title of the message on the Mac when exporting originals into a folder failed."
     },
     "Couldn't load albums" : {
       "comment" : "The title of an alert that appears when the user can't load their albums.",
@@ -567,11 +1293,17 @@
       "comment" : "Title shown when the folder list could not be loaded."
     },
     "Couldn't load your library" : {
-
+      "comment" : "Title in the empty timeline when the first sync with the server failed."
     },
     "Couldn't save" : {
       "comment" : "A title for an alert that displays when an error occurs while saving an edited photo.",
       "isCommentAutoGenerated" : true
+    },
+    "Couldn't search" : {
+      "comment" : "Title of the error state on the Search screen when the search itself failed (for example a tag or person filter while offline). Followed by the reason and \"Try again\"."
+    },
+    "Couldn't sync" : {
+      "comment" : "Title of the error banner at the bottom of photo grids, of the error state of the library and of the row in Settings › Server when synchronising with the server failed. Followed by the reason and a Retry button."
     },
     "Create" : {
       "comment" : "The label of a button that creates a new album.",
@@ -581,12 +1313,21 @@
       "comment" : "The label of a button that creates a new album.",
       "isCommentAutoGenerated" : true
     },
+    "Create albums" : {
+      "comment" : "Import from Google Takeout window (Mac): switch: the export's albums become Photos albums."
+    },
+    "Create public link…" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): button that creates a new public link."
+    },
+    "Creating albums…" : {
+      "comment" : "Import from Google Takeout window (Mac): progress title while albums are created."
+    },
     "Crop" : {
       "comment" : "A tab in the photo editor.",
       "isCommentAutoGenerated" : true
     },
     "Current account" : {
-
+      "comment" : "VoiceOver label of the checkmark next to the account in use, in Settings."
     },
     "Date" : {
       "comment" : "A label for the date picker.",
@@ -678,6 +1419,7 @@
       }
     },
     "Delete %lld items?" : {
+      "comment" : "Title of the confirmation before the selected photos and videos are deleted. %lld is their number.",
       "localizations" : {
         "en" : {
           "variations" : {
@@ -734,13 +1476,28 @@
       "comment" : "A confirmation dialog asking the user to delete all items permanently.",
       "isCommentAutoGenerated" : true
     },
+    "Delete link" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): button that removes a public link."
+    },
     "Delete permanently" : {
       "comment" : "A button that deletes permanently a recently deleted item.",
       "isCommentAutoGenerated" : true
     },
+    "Delete permanently…" : {
+      "comment" : "Context-menu item of an item in Recently deleted (the server's trash bin): deletes it for good after a confirmation."
+    },
+    "Delete smart album" : {
+      "comment" : "Destructive button in the confirmation dialog for deleting a smart album (a saved search) from the Smart albums list."
+    },
+    "Delete the smart album “%@”?" : {
+      "comment" : "Title of the confirmation dialog for deleting a smart album (a saved search). %@ is the smart album's name."
+    },
     "Delete this item?" : {
       "comment" : "A confirmation dialog title.",
       "isCommentAutoGenerated" : true
+    },
+    "Delete “%@” permanently?" : {
+      "comment" : "Title of the confirmation dialog for deleting an item from Recently deleted (the server's trash bin) for good. %@ is the file name."
     },
     "Delete “%@”?" : {
       "comment" : "A confirmation prompt for deleting an album. The argument is the album title.",
@@ -749,6 +1506,29 @@
     "Deleted %@" : {
       "comment" : "A sublabel below the name of a recently deleted photo, showing the date and time it was deleted. The argument is the date and time of the deletion.",
       "isCommentAutoGenerated" : true
+    },
+    "Deleted %lld items" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after deleting on a server without trash bin (cannot be undone). %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleted %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleted %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Delete…" : {
       "comment" : "Menu item that asks to delete a file; a confirmation follows."
@@ -763,6 +1543,9 @@
       "comment" : "A label for the description of an album.",
       "isCommentAutoGenerated" : true
     },
+    "Deselect all" : {
+      "comment" : "Button in the \"Add photos\" sheet of an album: removes all photos picked so far from the selection."
+    },
     "Details" : {
       "comment" : "A section header for the details of the backup.",
       "isCommentAutoGenerated" : true
@@ -774,6 +1557,9 @@
     "Detected %@." : {
       "comment" : "A footer that shows the date and time when the server features were detected.",
       "isCommentAutoGenerated" : true
+    },
+    "Diagnostics" : {
+      "comment" : "Header of the section in Settings › Server with the button \"Export diagnostics…\" (a log file for bug reports)."
     },
     "Dimensions" : {
       "comment" : "A label for the dimensions of a photo.",
@@ -787,16 +1573,22 @@
       "comment" : "A confirmation dialog asking the user if they already back up photos with the Nextcloud Files app.",
       "isCommentAutoGenerated" : true
     },
+    "Don't show hidden people" : {
+      "comment" : "Button under the People grid: hides the people hidden on this device again."
+    },
     "Done" : {
       "comment" : "A button that dismisses the current view.",
       "isCommentAutoGenerated" : true
     },
     "Download only on Wi-Fi" : {
-
+      "comment" : "Switch in Settings: offline albums are only downloaded on Wi-Fi."
     },
     "Download originals from iCloud" : {
       "comment" : "A toggle that allows users to download originals from iCloud.",
       "isCommentAutoGenerated" : true
+    },
+    "Download your photos from Google with Google Takeout (takeout.google.com, Google Photos only). Choose the unpacked Takeout folder, or its ZIP files: they don't need to be unpacked." : {
+      "comment" : "Import from Google Takeout window (Mac): explanation before an export is chosen."
     },
     "Dramatic" : {
       "comment" : "Photo filter."
@@ -809,12 +1601,15 @@
       "comment" : "A label for the duration of a photo.",
       "isCommentAutoGenerated" : true
     },
+    "Earlier" : {
+      "comment" : "Section of the shared-album activity list: entries already looked at."
+    },
     "Edit" : {
       "comment" : "The title of the photo editor.",
       "isCommentAutoGenerated" : true
     },
     "Edit Date and Location…" : {
-
+      "comment" : "Menu command on the Mac (title case) that opens the editor for a photo's capture date and place."
     },
     "Edit album" : {
       "comment" : "A title for the edit album screen.",
@@ -837,35 +1632,98 @@
       "isCommentAutoGenerated" : true
     },
     "Edited photo" : {
-
+      "comment" : "VoiceOver description of the image in the editor while the edited version is shown."
     },
     "Edited photos" : {
       "comment" : "A label for the option to include edited photos in the backup.",
       "isCommentAutoGenerated" : true
     },
     "Edit…" : {
-
+      "comment" : "Menu command that opens the photo editor."
+    },
+    "Email" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: someone invited by email address."
     },
     "Empty" : {
       "comment" : "A button that deletes all recently deleted items permanently.",
       "isCommentAutoGenerated" : true
     },
+    "Enter a name." : {
+      "comment" : "Naming a person: the name field is empty."
+    },
+    "Every photo and video that backup covers is on your Nextcloud." : {
+      "comment" : "Empty state of the list of photos that are not backed up yet."
+    },
+    "Everything is backed up" : {
+      "comment" : "Title of the empty list of photos that are not backed up yet."
+    },
     "Everything only on Wi-Fi" : {
       "comment" : "A toggle that allows users to choose whether to upload their backup data only when on Wi-Fi.",
       "isCommentAutoGenerated" : true
     },
+    "Expires on" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): date picker label: the day the share ends."
+    },
     "Export" : {
-
+      "comment" : "Button of the Mac's folder panel that starts exporting the selected photos (verb)."
+    },
+    "Export diagnostics…" : {
+      "comment" : "Button in Settings › Server › Diagnostics: writes a text file with the app's log for a bug report and lets the user save or share it."
+    },
+    "Exported %lld items" : {
+      "comment" : "Mac: originals were exported into a folder.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Exported %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Exported %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Exported %lld of %lld items" : {
+      "comment" : "Mac: only some of the originals were exported.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Exported %1$lld of %2$lld items"
+          }
+        }
+      }
+    },
+    "Exporting %lld of %lld…" : {
+      "comment" : "Mac: progress of an export, e.g. Exporting 2 of 5…",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Exporting %1$lld of %2$lld…"
+          }
+        }
+      }
     },
     "Export…" : {
-
+      "comment" : "Menu command on the Mac that saves the originals of the selected photos to a folder."
     },
     "Exposure" : {
       "comment" : "A label displayed in the UI for adjusting exposure.",
       "isCommentAutoGenerated" : true
     },
     "Extended" : {
-
+      "comment" : "Value of \"Photos features\" in Settings: the server's Photos app offers more than the standard features."
     },
     "Extract text" : {
       "comment" : "A button that extracts text from an image.",
@@ -876,10 +1734,10 @@
       "isCommentAutoGenerated" : true
     },
     "Failed: %@" : {
-
+      "comment" : "VoiceOver label of a failed upload. %@ is the error message."
     },
     "Favorite" : {
-
+      "comment" : "Part of the VoiceOver description of a photo that is marked as a favorite (adjective/noun, not a command)."
     },
     "Favorites" : {
       "comment" : "The label of a button that filters the feed to show only the user's favorites.",
@@ -897,6 +1755,9 @@
       "comment" : "A tab in the photo editor.",
       "isCommentAutoGenerated" : true
     },
+    "Find a tag" : {
+      "comment" : "Prompt of the search field of the tag sheet."
+    },
     "Finishing…" : {
       "comment" : "The title of a button that is displayed while the user is being logged in.",
       "isCommentAutoGenerated" : true
@@ -908,6 +1769,9 @@
     "Folder" : {
       "comment" : "A label for the backup folder.",
       "isCommentAutoGenerated" : true
+    },
+    "Folder %lld of %lld" : {
+      "comment" : "Free up space: progress of the server check, in server folders."
     },
     "Folder previews" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -929,17 +1793,59 @@
     "Free up server space" : {
       "comment" : "Title of the screen that lists screenshots, screen recordings and large videos stored on the server."
     },
+    "Free up space on this iPad" : {
+      "comment" : "Row and screen title: remove backed-up photos from the iPad."
+    },
+    "Free up space on this iPhone" : {
+      "comment" : "Row and screen title: remove backed-up photos from the iPhone."
+    },
     "Free up space on your Nextcloud or get more storage, then back up again." : {
-
+      "comment" : "Advice on the Backup screen when the user's storage on the server is full."
     },
     "General" : {
-
+      "comment" : "Title of the first tab of the Settings window on the Mac."
     },
     "Get Info" : {
-
+      "comment" : "Menu command on the Mac (title case) that shows details of the selected photo."
     },
     "Go" : {
-
+      "comment" : "Title of the Mac menu that lists the views of the app to go to, as in Finder."
+    },
+    "Group" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: a group of users of this server."
+    },
+    "Group on another server" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: a group on another Nextcloud server (federation)."
+    },
+    "Hide" : {
+      "comment" : "Import from Google Takeout window (Mac): button that closes the window while the import goes on."
+    },
+    "Hide Copies" : {
+      "comment" : "Viewer (Mac, title case): takes the other copies of a stacked photo out of the viewer again."
+    },
+    "Hide Memories" : {
+      "comment" : "Context menu of the memories strip at the top of the library (Mac, title case). They can be shown again in Settings."
+    },
+    "Hide Partner Photos" : {
+      "comment" : "Library toolbar button (Mac, title case): hides photos from partner folders in the timeline."
+    },
+    "Hide Person" : {
+      "comment" : "Hides a person from the People screen on this device only (Mac, title case)."
+    },
+    "Hide copies" : {
+      "comment" : "Viewer: takes the other copies of a stacked photo out of the viewer again."
+    },
+    "Hide download" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): switch of a public link: visitors can view but get no download button."
+    },
+    "Hide memories" : {
+      "comment" : "Context menu of the memories strip at the top of the library. They can be shown again in Settings."
+    },
+    "Hide partner photos" : {
+      "comment" : "Library toolbar button (iPhone, iPad): hides photos from partner folders in the timeline."
+    },
+    "Hide person" : {
+      "comment" : "Hides a person from the People screen on this device only."
     },
     "Highlights" : {
       "comment" : "A slider that adjusts the highlights of an image.",
@@ -949,6 +1855,9 @@
       "comment" : "A label at the bottom of the metadata editor that shows the number of hours to shift the capture date and time",
       "isCommentAutoGenerated" : true
     },
+    "I compared the new fingerprint with the one my server's administrator gave me, and they match." : {
+      "comment" : "Switch the user must turn on before the new certificate can be trusted (certificate review sheet)."
+    },
     "I couldn't turn that into a search." : {
       "comment" : "A message displayed when the search query cannot be translated into a search.",
       "isCommentAutoGenerated" : true
@@ -956,22 +1865,76 @@
     "Identical copies of a photo or video in your Nextcloud appear here." : {
       "comment" : "Description of the empty Duplicates screen."
     },
+    "If you trust a certificate that isn't your server's, whoever presents it can read your password and your photos." : {
+      "comment" : "Warning under the button \"Trust the new certificate\"."
+    },
     "Image" : {
-
+      "comment" : "Title of the Mac menu with commands for the selected photo, as in the Photos app."
     },
     "Immediately" : {
-
+      "comment" : "Option of \"Lock after\" in Settings: the app locks as soon as it goes to the background."
+    },
+    "Import" : {
+      "comment" : "Import from Google Takeout window (Mac): button that starts the import; also a section header."
+    },
+    "Import finished" : {
+      "comment" : "Import from Google Takeout window (Mac): progress title when everything was imported."
+    },
+    "Import finished with problems" : {
+      "comment" : "Import from Google Takeout window (Mac): progress title when some files could not be uploaded."
+    },
+    "Import from Google Takeout" : {
+      "comment" : "Import from Google Takeout window (Mac): window title."
+    },
+    "Import from Google Takeout…" : {
+      "comment" : "File menu item (Mac) that opens the Google Takeout import."
+    },
+    "Import stopped. It continues where it stopped when you resume it." : {
+      "comment" : "Import from Google Takeout window (Mac): the user stopped the import."
+    },
+    "Import stopped: %@" : {
+      "comment" : "Import from Google Takeout window (Mac): the import stopped because of an error that affects every file (login, full storage). The argument is the error."
+    },
+    "Importing…" : {
+      "comment" : "Import from Google Takeout window (Mac): progress title while files are uploaded."
+    },
+    "Include hidden photos" : {
+      "comment" : "Switch on the Backup screen: also back up photos the user hid in Apple's Photos app (in its Hidden album). Off by default."
+    },
+    "Include the last 30 days" : {
+      "comment" : "Free up space: also offer photos taken in the last 30 days."
     },
     "Info" : {
       "comment" : "Text for the info action in the grid context menu.",
       "isCommentAutoGenerated" : true
     },
+    "Issued to" : {
+      "comment" : "Label of a certificate's subject (usually the server's host name) in the certificate review sheet."
+    },
+    "It is removed from the trash bin of your Nextcloud and cannot be restored." : {
+      "comment" : "Message of the confirmation dialog for deleting an item from Recently deleted (the server's trash bin) for good."
+    },
     "It may have been renamed or deleted." : {
-
+      "comment" : "Explanation below \"Album not found\"."
+    },
+    "It was deleted or moved on the server." : {
+      "comment" : "Explanation below \"This item is no longer available\", on a page of the photo viewer whose photo was removed meanwhile (by a sync or another device)."
     },
     "Keep" : {
       "comment" : "A button to keep the current date and time.",
       "isCommentAutoGenerated" : true
+    },
+    "Keep captions as comments" : {
+      "comment" : "Import from Google Takeout window (Mac): switch: Google Photos captions become comments on the file in Nextcloud."
+    },
+    "Keep log across restarts" : {
+      "comment" : "Switch in Settings › Diagnostics: keep the app's (anonymised) log on the device across restarts, so it can be included in a diagnostics export."
+    },
+    "Keep screen on while backing up" : {
+      "comment" : "Backup option (iPhone, iPad): the screen does not lock while a backup runs and the app is open."
+    },
+    "Label (only you see it)" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): field for a name of a public link that only its owner sees."
     },
     "Large videos" : {
       "comment" : "Section title for large video files in the free space screen.",
@@ -998,7 +1961,10 @@
       "isCommentAutoGenerated" : true
     },
     "Library" : {
-
+      "comment" : "The timeline of all photos: name of the view in the sidebar or tab bar, and title of a Settings section."
+    },
+    "Licences" : {
+      "comment" : "Settings › About: opens the licence texts of the app and of the libraries it uses; title of that screen."
     },
     "Like Nextcloud Files" : {
       "comment" : "A description of the backup format that uses the same file names as Nextcloud.",
@@ -1017,7 +1983,7 @@
       "isCommentAutoGenerated" : true
     },
     "Live Photo" : {
-
+      "comment" : "VoiceOver description of the kind of a photo; also a label in the backup options. \"Live Photo\" is Apple's name for a photo with a short video."
     },
     "Live Photos" : {
       "comment" : "A toggle that allows users to enable or disable live photos in backup.",
@@ -1027,12 +1993,17 @@
       "comment" : "A label for the number of items being loaded from the library.",
       "isCommentAutoGenerated" : true
     },
-    "Loading library… %lld" : {
-      "comment" : "A label that shows the number of photos being loaded.",
-      "isCommentAutoGenerated" : true
+    "Loading video…" : {
+      "comment" : "Accessibility label of the spinner on a video page in the viewer while the video is being loaded."
+    },
+    "Loading your library — %@" : {
+      "comment" : "Progress of the first sync when the total is not known: the number of photos and videos loaded so far."
+    },
+    "Loading your library — %@ of %@" : {
+      "comment" : "Progress of the first sync, shown over the timeline: photos and videos loaded so far (first number) and how many there are (second number), e.g. \"12,000 of 48,213\"."
     },
     "Loading your library…" : {
-
+      "comment" : "Shown in the timeline while the photos are loaded from the server for the first time."
     },
     "Loading…" : {
       "comment" : "Text displayed when a screen is loading.",
@@ -1043,25 +2014,25 @@
       "isCommentAutoGenerated" : true
     },
     "Lock after" : {
-
+      "comment" : "Label of the setting that chooses how long the app may be in the background before it locks."
     },
     "Lock with Face ID or passcode" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on iPhone and iPad with Face ID."
     },
     "Lock with Optic ID or passcode" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on Apple Vision Pro."
     },
     "Lock with Touch ID or passcode" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on iPhone and iPad with Touch ID."
     },
     "Lock with Touch ID or password" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on a Mac with Touch ID."
     },
     "Lock with passcode" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on a device without Face ID or Touch ID."
     },
     "Lock with your password" : {
-
+      "comment" : "Switch in Settings that turns on the app lock, on a Mac without Touch ID."
     },
     "Log in" : {
       "comment" : "The title of the login button.",
@@ -1072,21 +2043,36 @@
       "isCommentAutoGenerated" : true
     },
     "Log in again to continue the backup" : {
-
+      "comment" : "Title on the Backup screen when the backup stopped because the login is no longer valid."
+    },
+    "Log in again…" : {
+      "comment" : "Button in the certificate review sheet for a server whose new certificate cannot be accepted in place: opens the login."
     },
     "Log in anyway" : {
-
+      "comment" : "Button that continues the login to a server without encryption, after the warning."
+    },
+    "Log in to %@ as %@? Your photos will be shown from this server, and backup will upload to it. Only continue if this is your own Nextcloud." : {
+      "comment" : "Message of the confirmation before logging in with a QR code or login link. The first %@ is the server's host name, the second the user name the link logs in as."
     },
     "Log in to Nextcloud Photos to change its settings." : {
-
+      "comment" : "Text in the Mac's Settings window while no account is logged in. \"Nextcloud Photos\" is the app's name."
     },
     "Log in with a QR code or link" : {
       "comment" : "A button that logs in the user with a QR code or link.",
       "isCommentAutoGenerated" : true
     },
+    "Log in with a link" : {
+      "comment" : "Title of the login option on the Mac and Apple Vision Pro where the user pastes a login link (nc://login/…) from the server's web interface. iPhone and iPad have \"Log in with a QR code or link\" instead."
+    },
     "Log in with link" : {
       "comment" : "A button that logs in using a login link.",
       "isCommentAutoGenerated" : true
+    },
+    "Log out %@" : {
+      "comment" : "Accessibility label of the \"Log out…\" button of an account in Settings › Accounts. %@ is the account's display name."
+    },
+    "Log out…" : {
+      "comment" : "Button of an account in Settings › Accounts: logs out of that account and removes its data from this device after a confirmation."
     },
     "Login link" : {
       "comment" : "A label for a text field that accepts a login link.",
@@ -1103,7 +2089,7 @@
       "isCommentAutoGenerated" : true
     },
     "Make Album Cover" : {
-
+      "comment" : "Menu command on the Mac (title case) that makes the selected photo the cover of the album."
     },
     "Make album cover" : {
       "comment" : "Label for the action to make an album cover.",
@@ -1116,6 +2102,9 @@
     "Map" : {
       "comment" : "The name of the map icon.",
       "isCommentAutoGenerated" : true
+    },
+    "Mark all as seen" : {
+      "comment" : "Button of the shared-album activity list."
     },
     "Media types" : {
       "comment" : "A section title that lists the media types detected by the server.",
@@ -1175,26 +2164,100 @@
         }
       }
     },
+    "Move to Another Person…" : {
+      "comment" : "Moves the selected photos from this person to another one (Recognize; Mac menu item, title case)."
+    },
+    "Move to another person…" : {
+      "comment" : "Moves the selected photos from this person to another one (Recognize)."
+    },
+    "Moved %lld items to the trash bin" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after deleting photos (they go to the server's trash bin); it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Moved %lld item to the trash bin"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Moved %lld items to the trash bin"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Name" : {
       "comment" : "The name of the album",
       "isCommentAutoGenerated" : true
     },
-    "Name or caption" : {
-
+    "Name or email address" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field."
+    },
+    "Name or group" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field."
+    },
+    "Name, caption or tag" : {
+      "comment" : "Kind of a search suggestion: the text is searched in file names, captions, places, tags, people and recognised content."
+    },
+    "Name, email address or user@server" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field; user@server is a Federated Cloud ID, keep it as is."
+    },
+    "Name, email, Talk conversation or user@server" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field; Talk is Nextcloud's chat app; user@server is a Federated Cloud ID."
+    },
+    "Needs attention" : {
+      "comment" : "Short backup status next to \"Backup\" in the Collections list (iPhone): the backup failed, has no access to photos or some items could not be uploaded. Opening Backup shows the details."
     },
     "Network and battery" : {
       "comment" : "A section in the backup options for network and battery settings.",
       "isCommentAutoGenerated" : true
     },
+    "New" : {
+      "comment" : "Section of the shared-album activity list: entries not looked at yet."
+    },
     "New Album…" : {
-
+      "comment" : "Menu command on the Mac (title case) that creates an album."
+    },
+    "New Person…" : {
+      "comment" : "Creates a person (Recognize) to move photos or faces to (Mac, title case)."
     },
     "New album" : {
       "comment" : "The title of a view that creates a new album.",
       "isCommentAutoGenerated" : true
     },
+    "New certificate" : {
+      "comment" : "Section title in the sheet \"The server's certificate changed\" : the certificate the server presents now."
+    },
+    "New in shared albums" : {
+      "comment" : "Title of the banner above the albums and of the list of what others added to shared albums."
+    },
+    "New password (leave empty to keep it)" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): password field of a link that already has a password."
+    },
+    "New person…" : {
+      "comment" : "Creates a person (Recognize) to move photos or faces to."
+    },
+    "New photos are uploaded here, in subfolders by date. Your library shows the photos in your timeline folders." : {
+      "comment" : "Footer of the backup folder on the Backup screen."
+    },
+    "New photos in shared albums" : {
+      "comment" : "Switch in Settings › Shared albums: notifications about photos others added to shared albums."
+    },
+    "New public link" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): title of the sheet that creates a public link."
+    },
+    "New tag" : {
+      "comment" : "Placeholder of the field in the tag sheet where a new tag is typed."
+    },
     "Newer Photos versions" : {
-
+      "comment" : "Heading of a group of server features in Settings › Server features: features that need a newer version of the Photos app on the server."
     },
     "Newest first" : {
       "comment" : "A label for the newest-first option in the album sorting picker.",
@@ -1204,28 +2267,31 @@
       "comment" : "Accessibility label and tooltip of the button that shows the next photo or video in the viewer."
     },
     "Nextcloud" : {
-
+      "comment" : "Label of the server's Nextcloud version in Settings. Do not translate."
     },
     "Nextcloud Photos" : {
       "comment" : "The title of the Nextcloud Photos app.",
       "isCommentAutoGenerated" : true
     },
-    "Nextcloud Photos is free software under the MIT licence. It uses NextcloudKit (GPL-3.0-or-later) and GRDB (MIT)." : {
-
+    "Nextcloud Photos can only see the photos you selected. Allow access to all photos to back up your whole library." : {
+      "comment" : "Explanation on the Backup screen when the user gave the app access to selected photos only (limited Photos access). \"Nextcloud Photos\" is the app's name."
+    },
+    "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT)." : {
+      "comment" : "Licence note in Settings › About. Names of software and licences stay as they are."
     },
     "Nextcloud Photos is not allowed to add photos to your library. You can change this in Settings." : {
       "comment" : "Error message displayed when the user does not have permission to add photos to the library.",
       "isCommentAutoGenerated" : true
     },
     "Nextcloud Photos uploads the photos and videos in the Photos library of this Mac to %@. Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this Mac never deletes it on the server." : {
-
+      "comment" : "Explanation on the Backup screen of the Mac. %@ is the server's host name. \"Photos library\" is the library of Apple's Photos app."
     },
     "Nextcloud Photos uploads the photos and videos of this device to %@. Originals keep their quality; photos already on your Nextcloud are not uploaded again. Deleting a photo on this device never deletes it on the server." : {
       "comment" : "A description of how Nextcloud Photos works.",
       "isCommentAutoGenerated" : true
     },
     "Nextcloud and Photos" : {
-
+      "comment" : "Heading of a group of server features in Settings › Server features: features of every Nextcloud with the Photos app."
     },
     "No" : {
       "comment" : "A button that cancels the backup and turns off the Nextcloud Photos backup.",
@@ -1259,11 +2325,23 @@
       "comment" : "A description of the view when the user has no memories.",
       "isCommentAutoGenerated" : true
     },
+    "No one has shared a folder with you yet." : {
+      "comment" : "Settings › Partner sharing: no folder was shared with the user."
+    },
     "No photos in this folder" : {
       "comment" : "Title of an empty folder screen."
     },
+    "No photos or videos were found. Choose the Takeout folder or its ZIP files." : {
+      "comment" : "Import from Google Takeout window (Mac): the chosen folder or files hold no photos."
+    },
+    "No photos to add" : {
+      "comment" : "Title of the empty state when adding photos to an album and there is nothing left to add."
+    },
+    "No photos to show" : {
+      "comment" : "Slideshow of a memory whose photos are no longer in the library."
+    },
     "No photos yet" : {
-
+      "comment" : "Title of the empty timeline when the account has no photos."
     },
     "No recently deleted photos" : {
       "comment" : "A description for the empty state of the recently deleted screen.",
@@ -1274,7 +2352,7 @@
       "isCommentAutoGenerated" : true
     },
     "No selection" : {
-
+      "comment" : "Placeholder of the info panel when no photo is selected."
     },
     "No shared albums" : {
       "comment" : "A description for the user's shared albums.",
@@ -1285,17 +2363,20 @@
       "isCommentAutoGenerated" : true
     },
     "No subfolders" : {
-
+      "comment" : "Placeholder in the folder browser when the folder shown has no folders in it."
     },
     "No suggestions" : {
-
+      "comment" : "Title shown in search when nothing matches what was typed so far."
+    },
+    "No tags yet" : {
+      "comment" : "Empty state of the tag sheet."
     },
     "No text found." : {
       "comment" : "A message displayed when no text is found in the image.",
       "isCommentAutoGenerated" : true
     },
     "No videos" : {
-
+      "comment" : "Title of the empty Videos view."
     },
     "Noir" : {
       "comment" : "Photo filter."
@@ -1304,15 +2385,42 @@
       "comment" : "Photo filter: no filter."
     },
     "Not available" : {
-
+      "comment" : "State of a server feature in Settings › Server features: this server does not offer it. Read by VoiceOver."
+    },
+    "Not backed up" : {
+      "comment" : "Status of one photo or video in the Backup screen's list of items when it was skipped (for example its original is only in iCloud) and no more specific reason is known."
+    },
+    "Not backed up yet" : {
+      "comment" : "Row and screen title: the device's photos that are not on the server yet."
+    },
+    "Not enough free space on this Mac" : {
+      "comment" : "Backup screen status on the Mac: the backup stopped because the disk is full."
+    },
+    "Not enough free space on this device" : {
+      "comment" : "Backup screen status on iPhone or iPad: the backup stopped because the device storage is full."
+    },
+    "Not now" : {
+      "comment" : "Button that closes the certificate review sheet without deciding."
     },
     "Not this person" : {
       "comment" : "Label for a menu action that removes the selected items from the current person.",
       "isCommentAutoGenerated" : true
     },
+    "Note to the recipient" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): field for a message sent with the share."
+    },
     "Nothing here" : {
       "comment" : "Text to display when the list is empty.",
       "isCommentAutoGenerated" : true
+    },
+    "Nothing in your library matches these filters." : {
+      "comment" : "Description of the empty state of the Search screen (\"No results\") when the chosen search filters match no photo."
+    },
+    "Nothing is synced until you have reviewed and trusted the new certificate." : {
+      "comment" : "Explanation in Settings › Server under \"The server's certificate changed\", next to the \"Review…\" button."
+    },
+    "Nothing new" : {
+      "comment" : "Empty state of the shared-album activity list."
     },
     "Nothing on this day" : {
       "comment" : "A description of the view when there are no memories on this day.",
@@ -1324,22 +2432,40 @@
     "Nothing to clean up" : {
       "comment" : "Title of the empty Free up server space screen."
     },
+    "Nothing to remove right now: no photo is both old enough and verified on your Nextcloud." : {
+      "comment" : "Free up space when no photo can be removed."
+    },
     "Notifications" : {
-
+      "comment" : "Switch in Settings that turns push notifications on or off."
     },
     "Notifications are delivered through Nextcloud's push service." : {
-
+      "comment" : "Footnote below the Notifications switch in Settings."
     },
     "Notifications are delivered through Nextcloud's push service. This server has no Notifications app, so it doesn't send any." : {
-
+      "comment" : "Footnote below the Notifications switch in Settings when the server cannot send notifications. \"Notifications\" is the name of a Nextcloud app."
+    },
+    "Off" : {
+      "comment" : "Backup is turned off (shown next to the Backup row)."
     },
     "Offline – showing saved photos" : {
       "comment" : "A description of the current sync status when the device is offline.",
       "isCommentAutoGenerated" : true
     },
+    "Offline: your changes are saved when the connection is back. New tags need the connection." : {
+      "comment" : "Footer of the tag sheet while the server cannot be reached."
+    },
     "Oldest first" : {
       "comment" : "A description of the oldest-first sorting option.",
       "isCommentAutoGenerated" : true
+    },
+    "On" : {
+      "comment" : "Backup is turned on (shown next to the Backup row)."
+    },
+    "On some of the selected items" : {
+      "comment" : "Accessibility value of a tag in the tag sheet: only some of the selected photos have the tag."
+    },
+    "On this Mac" : {
+      "comment" : "Header of the Backup screen's section about the Mac's Photos library."
     },
     "On this day" : {
       "comment" : "A heading displayed above a list of memories from the current day.",
@@ -1352,6 +2478,21 @@
       "comment" : "A description of a smart album that is saved on the user's device.",
       "isCommentAutoGenerated" : true
     },
+    "On this iPad" : {
+      "comment" : "Header of the Backup screen's section about the device's own photos."
+    },
+    "On this iPhone" : {
+      "comment" : "Header of the Backup screen's section about the device's own photos."
+    },
+    "Only in iCloud, not backed up" : {
+      "comment" : "Row label on the Backup screen; the value is the number of photos and videos whose originals are only in iCloud and were skipped because \"Download originals from iCloud\" is off."
+    },
+    "Only photos and videos whose files are on your Nextcloud with exactly the same size are offered: original, edited version, RAW and Live Photo. Photos converted to JPEG for the backup, or only recognised by their name, stay." : {
+      "comment" : "Footer of Free up space: which photos are offered for removal."
+    },
+    "Only selected photos are backed up" : {
+      "comment" : "Heading on the Backup screen when the user gave the app access to selected photos only (limited Photos access)."
+    },
     "Open" : {
       "comment" : "A button that opens a public album.",
       "isCommentAutoGenerated" : true
@@ -1361,7 +2502,13 @@
       "isCommentAutoGenerated" : true
     },
     "Open Public Album Link…" : {
-
+      "comment" : "Menu command on the Mac (title case) that opens an album someone shared with a public link."
+    },
+    "Open System Settings" : {
+      "comment" : "Button on the Backup screen on the Mac when the app may only see selected photos: opens System Settings › Privacy & Security › Photos. Use the name of the system app as it appears in macOS."
+    },
+    "Open anyway" : {
+      "comment" : "Button in the warning before opening a public album link over http://."
     },
     "Open public link" : {
       "comment" : "A button that opens a public link to the album.",
@@ -1391,7 +2538,7 @@
       "isCommentAutoGenerated" : true
     },
     "Original photo" : {
-
+      "comment" : "VoiceOver description of the image in the editor while the unedited original is shown."
     },
     "Originals" : {
       "comment" : "A backup option for including original photos in backups.",
@@ -1401,6 +2548,9 @@
       "comment" : "A label for the section of places that are not grouped by country.",
       "isCommentAutoGenerated" : true
     },
+    "Other share" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of share the app does not know (for example a Deck board)."
+    },
     "Overwrite original" : {
       "comment" : "The label of a button that overwrites the original photo with the edited version.",
       "isCommentAutoGenerated" : true
@@ -1408,6 +2558,15 @@
     "Owner" : {
       "comment" : "A label for the owner of the photo.",
       "isCommentAutoGenerated" : true
+    },
+    "Partner photo" : {
+      "comment" : "Accessibility: added to the description of a grid tile whose photo comes from a partner's shared folder."
+    },
+    "Partner sharing" : {
+      "comment" : "Settings › Partner sharing: section header. Partner sharing shows photos from a folder someone shared with you in your library."
+    },
+    "Password" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): password field of a public link or email share."
     },
     "Paste a login link (nc://login/…) from Settings › Security › Devices & sessions on the web." : {
       "comment" : "A description of how to paste a login link into the field below.",
@@ -1421,20 +2580,32 @@
       "comment" : "A toggle that allows the user to pause the backup process when the device is in low power mode.",
       "isCommentAutoGenerated" : true
     },
+    "Paused" : {
+      "comment" : "Short backup status next to \"Backup\" in the Collections list (iPhone): the backup is paused or waiting (for Wi-Fi, a network connection …)."
+    },
     "People" : {
       "comment" : "The title of the screen.",
       "isCommentAutoGenerated" : true
+    },
+    "People and groups on this server" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): first item of the list of who a file can be shared with."
     },
     "People are not available" : {
       "comment" : "A description of the error when people are not available.",
       "isCommentAutoGenerated" : true
     },
+    "Permissions" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): header and picker label: what the recipient may do."
+    },
     "Person" : {
       "comment" : "The system icon for a person.",
       "isCommentAutoGenerated" : true
     },
+    "Person on another server" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: a user of another Nextcloud server (federation)."
+    },
     "Photo" : {
-
+      "comment" : "VoiceOver description of the kind of an item in the grid (a photo, as opposed to a video or Live Photo)."
     },
     "Photos" : {
       "comment" : "A toggle that allows users to enable or disable the upload of photos.",
@@ -1443,25 +2614,43 @@
     "Photos (WebDAV)" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
+    "Photos and videos" : {
+      "comment" : "Import from Google Takeout window (Mac): label of the count and size of the photos and videos in the export."
+    },
+    "Photos and videos are uploaded as they are, with the date and place Google Photos knows. Photos already on your server are skipped, and albums are created again." : {
+      "comment" : "Import from Google Takeout window (Mac): what the import does, before an export is chosen."
+    },
+    "Photos and videos from the last 30 days stay on this iPad unless you turn this on." : {
+      "comment" : "Footer of the Free up space option for recent photos (iPad)."
+    },
+    "Photos and videos from the last 30 days stay on this iPhone unless you turn this on." : {
+      "comment" : "Footer of the Free up space option for recent photos (iPhone)."
+    },
     "Photos and videos in %@ on your Nextcloud appear here." : {
       "comment" : "The second argument is a list of folders that can be used to access photos and videos.",
       "isCommentAutoGenerated" : true
     },
     "Photos and videos in these folders of your Nextcloud appear in the library." : {
-
+      "comment" : "Footnote below the list of timeline folders in Settings."
     },
     "Photos app" : {
-
+      "comment" : "Label of the version of the Photos app on the server, in Settings. \"Photos\" is the name of the Nextcloud app."
     },
     "Photos capability" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
     "Photos features" : {
-
+      "comment" : "Label in Settings that says whether the server offers the standard or the extended set of Photos features."
+    },
+    "Photos in a folder someone shares with you appear in your library, marked with a badge. To share yours, share your photo folder with your partner; they turn it on in their app. Only this device shows them: nothing changes on the server or in the web app." : {
+      "comment" : "Settings › Partner sharing: explanation under the section."
     },
     "Photos in this area" : {
       "comment" : "A button that displays a map of photos in the current area.",
       "isCommentAutoGenerated" : true
+    },
+    "Photos looked at" : {
+      "comment" : "Settings › Search: progress of the on-device recognition."
     },
     "Photos settings API" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -1474,9 +2663,15 @@
       "comment" : "A message that appears when the user is asked to switch from the Files app to Nextcloud Photos.",
       "isCommentAutoGenerated" : true
     },
+    "Photos that others add to shared albums are listed here." : {
+      "comment" : "Empty state of the shared-album activity list."
+    },
     "Photos this person added to the album are removed from it." : {
       "comment" : "A description of the effect of removing a collaborator from an album.",
       "isCommentAutoGenerated" : true
+    },
+    "Photos you have hidden in the Photos app are not backed up." : {
+      "comment" : "Footer under the backup options while \"Include hidden photos\" is off. \"Photos app\" is Apple's Photos app."
     },
     "Place" : {
       "comment" : "A label for the location of the photo.",
@@ -1489,6 +2684,9 @@
     "Places by country" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
+    "Places from Google Photos can only be added to photos without a location of their own on Nextcloud 35 or later." : {
+      "comment" : "Import from Google Takeout window (Mac): the server is too old to set the location from Google Photos."
+    },
     "Places, people, dates…" : {
       "comment" : "A prompt for the search bar in the search screen.",
       "isCommentAutoGenerated" : true
@@ -1496,6 +2694,15 @@
     "Places, people, tags, albums, dates like “june 2023”, or file names." : {
       "comment" : "A description of the search bar's placeholder text.",
       "isCommentAutoGenerated" : true
+    },
+    "Play" : {
+      "comment" : "Slideshow button: moves on to the next photo every few seconds."
+    },
+    "Play Slideshow" : {
+      "comment" : "Button and menu item (Mac, title case): shows the photos of a memory one after the other."
+    },
+    "Play slideshow" : {
+      "comment" : "Button and menu item: shows the photos of a memory one after the other."
     },
     "Please enter a valid server address." : {
       "comment" : "Error message when the server address is invalid.",
@@ -1505,18 +2712,30 @@
       "comment" : "Error message displayed when the user is not logged in when trying to upload photos.",
       "isCommentAutoGenerated" : true
     },
+    "Point the camera at the QR code." : {
+      "comment" : "Instruction under the camera view of the QR code scanner at login (iPhone, iPad)."
+    },
     "Preparing video…" : {
       "comment" : "A placeholder text that appears while the video is being prepared.",
       "isCommentAutoGenerated" : true
     },
     "Preview cache" : {
-
+      "comment" : "Label of the size of the cached previews in Settings › Storage."
     },
     "Previous" : {
       "comment" : "Accessibility label and tooltip of the button that shows the previous photo or video in the viewer."
     },
+    "Previous certificate" : {
+      "comment" : "Section title in the sheet \"The server's certificate changed\" : the certificate the server presented before."
+    },
     "Privacy" : {
-
+      "comment" : "Title of the Settings section with the app lock, and of the link to the privacy policy."
+    },
+    "Problems" : {
+      "comment" : "Import from Google Takeout window (Mac): header of the list of files that failed."
+    },
+    "Protect with password" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): switch of a public link or email share."
     },
     "Public album links can be opened without an account." : {
       "comment" : "A description of how public album links can be opened.",
@@ -1532,6 +2751,12 @@
     "Reading text…" : {
       "comment" : "A placeholder text that appears while the text is being read from the image.",
       "isCommentAutoGenerated" : true
+    },
+    "Reading the export…" : {
+      "comment" : "Import from Google Takeout window (Mac): shown while the export's descriptions are read."
+    },
+    "Recent searches" : {
+      "comment" : "Header of the list of recent searches on the Search screen, shown while the search field is empty."
     },
     "Recently changed" : {
       "comment" : "A label for the album sort order \"Recently changed\".",
@@ -1551,31 +2776,83 @@
     "Recognize key API" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
+    "Recognize what's in photos" : {
+      "comment" : "Switch in Settings › Search: recognise things like dogs or beaches in photos on this device."
+    },
     "Redo" : {
       "comment" : "A button that redos the last undone action.",
       "isCommentAutoGenerated" : true
+    },
+    "Refresh" : {
+      "comment" : "Button in the empty state of a list loaded from the server (places, tags, folders …): loads it again."
     },
     "Remove" : {
       "comment" : "The text of a button that removes a collaborator from an album.",
       "isCommentAutoGenerated" : true
     },
     "Remove %@" : {
-
+      "comment" : "VoiceOver label and tooltip of the button that removes an entry from a list. %@ is the entry: a folder path or the name of someone an album is shared with."
+    },
+    "Remove %lld photos and videos from this iPad?" : {
+      "comment" : "Free up space: confirmation title (iPad). The placeholder is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Remove %lld photo or video from this iPad?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Remove %lld photos and videos from this iPad?"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Remove %lld photos and videos from this iPhone?" : {
+      "comment" : "Free up space: confirmation title (iPhone). The placeholder is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Remove %lld photo or video from this iPhone?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Remove %lld photos and videos from this iPhone?"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Remove account" : {
-
+      "comment" : "Button in Settings that logs out and removes an account from the app."
     },
     "Remove all offline files" : {
-
+      "comment" : "Button in Settings › Storage that deletes all files downloaded for offline use."
     },
     "Remove filter %@" : {
-
+      "comment" : "VoiceOver label of the button that removes a search filter. %@ is the filter's name."
     },
     "Remove from Album" : {
-
+      "comment" : "Menu command on the Mac (title case) that takes the selected photos out of the album without deleting them."
     },
     "Remove from Favorites" : {
-
+      "comment" : "Command that removes the favorite mark from the selected or shown photo."
     },
     "Remove from album" : {
       "comment" : "Label for a menu action that removes the selected items from the album.",
@@ -1584,6 +2861,15 @@
     "Remove from favorites" : {
       "comment" : "Text for the action to remove a set of items from favorites.",
       "isCommentAutoGenerated" : true
+    },
+    "Remove from recent searches" : {
+      "comment" : "Context-menu item of one entry in the \"Recent searches\" list on the Search screen."
+    },
+    "Remove from this iPad" : {
+      "comment" : "Free up space: button that removes the backed-up photos from the iPad."
+    },
+    "Remove from this iPhone" : {
+      "comment" : "Free up space: button that removes the backed-up photos from the iPhone."
     },
     "Remove location" : {
       "comment" : "A toggle to remove the location from the metadata.",
@@ -1594,10 +2880,65 @@
       "isCommentAutoGenerated" : true
     },
     "Remove person" : {
-
+      "comment" : "Button that removes a recognized person (their face group) on the server."
+    },
+    "Remove person…" : {
+      "comment" : "Destructive menu item on a person's page (People, face recognition): removes the person after a confirmation. The photos are not deleted."
+    },
+    "Remove tag" : {
+      "comment" : "Action for selected photos on the screen of one tag: takes the tag off them."
     },
     "Remove this account?" : {
-
+      "comment" : "Title of the confirmation before an account is removed from the app."
+    },
+    "Remove this person?" : {
+      "comment" : "Title of the confirmation dialog for removing a person (face recognition) from People."
+    },
+    "Removed %lld items from favorites" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after removing photos from the favourites; it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld item from favorites"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld items from favorites"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Removed %lld items from the album" : {
+      "comment" : "Confirmation at the bottom of an album's grid after removing photos from the album; it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld item from the album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld items from the album"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Rename" : {
       "comment" : "The button to rename an album.",
@@ -1619,9 +2960,38 @@
       "comment" : "A button that restores a recently deleted item.",
       "isCommentAutoGenerated" : true
     },
+    "Restored %lld items" : {
+      "comment" : "Confirmation at the bottom of a photo grid or the viewer after undoing a delete: the items were brought back from the server's trash bin. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Restored %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Restored %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Resume Import" : {
+      "comment" : "Import from Google Takeout window (Mac): button that continues a stopped import (Mac title case)."
+    },
     "Retry" : {
       "comment" : "The label of a button that retries failed operations.",
       "isCommentAutoGenerated" : true
+    },
+    "Review…" : {
+      "comment" : "Button next to \"The server's certificate changed\" (banner at the bottom of photo grids, Settings › Server): opens the dialog that shows the new certificate and asks whether to trust it."
     },
     "Rotate" : {
       "comment" : "A button that rotates the image.",
@@ -1644,15 +3014,62 @@
       "isCommentAutoGenerated" : true
     },
     "Save to Photos" : {
-
+      "comment" : "Command on iPhone and iPad that saves the selected photos to the device's Photos library (Apple's Photos app)."
     },
-    "Save to device" : {
-      "comment" : "Text for the action to save a photo to the user's photo library.",
-      "isCommentAutoGenerated" : true
+    "Saved %lld items to Photos" : {
+      "comment" : "Originals were saved to the device's photo library.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Saved %lld item to Photos"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Saved %lld items to Photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Saved %lld of %lld items to Photos" : {
+      "comment" : "Only some of the originals were saved to the photo library.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saved %1$lld of %2$lld items to Photos"
+          }
+        }
+      }
+    },
+    "Saving %lld of %lld…" : {
+      "comment" : "Progress of saving originals to the photo library, e.g. Saving 2 of 5…",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saving %1$lld of %2$lld…"
+          }
+        }
+      }
     },
     "Saving…" : {
       "comment" : "The title of a system alert that appears when saving an edited photo.",
       "isCommentAutoGenerated" : true
+    },
+    "Scan QR code" : {
+      "comment" : "Button on the login screen (iPhone, iPad) that opens the camera to scan the login QR code from the server's web interface; also the title of the scanner screen."
+    },
+    "Scan the QR code shown under Settings › Security › Devices & sessions on the web, or paste the login link (nc://login/…) from there." : {
+      "comment" : "Instruction on the login screen (iPhone, iPad) for logging in with a QR code. \"Settings › Security › Devices & sessions\" is the path in the Nextcloud web interface: use the names Nextcloud's own translation uses. Keep nc://login/… as it is."
     },
     "Screen recordings" : {
       "comment" : "Section title for screen recordings in the free space screen.",
@@ -1676,6 +3093,9 @@
       "comment" : "A description of how to create a smart album.",
       "isCommentAutoGenerated" : true
     },
+    "Search name, place or folder" : {
+      "comment" : "Placeholder of the search field in the \"Add photos\" sheet of an album: searches the library by file name, place or folder."
+    },
     "Search users or groups" : {
       "comment" : "A placeholder text for a search bar in a collaborators sheet.",
       "isCommentAutoGenerated" : true
@@ -1692,26 +3112,32 @@
       "comment" : "A button that displays a sheet for selecting items.",
       "isCommentAutoGenerated" : true
     },
+    "Select photos to add" : {
+      "comment" : "Subtitle of the \"Add photos\" sheet of an album while no photo is picked yet; replaced by the number of picked photos."
+    },
     "Send" : {
       "comment" : "The label of a button that sends a comment.",
       "isCommentAutoGenerated" : true
     },
     "Server" : {
-
+      "comment" : "Title of the Settings section about the Nextcloud server of the account."
     },
     "Server address" : {
       "comment" : "A label displayed above a text field for the server address.",
       "isCommentAutoGenerated" : true
     },
     "Server features" : {
-
+      "comment" : "Link in Settings to the list of features this server offers, and title of that list."
     },
     "Set" : {
       "comment" : "A button title that saves the metadata.",
       "isCommentAutoGenerated" : true
     },
+    "Set expiration date" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): switch: the share ends on a date."
+    },
     "Settings" : {
-
+      "comment" : "Name of the Settings view in the tab bar or sidebar, and title of the Settings screen."
     },
     "Shadows" : {
       "comment" : "A slider that adjusts the shadows of an image.",
@@ -1722,11 +3148,20 @@
       "isCommentAutoGenerated" : true
     },
     "Share album" : {
-
+      "comment" : "Button in an album that opens its sharing options."
     },
     "Share link" : {
       "comment" : "A button that shares the link to the album.",
       "isCommentAutoGenerated" : true
+    },
+    "Share my photos with a partner…" : {
+      "comment" : "Settings › Partner sharing: button that opens sharing for the user's own photo folder."
+    },
+    "Share via Nextcloud…" : {
+      "comment" : "Menu action and toolbar button that opens Nextcloud's own sharing (people, other servers, email, Talk, links with password and expiry) for a photo or a folder."
+    },
+    "Share with" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): header of the recipient search."
     },
     "Share with people and groups" : {
       "comment" : "A section title for sharing the album with people and groups.",
@@ -1744,12 +3179,18 @@
       "comment" : "Text describing how an album is shared. The argument is the display name of the album's owner.",
       "isCommentAutoGenerated" : true
     },
+    "Shared with" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): header of the list of existing shares."
+    },
     "Shared with you" : {
       "comment" : "A title for the list of folders shared with the user.",
       "isCommentAutoGenerated" : true
     },
+    "Shared with you by %@" : {
+      "comment" : "Entry of the shared-album activity list: the album was newly shared by this person (display name)."
+    },
     "Share…" : {
-
+      "comment" : "Menu command on the Mac that shares the selected photos."
     },
     "Sharpness" : {
       "comment" : "A label displayed in the photo editor.",
@@ -1763,17 +3204,68 @@
       "comment" : "A button that displays a picker for selecting the media type to show in the timeline.",
       "isCommentAutoGenerated" : true
     },
+    "Show %lld Copies" : {
+      "comment" : "Viewer (Mac, title case): shows every copy of a stacked photo (HEIC and JPEG, RAW and JPEG) as pages of the viewer. %lld is the number of copies (2 or more)."
+    },
+    "Show %lld copies" : {
+      "comment" : "Viewer: shows every copy of a stacked photo (HEIC and JPEG, RAW and JPEG) as pages of the viewer. %lld is the number of copies (2 or more)."
+    },
+    "Show More" : {
+      "comment" : "Toolbar button on the Mac in the list of photos of a map area: loads the next photos of the area (the list shows them in pages)."
+    },
+    "Show Partner Photos" : {
+      "comment" : "Library toolbar button (Mac, title case): shows photos from partner folders in the timeline again."
+    },
+    "Show Person" : {
+      "comment" : "Shows a person that was hidden from the People screen again (Mac, title case)."
+    },
     "Show archived photos" : {
       "comment" : "Text for the authentication prompt when accessing the archive.",
       "isCommentAutoGenerated" : true
+    },
+    "Show backup status" : {
+      "comment" : "Button of the backup set-up when the Files app keeps doing the backup: shows which photos are on the server."
+    },
+    "Show hidden people" : {
+      "comment" : "Button under the People grid: shows the people hidden on this device."
+    },
+    "Show in Finder" : {
+      "comment" : "Button on the Mac after originals were exported into a folder: opens that folder in the Finder. Use the name of the menu command as macOS translates it."
+    },
+    "Show in Folder" : {
+      "comment" : "Menu item (Mac, title case): opens the folder browser of the app at the folder that contains the photo."
+    },
+    "Show in folder" : {
+      "comment" : "Menu item: opens the folder browser of the app at the folder that contains the photo."
+    },
+    "Show memories" : {
+      "comment" : "Settings switch: the memories strip at the top of the library."
+    },
+    "Show more" : {
+      "comment" : "Toolbar button in the list of photos of a map area: loads the next photos of the area (the list shows them in pages)."
+    },
+    "Show partner photos" : {
+      "comment" : "Library toolbar button (iPhone, iPad): shows photos from partner folders in the timeline again."
+    },
+    "Show partner photos in the library" : {
+      "comment" : "Settings › Partner sharing: switch: partner photos are shown in the library."
+    },
+    "Show person" : {
+      "comment" : "Shows a person that was hidden from the People screen again."
     },
     "Show recently deleted photos" : {
       "comment" : "Title of the system prompt to unlock recently deleted photos.",
       "isCommentAutoGenerated" : true
     },
+    "Show this folder in your library" : {
+      "comment" : "Button: adds the backup folder to the folders the timeline shows."
+    },
     "Signed out" : {
       "comment" : "A title for a view that indicates that the user's session has expired.",
       "isCommentAutoGenerated" : true
+    },
+    "Signed out – showing saved photos" : {
+      "comment" : "Banner at the bottom of photo grids when the account's login is no longer valid: the app shows the photos it has stored on this device. Followed by a \"Log in again\" button."
     },
     "Silvertone" : {
       "comment" : "Photo filter."
@@ -1787,7 +3279,7 @@
       "isCommentAutoGenerated" : true
     },
     "Some uploads failed" : {
-
+      "comment" : "Status of the upload indicator when at least one upload failed."
     },
     "Something went wrong" : {
       "comment" : "A title for an alert that appears when an error occurs.",
@@ -1801,24 +3293,39 @@
       "comment" : "A label for a menu that lets the user sort albums.",
       "isCommentAutoGenerated" : true
     },
+    "Sort into a folder per year" : {
+      "comment" : "Import from Google Takeout window (Mac): switch: files go into a subfolder named after the year they were taken."
+    },
     "Source code" : {
-
+      "comment" : "Link in Settings › About to the app's source code."
+    },
+    "Space" : {
+      "comment" : "Free up space: label of the storage the removal frees."
     },
     "Square" : {
       "comment" : "Crop aspect ratio."
     },
-    "Square tiles" : {
-
+    "Stack copies of a photo" : {
+      "comment" : "Settings switch: HEIC and JPEG (or RAW and JPEG) copies of one shot are shown as one tile in the library."
     },
     "Standard" : {
-
+      "comment" : "Value of \"Photos features\" in Settings: the server's Photos app offers the standard features."
+    },
+    "Start backup" : {
+      "comment" : "Main button of the backup set-up, after the app counted what is already on the server."
+    },
+    "Stop Import" : {
+      "comment" : "Import from Google Takeout window (Mac): button that stops the running import (Mac title case)."
+    },
+    "Stop sharing" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): button that removes a share with a person, group or conversation."
     },
     "Stop sharing with %@?" : {
       "comment" : "A confirmation dialog asking the user to stop sharing with a given person.",
       "isCommentAutoGenerated" : true
     },
     "Storage" : {
-
+      "comment" : "Title of the Settings section (and, on the Mac, the Settings tab) about caches and offline files."
     },
     "Straighten" : {
       "comment" : "A label for the straighten slider.",
@@ -1829,23 +3336,23 @@
       "isCommentAutoGenerated" : true
     },
     "Switch" : {
-
+      "comment" : "Button in Settings that makes another account the one in use (verb)."
     },
     "Switch or add an account" : {
-
+      "comment" : "VoiceOver hint of the account switcher in the sidebar."
     },
     "Sync Now" : {
-
+      "comment" : "Menu command on the Mac (title case) that syncs the library with the server."
     },
     "Sync now" : {
-
+      "comment" : "Button in Settings that syncs the library with the server."
     },
     "Syncing" : {
       "comment" : "A label for the syncing state of the settings.",
       "isCommentAutoGenerated" : true
     },
     "Tag" : {
-
+      "comment" : "Kind of a search suggestion or filter: a tag of the user's files (noun)."
     },
     "Tag filters in albums" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -1854,9 +3361,21 @@
       "comment" : "The title of the screen that displays the user's tags.",
       "isCommentAutoGenerated" : true
     },
+    "Tags are shared with Files and the other Nextcloud apps." : {
+      "comment" : "Footer of the tag list in the tag sheet: tags are Nextcloud system tags."
+    },
+    "Tags…" : {
+      "comment" : "Menu item that opens the tags of the selected photos or of the photo shown."
+    },
     "Taken" : {
       "comment" : "A label for the date and time when the photo was taken.",
       "isCommentAutoGenerated" : true
+    },
+    "Talk conversation" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: a conversation in Nextcloud Talk."
+    },
+    "Talk conversations" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): item of the list of who a file can be shared with (lower case where the language allows, it is inside a sentence)."
     },
     "Tap another copy to keep that one instead." : {
       "comment" : "Hint in the Duplicates screen on touch devices."
@@ -1865,23 +3384,35 @@
       "comment" : "A description of how to select a location on the map.",
       "isCommentAutoGenerated" : true
     },
+    "Team" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): kind of recipient: a Nextcloud Team (formerly Circle)."
+    },
+    "Teams" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): item of the list of who a file can be shared with: Nextcloud Teams."
+    },
     "Text in photo" : {
       "comment" : "The title of the sheet that displays text extracted from a photo.",
       "isCommentAutoGenerated" : true
     },
     "The Files app backs up this Mac. This shows which photos are already on your Nextcloud." : {
-
+      "comment" : "Note on the Backup screen when the Nextcloud Files app does the backup. \"Files\" is the Nextcloud Files app."
     },
     "The Files app backs up this device. This shows which photos are already on your Nextcloud." : {
       "comment" : "A description of the backup process.",
       "isCommentAutoGenerated" : true
     },
+    "The app looks for new photos in shared albums whenever it refreshes. To be told the moment someone adds photos, your Nextcloud server would need to send notifications for it." : {
+      "comment" : "Footer of the shared-album activity list."
+    },
     "The app's access to the account is revoked and all its data is removed from this device. Nothing is deleted on the server." : {
-
+      "comment" : "Explanation in the confirmation before an account is removed."
     },
     "The archive is empty" : {
       "comment" : "Title of the empty state when the archive is empty.",
       "isCommentAutoGenerated" : true
+    },
+    "The camera can't be used. Allow camera access in Settings, or paste the login link below." : {
+      "comment" : "Error in the QR code scanner at login (iPhone, iPad) when the user denied camera access. \"Settings\" is the system's Settings app."
     },
     "The certificate of %@ is not trusted by this device. Only trust it if you know it belongs to your server.\n\n%@" : {
       "comment" : "A message in an alert that appears when a user is presented with a certificate that is not trusted by the device. The argument is the hostname of the server.",
@@ -1896,7 +3427,7 @@
       }
     },
     "The connection to your Nextcloud is not trusted" : {
-
+      "comment" : "Title on the Backup screen when the backup stopped because of the server's certificate."
     },
     "The copies don't differ; the first one by folder is kept." : {
       "comment" : "Explains why a copy of a duplicate is kept."
@@ -1907,9 +3438,18 @@
     "The favorite is kept." : {
       "comment" : "Explains why a copy of a duplicate is kept."
     },
+    "The item could not be read." : {
+      "comment" : "Note in the share extension (\"Upload to Nextcloud Photos\" from the share sheet) when the single shared item could not be read."
+    },
     "The items are moved to the trash bin of your Nextcloud." : {
       "comment" : "Confirmation dialog text for deleting items.",
       "isCommentAutoGenerated" : true
+    },
+    "The link stops working for everyone who has it." : {
+      "comment" : "Sharing screen (Share via Nextcloud…): confirmation message before a public link is deleted."
+    },
+    "The person and the assignment of their photos are removed. The photos stay in your library." : {
+      "comment" : "Message of the confirmation dialog \"Remove this person?\" (People, face recognition)."
     },
     "The photos stay in your library." : {
       "comment" : "The text that appears in a confirmation dialog when the user deletes an album.",
@@ -1919,50 +3459,87 @@
       "comment" : "The text that appears when the user deletes an album.",
       "isCommentAutoGenerated" : true
     },
-    "The server could not convert this video." : {
-      "comment" : "A description of a video that can't be played.",
-      "isCommentAutoGenerated" : true
+    "The recipient no longer sees this item." : {
+      "comment" : "Sharing screen (Share via Nextcloud…): confirmation message before a share is removed."
+    },
+    "The saved search is deleted. Your photos are not affected." : {
+      "comment" : "Message of the confirmation dialog for deleting a smart album (a saved search)."
     },
     "The server does not allow the upload" : {
-
+      "comment" : "Title on the Backup screen when the server refused an upload."
+    },
+    "The server is converting it so it can be played here. This can take a few minutes." : {
+      "comment" : "Explanation under \"Preparing video…\" on a video page in the viewer: the server converts the video into a format this device can play."
+    },
+    "The server is still converting this video." : {
+      "comment" : "Message on a video page in the viewer when the server's conversion of the video takes longer than the app waits. Followed by \"Try again in a few minutes.\""
+    },
+    "The server's certificate changed" : {
+      "comment" : "Title of the banner at the bottom of photo grids, of the row in Settings › Server and of the dialog shown when the server presents a different certificate that is not trusted. Nothing syncs until the user reviews it."
     },
     "The server's certificate changed or is not trusted, or the server asks for a client certificate." : {
-
+      "comment" : "Explanation on the Backup screen when the backup stopped because of the server's certificate."
     },
     "The trash bin is disabled on your server: deleted items cannot be restored." : {
       "comment" : "The message displayed when the trash bin is disabled on the server.",
       "isCommentAutoGenerated" : true
     },
+    "There are no albums on this device." : {
+      "comment" : "Backup › Albums (iPhone, iPad): mirroring device albums into Nextcloud albums. Shown when the device has no albums of its own."
+    },
     "These files are identical copies stored in different folders of your Nextcloud. Choose the copy to keep in each set; the others can be deleted from the server." : {
       "comment" : "Explanation at the top of the Duplicates screen."
     },
     "These settings are shared with the Photos app on the web." : {
-
+      "comment" : "Footnote below the library settings: the same settings apply in the Photos web app of the server."
+    },
+    "They stay on your Nextcloud. The system asks you once more and keeps them in Recently Deleted for 30 days. If you use iCloud Photos, they are also removed from iCloud and your other devices." : {
+      "comment" : "Free up space: confirmation message."
+    },
+    "Things like “dog” or “beach” are recognized in the previews that are already downloaded, only while charging and not in use, so that search finds them. The labels stay in this app and are never uploaded. They are English words. Turning this off deletes them." : {
+      "comment" : "Footer of Settings › Search on iPhone and iPad."
     },
     "Thinking…" : {
       "comment" : "A placeholder text that appears when the app is thinking.",
       "isCommentAutoGenerated" : true
+    },
+    "This QR code is not a Nextcloud login code." : {
+      "comment" : "Message in the QR code scanner at login (iPhone, iPad) when the camera sees a QR code that is not a Nextcloud login link."
     },
     "This album is empty" : {
       "comment" : "Text displayed when an album is empty.",
       "isCommentAutoGenerated" : true
     },
     "This connection is not encrypted" : {
-
+      "comment" : "Title of the warning before logging in to a server over http://."
     },
     "This is not a valid login link." : {
       "comment" : "A description of an error that occurs when a user tries to log in with a link that is not a valid login link.",
       "isCommentAutoGenerated" : true
     },
-    "This part of Nextcloud Photos is not available yet." : {
-      "comment" : "A description of the unavailable part of Nextcloud Photos.",
-      "isCommentAutoGenerated" : true
+    "This item is no longer available" : {
+      "comment" : "Shown on a page of the photo viewer whose photo or video was removed meanwhile (by a sync or another device)."
+    },
+    "This link is not encrypted" : {
+      "comment" : "Title of the warning before opening a public album link that uses http://."
+    },
+    "This link logs in to %@ as %@. The server uses http:// instead of https://: your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if this is your server and you trust the network between you and it." : {
+      "comment" : "Warning before logging in with a QR code or login link to a server without encryption. The first %@ is the server's host name, the second the user name. \"http://\" and \"https://\" stay as they are."
+    },
+    "This link uses http: the photos are sent unencrypted." : {
+      "comment" : "Warning under a public link whose address starts with http:// instead of https://."
     },
     "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that." : {
-
+      "comment" : "Error during login when a server that was entered with https:// redirects to http://."
     },
     "This server runs the standard Photos app. Features of newer Photos versions appear here and in the app as soon as the server offers them." : {
-
+      "comment" : "Footnote in Settings › Server features."
+    },
+    "This video couldn't be loaded." : {
+      "comment" : "Message on a video page in the viewer when the video could not be loaded or stopped playing. Followed by the reason and a \"Try again\" button."
+    },
+    "This video format can't be played on this Mac." : {
+      "comment" : "Message on a video page in the viewer on the Mac when the video's format is not supported (and the server cannot convert it)."
     },
     "This video format can't be played on this device." : {
       "comment" : "A localized error message.",
@@ -1972,17 +3549,17 @@
       "comment" : "A server feature in the list under Settings › Server features."
     },
     "Timeline folders" : {
-
+      "comment" : "Title of the setting that chooses which folders of the server appear in the timeline."
     },
     "Timeline position" : {
-
+      "comment" : "VoiceOver label of the scrubber at the edge of the grid on the Mac that scrolls through the years."
     },
     "Tint" : {
       "comment" : "A parameter that can be adjusted to change the color of the image.",
       "isCommentAutoGenerated" : true
     },
     "Tools" : {
-
+      "comment" : "Label of the control in the photo editor that switches between Adjust, Filters and Crop."
     },
     "Top folder" : {
       "comment" : "Name shown for the top folder of the user's files."
@@ -1998,11 +3575,17 @@
       "comment" : "The title of a button that trusts a server's certificate.",
       "isCommentAutoGenerated" : true
     },
+    "Trust the new certificate" : {
+      "comment" : "Destructive button in the certificate review sheet, enabled only after the user confirmed comparing the fingerprint."
+    },
     "Try a place, an album, a date like “june 2023”, or part of a file name." : {
-
+      "comment" : "Hint in search when there are no suggestions. Translate the example date."
     },
     "Try again" : {
       "comment" : "Button that retries loading."
+    },
+    "Try again in a few minutes." : {
+      "comment" : "Detail under \"The server is still converting this video.\" on a video page in the viewer."
     },
     "Turn off backup" : {
       "comment" : "A button that turns off a backup.",
@@ -2012,13 +3595,42 @@
       "comment" : "A button that turns on backup.",
       "isCommentAutoGenerated" : true
     },
+    "Turn on “Download originals from iCloud” to back them up." : {
+      "comment" : "Explanation under \"Only in iCloud, not backed up\" on the Backup screen. “Download originals from iCloud” is the name of a switch on the same screen: use the same translation as there."
+    },
     "Type" : {
       "comment" : "A label for the type of the file.",
       "isCommentAutoGenerated" : true
     },
+    "Type a name above to create the first one." : {
+      "comment" : "Empty state of the tag sheet: how to create a tag."
+    },
     "Unarchive" : {
       "comment" : "Text for unarchiving media items.",
       "isCommentAutoGenerated" : true
+    },
+    "Unarchived %lld items" : {
+      "comment" : "Confirmation at the bottom of the Archive's grid or the viewer after taking photos out of the archive; it has an Undo button next to it. %lld is the number of items. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Unarchived %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Unarchived %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Unassigned faces" : {
       "comment" : "Tooltip for the \"Unassigned faces\" button.",
@@ -2056,18 +3668,24 @@
       "isCommentAutoGenerated" : true
     },
     "Upload Photos…" : {
-
+      "comment" : "Menu command on the Mac (title case) that uploads files from the Mac to the server."
     },
     "Upload anyway" : {
       "comment" : "A button that uploads a photo to Nextcloud even if it's already on the server.",
       "isCommentAutoGenerated" : true
+    },
+    "Upload failed" : {
+      "comment" : "VoiceOver label of a photo whose upload failed."
+    },
+    "Upload failed: %@" : {
+      "comment" : "VoiceOver label of a photo whose upload failed. The placeholder is the reason."
     },
     "Upload files…" : {
       "comment" : "A button that opens a file picker to upload files.",
       "isCommentAutoGenerated" : true
     },
     "Upload folder" : {
-
+      "comment" : "Label in Settings of the server folder that uploads go to."
     },
     "Upload from Photos" : {
       "comment" : "A button that uploads photos from the user's photo library.",
@@ -2076,6 +3694,12 @@
     "Upload in Low Data Mode" : {
       "comment" : "A toggle that allows uploading photos and videos in low data mode.",
       "isCommentAutoGenerated" : true
+    },
+    "Upload only (file drop)" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): permission of a public link to a folder: visitors can only add files, not see any."
+    },
+    "Upload to" : {
+      "comment" : "Import from Google Takeout window (Mac): label of the field with the server folder the photos are uploaded to."
     },
     "Uploaded" : {
       "comment" : "A label for the number of uploaded files.",
@@ -2090,7 +3714,7 @@
       "isCommentAutoGenerated" : true
     },
     "Uploading" : {
-
+      "comment" : "VoiceOver label of the progress bar of an upload."
     },
     "Uploading %lld items" : {
       "comment" : "A label describing the number of items being uploaded. The argument is the number of active uploads.",
@@ -2132,25 +3756,28 @@
       "comment" : "The title of a screen that lists the user's uploads.",
       "isCommentAutoGenerated" : true
     },
+    "Uploads are fastest while Nextcloud Photos is open. With “Keep screen on” the screen stays on only while a backup runs and the app is in front." : {
+      "comment" : "Footer of the backup options \"Network and battery\" (iPhone, iPad)."
+    },
     "Uploads finished" : {
-
+      "comment" : "Status of the upload indicator when all uploads are done."
     },
     "Use an account from another Nextcloud app" : {
       "comment" : "A heading for a list of shared Nextcloud accounts.",
       "isCommentAutoGenerated" : true
     },
     "Utilities" : {
-
+      "comment" : "Heading of the group of tools (duplicates, trash bin, free up space…) in the sidebar."
     },
     "Version" : {
-
+      "comment" : "Label of the app's version number in Settings › About."
     },
     "Vibrance" : {
       "comment" : "A slider that adjusts the vibrance of an image.",
       "isCommentAutoGenerated" : true
     },
     "Video" : {
-
+      "comment" : "VoiceOver description of the kind of an item in the grid (a video)."
     },
     "Video conversion" : {
       "comment" : "A server feature in the list under Settings › Server features."
@@ -2187,9 +3814,15 @@
       "comment" : "The title of a button that appears when the user is waiting for the browser to open.",
       "isCommentAutoGenerated" : true
     },
+    "Waiting to be backed up" : {
+      "comment" : "VoiceOver label of a photo that is not backed up yet."
+    },
     "Warmth" : {
       "comment" : "A parameter that adjusts the warmth of an image.",
       "isCommentAutoGenerated" : true
+    },
+    "When a photo of a chosen album is backed up, it is added to the album of the same name on your Nextcloud, which is created if needed. Photos are only added: taking one out of an album on this device does not change the album on Nextcloud." : {
+      "comment" : "Backup › Albums (iPhone, iPad): mirroring device albums into Nextcloud albums. Explanation under the switch."
     },
     "Write a comment" : {
       "comment" : "A placeholder text for a text field where the user can write a comment.",
@@ -2219,6 +3852,12 @@
       "comment" : "A button that switches the backup to Nextcloud Photos.",
       "isCommentAutoGenerated" : true
     },
+    "You can close this window; the import goes on while the app is open." : {
+      "comment" : "Import from Google Takeout window (Mac): footer while the import runs."
+    },
+    "You can share with %@. The file stays on your server; nothing is uploaded again." : {
+      "comment" : "Sharing screen (Share via Nextcloud…): footer of the recipient search. The argument is a list such as “people and groups on this server, anyone by email or Talk conversations”."
+    },
     "You chose which copy to keep." : {
       "comment" : "Explains why a copy of a duplicate is kept."
     },
@@ -2226,20 +3865,32 @@
       "comment" : "Shown instead of the delete button of a set of duplicates."
     },
     "You're offline" : {
-
+      "comment" : "Title in the empty timeline when the device has no connection and nothing was loaded yet."
+    },
+    "Your Mac recognizes things like “dog” or “beach” in the previews it has already downloaded, while it is idle, so that search finds them. The labels stay on this Mac and are never uploaded. They are English words. Turning this off deletes them." : {
+      "comment" : "Footer of Settings › Search on the Mac."
     },
     "Your Nextcloud storage is full" : {
-
+      "comment" : "Title on the Backup screen when the backup stopped because the user's storage on the server is used up."
+    },
+    "Your device trusted the previous certificate of this server." : {
+      "comment" : "Shown under \"Previous certificate\" when the old certificate's details are not known: the system trusted it, the app never stored it."
+    },
+    "Your device trusted this server's certificate before, and it doesn't trust the new one. The app doesn't accept such a certificate here. If your server really uses a new certificate that your device doesn't trust, log in again to review it, ideally on a network you trust." : {
+      "comment" : "Explanation under \"Log in again…\" in the certificate review sheet: a server the system trusted now presents an untrusted certificate."
     },
     "Your library is loaded as soon as the server can be reached." : {
-
+      "comment" : "Explanation below \"You're offline\" in the empty timeline."
+    },
+    "Your library only shows photos in %@. Photos uploaded to %@ are on your Nextcloud, but not in your library." : {
+      "comment" : "Explains why backed-up photos would not appear. The first placeholder lists the timeline folders (\"/Photos, /InstantUpload\"), the second is the backup folder."
     },
     "Your login for %@ is no longer valid. Please log in again." : {
       "comment" : "A description of the message shown when the user's login is no longer valid. The argument is the display name of the account's host.",
       "isCommentAutoGenerated" : true
     },
     "Your login on this server is no longer valid." : {
-
+      "comment" : "Explanation on the Backup screen when the backup stopped because the login expired."
     },
     "Your own file is kept; the other copies are shared with you." : {
       "comment" : "Explains why a copy of a duplicate is kept."
@@ -2248,14 +3899,40 @@
       "comment" : "Error message displayed when the server does not allow apps to access people.",
       "isCommentAutoGenerated" : true
     },
+    "Your server lets public links stay valid for at most %lld days." : {
+      "comment" : "Sharing screen (Share via Nextcloud…): the server enforces an expiration date. Has plural forms.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Your server lets public links stay valid for at most %lld day."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Your server lets public links stay valid for at most %lld days."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Zoom" : {
-
+      "comment" : "Label of the slider that changes the size of the photos in the grid (noun)."
     },
     "Zoom In" : {
-
+      "comment" : "Command that makes the photos in the grid larger."
     },
     "Zoom Out" : {
-
+      "comment" : "Command that makes the photos in the grid smaller."
+    },
+    "Zoom to Fit" : {
+      "comment" : "Command in the View menu (Mac) and accessibility action of a photo in the viewer: shows the whole photo again after zooming in. Title-style capitalisation as in the menu bar."
     },
     "album" : {
       "comment" : "Accessibility: the kind of a card."
@@ -2263,8 +3940,11 @@
     "and %lld more" : {
       "comment" : "Shown under a list that is cut off; the argument is the number of rows not shown."
     },
+    "anyone by email" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): item of the list of who a file can be shared with (inside a sentence, lower case)."
+    },
     "folder" : {
-
+      "comment" : "What a tile is, read by VoiceOver after its name, e.g. \"Holidays, folder\". Lower case where the language allows."
     },
     "https://cloud.example.com/apps/photos/public/…" : {
       "comment" : "A placeholder text for a public album link.",
@@ -2274,28 +3954,40 @@
       "comment" : "Accessibility: the kind of a card."
     },
     "newest from %@" : {
-
+      "comment" : "Part of the VoiceOver description of a collection, after the number of photos. %@ is the date of its newest photo."
+    },
+    "password" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): one line about a share: it has a password (lower case, joined with ·)."
+    },
+    "people on other Nextcloud servers (user@server)" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): item of the list of who a file can be shared with (inside a sentence, lower case); user@server is a Federated Cloud ID."
     },
     "person" : {
-
+      "comment" : "What a tile is, read by VoiceOver after its name, e.g. \"Anna, person\". Lower case where the language allows."
     },
     "place" : {
-
+      "comment" : "What a tile is, read by VoiceOver after its name, e.g. \"Lisbon, place\". Lower case where the language allows."
     },
     "shared by %@" : {
-
+      "comment" : "Part of the VoiceOver description of an album that someone shared with the user. %@ is that person's name."
     },
     "shared with a link" : {
-
+      "comment" : "Part of the VoiceOver description of an album that has a public link."
     },
     "shared with others" : {
-
+      "comment" : "Part of the VoiceOver description of an album that the user shares with other people."
     },
     "tag" : {
-
+      "comment" : "What a tile is, read by VoiceOver after its name, e.g. \"Birthday, tag\". Lower case where the language allows."
+    },
+    "until %@" : {
+      "comment" : "Sharing screen (Share via Nextcloud…): one line about a share: the day it expires. The argument is a date."
     },
     "with %@" : {
       "comment" : "Accessibility: the people in a photo."
+    },
+    "“%@” was shared with you" : {
+      "comment" : "Banner above the albums: an album (its title) was newly shared with the user."
     }
   },
   "version" : "1.1"
