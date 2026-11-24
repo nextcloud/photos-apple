@@ -218,6 +218,17 @@ import Testing
         #expect(try ids() == [2, 3])
     }
 
+    /// "Sync now" while offline: the reconciliation it asked for is still due once the server can be reached.
+    @Test func syncNowThatFailedOfflineStaysDue() async throws {
+        try await initialSync()
+        server.delete(1, changingRootETag: false)
+        server.setOffline(true)
+        await engine.sync(forceReconcile: true)
+        server.setOffline(false)
+        await engine.sync()
+        #expect(try ids() == [2, 3])
+    }
+
     @Test func alreadyCancelledCallerDoesNotStartASync() async throws {
         try await initialSync()
         let engine = self.engine

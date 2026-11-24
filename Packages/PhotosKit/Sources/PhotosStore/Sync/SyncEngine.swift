@@ -207,8 +207,9 @@ public actor SyncEngine {
         var reconciled = false
         var reconcileAttempted = false
         defer {
-            // A requested reconcile that did not finish (offline, cancelled, failed) stays due for the next sync.
-            if request > .ifDue && reconcileAttempted && !reconciled { requested = max(requested, request) }
+            // A requested reconcile that did not finish (offline, cancelled, failed) stays due for the next sync: "Sync now"
+            // always, pull-to-refresh when it had begun to walk.
+            if !reconciled && (request == .now || (request == .refresh && reconcileAttempted)) { requested = max(requested, request) }
         }
         do {
             let folderKey = scopes.joined(separator: "|")
