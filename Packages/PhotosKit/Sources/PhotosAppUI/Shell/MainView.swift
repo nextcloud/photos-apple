@@ -153,8 +153,8 @@ struct MainView: View {
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
-    /// File › Import from Google Takeout… (Mac).
-    @State private var importingTakeout = false
+    /// File › Import Library… (SPEC §15.7).
+    @State private var importingLibrary = false
     /// "Show in library": the photo the Library timeline scrolls to and highlights.
     @State private var timelineReveal = TimelineRevealCenter()
 
@@ -207,14 +207,12 @@ struct MainView: View {
                     upload: { importingFiles = true },
                     openPublicLink: { openingLink = true },
                     syncNow: { Task { await session.syncNow(forceReconcile: true) } },
-                    importTakeout: { importingTakeout = true }
+                    importLibrary: { importingLibrary = true }
                 )
             )
             .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
             .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
-            #if os(macOS)
-                .sheet(isPresented: $importingTakeout) { TakeoutImportSheet() }
-            #endif
+            .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
             // A link for another account, an unknown account or a public album asks first (not while locked).
             .linkPrompts(isLocked: lock.requiresUnlock)
             .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in

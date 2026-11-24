@@ -3,33 +3,10 @@
 
 import Foundation
 
-/// What a Google Takeout JSON sidecar says about a photo or video.
-public struct TakeoutMetadata: Hashable, Sendable {
-    /// `photoTakenTime.timestamp`: the capture time Google Photos shows.
-    public var takenAt: Date?
-    public var latitude: Double?
-    public var longitude: Double?
-    public var altitude: Double?
-    /// The caption the user wrote in Google Photos.
-    public var description: String?
-
-    public init(
-        takenAt: Date? = nil, latitude: Double? = nil, longitude: Double? = nil, altitude: Double? = nil, description: String? = nil
-    ) {
-        self.takenAt = takenAt
-        self.latitude = latitude
-        self.longitude = longitude
-        self.altitude = altitude
-        self.description = description
-    }
-
-    public var hasLocation: Bool { latitude != nil && longitude != nil }
-}
-
-/// Matches media files of a Takeout export to their JSON sidecars and reads them. The same rules as the Photos server's
+/// Matches media files of a Google Takeout export to their JSON sidecars and reads them. The same rules as the Photos server's
 /// `occ photos:import-takeout-metadata` (`TakeoutSidecarService`): truncated sidecar names, `(1)` copy suffixes after the
 /// extension, `.supplemental-metadata` (also cut short), edited copies and Live Photo videos sharing the picture's sidecar.
-public enum TakeoutSidecars {
+public enum GoogleTakeoutSidecars {
     /// Sidecars are small; anything bigger is not one.
     static let maxSidecarSize: UInt64 = 1 << 20
     static let supplementalSuffix = "supplemental-metadata"
@@ -122,10 +99,15 @@ public enum TakeoutSidecars {
         return nil
     }
 
-    /// Reads a sidecar. Nil when it holds neither a capture time, a position nor a description.
-    public static func parse(_ data: Data) -> TakeoutMetadata? {
+    /// Reads a sidecar. Nil when it holds neither a capture time, a position, a description nor a favourite.
+    public static func parse(_ data: Data) -> ImportMetadata? {
+        read(data)?.metadata
+    }
+
+    /// A sidecar's details, and whether the photo is in Google Photos' trash (`"trashed": true`, newer exports).
+    static func read(_ data: Data) -> (metadata: ImportMetadata?, trashed: Bool)? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        var metadata = TakeoutMetadata()
+        var metadata = ImportMetadata()
         if let taken = object["photoTakenTime"] as? [String: Any], let seconds = timestamp(taken["timestamp"]) {
             metadata.takenAt = Date(timeIntervalSince1970: TimeInterval(seconds))
         }
@@ -135,9 +117,13 @@ public enum TakeoutSidecars {
             metadata.altitude = position.altitude
         }
         if let text = (object["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-            metadata.description = text
+            metadata.caption = text
         }
-        return metadata.takenAt == nil && !metadata.hasLocation && metadata.description == nil ? nil : metadata
+        metadata.favorite = object["favorited"] as? Bool == true
+        metadata.hidden = object["archived"] as? Bool == true
+        let trashed = object["trashed"] as? Bool == true
+        let empty = metadata.takenAt == nil && !metadata.hasLocation && metadata.caption == nil && !metadata.favorite && !metadata.hidden
+        return (empty ? nil : metadata, trashed)
     }
 
     static func timestamp(_ value: Any?) -> Int64? {
@@ -169,9 +155,12 @@ public enum TakeoutSidecars {
         return double.isFinite ? double : nil
     }
 
-    /// The title of an album folder from its `metadata.json` (`{"title": "Trip to Lisbon", …}`).
+    /// The title of an album folder from its `metadata.json` (`{"title": "Trip to Lisbon", …}`; older exports wrap it in
+    /// `albumData`; the file's name is translated, `métadonnées.json`, `Metadaten.json`…).
     public static func albumTitle(_ data: Data) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let wrapped = object["albumData"] as? [String: Any] { object = wrapped }
+        guard object["photoTakenTime"] == nil,
             let title = (object["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty
         else { return nil }
         return title
