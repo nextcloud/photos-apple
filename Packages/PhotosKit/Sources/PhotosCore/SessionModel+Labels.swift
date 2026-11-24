@@ -26,6 +26,8 @@ extension SessionModel {
         await checkSharedAlbumActivity()
         // After the labels: people come from them.
         await updateSpotlight()
+        // Smart offline and the photo of the day follow the library (SPEC §15.8).
+        await afterSyncExtras()
     }
 
     // MARK: Search labels

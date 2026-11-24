@@ -108,6 +108,13 @@ exports it as a video, plays a trip and swipes through the year in review; `PHOT
 screenshot and the accessibility tree of each step there, `PHOTOS_UITEST_TRIP=<part of a trip's title>` picks the trip
 (one with stops more than 30 km apart shows the map flights). Run in the iOS 27.2 simulator.
 
+`UITests/ExtrasTourTests.swift` (iPhone simulator) walks through the round-5 extras (SPEC §15.8): Settings › Smart
+offline, Make Sticker, a collage of a selection, the sticker book, and a photo of the day notification (the Debug build
+schedules one 25 seconds ahead when started with `PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN=25`; the test accepts the permission
+alert). With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` the screenshots are also written there. Subject lifting (stickers)
+does not work in the simulator; `PhotosMediaTests/StickerSampleTests` lifts real photos on the Mac when run with
+`TEST_RUNNER_PHOTOS_STICKER_SAMPLES=<folder of JPEGs>` and writes every sticker style next to them.
+
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
 

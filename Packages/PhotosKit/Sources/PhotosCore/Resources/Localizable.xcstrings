@@ -155,6 +155,9 @@
         }
       }
     },
+    "A photo from your library is waiting for you." : {
+      "comment" : "Body of the daily photo notification while app lock is on: no photo, date or place is shown."
+    },
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
     },
@@ -284,6 +287,9 @@
     "Delete" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Delete\"): photos were moved to the server's trash bin. A verb."
     },
+    "From your favorites · %@" : {
+      "comment" : "Daily photo notification when the photo is a favourite: the argument is its month and year, e.g. June 2019."
+    },
     "Log in to back up your photos." : {
       "comment" : "Result of the \"Back up now\" shortcut when no account is logged in."
     },
@@ -292,6 +298,29 @@
     },
     "Nextcloud Photos has no access to your photos." : {
       "comment" : "Result of a backup run when the user has not allowed the app to read the device's photo library. \"Nextcloud Photos\" is the app's name."
+    },
+    "On this day %lld years ago" : {
+      "comment" : "Daily photo notification: the photo was taken on this day N years ago. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "On this day %lld year ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "On this day %lld years ago"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Only the photos you selected for Nextcloud Photos are backed up." : {
       "comment" : "Added to the result of a backup run when the user gave the app access to selected photos only (limited Photos access). \"Nextcloud Photos\" is the app's name."
@@ -304,6 +333,9 @@
     },
     "Person" : {
       "comment" : "Spotlight: kind of a result that is a person."
+    },
+    "Photo of the Day" : {
+      "comment" : "Title of the daily photo notification."
     },
     "Place" : {
       "comment" : "Spotlight: kind of a result that is a place."
@@ -331,6 +363,29 @@
     },
     "There are no photos to show. Open the album once, so that its photos are on this Mac." : {
       "comment" : "Settings › Desktop Picture: the rotation's album or source has no photos (yet)."
+    },
+    "This week %lld years ago" : {
+      "comment" : "Daily photo notification: the photo was taken around this day N years ago. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This week %lld year ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This week %lld years ago"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Unarchive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."

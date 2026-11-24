@@ -18,6 +18,8 @@ import UniformTypeIdentifiers
     var choosingSong = false
     /// The memory whose film is being exported as a video.
     var exporting: SlideshowStart?
+    /// A card of the memory (SPEC §15.8.3).
+    var collage: CollageRequest?
 
     struct Message: Identifiable {
         let id = UUID()
@@ -97,6 +99,11 @@ struct MemoryActionsMenu: View {
                 model.exporting = SlideshowStart(memory: memory)
             } label: {
                 Label(MemoryFilmExportSheet.menuTitle, systemImage: "film")
+            }
+            Button {
+                Task { model.collage = await CollageRequest.memory(memory, session: session) }
+            } label: {
+                Label(CollageRequest.cardTitle, systemImage: "rectangle.3.group")
             }
             Divider()
             musicMenu
@@ -204,6 +211,7 @@ private struct MemoryActionsPresenter: ViewModifier {
             .sheet(item: $model.exporting) { (start: SlideshowStart) in
                 MemoryFilmExportSheet(start: start)
             }
+            .collageEditor($model.collage)
             .fileImporter(isPresented: $model.choosingFile, allowedContentTypes: [.audio]) { result in
                 model.importMusic(result)
             }

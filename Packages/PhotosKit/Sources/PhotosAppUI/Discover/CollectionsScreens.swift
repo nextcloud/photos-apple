@@ -288,6 +288,8 @@ struct PersonScreen: View {
     @State private var hidden = HiddenPeople()
     /// Counted up to load the photos again after some were moved away.
     @State private var reloads = 0
+    /// "Make Sticker Pack" (SPEC §15.8.2).
+    @State private var makingStickers = false
 
     var isHidden: Bool { hidden.names.contains(person.name) }
 
@@ -329,12 +331,16 @@ struct PersonScreen: View {
                 }
                 Button(String(localized: "Merge with…", bundle: .module)) { merging = true }
                 Button(isHidden ? PeopleActions.showTitle : PeopleActions.hideTitle) { toggleHidden() }
+                if !person.isUnnamed {
+                    Button(StickerWording.packTitle, systemImage: "face.smiling") { makingStickers = true }
+                }
                 Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
             }
         }
         .id(reloads)
+        .sheet(isPresented: $makingStickers) { StickerPackSheet(person: person.name) }
         .task { if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) } }
         .alert(String(localized: "Name", bundle: .module), isPresented: $renaming) {
             TextField(String(localized: "Name", bundle: .module), text: $newName)

@@ -14,13 +14,35 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
         [.banner, .list]
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    /// The completion-handler form, called back on the main thread: UIKit asserts that the handler runs there (the async
+    /// form finished on another thread and the app crashed when a notification was tapped).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let userInfo = response.notification.request.content.userInfo
         let destination = userInfo["photosDestination"] as? String
-        await MainActor.run {
-            if let destination { AppHost.model.requestedDestination = destination }
+        // The photo of the day carries a link with its account (SPEC §15.8.4).
+        let link = (userInfo["photosLink"] as? String).flatMap(URL.init(string:))
+        let done = NotificationCompletion(call: completionHandler)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                AppLock.shared.refresh()
+                if let link, AppHost.model.open(link) {
+                } else if let destination {
+                    AppHost.model.requestedDestination = destination
+                }
+                done.call()
+            }
         }
     }
+}
+
+/// The completion handler of a notification response, which UserNotifications does not declare Sendable.
+///
+/// `@unchecked Sendable`: it is only passed to the main queue and called there once.
+struct NotificationCompletion: @unchecked Sendable {
+    let call: () -> Void
 }
 
 #if os(macOS)
@@ -35,6 +57,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
             ContentLabeling.register { AppHost.model }
             // On-device feature prints for "Show Similar" and key photos, while the Mac is idle.
             SimilarIndexing.register { AppHost.model }
+            // Smart offline fills up while the Mac is idle (SPEC §15.8.1).
+            SmartOfflineScheduling.register { AppHost.model }
         }
 
         func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

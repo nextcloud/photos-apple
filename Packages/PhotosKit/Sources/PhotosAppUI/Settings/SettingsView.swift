@@ -157,6 +157,8 @@ public struct SettingsView: View {
                 }
             }
 
+            if shows(.general) { PhotoOfTheDaySettingsSection() }
+
             if shows(.general) { SearchAndActivitySettings() }
 
             if shows(.general) {
@@ -170,6 +172,8 @@ public struct SettingsView: View {
                             app.reloadWidgets()
                             // Nothing in Spotlight while app lock is on; indexed again when it is turned off.
                             Task { await session.updateSpotlight(force: true) }
+                            // The photo of the day shows no photo while app lock is on.
+                            Task { await session.photoOfTheDaySettingsChanged() }
                         }
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
@@ -199,6 +203,8 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            if shows(.storage) { SmartOfflineSettingsSection() }
 
             if shows(.storage) {
                 Section(String(localized: "Available offline", bundle: .module)) {

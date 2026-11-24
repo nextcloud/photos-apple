@@ -14,6 +14,8 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     case albums, sharedAlbums, smartAlbums, people, places, tags
     case folders, sharedWithYou, archive, recentlyDeleted, duplicates, freeSpace
     case search, backup, settings
+    /// The sticker book (SPEC §15.8.2).
+    case stickers
     /// The tab that lists the places without a tab of their own (iPhone, narrow iPad windows; SPEC §6.2).
     case collections
 
@@ -44,6 +46,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .backup: LocalizedStringResource("Backup", bundle: .module)
         case .settings: LocalizedStringResource("Settings", bundle: .module)
         case .collections: LocalizedStringResource("Collections", bundle: .module)
+        case .stickers: LocalizedStringResource("Stickers", bundle: .module, comment: "The sticker book in the sidebar.")
         }
     }
 
@@ -72,6 +75,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .backup: "icloud.and.arrow.up"
         case .settings: "gearshape"
         case .collections: "square.stack"
+        case .stickers: "face.smiling"
         }
     }
 
@@ -92,7 +96,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         switch self {
         case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup, .collections: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
-        case .recentlyDeleted, .duplicates, .freeSpace: nil
+        case .recentlyDeleted, .duplicates, .freeSpace, .stickers: nil
         }
     }
 }
@@ -101,7 +105,9 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
 /// row of its own; it stays a destination for notifications, widgets and links.
 enum SidebarLayout {
     static let primary: [AppDestination] = [.library, .photos, .videos, .favorites, .memories, .map]
-    static let collections: [AppDestination] = [.albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou]
+    static let collections: [AppDestination] = [
+        .albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou, .stickers,
+    ]
     static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace]
 
     /// The row that is highlighted while `destination` is shown.
@@ -630,6 +636,7 @@ struct DestinationView: View {
         case .duplicates: DuplicatesScreen()
         case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
+        case .stickers: StickerBookScreen()
         case .collections:
             #if os(macOS)
                 // The Mac has the sidebar; nothing leads here.

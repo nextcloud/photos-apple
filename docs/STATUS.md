@@ -779,7 +779,31 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
 - ⬜ iPad and Vision Pro layouts not looked at (same sheet).
 
 ### §15.8 Smart offline and fun extras: stickers, collages, photo of the day
-- ⬜ Not started.
+Unit tests: `SmartOfflinePolicyTests`, `ExtrasTests` (photo of the day, collage layouts and picker, sticker subjects),
+`ExtrasStoreTests`, `ExtrasCoreTests` (smart offline passes against a stubbed server, notification texts and dates, sticker
+book), `ExtrasMediaTests` (pipeline uses kept previews, sticker styles, PNG/HEIC alpha). UI: `UITests/ExtrasTourTests`
+in the iOS 27.2 simulator against the 504-photo test server; screenshots in `ios-fix-shots/r5-extras/`.
+- ✅ Smart offline (§15.8.1): run in the iOS 27.2 simulator against the test server — the first foreground passes kept 135
+  previews (62.6 MB) of the recent photos, favourites and the coming days' memories, and Settings shows that. Policy,
+  eviction (LRU, stale, budget change, Off), Wi-Fi/Low Power rules and originals mode unit-tested. 🟡 The background task
+  (charging) and the Mac's background activity were not seen to run; offline browsing was not tried in the simulator
+  (the pipeline's use of kept previews is unit-tested). ⬜ No badge on grid tiles (decided against, see SPEC).
+- 🟡 Stickers (§15.8.2): lifting and all four styles verified on the Mac with real photos of the test library
+  (`StickerSampleTests`, outputs in `ios-fix-shots/r5-extras/mac-stickers/`). In the simulator Vision's segmentation is not
+  available, so the sheet shows its explanation; the sticker book was shown with stickers made on the Mac (copied into
+  the simulator's book). Not verified:
+  the system's "Add Sticker" in VisionKit's menu (needs a device), a person's sticker pack (the test server has no
+  Recognize), the Mac and Vision Pro sheets running.
+- 🟡 Collage and card (§15.8.3): layouts, crop and picker unit-tested; the editor run in the iOS 27.2 simulator with six
+  photos of the test library (mosaic, magazine, prints, grid, picking a photo to swap). Not verified: the PDF and image
+  export through the share sheet, "Save to Nextcloud" (it uses the same uploader as "Save as copy"), the album and memory
+  entry points, the Mac and Vision Pro.
+- ✅ Photo of the day (§15.8.4): run in the iOS 27.2 simulator — turning it on asks for permission and schedules the
+  coming days with their photos attached (the system log shows the attachments copied), the debug one arrived ("On this
+  day 13 years ago · Dubai") and tapping it opened the photo in the viewer. Choice, texts (also with app lock) and dates
+  unit-tested. Tapping any notification crashed the app before (UIKit asserted on the async delegate method finishing off
+  the main thread); the router now uses the completion-handler form on the main queue. 🟡 The attached photo was not seen
+  as a thumbnail or expanded in the simulator; the app-lock text and the Mac were not seen on screen.
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

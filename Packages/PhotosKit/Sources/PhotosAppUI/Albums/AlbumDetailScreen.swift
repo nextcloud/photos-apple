@@ -25,6 +25,8 @@ struct AlbumDetailScreen: View {
     @State private var newName = ""
     @State private var renaming = false
     @State private var showingNotes = false
+    /// A collage of the album (SPEC §15.8.3).
+    @State private var collage: CollageRequest?
     /// Selection in the grid (reported by `MediaGridScreen`).
     @State private var gridSelection = GridSelectionState()
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -70,6 +72,8 @@ struct AlbumDetailScreen: View {
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
+            // Its photos become smart offline candidates for a while (SPEC §15.8.1).
+            session.noteAlbumViewed(albumId)
             // What was new in this album has been seen now ("New in shared albums").
             try? AlbumActivityStore(database: services.database).markSeen(albumId: albumId)
             Task {
@@ -99,6 +103,7 @@ struct AlbumDetailScreen: View {
                 }, flat: true)
         }
         .refreshable { try? await session.refreshAlbumContent(album, force: true) }
+        .collageEditor($collage)
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .addPhotos: PhotoPickerSheet(album: album)
@@ -256,6 +261,11 @@ struct AlbumDetailScreen: View {
                 Label(DesktopPictureAction.rotateTitle, systemImage: DesktopPictureAction.systemImage)
             }
         #endif
+        Button {
+            Task { collage = await CollageRequest.album(album, session: session) }
+        } label: {
+            Label(CollageRequest.menuTitle, systemImage: "rectangle.3.group")
+        }
         Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
             Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)
             Text("Newest first", bundle: .module).tag(AlbumPhotosSortOrder.newest)
