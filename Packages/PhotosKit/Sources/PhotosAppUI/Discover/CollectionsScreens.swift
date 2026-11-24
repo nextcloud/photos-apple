@@ -294,6 +294,7 @@ struct FoldersScreen: View {
     @State private var error: String?
     @State private var loaded = false
     @AppStorage("gridColumns") private var columns = GridColumns.default
+    @State private var sharing: SharingTarget?
 
     var title: String {
         if path == "/" {
@@ -333,6 +334,21 @@ struct FoldersScreen: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .toolbar {
+            if path != "/" {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        sharing = SharingTarget(path: path, isFolder: true)
+                    } label: {
+                        Label(String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus")
+                    }
+                    .help(String(localized: "Share via Nextcloud…", bundle: .module))
+                }
+            }
+        }
+        .sheet(item: $sharing) { target in
+            if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
+        }
     }
 
     func folderLink(_ folder: FolderEntry, compact: Bool = false) -> some View {

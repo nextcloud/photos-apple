@@ -40,6 +40,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var sharedLink: SharedLink?
     @State private var metadataItems: PickedItems?
     @State private var editedItem: MediaItem?
+    /// Nextcloud's own sharing of one photo (users, other servers, email, Talk, links with password and expiry).
+    @State private var nextcloudShare: SharingTarget?
     /// Haptic triggers (iPhone, iPad).
     @State private var favoriteToggles = 0
     @State private var deletions = 0
@@ -90,6 +92,9 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $editedItem) { item in EditorView(item: item) }
+            .sheet(item: $nextcloudShare) { target in
+                if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
+            }
             .infoInspector(isPresented: $showingInfo) {
                 if let item = infoItem ?? selectedItems.first {
                     InfoPanel(item: item, inInspector: true)
@@ -367,6 +372,14 @@ struct MediaGridScreen<Accessory: View>: View {
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(
             GridMenuAction(id: "save", title: exportTitle, systemImage: "square.and.arrow.down") { _ in export(items) })
+        if items.count == 1, let item = items.first, item.permissions.canShare {
+            actions.append(
+                GridMenuAction(
+                    id: "ncshare", title: String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus"
+                ) { _ in
+                    nextcloudShare = SharingTarget(item: item)
+                })
+        }
         let allFavorite = items.allSatisfy(\.isFavorite)
         actions.append(
             GridMenuAction(
