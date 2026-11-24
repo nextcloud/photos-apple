@@ -93,9 +93,15 @@ public struct PhotoLibrarySource: Sendable, BackupLibrary {
     ///
     /// Only the user's own library: photos of iCloud Shared Albums belong to somebody else's library (and are reduced
     /// copies), and what was synced from a computer is on that computer. Hidden photos only when the user asks for them.
-    public func assets(_ settings: BackupSettings) -> [PHAsset] {
+    ///
+    /// - Parameter only: only these assets (those that changed); nil: all of them.
+    public func assets(_ settings: BackupSettings, only identifiers: Set<String>? = nil) -> [PHAsset] {
         let options = PHFetchOptions()
         var predicates: [NSPredicate] = []
+        if let identifiers {
+            guard !identifiers.isEmpty else { return [] }
+            predicates.append(NSPredicate(format: "localIdentifier IN %@", Array(identifiers)))
+        }
         var types: [Int] = []
         if settings.photos { types.append(PHAssetMediaType.image.rawValue) }
         if settings.videos { types.append(PHAssetMediaType.video.rawValue) }
@@ -122,12 +128,51 @@ public struct PhotoLibrarySource: Sendable, BackupLibrary {
     }
 
     /// Resources of the selected assets, oldest first; `needsScan` saves reading the resources of assets that are done.
-    func scan(_ settings: BackupSettings, needsScan: (String, Date?) -> Bool) -> [BackupResource] {
+    func scan(_ settings: BackupSettings, assets identifiers: Set<String>?, needsScan: (String, Date?) -> Bool) -> [BackupResource] {
         var result: [BackupResource] = []
-        for asset in assets(settings) where needsScan(asset.localIdentifier, asset.modificationDate) {
+        for asset in assets(settings, only: identifiers) where needsScan(asset.localIdentifier, asset.modificationDate) {
             result.append(contentsOf: resources(of: asset, settings: settings).map(\.0))
         }
         return result
+    }
+
+    // MARK: Changes (SPEC §7.18.3)
+
+    /// More changed assets than this are looked at like the whole library: one fetch of everything is cheaper than a
+    /// predicate with that many identifiers.
+    static let maxChangedAssets = 10_000
+
+    var changeToken: Data? {
+        try? NSKeyedArchiver.archivedData(withRootObject: PHPhotoLibrary.shared().currentChangeToken, requiringSecureCoding: true)
+    }
+
+    /// Assets inserted, updated or deleted since the token, from the library's persistent change history. Nil when the
+    /// token is unreadable or older than the history, when the history has no details, when there are very many, and
+    /// when one of the albums the backup is limited to changed (an asset added to an album is a change of the album).
+    func changedAssets(since data: Data, settings: BackupSettings) -> Set<String>? {
+        guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: PHPersistentChangeToken.self, from: data) else { return nil }
+        let albums = Set(settings.albumIdentifiers)
+        var assets = Set<String>()
+        do {
+            let changes = try PHPhotoLibrary.shared().fetchPersistentChanges(since: token)
+            for change in changes {
+                let details = try change.changeDetails(for: .asset)
+                assets.formUnion(details.insertedLocalIdentifiers)
+                assets.formUnion(details.updatedLocalIdentifiers)
+                assets.formUnion(details.deletedLocalIdentifiers)
+                if !albums.isEmpty {
+                    let collections = try change.changeDetails(for: .assetCollection)
+                    let touched = collections.insertedLocalIdentifiers.union(collections.updatedLocalIdentifiers)
+                        .union(collections.deletedLocalIdentifiers)
+                    if !touched.isDisjoint(with: albums) { return nil }
+                }
+                if assets.count > Self.maxChangedAssets { return nil }
+            }
+        } catch {
+            // `persistentChangeTokenExpired`, `persistentChangeDetailsUnavailable`, or another failure: everything is looked at.
+            return nil
+        }
+        return assets
     }
 
     /// Resources of an asset to upload, according to the settings.

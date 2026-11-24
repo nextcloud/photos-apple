@@ -493,7 +493,8 @@ final class FakeTransport: BackgroundUploading {
                 await test.report(engine, "IMG_0001.heic")
             }
         }
-        let next = Task { await engine.run(settings) }
+        // The user's "Back up now" asks the server again about what waits.
+        let next = Task { await engine.run(settings, retryFailed: true) }
         // Only the second one is left for this pass, and it is with the system already.
         #expect(await eventually { status.phase == .uploading(done: 0, total: 1, current: "") })
         #expect(try await entry(engine, "0001")?.state == BackupItemState.uploaded.rawValue)

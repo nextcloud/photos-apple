@@ -65,10 +65,14 @@ features shows the result. Details: SPEC §5.2–§5.3.
 
 `BackupEngine` (an actor) uploads the photo library of the device to one account:
 
-1. `PhotoLibrarySource` lists PhotoKit assets and their resources (original, edited version, Live Photo video).
-2. The ledger (a table per account) remembers what was uploaded; the Files app's auto-upload history is read so that
-   photos it already uploaded are not uploaded again.
-3. `BackupMatcher` compares the rest with the server (a WebDAV `SEARCH` by name, size and date).
+1. `PhotoLibrarySource` lists PhotoKit assets and their resources (original, edited version, Live Photo video). A pass
+   only looks at the assets that changed since the last one (PhotoKit's persistent change token); the whole library
+   once a day, after the uploads, or when the options or the selection change.
+2. The ledger (a table per account) remembers what was uploaded, and for what still waits the resource itself and when
+   the server was last asked about it, so a pass can upload it without reading the library or asking the server again.
+   The Files app's auto-upload history is read so that photos it already uploaded are not uploaded again.
+3. `BackupMatcher` compares the rest with the server (a WebDAV `SEARCH` by name, size and date), a batch at a time,
+   with the candidates indexed by second; uploads start after the first batch.
 4. Missing files are uploaded by `Uploader`; on iOS files up to 100 MB are handed to a background `URLSession`, so
    they continue while the app is suspended.
 

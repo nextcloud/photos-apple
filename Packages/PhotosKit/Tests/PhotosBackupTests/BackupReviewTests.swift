@@ -178,15 +178,12 @@ import Testing
         #expect(try await entry(engine, "0003")?.state == BackupItemState.failed.rawValue)
         await engine.cancel()
 
-        // The user deletes the video and the photo that failed. Nothing is left to upload.
+        // The user deletes the video and the photo that failed. Nothing is left to upload; the failed one does not wait
+        // for its next attempt to be found gone.
         library.state.withLock { $0.assets.removeLast(2) }
         await engine.setNetwork(BackupNetwork())
-        // The failed one is only looked at when its waiting time is over (or the user asks).
         await engine.run(settings)
         #expect(try await entry(engine, "0002", .video) == nil)
-        #expect(status.phase == .incomplete(failed: 1))
-        clock.advance(BackupPolicy.retryBase + 1)
-        await engine.run(settings)
         #expect(try await entry(engine, "0003") == nil)
         #expect(status.phase == .upToDate)
         #expect(status.pending == 0)
