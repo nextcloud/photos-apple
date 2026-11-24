@@ -494,7 +494,10 @@ struct MainView: View {
             }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewCustomization($customization)
-            .tabViewSidebarHeader { AccountHeader() }
+            // The models are handed over explicitly: when the sidebar first appears during a rotation (portrait → landscape),
+            // UIKit sizes the header before SwiftUI has given it the environment, and the app crashed ("No Observable object
+            // of type AppModel found").
+            .tabViewSidebarHeader { AccountHeader().environment(app).environment(session) }
             .onChange(of: selection, initial: true) { _, destination in
                 if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
             }
