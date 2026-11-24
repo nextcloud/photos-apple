@@ -248,10 +248,21 @@ public struct MapCell: Hashable, Sendable, Identifiable {
     public var longitude: Double
     /// The place name of the cover ("Lisbon"), for the marker's label.
     public var place: String?
-    /// The query this cell came from; `LibraryStore.mapItems(in:)` uses it to list the cell's items.
+    /// The region of the query this cell came from (its count is of the part inside); `LibraryStore.mapItems(in:)` lists the
+    /// same items.
     public var region: MapRegion
     public var cellLatitude: Double
     public var cellLongitude: Double
+    /// The time the map was filtered to (SPEC MP-1 time slider), nil for all of it.
+    public var period: Range<Date>? = nil
+}
+
+/// Where and when the geotagged photos of the library were taken.
+public struct MapOverview: Hashable, Sendable {
+    public var oldest: Date
+    public var newest: Date
+    /// The smallest rectangle around all of them.
+    public var region: MapRegion
 }
 
 /// What the actions of a selection need to know about it (which actions apply, their titles), without the items: a
@@ -878,20 +889,32 @@ public struct LibraryStore: Sendable {
         [region.minLatitude, region.maxLatitude, region.minLongitude, region.maxLongitude]
     }
 
+    /// The located items of a region, within a period when the map is filtered by time.
+    static func mapCondition(_ region: MapRegion, period: Range<Date>?) -> (String, StatementArguments) {
+        guard let period else { return ("\(located) AND \(inRegion)", arguments(region)) }
+        return (
+            "\(located) AND \(inRegion) AND \(timestamp) >= ? AND \(timestamp) < ?",
+            arguments(region) + [period.lowerBound.timeIntervalSince1970, period.upperBound.timeIntervalSince1970]
+        )
+    }
+
     /// The grid cell of a coordinate, as SQL. The offsets keep the values positive, so the cast rounds down.
     static let cellRow = "CAST((media.latitude + 90.0) / ? AS INTEGER)"
     static let cellColumn = "CAST((media.longitude + 180.0) / ? AS INTEGER)"
 
     /// Geotagged items of a region, aggregated into grid cells by the database (SPEC MP-1): the map never holds the
-    /// located items themselves, only one row per cell on screen.
-    public func mapCells(in region: MapRegion, cellLatitude: Double, cellLongitude: Double) async throws -> [MapCell] {
+    /// located items themselves, only one row per cell. With a `period` only the items taken then (time slider).
+    public func mapCells(in region: MapRegion, cellLatitude: Double, cellLongitude: Double, during period: Range<Date>? = nil)
+        async throws -> [MapCell]
+    {
         guard cellLatitude > 0, cellLongitude > 0 else { return [] }
+        let (condition, conditionArguments) = Self.mapCondition(region, period: period)
         return try await database.writer.read { db in
             let sql = """
                 SELECT \(Self.cellRow) AS cellRow, \(Self.cellColumn) AS cellColumn, COUNT(*), MAX(media.fileId)
-                FROM media WHERE \(Self.located) AND \(Self.inRegion) GROUP BY cellRow, cellColumn
+                FROM media WHERE \(condition) GROUP BY cellRow, cellColumn
                 """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [cellLatitude, cellLongitude] + Self.arguments(region))
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [cellLatitude, cellLongitude] + conditionArguments)
             let coverIds: [FileID] = rows.map { $0[3] }
             let covers = try Self.gridMedia(db, coverIds)
             var coordinates: [FileID: (Double, Double, String?)] = [:]
@@ -907,45 +930,89 @@ public struct LibraryStore: Sendable {
                 return MapCell(
                     row: row[0], column: row[1], count: row[2], cover: cover, latitude: coordinate.0, longitude: coordinate.1,
                     place: coordinate.2.flatMap { $0.isEmpty ? nil : $0 }, region: region, cellLatitude: cellLatitude,
-                    cellLongitude: cellLongitude)
+                    cellLongitude: cellLongitude, period: period)
             }
         }
     }
 
+    /// The condition of the items of some cells of the same size and period (a marker, or a cluster of markers MapKit
+    /// merged, which may come from the queries of different regions as the map moved): their rows and columns, within the
+    /// rectangle around the cells (for the coordinate index) and around the regions they were counted in.
+    static func cellsCondition(_ cells: [MapCell]) -> (String, StatementArguments)? {
+        guard let first = cells.first else { return nil }
+        // A little more than the cells: the rows and columns decide, the rectangle only narrows the index range.
+        let margin = 1e-9
+        let rows = cells.map(\.row)
+        let columns = cells.map(\.column)
+        let around = MapRegion(
+            minLatitude: max(Double(rows.min()!) * first.cellLatitude - 90 - margin, cells.map(\.region.minLatitude).min()!),
+            maxLatitude: min(Double(rows.max()! + 1) * first.cellLatitude - 90 + margin, cells.map(\.region.maxLatitude).max()!),
+            minLongitude: max(Double(columns.min()!) * first.cellLongitude - 180 - margin, cells.map(\.region.minLongitude).min()!),
+            maxLongitude: min(Double(columns.max()! + 1) * first.cellLongitude - 180 + margin, cells.map(\.region.maxLongitude).max()!))
+        var (condition, arguments) = mapCondition(around, period: first.period)
+        let pairs = cells.map { _ in "(?, ?)" }.joined(separator: ", ")
+        condition += " AND (\(cellRow), \(cellColumn)) IN (VALUES \(pairs))"
+        arguments += [first.cellLatitude, first.cellLongitude]
+        for cell in cells { arguments += [cell.row, cell.column] }
+        return (condition, arguments)
+    }
+
     /// The items of a map cell, newest first.
     public func mapItems(in cell: MapCell) async throws -> [MediaItem] {
-        let sql =
-            "SELECT media.* FROM media WHERE \(Self.located) AND \(Self.inRegion) AND \(Self.cellRow) = ? AND \(Self.cellColumn) = ? \(Self.displayOrder)"
-        var arguments = Self.arguments(cell.region)
-        arguments += [cell.cellLatitude, cell.row, cell.cellLongitude, cell.column]
-        return try await database.writer.read { [arguments] db in try MediaItem.fetchAll(db, sql: sql, arguments: arguments) }
+        guard let (condition, arguments) = Self.cellsCondition([cell]) else { return [] }
+        let sql = "SELECT media.* FROM media WHERE \(condition) \(Self.displayOrder)"
+        return try await database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: arguments) }
     }
 
     /// The geotagged items of a region, newest first.
-    public func mapItems(in region: MapRegion) async throws -> [MediaItem] {
-        let sql = "SELECT media.* FROM media WHERE \(Self.located) AND \(Self.inRegion) \(Self.displayOrder)"
-        return try await database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: Self.arguments(region)) }
+    public func mapItems(in region: MapRegion, during period: Range<Date>? = nil) async throws -> [MediaItem] {
+        let (condition, arguments) = Self.mapCondition(region, period: period)
+        let sql = "SELECT media.* FROM media WHERE \(condition) \(Self.displayOrder)"
+        return try await database.writer.read { db in try MediaItem.fetchAll(db, sql: sql, arguments: arguments) }
     }
 
     /// A page of the items of a map cell as grid rows, newest first ("Photos in this area" can be most of the library).
     public func mapGridItems(in cell: MapCell, limit: Int, offset: Int = 0) async throws -> [GridMedia] {
-        let sql =
-            "SELECT \(Self.gridColumns) FROM media WHERE \(Self.located) AND \(Self.inRegion) AND \(Self.cellRow) = ? AND \(Self.cellColumn) = ? \(Self.displayOrder) LIMIT ? OFFSET ?"
-        var arguments = Self.arguments(cell.region)
-        arguments += [cell.cellLatitude, cell.row, cell.cellLongitude, cell.column, limit, offset]
-        return try await database.writer.read { [arguments] db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
+        try await mapGridItems(in: [cell], limit: limit, offset: offset)
+    }
+
+    /// A page of the items of several cells of the same query (a cluster) as grid rows, newest first.
+    public func mapGridItems(in cells: [MapCell], limit: Int, offset: Int = 0) async throws -> [GridMedia] {
+        guard let (condition, arguments) = Self.cellsCondition(cells) else { return [] }
+        let sql = "SELECT \(Self.gridColumns) FROM media WHERE \(condition) \(Self.displayOrder) LIMIT ? OFFSET ?"
+        return try await database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments + [limit, offset]) }
     }
 
     /// A page of the geotagged items of a region as grid rows, newest first.
-    public func mapGridItems(in region: MapRegion, limit: Int, offset: Int = 0) async throws -> [GridMedia] {
-        let sql = "SELECT \(Self.gridColumns) FROM media WHERE \(Self.located) AND \(Self.inRegion) \(Self.displayOrder) LIMIT ? OFFSET ?"
-        let arguments = Self.arguments(region) + [limit, offset]
-        return try await database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments) }
+    public func mapGridItems(in region: MapRegion, during period: Range<Date>? = nil, limit: Int, offset: Int = 0) async throws
+        -> [GridMedia]
+    {
+        let (condition, arguments) = Self.mapCondition(region, period: period)
+        let sql = "SELECT \(Self.gridColumns) FROM media WHERE \(condition) \(Self.displayOrder) LIMIT ? OFFSET ?"
+        return try await database.writer.read { db in try Self.fetchGrid(db, sql: sql, arguments: arguments + [limit, offset]) }
     }
 
-    public func mapItemCount(in region: MapRegion) async throws -> Int {
-        let sql = "SELECT COUNT(*) FROM media WHERE \(Self.located) AND \(Self.inRegion)"
-        return try await database.writer.read { db in try Int.fetchOne(db, sql: sql, arguments: Self.arguments(region)) ?? 0 }
+    public func mapItemCount(in region: MapRegion, during period: Range<Date>? = nil) async throws -> Int {
+        let (condition, arguments) = Self.mapCondition(region, period: period)
+        let sql = "SELECT COUNT(*) FROM media WHERE \(condition)"
+        return try await database.writer.read { db in try Int.fetchOne(db, sql: sql, arguments: arguments) ?? 0 }
+    }
+
+    /// Where and when the geotagged photos were taken: the area the map opens on and the ends of its time slider.
+    public func mapOverview() async throws -> MapOverview? {
+        try await database.writer.read { db in
+            let sql = """
+                SELECT MIN(\(Self.timestamp)), MAX(\(Self.timestamp)), MIN(media.latitude), MAX(media.latitude),
+                    MIN(media.longitude), MAX(media.longitude)
+                FROM media WHERE \(Self.located)
+                """
+            guard let row = try Row.fetchOne(db, sql: sql), let oldest = row[0] as Double?, let newest = row[1] as Double? else {
+                return nil
+            }
+            return MapOverview(
+                oldest: Date(timeIntervalSince1970: oldest), newest: Date(timeIntervalSince1970: newest),
+                region: MapRegion(minLatitude: row[2], maxLatitude: row[3], minLongitude: row[4], maxLongitude: row[5]))
+        }
     }
 
     // MARK: Writes

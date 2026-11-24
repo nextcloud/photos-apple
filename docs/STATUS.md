@@ -184,7 +184,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   (`LargeLibraryPerformanceTests`, tag `performance`; skip with `PHOTOS_SKIP_PERFORMANCE=1`). On an Apple-silicon Mac, release
   build: initial index 6.3 s (store only; was 382 s in a debug build before the search index was fixed, 15 s now in debug),
   1000-row page 65 ms, local search 0.1–10 ms (budget 100 ms), timeline 58 ms as grid rows and 13 ms as lightweight rows,
-  map cells for 50 000 geotagged items 8–9 ms (budget 200 ms). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
+  map cells for 50 000 geotagged items 8–9 ms (budget 200 ms; debug, round 4: the cells MapKit clusters 9 ms, with the time
+  slider 34 ms, a cluster's first page 6–34 ms, the map's opening area 19 ms; MapKit takes 20 ms for 1024 cell annotations
+  and 1.45 s for 50 000, one per photo, `MapClusteringTests`). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
   measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet (its observation of grid
   rows is coalesced to one refetch per 300 ms, and to one per 2 s while writes keep coming: a sync, a backup, the
   outbox). A grid update that only touches some sections (an upload, a sync page) is applied as a batch update of those
@@ -388,7 +390,15 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   detections). "Hide person" is kept on this device only, per account, in the account's folder (removed on logout): Recognize has
   no way to hide a person, and the People screen says so under the grid ("N people are hidden on this device…", "Show hidden
   people"). Name check and hidden list ✅ unit-tested.
-- ⬜ Map time slider; MapKit native clustering (grid clustering is used).
+- Map clustering and time slider (MP-1, round 4) 🟡: the map is an `MKMapView` (SwiftUI's `Map` has no clustering on OS 27).
+  The database still adds the located photos up into grid cells, now of power-of-two degrees between a 16th and an 8th of
+  the visible span (at most 32 × 32 for the loaded area, cut along cell borders so every marker counts all its photos), and
+  MapKit clusters the cells' markers where they overlap (`MKClusterAnnotation`; newest photo, photos of all its cells; a
+  click lists them, newest first, in pages). MapKit alone over every photo is no option (50 000 annotations: 1.45 s to add,
+  budget 200 ms), so the grid stays as the first step rather than as a fallback. The map opens on the area of all
+  geotagged photos. "Time range" in the toolbar shows two month sliders (From, To; VoiceOver reads the month) and "All
+  time"; the markers, a cluster's list and "Photos in this area" follow it. Queries, cell maths and months ✅ unit-tested,
+  timings above; the map itself not looked at (Mac screen locked during this round), iOS and visionOS compiled only.
 - Tags ✅/🟡: "Tags…" in the viewer's More menu and the grid's context and selection menus opens a sheet with all
   assignable tags (on all / some / none of the photos), a filter field and "New tag"; changes go through the outbox
   (`PendingOperation.tag`) and show in search at once. Tag browsing falls back to the stored memberships offline and offers
