@@ -527,8 +527,19 @@ struct MediaGridScreen<Accessory: View>: View {
             rotate: info.items.map(PhotoRotation.canRotate) == true ? { clockwise in rotate(Array(selected), clockwise: clockwise) } : nil,
             recentAlbums: summary.count == 0 ? [] : recentAlbums,
             addToRecentAlbum: { album in add(withStacks(Array(selected)), to: album) },
-            addToNewAlbum: { withItems(withStacks(Array(selected))) { newAlbumItems = PickedItems(items: $0) } }
+            addToNewAlbum: { withItems(withStacks(Array(selected))) { newAlbumItems = PickedItems(items: $0) } },
+            useAsDesktopPicture: desktopPictureAction(single)
         )
+    }
+
+    /// Image ▸ Use as Desktop Picture for one still photo (Mac, SPEC §15.4).
+    func desktopPictureAction(_ item: MediaItem?) -> (() -> Void)? {
+        #if os(macOS)
+            guard let item, DesktopPictureAction.isOffered(item) else { return nil }
+            return { DesktopPictureAction.use(item, session: session) }
+        #else
+            return nil
+        #endif
     }
 
     /// The albums the "Add to Album" submenus list.
@@ -755,6 +766,14 @@ struct MediaGridScreen<Accessory: View>: View {
                     editedItem = item
                 })
         }
+        #if os(macOS)
+            if let use = desktopPictureAction(single) {
+                actions.append(
+                    GridMenuAction(id: "desktop", title: DesktopPictureAction.title, systemImage: DesktopPictureAction.systemImage) { _ in
+                        use()
+                    })
+            }
+        #endif
         // Image ▸ Rotate in the context menu as well (iPhone and iPad have no menu bar); only for photos that may be changed.
         if let items = info.items, PhotoRotation.canRotate(items) {
             actions.append(

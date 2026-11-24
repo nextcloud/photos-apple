@@ -274,6 +274,9 @@ struct MediaViewer: View {
         if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
         actions.shareTitle = item.name
         actions.slideshow = { playSlideshow() }
+        #if os(macOS)
+            if DesktopPictureAction.isOffered(item) { actions.useAsDesktopPicture = { DesktopPictureAction.use(item, session: session) } }
+        #endif
         return actions
     }
 
@@ -553,6 +556,15 @@ struct MediaViewer: View {
         } label: {
             Label(SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage)
         }
+        #if os(macOS)
+            if DesktopPictureAction.isOffered(item) {
+                Button {
+                    DesktopPictureAction.use(item, session: session)
+                } label: {
+                    Label(DesktopPictureAction.title, systemImage: DesktopPictureAction.systemImage)
+                }
+            }
+        #endif
         if showInFolder != nil {
             Button {
                 showFolder(item)

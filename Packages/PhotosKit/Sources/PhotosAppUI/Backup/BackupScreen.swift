@@ -398,6 +398,7 @@ struct BackupOptions: View {
                         localized: "Keep screen on while backing up", bundle: .module,
                         comment: "Backup option (iPhone, iPad): the screen does not lock while a backup runs and the app is open."),
                     isOn: Binding(get: { backup.keepScreenOn }, set: { value in backup.keepScreenOn = value }))
+                BackupLiveActivityToggle()
             #endif
         } header: {
             Text("Network and battery", bundle: .module)

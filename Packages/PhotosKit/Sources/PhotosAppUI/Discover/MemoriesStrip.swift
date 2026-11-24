@@ -153,6 +153,10 @@ struct MemoryScreen: View {
                 Label(Self.playTitle, systemImage: "play.rectangle")
             }
             .help(Self.playTitle)
+            #if os(visionOS)
+                // The photos around the viewer (SPEC §15.4).
+                MemoryRoomButton(memory: memory)
+            #endif
             MemoryActionsMenu(memory: memory, model: actions)
         }
         .memorySlideshow($slideshow)

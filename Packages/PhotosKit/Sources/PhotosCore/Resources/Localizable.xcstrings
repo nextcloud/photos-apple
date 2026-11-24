@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ left" : {
+      "comment" : "Backup Live Activity: the size of what is still to upload, e.g. “1.2 GB left”."
+    },
     "%@ shared the album with you." : {
       "comment" : "Notification body; the title is the album's title. %@ is the display name of the owner."
     },
@@ -60,6 +63,29 @@
     "%lld items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more." : {
       "comment" : "Text of a notification: %lld is the number of shared items that could not be uploaded after the share sheet was closed."
     },
+    "%lld left" : {
+      "comment" : "Backup Live Activity: number of photos and videos still to upload. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item left"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items left"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld new photos" : {
       "comment" : "Notification body about a shared album (its title is the title): how many photos others added.",
       "localizations" : {
@@ -83,6 +109,52 @@
         }
       }
     },
+    "%lld not uploaded" : {
+      "comment" : "Backup Live Activity: the pass ended, but this many items failed. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item not uploaded"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items not uploaded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld uploaded" : {
+      "comment" : "Backup Live Activity: how many photos and videos the finished pass uploaded. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item uploaded"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items uploaded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
     },
@@ -94,6 +166,9 @@
     },
     "Archive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
+    },
+    "Backed up" : {
+      "comment" : "Backup Live Activity and widget: everything is on the server."
     },
     "Backing up photos to Nextcloud" : {
       "comment" : "Title of the system's progress panel (Live Activity) while a backup the user started runs in the background."
@@ -167,6 +242,12 @@
         }
       }
     },
+    "Backup paused" : {
+      "comment" : "Backup Live Activity and widget: title while it waits."
+    },
+    "Backup stopped" : {
+      "comment" : "Backup Live Activity and widget: the user has to fix something."
+    },
     "Backup stopped: free up space on this Mac." : {
       "comment" : "Result of a backup run on the Mac that stopped because the disk is full (each photo is copied before it is uploaded)."
     },
@@ -193,6 +274,9 @@
     },
     "Checking your Nextcloud… %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel while the app compares the device's photos with the server."
+    },
+    "Continues when Nextcloud Photos runs again" : {
+      "comment" : "Backup Live Activity and widget: the system stopped the backup in the background; it goes on later."
     },
     "Delete" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Delete\"): photos were moved to the server's trash bin. A verb."
@@ -232,6 +316,15 @@
     },
     "Shared on %@" : {
       "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
+    },
+    "The desktop pictures change while the account they come from is shown in Nextcloud Photos." : {
+      "comment" : "Settings › Desktop Picture: the rotation waits because another account is active."
+    },
+    "The photo could not be loaded from your Nextcloud." : {
+      "comment" : "Use as Desktop Picture: the photo could not be downloaded."
+    },
+    "There are no photos to show. Open the album once, so that its photos are on this Mac." : {
+      "comment" : "Settings › Desktop Picture: the rotation's album or source has no photos (yet)."
     },
     "Unarchive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."

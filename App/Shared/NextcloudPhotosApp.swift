@@ -88,6 +88,10 @@ struct NextcloudPhotosApp: App {
             ImmersiveSpace(id: PanoramaImmersion.spaceID, for: PanoramaImmersion.Request.self) { $request in
                 if let request { PanoramaSpace(request: request) }
             }
+            // A memory's photos as framed pictures around the viewer (SPEC §15.4), opened from the memory.
+            ImmersiveSpace(id: MemoryRoom.spaceID, for: MemoryRoom.Request.self) { $request in
+                if let request { MemoryRoomSpace(request: request).environment(app) }
+            }
         #endif
 
         #if os(macOS)

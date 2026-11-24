@@ -9,7 +9,8 @@ import PhotosStore
 import SwiftUI
 import WidgetKit
 
-/// Widgets: On this day and favourite photos (SPEC §7.22).
+/// Widgets: On this day and favourite photos (SPEC §7.22); the photo frame, the backup's status, its Live Activity and the
+/// Control Center controls (SPEC §15.4).
 ///
 /// Privacy (SPEC §8): with app lock on they show a placeholder; on a locked device (lock screen, StandBy) the photo, place
 /// and date are redacted; the app reloads them when an account is added, switched, removed or wiped, and when app lock
@@ -19,6 +20,17 @@ struct PhotosWidgets: WidgetBundle {
     var body: some Widget {
         OnThisDayWidget()
         FavoritesWidget()
+        PhotoFrameWidget()
+        #if !os(visionOS)
+            // No backup on Vision Pro.
+            BackupStatusWidget()
+        #endif
+        #if os(iOS)
+            BackupLiveActivityWidget()
+            BackupToggleControl()
+            BackUpNowControl()
+            OpenLibraryControl()
+        #endif
     }
 }
 

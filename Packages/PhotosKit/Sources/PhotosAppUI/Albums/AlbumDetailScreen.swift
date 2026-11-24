@@ -36,6 +36,8 @@ struct AlbumDetailScreen: View {
 
     enum Sheet: String, Identifiable {
         case addPhotos, share, edit, comments
+        /// The album's photos as rotating desktop pictures (Mac, SPEC §15.4).
+        case desktopPictures
         var id: String { rawValue }
     }
 
@@ -103,6 +105,12 @@ struct AlbumDetailScreen: View {
             case .share: CollaboratorsSheet(album: album)
             case .edit: AlbumEditor(album: album)
             case .comments: CommentsSheet(album: album)
+            case .desktopPictures:
+                #if os(macOS)
+                    DesktopPictureSheet(source: .album(id: albumId, title: album.title))
+                #else
+                    EmptyView()
+                #endif
             }
         }
         .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -241,6 +249,13 @@ struct AlbumDetailScreen: View {
                 Label(String(localized: "Comments", bundle: .module), systemImage: "bubble.left.and.bubble.right")
             }
         }
+        #if os(macOS)
+            Button {
+                sheet = .desktopPictures
+            } label: {
+                Label(DesktopPictureAction.rotateTitle, systemImage: DesktopPictureAction.systemImage)
+            }
+        #endif
         Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
             Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)
             Text("Newest first", bundle: .module).tag(AlbumPhotosSortOrder.newest)

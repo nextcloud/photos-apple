@@ -34,10 +34,13 @@ targets:
         product: PhotosAppUI
       - package: PhotosKit
         product: PhotosCore
+      # Neither extension point exists on visionOS: an app that embeds them does not install there.
       - target: ShareExtension
         embed: true
+        destinationFilters: [iOS, macOS]
       - target: NotificationService
         embed: true
+        destinationFilters: [iOS, macOS]
       - target: Widgets
         embed: true
       # PhotoKit's background uploads (SPEC §7.18.6); not on visionOS.
@@ -88,6 +91,10 @@ targets:
         LSApplicationCategoryType: public.app-category.photography
         UILaunchScreen: {}
         UIApplicationSupportsMultipleScenes: true
+        # Where the system looks for it: without it Vision Pro refuses to open the immersive spaces (memory room, panorama)
+        # and iPadOS gives the app a single window.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
         NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
@@ -106,6 +113,8 @@ targets:
           # not known at build time. The app asks before it signs in over http and before it trusts an unknown
           # certificate. App Review justification: docs/PRIVACY-AND-EXPORT.md.
           NSAllowsArbitraryLoads: true
+        # The backup's Live Activity (SPEC §15.4; iPhone and iPad, ignored elsewhere).
+        NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
@@ -203,6 +212,8 @@ targets:
     sources:
       - path: Extensions/Widgets
         excludes: ["*.entitlements"]
+      # The controls' intents: compiled here for the controls, performed in the app (SPEC §15.4).
+      - path: App/Shared/AmbientIntents.swift
     dependencies:
       - package: PhotosKit
         product: PhotosCore
@@ -210,6 +221,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).widgets
         PRODUCT_NAME: Widgets
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET_EXTENSION
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
@@ -431,7 +443,7 @@ targets:
   # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
   NextcloudPhotosUITests:
     type: bundle.ui-testing
-    supportedDestinations: [iOS, macOS]
+    supportedDestinations: [iOS, macOS, visionOS]
     sources:
       - path: UITests
     dependencies:
@@ -440,7 +452,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).uitests
         TEST_TARGET_NAME: NextcloudPhotos
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1,2,7"
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   NextcloudPhotosTV:
