@@ -72,6 +72,18 @@ photos; the first photo opens in the viewer and closes again; the Albums screen 
   The debug login only signs in when the app has no account yet, so with the official bundle id the tests would drive
   whatever account that installation has; they refuse to run in that case.
 - On a Mac the tests take over keyboard and pointer while they run.
+- `UITests/IPadTourTests.swift` (iPad simulators only) turns the device (`XCUIDevice.shared.orientation`; `simctl`
+  cannot rotate), walks every sidebar row, the tab bar in portrait, the viewer and its inspector, the grid's inspector,
+  selection, context menus, "Open in new window", the editor and the share sheet, and types the menu commands' keyboard
+  shortcuts on the simulated hardware keyboard. With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<directory>` it writes a
+  screenshot and the accessibility tree of every step there (landscape screenshots are stored rotated, as the screen
+  is). The `testWindows…` tests run only with `TEST_RUNNER_PHOTOS_UITEST_WINDOWS=1`, one at a time on a fresh installation
+  (`xcrun simctl uninstall`): they open album windows, which the system restores at every later launch in front of the
+  library, and switch the simulator to "Windowed Apps" (Settings › Multitasking & Gestures) and back, to make a window
+  narrow and to put two windows side by side.
+  `testWindowsDragPhotoIntoAlbumWindow` changes the server: it runs only with `TEST_RUNNER_PHOTOS_UITEST_DND_ALBUM=1` and an
+  empty own album `r4-ipad-dnd`, and the photo it adds has to be removed again. The system's passcode sheet (Archive)
+  belongs to SpringBoard: `XCUIApplication(bundleIdentifier: "com.apple.springboard")`.
 
 ```sh
 xcodegen generate
