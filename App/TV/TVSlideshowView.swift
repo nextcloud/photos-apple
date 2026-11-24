@@ -47,11 +47,17 @@ struct TVSlideshowView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let slide = player.slide {
-                TVSlideImage(slide: slide, duration: Double(TVSettings.interval) + 2, reduceMotion: reduceMotion)
-                    .id(slide.key)
-                    .transition(.opacity)
+            if player.slide != nil {
+                // The new photo fades in over the previous one, which stays opaque below it: a cross-dissolve, not a dip
+                // to black.
+                ForEach(player.visibleSlides, id: \.key) { slide in
+                    TVSlideImage(
+                        slide: slide, duration: Double(TVSettings.interval) + 2, fade: Slideshow.crossfade(reduceMotion: reduceMotion),
+                        reduceMotion: reduceMotion
+                    )
+                    .zIndex(Double(slide.key))
                     .ignoresSafeArea()
+                }
             } else if loaded {
                 ContentUnavailableView {
                     Label {
@@ -63,9 +69,9 @@ struct TVSlideshowView: View {
             } else {
                 ProgressView()
             }
-            overlays
+            // Above every slide (they are stacked by their number).
+            overlays.zIndex(1e12)
         }
-        .animation(.easeInOut(duration: Slideshow.crossfade(reduceMotion: reduceMotion)), value: player.slide?.key)
         .animation(.easeInOut(duration: 0.3), value: player.isPaused)
         .animation(.easeInOut(duration: 0.3), value: showsInfo)
         .focusable()
@@ -204,8 +210,11 @@ struct TVSlideshowView: View {
 struct TVSlideImage: View {
     let slide: TVSlideshowPlayer.Slide
     let duration: Double
+    /// How long it takes to appear over the previous photo.
+    let fade: Double
     let reduceMotion: Bool
     @State private var drifting = false
+    @State private var shown = false
 
     var anchor: UnitPoint {
         [.topLeading, .bottomTrailing, .topTrailing, .bottomLeading, .center][abs(slide.position) % 5]
@@ -220,19 +229,25 @@ struct TVSlideImage: View {
                 .scaleEffect(drifting ? Slideshow.drift(reduceMotion: reduceMotion) : 1, anchor: anchor)
                 .clipped()
                 .background {
-                    // Portrait photos: the photo blurred behind it instead of black bars.
-                    if !fills {
-                        Image(decorative: slide.image, scale: 1)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .blur(radius: 60)
-                            .opacity(0.5)
-                            .clipped()
+                    // Opaque, so the photo before is gone once this one has faded in. Portrait photos: the photo blurred
+                    // behind it instead of black bars.
+                    ZStack {
+                        Color.black
+                        if !fills {
+                            Image(decorative: slide.image, scale: 1)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                .blur(radius: 60)
+                                .opacity(0.5)
+                                .clipped()
+                        }
                     }
                 }
         }
+        .opacity(shown ? 1 : 0)
         .onAppear {
+            withAnimation(.easeInOut(duration: fade)) { shown = true }
             withAnimation(.linear(duration: duration)) { drifting = true }
         }
     }
@@ -258,7 +273,11 @@ final class TVSlideshowPlayer {
     }
 
     private(set) var slide: Slide?
+    /// The slide before, kept below the current one while that fades in.
+    private(set) var previous: Slide?
     var isPaused = false
+
+    var visibleSlides: [Slide] { [previous, slide].compactMap { $0 } }
     private(set) var position = 0
     var startPosition = 0
     @ObservationIgnored private var skipRequest: Int?
@@ -290,6 +309,7 @@ final class TVSlideshowPlayer {
             }
             failures = 0
             shown += 1
+            previous = slide
             slide = Slide(position: position, item: current, image: image, key: shown)
             if let upcoming = item(position + 1) {
                 next = Task { await Self.load(upcoming, services: services) }

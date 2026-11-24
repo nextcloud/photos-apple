@@ -25,7 +25,8 @@ final class TVTourTests: XCTestCase {
             "Build the UI tests with a bundle id of your own (PHOTOS_BUNDLE_ID), not com.nextcloud.photos.")
         app = XCUIApplication()
         app.launchEnvironment["PHOTOS_DEBUG_LOGIN"] = login
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // No family slideshow banner: the tour starts on the memories (an argument domain, the setting stays).
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-tvFamilyAlbum", ""]
         app.launch()
     }
 
