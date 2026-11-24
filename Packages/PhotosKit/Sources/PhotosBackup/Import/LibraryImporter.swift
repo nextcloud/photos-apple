@@ -457,9 +457,17 @@ public actor LibraryImporter {
     /// Stops the import before the device runs full: a file is unpacked or exported before it is uploaded.
     func ensureSpace(for size: UInt64) throws {
         let directory = FileManager.default.temporaryDirectory
-        guard let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-            let available = values.volumeAvailableCapacityForImportantUsage, available > 0
-        else { return }
+        #if os(tvOS) || os(watchOS)
+            // No "important usage" capacity there (and no import UI; SPEC §15.3): the plain free capacity.
+            guard let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+                let capacity = values.volumeAvailableCapacity, capacity > 0
+            else { return }
+            let available = Int64(capacity)
+        #else
+            guard let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+                let available = values.volumeAvailableCapacityForImportantUsage, available > 0
+            else { return }
+        #endif
         let needed = Int64(size) + spaceMargin
         if available < needed { throw ImportError.notEnoughSpace(needed: needed) }
     }

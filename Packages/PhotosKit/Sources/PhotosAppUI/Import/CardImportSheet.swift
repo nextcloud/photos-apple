@@ -297,7 +297,7 @@ struct CardImportSheet: View {
 
     var fileCount: Int { importGroups.reduce(0) { $0 + $1.items.count } }
 
-    #if os(iOS)
+    #if !os(macOS)
         @ToolbarContentBuilder var toolbar: some ToolbarContent {
             ToolbarItem(placement: .cancellationAction) { closeButton }
             ToolbarItem(placement: .principal) { devicePicker }

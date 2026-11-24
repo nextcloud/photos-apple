@@ -138,83 +138,89 @@ public enum PhotoOfTheDayNotifications {
 
     /// Replaces the scheduled notifications with new ones for the account shown (none when the setting is off).
     @MainActor public static func reschedule(session: SessionModel?, defaults: UserDefaults = .standard) async {
-        guard isApp else { return }
-        let center = UNUserNotificationCenter.current()
-        await removePending(center: center)
-        guard PhotoOfTheDaySettings.isEnabled(defaults), let session, let services = session.services, !session.isSignedOut else { return }
-        let status = await center.notificationSettings().authorizationStatus
-        guard status == .authorized || status == .provisional else { return }
-        let locked = AppLockSettings.isEnabled()
-        let excluded = session.excludedFolders
-        let account = session.account
-        let now = Date()
-        var history = pruned(loadHistory(defaults), now: now)
-        var chosenNow: Set<FileID> = []
-        var dates = fireDates(now: now, minutes: PhotoOfTheDaySettings.time(defaults))
-        #if DEBUG
-            // UI checks: PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN=<seconds> adds a notification that soon.
-            if let seconds = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN"].flatMap(Double.init) {
-                dates = [now.addingTimeInterval(seconds)] + dates.prefix(daysAhead - 1)
+        #if !os(tvOS)  // No notification content on Apple TV (SPEC §15.3).
+            guard isApp else { return }
+            let center = UNUserNotificationCenter.current()
+            await removePending(center: center)
+            guard PhotoOfTheDaySettings.isEnabled(defaults), let session, let services = session.services, !session.isSignedOut else {
+                return
             }
+            let status = await center.notificationSettings().authorizationStatus
+            guard status == .authorized || status == .provisional else { return }
+            let locked = AppLockSettings.isEnabled()
+            let excluded = session.excludedFolders
+            let account = session.account
+            let now = Date()
+            var history = pruned(loadHistory(defaults), now: now)
+            var chosenNow: Set<FileID> = []
+            var dates = fireDates(now: now, minutes: PhotoOfTheDaySettings.time(defaults))
+            #if DEBUG
+                // UI checks: PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN=<seconds> adds a notification that soon.
+                if let seconds = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN"].flatMap(Double.init) {
+                    dates = [now.addingTimeInterval(seconds)] + dates.prefix(daysAhead - 1)
+                }
+            #endif
+            for date in dates {
+                guard
+                    let pools = try? await services.library.dailyPhotoCandidates(for: date, excludedFolders: excluded)
+                else { continue }
+                let shown = recentlyShown(history, before: date).union(chosenNow)
+                let choice = PhotoOfTheDay.choose(for: date, onThisDay: pools.onThisDay, favorites: pools.favorites, recentlyShown: shown)
+                guard let choice else { continue }
+                chosenNow.insert(choice.fileId)
+                history[dayKey(date)] = Int64(choice.fileId)
+                let text = text(for: choice, locked: locked)
+                let content = UNMutableNotificationContent()
+                content.title = text.title
+                content.body = text.body
+                content.threadIdentifier = threadIdentifier
+                content.sound = nil
+                content.userInfo[PushNotifications.accountKey] = account.id.rawValue
+                content.userInfo[PushNotifications.destinationKey] = DeepLink.photo(fileId: choice.fileId).request
+                if let link = DeepLink.photo(fileId: choice.fileId).url(for: account) { content.userInfo[linkKey] = link.absoluteString }
+                if !locked, let attachment = await attachment(for: choice.fileId, day: dayKey(date), services: services) {
+                    content.attachments = [attachment]
+                }
+                let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+                let request = UNNotificationRequest(
+                    identifier: identifierPrefix + String(Int(date.timeIntervalSince1970)), content: content,
+                    trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
+                do {
+                    try await center.add(request)
+                } catch {
+                    logger.error("could not schedule: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            defaults.set(history, forKey: PhotoOfTheDaySettings.historyKey)
         #endif
-        for date in dates {
-            guard
-                let pools = try? await services.library.dailyPhotoCandidates(for: date, excludedFolders: excluded)
-            else { continue }
-            let shown = recentlyShown(history, before: date).union(chosenNow)
-            let choice = PhotoOfTheDay.choose(for: date, onThisDay: pools.onThisDay, favorites: pools.favorites, recentlyShown: shown)
-            guard let choice else { continue }
-            chosenNow.insert(choice.fileId)
-            history[dayKey(date)] = Int64(choice.fileId)
-            let text = text(for: choice, locked: locked)
-            let content = UNMutableNotificationContent()
-            content.title = text.title
-            content.body = text.body
-            content.threadIdentifier = threadIdentifier
-            content.sound = nil
-            content.userInfo[PushNotifications.accountKey] = account.id.rawValue
-            content.userInfo[PushNotifications.destinationKey] = DeepLink.photo(fileId: choice.fileId).request
-            if let link = DeepLink.photo(fileId: choice.fileId).url(for: account) { content.userInfo[linkKey] = link.absoluteString }
-            if !locked, let attachment = await attachment(for: choice.fileId, day: dayKey(date), services: services) {
-                content.attachments = [attachment]
-            }
-            let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-            let request = UNNotificationRequest(
-                identifier: identifierPrefix + String(Int(date.timeIntervalSince1970)), content: content,
-                trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
-            do {
-                try await center.add(request)
-            } catch {
-                logger.error("could not schedule: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        defaults.set(history, forKey: PhotoOfTheDaySettings.historyKey)
     }
 
-    /// A 1024 px preview of the photo as the notification's attachment (the system moves the file into its own store).
-    static func attachment(for fileId: FileID, day: String, services: AccountServices) async -> UNNotificationAttachment? {
-        guard let item = try? services.library.item(fileId) else { return nil }
-        let data: Data
-        if let image = services.images.cache.diskImage(fileId: fileId, etag: item.etag, bucket: 1024),
-            let local = ImageDecoding.jpegData(image, quality: 0.85)
-        {
-            data = local
-        } else if let downloaded = try? await services.api.preview(fileId: fileId, size: 1024, etag: item.etag) {
-            data = downloaded
-        } else {
-            return nil
+    #if !os(tvOS)
+        /// A 1024 px preview of the photo as the notification's attachment (the system moves the file into its own store).
+        static func attachment(for fileId: FileID, day: String, services: AccountServices) async -> UNNotificationAttachment? {
+            guard let item = try? services.library.item(fileId) else { return nil }
+            let data: Data
+            if let image = services.images.cache.diskImage(fileId: fileId, etag: item.etag, bucket: 1024),
+                let local = ImageDecoding.jpegData(image, quality: 0.85)
+            {
+                data = local
+            } else if let downloaded = try? await services.api.preview(fileId: fileId, size: 1024, etag: item.etag) {
+                data = downloaded
+            } else {
+                return nil
+            }
+            let directory = FileManager.default.temporaryDirectory.appending(path: "PhotoOfTheDay")
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appending(path: "\(day)-\(fileId).jpg")
+            do {
+                try data.write(to: file, options: .atomic)
+                return try UNNotificationAttachment(
+                    identifier: "photo", url: file, options: [UNNotificationAttachmentOptionsTypeHintKey: "public.jpeg"])
+            } catch {
+                return nil
+            }
         }
-        let directory = FileManager.default.temporaryDirectory.appending(path: "PhotoOfTheDay")
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appending(path: "\(day)-\(fileId).jpg")
-        do {
-            try data.write(to: file, options: .atomic)
-            return try UNNotificationAttachment(
-                identifier: "photo", url: file, options: [UNNotificationAttachmentOptionsTypeHintKey: "public.jpeg"])
-        } catch {
-            return nil
-        }
-    }
+    #endif
 
     /// Removes the notifications that are scheduled and not delivered yet.
     static func removePending(center: UNUserNotificationCenter = .current()) async {
@@ -224,14 +230,16 @@ public enum PhotoOfTheDayNotifications {
 
     /// Account removal: what was scheduled for it goes (delivered ones go with the account's other notifications).
     public static func removePending(account: AccountID) async {
-        guard isApp else { return }
-        let center = UNUserNotificationCenter.current()
-        let ids = await center.pendingNotificationRequests()
-            .filter {
-                $0.identifier.hasPrefix(identifierPrefix)
-                    && ($0.content.userInfo[PushNotifications.accountKey] as? String) == account.rawValue
-            }
-            .map(\.identifier)
-        if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
+        #if !os(tvOS)  // No notification content on Apple TV (SPEC §15.3).
+            guard isApp else { return }
+            let center = UNUserNotificationCenter.current()
+            let ids = await center.pendingNotificationRequests()
+                .filter {
+                    $0.identifier.hasPrefix(identifierPrefix)
+                        && ($0.content.userInfo[PushNotifications.accountKey] as? String) == account.rawValue
+                }
+                .map(\.identifier)
+            if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
+        #endif
     }
 }
