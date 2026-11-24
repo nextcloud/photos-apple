@@ -64,9 +64,13 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   of the timeline folders rebuilds the index but keeps albums; offline originals are only removed when the server said
   their album no longer contains them. Index paging ends at an empty page only; a reconciliation that would remove more
   than half of an index of more than 20 items waits for a second listing (the next sync); a changed root ETag leads to
-  a full reconciliation at most every 10 minutes ("Sync now" and pull-to-refresh at once). Queued deletes and moves find
-  the file by its id first (one small SEARCH each); a locked file (423) is retried; an operation that failed for good or
-  was discarded gives the local row back. Smart albums and album collaborators are read again before they are written.
+  a full reconciliation at most every 10 minutes ("Sync now" and pull-to-refresh at once). The outbox sends up to 5
+  operations at a time, never two for the same file; queued deletes and moves address the file with the path and ETag
+  the index knows (`If-Match`, one request) and look it up by its id only when that is refused; a connection problem
+  pauses the queue, a locked file (423) holds back only its own operations and is given up after 8 answers of 423; an
+  operation that failed for good or was discarded gives the local row back (only for files the timeline shows), and album
+  content read from the server keeps the album changes still queued. Bulk archive/unarchive/delete ✅ against the 8089
+  test server (`IntegrationOutboxTests`). Smart albums and album collaborators are read again before they are written.
   ETags are whitelisted or hashed before they become part of a cache file name.
 - Viewer zoom (VW-1): every photo page is a real zooming scroll view (`ZoomSurface`: `UIScrollView` on iOS/visionOS,
   `NSScrollView` with magnification on the Mac) — pinch around the fingers or the pointer, double tap / double click zooms to
@@ -78,7 +82,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   shows the info panel; every screen opens the viewer through one modifier (`mediaViewer`), with the navigation stack its
   toolbar needs — also from Folders, Shared with you and photo links. ⬜ Zoom transition from the tile (matched geometry).
 - Viewer actions: More ▸ Add to Album… / Export… (Save to Photos on iOS), also from the menu bar; deleting or archiving takes
-  the page out and shows the next photo ✅ Mac (delete; archive shares the code). Saving originals goes through one path for
+  the page out and shows the next photo ✅ Mac (delete; archive shares the code); Delete (⌘⌫) does nothing for a
+  read-only photo, and a page whose photo was removed meanwhile says so instead of loading for ever (🟡 not run). Saving originals goes through one path for
   grid, viewer and menu bar (`MediaSaveModel`): progress with Cancel, "Exported 3 items" / what failed; on the Mac the viewer
   asks for a folder like the grid ✅ (panel opens; the export itself was not driven by hand) — result logic ✅ unit-tested.
 - Video page: loading, "Preparing video…" (server converts, no warning sign) and failure (what happened, reason, "Try again")
@@ -109,11 +114,16 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - ⬜ Timeline skeleton from `timelineDays` during the first sync (a plain placeholder grid is shown instead).
 - ⬜ "Aspect ratio" tile mode (`croppedLayout`), only square tiles; the "Square tiles" switch is gone from Settings until
   the mode exists.
-- Undo ✅ (Mac app): favourite, archive, remove from album and delete (restored from the server's trash bin) register with
-  the window's undo manager (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
+- Undo ✅ (Mac app): favourite, archive, remove from album and delete register with the undo manager of the window they
+  were made in (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
   ("Archived 3 items · Undo"), in the grids and in the viewer (favourite, archive, delete; an undo there brings the
-  page back, Redo takes it out again). A photo
-  restored after a delete comes back to the library, not to the albums it was in (the server drops those on delete).
+  page back, Redo takes it out again). The confirmation only undoes its own change (marked in the undo manager), a
+  second tap while an undo runs does nothing, and a session that stops (account switch, removal) clears its undo actions.
+  Undoing a delete takes the queued deletes back (their photos and album places return at once, also offline), waits for
+  the ones being sent, and restores only what reached the server from the trash bin, by file id (TIFF and RAW too), then
+  adds the photos to their albums again. No Undo for deleting a received share. Unit-tested (`SessionUndoTests`,
+  `OutboxBulkAndUndoTests`); the trash bin restore with album re-add ✅ against the 8089 test server
+  (`IntegrationOutboxTests`); 🟡 the round-3 changes were not driven in the Mac app (screen locked during the run).
 - Empty and error states have an action (SPEC §6.3): "Sync now" / "Retry" in the library, "Refresh" / "Try again" in lists
   loaded from the server, "Clear search" for a search without results.
 - ⬜ VW-4 Live Text / Visual Look Up overlay in the viewer (text extraction exists as an action), ⬜ VW-5 slideshow, ⬜ VW-6 stack strip.

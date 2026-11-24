@@ -48,7 +48,8 @@ server ──► SyncEngine ──► AccountDatabase (SQLite) ──► Library
   WebDAV `SEARCH`, page by page; later runs ask for what changed since the last one and compare folder ETags;
   a reconciliation pass finds deletes and moves. Albums, places and other collections are refreshed when they are shown.
 - **Writes** (favourite, delete, album changes, metadata…) are applied to the database at once and queued in the
-  `Outbox`, which sends them in order, retries with a growing delay and wakes up when the network comes back.
+  `Outbox`, which sends a few at a time (in order for each file), retries with a growing delay and wakes up when the
+  network comes back.
 - **Previews and originals** go through `ImagePipeline`: memory cache, disk cache, then the server; loads nobody waits
   for any more are cancelled, the caches are trimmed (least recently used first).
 

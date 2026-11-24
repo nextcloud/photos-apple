@@ -105,7 +105,8 @@ struct RecentlyDeletedScreen: View {
 
     func load() async {
         guard let services = session.services else { return }
-        items = (try? await services.api.trash(mimeTypes: session.features.allMimeTypes)) ?? []
+        // The types the timeline indexes, TIFF and RAW included.
+        items = (try? await services.api.trash(mimeTypes: session.features.allMimeTypes + MimeTypes.appleExtras)) ?? []
     }
 
     func run(_ action: @escaping (PhotosAPI) async throws -> Void) async {

@@ -128,9 +128,11 @@ struct MediaViewer: View {
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
             ) {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
-                    if let item = currentItem {
+                    // Only a photo that really is deleted leaves the viewer (a read-only one stays).
+                    if let item = currentItem, item.permissions.canDelete {
                         deletions += 1
-                        Task { await session.perform(.delete([item])) }
+                        let undoManager = undoManager
+                        Task { await session.perform(.delete([item]), undoManager: undoManager) }
                         moveOn(from: item.fileId)
                     }
                 }
@@ -140,10 +142,6 @@ struct MediaViewer: View {
             // "Moved 1 item to the trash bin · Undo", as in the grid.
             .overlay(alignment: .bottom) { ChangeNoticeToast() }
             .animation(.default, value: session.lastChange?.id)
-            // Changes made in this window are undone by this window's Edit › Undo.
-            .onChange(of: undoManager, initial: true) { _, manager in
-                if let manager { session.undoManager = manager }
-            }
             .onChange(of: session.lastChange) { _, notice in
                 if let notice { apply(ViewerPageChange(notice)) }
             }
@@ -217,7 +215,7 @@ struct MediaViewer: View {
             selectionCount: item == nil ? 0 : 1,
             allFavorite: item?.isFavorite ?? false,
             toggleFavorite: { if let item { toggleFavorite(item) } },
-            delete: { confirmDelete = true },
+            delete: { if item?.permissions.canDelete == true { confirmDelete = true } },
             toggleInfo: { toggleInfo() },
             addToAlbum: { addingToAlbum = item },
             zoomIn: isImage && zoomScale < ViewerZoom.maximumScale - ViewerZoom.epsilon ? { zoom(.zoomIn) } : nil,
@@ -250,10 +248,11 @@ struct MediaViewer: View {
     /// An archived photo leaves the place it was opened from, so the viewer moves on. Unarchiving stays: the photo
     /// is shown again everywhere, and "Archive" in the same menu takes it back.
     func toggleArchive(_ item: MediaItem) {
+        let undoManager = undoManager
         if item.isArchived {
-            Task { await session.perform(.unarchive([item])) }
+            Task { await session.perform(.unarchive([item]), undoManager: undoManager) }
         } else {
-            Task { await session.perform(.archive([item])) }
+            Task { await session.perform(.archive([item]), undoManager: undoManager) }
             moveOn(from: item.fileId)
         }
     }
@@ -347,7 +346,8 @@ struct MediaViewer: View {
 
     func toggleFavorite(_ item: MediaItem) {
         favoriteToggles += 1
-        Task { await session.perform(.favorite([item], value: !item.isFavorite)) }
+        let undoManager = undoManager
+        Task { await session.perform(.favorite([item], value: !item.isFavorite), undoManager: undoManager) }
     }
 
     func toggleInfo() {
@@ -633,6 +633,8 @@ struct ViewerPage: View {
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var item: MediaItem?
+    /// The library was asked for the photo; with no `item`, the library does not have it (any more).
+    @State private var isLoaded = false
     /// Names of the recognised people, loaded for the photo shown while VoiceOver runs.
     @State private var people: [String] = []
 
@@ -667,6 +669,13 @@ struct ViewerPage: View {
                             }
                         }
                 }
+            } else if isLoaded {
+                // Removed by a sync or a delete made elsewhere: say so instead of loading for ever.
+                ContentUnavailableView(
+                    String(localized: "This item is no longer available", bundle: .module), systemImage: "photo",
+                    description: Text("It was deleted or moved on the server.", bundle: .module)
+                )
+                .foregroundStyle(.white)
             } else {
                 ProgressView().tint(.white)
             }
@@ -679,7 +688,10 @@ struct ViewerPage: View {
             // Observed, so the VoiceOver favourite action and description follow a toggle.
             guard let library = session.services?.library else { return }
             do {
-                for try await value in library.observeItem(fileId) { item = value }
+                for try await value in library.observeItem(fileId) {
+                    item = value
+                    isLoaded = true
+                }
             } catch {}
         }
         .task(id: PeopleRequest(fileId: fileId, wanted: isCurrent && voiceOver)) {
