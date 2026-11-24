@@ -79,8 +79,13 @@ import XCTest
         /// The sidebar's toggle in the tab bar ("Show Sidebar" / "Hide Sidebar").
         func showSidebar() {
             let show = app.buttons["Show Sidebar"].firstMatch
+            // With the tab bar (portrait) the button is "Toggle sidebar"; the sidebar is shown when its rows are there.
+            let toggle = app.buttons["Toggle sidebar"].firstMatch
             if show.exists && show.isHittable {
                 show.tap()
+                pause(1)
+            } else if toggle.exists && toggle.isHittable && !app.cells["Library"].exists {
+                toggle.tap()
                 pause(1)
             }
         }
@@ -101,6 +106,25 @@ import XCTest
 
         /// A sidebar row.
         func sidebarRow(_ title: String) -> XCUIElement { app.cells[title].firstMatch }
+
+        /// A sidebar row, scrolled into view: on smaller iPads the sidebar scrolls (down to the utilities, up to Settings).
+        func revealedSidebarRow(_ title: String) -> XCUIElement {
+            let row = sidebarRow(title)
+            let known = [
+                "Library", "Search", "Backup", "Settings", "Photos", "Videos", "Favorites", "Memories", "Map", "Albums",
+                "Shared albums", "Smart albums", "Places", "Tags", "Shared with you", "Folders", "Archive", "Recently deleted",
+                "Duplicates", "Free up server space",
+            ]
+            // A row that exists is scrolled into view by tap(); one the list has not made yet needs a swipe.
+            for attempt in 0..<6 where !row.exists {
+                guard
+                    let anchor = app.cells.matching(NSPredicate(format: "label IN %@", known)).allElementsBoundByIndex.first(
+                        where: \.isHittable)
+                else { break }
+                if attempt < 3 { anchor.swipeUp(velocity: .slow) } else { anchor.swipeDown(velocity: .slow) }
+            }
+            return row
+        }
 
         // MARK: Tour
 
@@ -138,27 +162,28 @@ import XCTest
             app.launch()
             waitForTiles("the Library")
             showSidebar()
-            sidebarRow("Photos").tap()
+            revealedSidebarRow("Photos").tap()
             waitForTiles("Photos")
             assertRunning()
             shot("ipad-04-photos")
             showSidebar()
-            sidebarRow("Favorites").tap()
+            revealedSidebarRow("Favorites").tap()
             pause(3)
             assertRunning()
             shot("ipad-05-favorites")
             showSidebar()
-            sidebarRow("Library").tap()
+            revealedSidebarRow("Library").tap()
             waitForTiles("the Library")
         }
 
         /// The Archive asks for the device passcode when it is opened, and only then: not again on other screens.
         func testArchiveAsksOnlyInTheArchive() {
-            XCUIDevice.shared.orientation = .landscapeLeft
+            // Portrait: in landscape on the iPad mini the keyboard pushes the passcode sheet's Cancel off the screen.
+            XCUIDevice.shared.orientation = .portrait
             app.launch()
             waitForTiles("the Library")
             showSidebar()
-            sidebarRow("Archive").tap()
+            revealedSidebarRow("Archive").tap()
             pause(4)
             shot("ipad-archive-1-prompt")
             // The system's passcode sheet belongs to SpringBoard.
@@ -333,7 +358,7 @@ import XCTest
                 app.cells.containing(.staticText, identifier: "Albums").firstMatch.tap()
             } else {
                 showSidebar()
-                sidebarRow("Albums").tap()
+                revealedSidebarRow("Albums").tap()
             }
             pause(3)
             let album = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'r4-ipad-dnd'")).firstMatch
@@ -429,8 +454,11 @@ import XCTest
             shares.element(boundBy: shares.count - 1).tap()
             pause(6)
             shot("ipad-sheet-1c-viewer-share")
-            tapOutside()
-            app.buttons["Close"].firstMatch.tap()
+            // Start the grid part afresh: a tap outside the share popover can also hide the viewer's bars, and the popover
+            // then becomes a sheet (iPad mini).
+            app.terminate()
+            app.launch()
+            waitForTiles("the Library")
             pause(2)
             app.navigationBars.buttons["Select"].firstMatch.tap()
             tiles.element(boundBy: 2).tap()
@@ -468,7 +496,7 @@ import XCTest
             shot("ipad-menu-1-photo")
             tapOutside()
             showSidebar()
-            sidebarRow("Albums").tap()
+            revealedSidebarRow("Albums").tap()
             pause(3)
             let album = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Rome 2021'")).firstMatch
             XCTAssertTrue(album.waitForExistence(timeout: 20), "No album Rome 2021")
@@ -494,19 +522,18 @@ import XCTest
             shot("ipad-drag-1-dropped")
         }
 
-        /// Every sidebar row opens its screen.
+        /// Every sidebar row opens its screen (the Archive has a test of its own: it asks for the passcode).
         func testSidebarDestinations() {
             XCUIDevice.shared.orientation = .landscapeLeft
             app.launch()
             waitForTiles("the Library")
             let titles = [
                 "Videos", "Memories", "Map", "Albums", "Shared albums", "Smart albums", "People", "Places", "Tags", "Shared with you",
-                "Folders", "Archive", "Recently deleted", "Duplicates", "Free up server space", "Backup", "Settings",
+                "Folders", "Recently deleted", "Duplicates", "Free up server space", "Backup", "Settings",
             ]
             for (index, title) in titles.enumerated() {
                 showSidebar()
-                let row = sidebarRow(title)
-                if !row.isHittable { app.cells["Albums"].firstMatch.swipeUp() }
+                let row = revealedSidebarRow(title)
                 guard row.waitForExistence(timeout: 5) else {
                     // People, Places and Tags need server apps (Recognize, system tags) the test server may not have.
                     if !["People", "Places", "Tags"].contains(title) { XCTFail("No sidebar row \(title)") }

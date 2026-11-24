@@ -289,11 +289,13 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
   search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
   iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping; iPad ✅ run in the iOS 27.2
-  simulator (`IPadTourTests`: every sidebar row in landscape, the tab bar in portrait shows Library, Settings and Search, turning
-  the device keeps the app running), Vision Pro 🟡. Fixed on the way: Photos/Videos/Favorites hung at 100 % CPU (undo manager,
+  simulator on the iPad Pro 13-inch and the iPad mini (`IPadTourTests`: every sidebar row in landscape, the tab bar in
+  portrait shows Library, Settings and Search, turning the device keeps the app running), Vision Pro 🟡. Fixed on the way: Photos/Videos/Favorites hung at 100 % CPU (undo manager,
   `UndoManagerBox`), the sidebar's sections and Backup were tabs of the portrait tab bar, rotating to landscape crashed (the
   sidebar header had no app model).
-- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`, not run): tabs Library,
+- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`; a narrow iPad window ✅ run in
+  the iOS 27.2 simulator on the iPad Pro 13-inch and the iPad mini with "Windowed Apps": the tab bar with Collections and its
+  list, `testWindowsNarrowWindowIsCompact`): tabs Library,
   Collections, Search, Settings. The Collections tab lists every place that is a sidebar row elsewhere (server features
   respected) and Backup with its state, and pushes it in its own stack; the navigation state stays the selected destination
   and its path, so deep links, state restoration and a change between tab bar and sidebar keep working.
