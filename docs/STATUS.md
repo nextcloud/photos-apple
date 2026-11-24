@@ -592,7 +592,24 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 - ⬜ Not started.
 
 ### §15.2 Photographer's Mac: import, culling, compare, external editors
-- ⬜ Not started.
+- ✅ Culling (ratings 1–5, Pick/Reject as collaborative system tags, outbox, Undo, P/X/U/0–5 keys in grid and viewer,
+  auto-advance, tile badges, dimmed rejected, Image ▸ Flag/Rating, Library filter, Delete Rejected…). Unit tests (model,
+  store filter vs. marks for every filter). Run on the Mac against the 8089 test server (keys through `PHOTOS_DEBUG_GRID_KEYS`,
+  tags created and assigned on the server, badges live, filter "Picks", Delete Rejected confirmation) and in the iPad
+  simulator (iOS 27.2: badges of the server's tags on a fresh device). iPad hardware-keyboard keys built, not run.
+- ✅ Compare view (2-up/4-up, synchronised zoom/pan, 100 %, keep one). Run on the Mac (`PHOTOS_DEBUG_COMPARE=2`, 100 % via the
+  toolbar). Pinch/drag/keys not driven (no real input).
+- 🟡 Import from camera or card. Engine unit-tested (pairing, patterns, ledger, matching, verification, delete only
+  verified, stop). Run on the Mac with a folder card: new-only (4 of 6 found on the server), upload into the date folder,
+  checksum verified, deleted from the card, toolbar summary; iPad simulator: the sheet with the same card folder. Not run:
+  a real USB camera or card reader (ImageCaptureCore paths are built for Mac and iPad, untested), eject, the Dock bar
+  (drawn, not seen), and reading a mounted card in the sandbox (the TCC/sandbox refusal path was seen and explains itself).
+- 🟡 Edit With (Mac). Run on the Mac with `PHOTOS_DEBUG_EDIT_WITH`/`_NO_OPEN` (another app is not brought to the front in
+  checks): download, a save changed the file on the server (new ETag), a server-side change in between gave
+  `IMG_8001 (edited).JPG`, Done removed the local copy. Not run: opening a real editor (Pixelmator, Photoshop…) and its
+  saving; apps that save by replacing the file through a sandboxed save panel may not reach the watched file.
+- ⬜ Not done: thumbnails grid for a camera's RAW-only shots on iPad (ImageCaptureCore thumbnails untested), tethered
+  shooting, import into an album, keywords/XMP sidecars, a Lightroom-style loupe with filmstrip.
 
 ### §15.3 New platforms: Apple TV and Apple Watch
 - ⬜ Not started.

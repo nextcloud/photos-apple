@@ -808,7 +808,70 @@ _To be written._
 
 ### 15.2 Photographer's Mac: import, culling, compare, external editors [macpro]
 
-_To be written._
+For people who shoot a lot and keep everything on their own Nextcloud: get a card in, go through the shoot with the
+keyboard, keep the best, edit in the tools they already use. Mac first; the iPad gets what fits there.
+
+**Culling (all platforms; keys on the Mac and iPad with a keyboard).**
+- Ratings 1–5 stars and the flags Pick / Rejected are **collaborative system tags** named `★`, `★★`, `★★★`, `★★★★`,
+  `★★★★★`, `Pick` and `Rejected` (fixed names, not translated: they are the shared vocabulary of all devices and the
+  web; the app shows them in the user's language). They are created on first use through the stock tags API
+  (`POST systemtags/`, an existing tag of that name in another case is reused). No server change. A server that lets
+  only admins create tags gets an explanation naming the tags to create.
+- Changes are tag operations of the outbox (`PendingOperation.tag`): optimistic, offline, undoable (Edit ▸ Undo
+  Rating). Only the tags that differ are changed; a file has at most one rating tag after a change.
+- Reading: several rating tags (two devices at once) → the highest counts; Pick and Rejected together → Pick counts,
+  so "Delete Rejected" never takes a picked photo. Other devices see changes after the next tag refresh (`LabelSync`).
+- Keys without modifiers, as in Lightroom/Photo Mechanic: **P** pick, **X** reject, **U** unflag, **1–5** stars,
+  **0** no rating; in the grid (selection, stacked copies included) and the viewer (the photo shown, or all copies of a
+  stack). They are deliberately not menu key equivalents (a bare letter in the menu bar would fire while typing in the
+  search field); Image ▸ Flag ▸ / Rating ▸ list the same commands, and so do the context menu and the viewer's More menu.
+- **Auto-advance** (on by default; Image menu and the filter menu): after a key the next photo is selected (grid) or
+  shown (viewer). On the Mac the grid follows the viewer: back in the grid, the photo seen last is selected.
+- Feedback: a short confirmation in the middle ("★★★ 3 Stars", "Pick") and VoiceOver announcement; tiles show the flag
+  and stars in the top leading corner (stars hidden below 56 pt tiles), rejected tiles are dimmed; the viewer shows the
+  mark in a corner.
+- Library toolbar menu "Ratings and Flags": All Items · Picks · Unflagged · Hide Rejected · Rejected · 1–5 Stars or More ·
+  Unrated (a condition of the grid query, so 100 000 photos stay fast), Auto-Advance, **Delete Rejected…** (every
+  rejected photo of the library that may be deleted, after a confirmation with the count; to the trash bin; undoable).
+
+**Compare (all platforms).** Select 2–4 photos and press **C** (or Image ▸ Compare, context menu): 2-up side by side
+(one above the other in a tall window) or 2 × 2. Zoom and pan are shared: zoom into one and all follow, relative to
+"fit". **Z**, a double-click or the toolbar button toggles **100 %** (one image pixel per screen pixel of the photo with
+the focus); the panes load the 4096 px preview and, above that, the original (RAW developed by Image I/O). Arrow keys
+move the focus; rating keys rate the photo with the focus; **Return** ("Keep This One") picks it and rejects the others
+after a confirmation. Presented like the viewer (pushed on the Mac, full-screen cover on iPhone/iPad).
+
+**Import from camera or card (Mac, iPad).** File ▸ Import from Camera or Card… (⇧⌘I, as Photos' Import).
+- Sources: cameras over USB through ImageCaptureCore (Mac and iPad); on the Mac memory cards mounted as volumes with a
+  `DCIM` folder when the sandbox lets the app read them, else ImageCaptureCore offers the card; any folder ("Choose
+  Folder…", on the iPad the card reader or drive in Files).
+- The sheet shows the shots (thumbnails from the embedded EXIF thumbnail, RAW + JPEG of a shot as one tile with a badge),
+  newest first. **New items only** (default on) leaves out what is already on the server: a per-account ledger of earlier
+  imports (name + size + capture second), then the backup's matching rules against a server search of the shots' dates,
+  plus "same size, capture time off by whole hours" (cameras write local time without an offset). A shot of which only
+  the RAW is missing imports the RAW.
+- Destination: a folder pattern (default `/Photos/{yyyy}/{yyyy-MM-dd}`; parts `{yyyy} {yy} {MM} {MMM} {dd}` and any
+  combination of them, and `{camera}`), date parts from the shot's capture time in this device's time zone; a pair goes
+  into one folder (by the earlier time). Suggestions in a menu; the preview line shows the folder and "N new of M".
+- Upload with the backup's uploader (chunked, resumable, `X-OC-MTime` = capture time, `OC-Checksum` SHA-256), an existing
+  file of the same name and size counts as done. **Verified** = the server has the file with the same size and, where it
+  keeps one, the SHA-256 the app computed from the card's bytes.
+- **Delete from card after verified upload** (off by default; only when the source can delete): asks once with the count;
+  only verified files are deleted, the others are listed as kept. **Eject after import** (when the device can eject).
+- The import runs in the background: the sheet can be closed; progress (bytes) as a ring in the Library toolbar with a
+  popover (Stop Import, summary: imported, verified, deleted, kept, failures) and on the Mac as a bar on the Dock icon
+  (a bounce when done and the app is in the background). iPad: extra background time while the app is left.
+
+**Edit With (Mac).** Image ▸ Edit With ▸ (and the context menu) lists the apps that open the file's type (default app
+first, then by name; "Other…" picks any app). The original is downloaded to a private temporary folder and opened in that
+app. The file is watched (once a second; a save counts when the file changed and stayed the same for a second, which
+covers apps that save in steps or swap in a temporary file). Each save is uploaded as a **new version** of the file with
+`If-Match` (the ETag it was downloaded with, then the ETag of the last upload). If the file changed on the server
+(412), or the photo is read-only, or the app saved another format, the save becomes `<name> (edited).<ext>` next to it
+and later saves update that copy. A toolbar button lists the photos open in other apps with their state ("Saved at
+14:02", "Saved as a copy") and **Done**, which stops watching and removes the local copy; quitting the other app ends the
+session after its last save. Leftover copies are removed at the next launch.
+
 
 ### 15.3 New platforms: Apple TV and Apple Watch [tvwatch]
 
