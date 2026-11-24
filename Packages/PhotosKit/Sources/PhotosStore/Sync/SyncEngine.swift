@@ -150,10 +150,16 @@ public actor SyncEngine {
     var mimeTypes: [String] { features.allMimeTypes + MimeTypes.appleExtras }
 
     /// Source folders plus the archive folder (SPEC §7.13).
-    var scopes: [String] {
+    var baseScopes: [String] {
         var folders = features.userConfig.photosSourceFolders
         if !folders.contains("/") && !folders.contains("/.archive") { folders.append("/.archive") }
         return folders
+    }
+
+    /// What is indexed: the timeline folders and the partner folders (`PartnerTimeline.swift`).
+    var scopes: [String] {
+        let base = baseScopes
+        return base + partnerScopes(base: base)
     }
 
     // MARK: Entry points
@@ -212,7 +218,8 @@ public actor SyncEngine {
             if !reconciled && (request == .now || (request == .refresh && reconcileAttempted)) { requested = max(requested, request) }
         }
         do {
-            let folderKey = scopes.joined(separator: "|")
+            // Partner folders are not part of the key: adding or removing one changes the index by itself, not by a rebuild.
+            let folderKey = baseScopes.joined(separator: "|")
             if try database.syncValue(Key.sourceFolders) != folderKey {
                 // Timeline folders changed: rebuild the index. Albums and their content do not depend on the folders
                 // and stay (offline albums hang on them).

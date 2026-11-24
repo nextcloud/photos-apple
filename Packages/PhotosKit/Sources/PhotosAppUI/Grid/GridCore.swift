@@ -283,17 +283,20 @@ struct GridTileBadges: Equatable {
     var showsVideo: Bool
     var showsFavorite: Bool
     var showsLivePhoto: Bool
+    /// From a partner's shared folder (partner sharing, SPEC SH-8).
+    var showsPartner: Bool
     /// The lower edge is darkened so the white badges stay readable.
     var showsShade: Bool
     /// The tile stands for several copies of one shot (`TimelineStacking`): a stack badge in the top trailing corner.
     var showsStack = false
     var accessibilityLabel: String
 
-    init(item: GridMedia) {
+    init(item: GridMedia, isPartner: Bool = false) {
         duration = GridTile.durationText(for: item)
         showsVideo = item.kind == .video
         showsFavorite = item.isFavorite
         showsLivePhoto = item.isLivePhoto
+        showsPartner = isPartner
         showsShade = GridTile.showsBottomShade(for: item)
         showsStack = item.stack.count > 1
         accessibilityLabel = GridTile.accessibilityLabel(for: item)
@@ -301,7 +304,11 @@ struct GridTileBadges: Equatable {
             let copies = String(localized: "\(item.stack.count) copies", bundle: .module)
             accessibilityLabel += ", " + copies
         }
+        if isPartner { accessibilityLabel += ", " + String(localized: "Partner photo", bundle: .module) }
     }
+
+    /// SF Symbol of the partner badge.
+    static let partnerSymbol = "person.2.fill"
 }
 
 /// Loads the picture of one tile and says what the tile should show.

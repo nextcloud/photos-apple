@@ -370,6 +370,9 @@ struct BackupOptions: View {
                 Text("Photos you have hidden in the Photos app are not backed up.", bundle: .module)
             }
         }
+        #if os(iOS)
+            AlbumMirrorSection()
+        #endif
         Section {
             Toggle(
                 String(localized: "Videos only on Wi-Fi", bundle: .module),

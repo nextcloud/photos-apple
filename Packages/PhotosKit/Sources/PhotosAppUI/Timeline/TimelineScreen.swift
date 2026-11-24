@@ -26,10 +26,16 @@ struct TimelineScreen: View {
         filter == .all && mediaKind == .all && showsMemories && !gridSelection.isSelecting
     }
 
-    /// What the grid observes: the media kind and whether copies of a photo are stacked.
+    /// What the grid observes: the media kind, whether copies of a photo are stacked and which partner folders are
+    /// hidden (Settings › Partner sharing, or the toolbar button).
     struct Query: Hashable {
         var kind: MediaFilter
         var stacksCopies: Bool
+        var hiddenPartnerFolders: [String] = []
+    }
+
+    var query: Query {
+        Query(kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [])
     }
 
     init(filter: MediaFilter) {
@@ -95,7 +101,7 @@ struct TimelineScreen: View {
         .onPreferenceChange(GridSelectionState.Key.self) { state in
             gridSelection = state
         }
-        .task(id: Query(kind: mediaKind, stacksCopies: stackCopies)) { observe() }
+        .task(id: query) { observe() }
         .dropDestination(for: URL.self) { urls, _ in
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
@@ -116,6 +122,7 @@ struct TimelineScreen: View {
         ) {
             TransfersIndicator()
             UploadMenu()
+            PartnerFilterButton()
             #if os(macOS)
                 // Mac: zoom slider between two buttons that step, like Apple Photos. Three toolbar items, not a slider
                 // with value labels or a stack: the toolbar gives every control of an item that item's label, so the
@@ -147,7 +154,7 @@ struct TimelineScreen: View {
     func observe() {
         guard let services = session.services else { return }
         let library = services.library
-        let excluded = session.excludedFolders
+        let excluded = session.excludedFolders + (session.partners?.hiddenFolders ?? [])
         let kind = mediaKind
         // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.
         let query: @Sendable () -> GridStream = {

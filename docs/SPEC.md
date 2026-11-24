@@ -434,6 +434,8 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SH-4** **Quick share** a selection: create album "Shared on <date>" (suffix (2), (3)… if taken), copy the photos in, add a public link, present the share sheet with the link; roll back on failure (`photos-extended-api.md` quick-share-selection).
 - **SH-5** Comments on own and shared albums when `albumComments` (comments DAV `/remote.php/dav/comments/photos_album/<albumId>`): list, post, delete own; not for public links.
 - **SH-6** **Public album viewer**: open a public link (pasted, from the share sheet, or deep link) anonymously via `/remote.php/dav/photospublic/<token>` with `Authorization: Basic base64("<token>:")`, previews via `publicPreview`; read-only grid, viewer, slideshow, download/export. Does not need an account.
+- **SH-7** **Share via Nextcloud** (photo or folder): Nextcloud's own sharing through the OCS Files Sharing API (`/ocs/v2.php/apps/files_sharing/api/v1/shares`, recipients from `…/sharees`), on every server without a Photos change. Recipients: users, groups, users and groups on other servers (federation), email addresses, Teams, Talk conversations (when the `spreed` capability is there); what is offered follows `capabilities.files_sharing`. Public links with password, expiry date (enforced limits respected), permissions (folders: view, view and upload, file drop), hide download, label and note. Existing shares are listed and can be changed or removed. Albums keep SH-1/SH-2: the Photos server shares albums only with users, groups and one public link; the album sharing sheet says that other servers, email and Talk work for photos and folders, not for albums (that would need a server change). All links are shown and copied through one view (`SharedLinkView`, warns for http).
+- **SH-8** **Partner sharing**: Settings › Partner sharing lists folders shared with the user (received user/group shares); turning one on indexes it with the timeline folders (only that folder is read, no rebuild) and its photos get a partner badge; a toolbar button and a switch hide or show them in the timeline. "Share my photos with a partner…" opens SH-7 for the upload folder. Stored per account on the device; the server and the web app's timeline folders are not changed.
 
 ### 7.7 Search, filters and smart albums — M4 (basic filter bar in M1)
 
@@ -618,6 +620,14 @@ Backup status row (sidebar/Collections) and screen: state (Up to date / Uploadin
 #### 7.18.8 Free up device space (M5)
 
 "Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before: the server lists the file with exactly the device's size, and the same file id when known; converted or name-only matches never qualify; RAW, edited version and Live Photo motion are required), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
+
+#### 7.18.9 Mirror device albums (iOS, iPadOS)
+
+Opt-in, for the albums the user picks (Backup › Albums): after each pass, backed-up photos (ledger `uploaded`/`matched`) of a picked device album are added to the Nextcloud album of the same name (created when missing; `/` becomes `-`). The edited rendition is preferred. Only adds: a photo taken out of the device album, or removed from the Nextcloud album, is not touched again (what was added is remembered per album).
+
+#### 7.18.10 Import from Google Takeout (Mac)
+
+File › Import from Google Takeout…: pick the unpacked export, its ZIP parts (read in place, ZIP64, no unpacking) or a folder holding them. JSON sidecars are matched with the server's rules (`TakeoutSidecarService`: truncated names, `(1)` copies, `supplemental-metadata`, edited copies and Live Photo videos); `photoTakenTime` is sent as `X-OC-MTime`, the file itself is uploaded unchanged (EXIF stays), the position is set by PROPPATCH where the file has none (Nextcloud 35+), captions become file comments. Files already on the server are skipped with the backup matcher (§7.18.4); copies in album folders are imported once; album folders become Photos albums; the trash folder is left out. Destination: a folder below a timeline folder (default `<upload folder>/Google Photos/<year>`). Resumable through a journal per export in the account's directory; progress, stop and resume.
 
 ### 7.19 Offline — M2
 

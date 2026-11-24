@@ -241,6 +241,15 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
   trusted and client certificates 🟡 (compiled; not run). Items that cannot be read are counted ("2 of 5 items could
   not be read"), and its temporary copies are removed on cancel, on completion and (leftovers) at the start ✅ unit-tested. ⬜ It still uploads in its own process, not in a background session.
 
+- Share via Nextcloud (SH-7): OCS Files Sharing for a photo (grid context menu, selection "More" menu) or a folder (Folders toolbar):
+  users, groups, other servers, email, Teams, Talk (when installed), public links with password, expiry, permissions, hide
+  download; list, change, remove. API ✅ unit-tested and ✅ against the stock (8093), extended (8091) and default (8089)
+  test servers (create, update, list, delete, sharee search); the sheet 🟡 compiled, not looked at (screen locked). Albums
+  keep album sharing; the album sheet says what only photos and folders can do. ⬜ From the viewer; several photos at once.
+- Partner sharing (SH-8): received folder shares in the timeline with badge and show/hide ✅ sync unit-tested and ✅ against
+  8089 and 8093 (a real received share indexed and removed again); Settings section, badge and toolbar button 🟡 compiled,
+  not looked at.
+
 ## M3 Backup — 🟡
 Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against server), matcher ✅, engine, UI, background tasks 🟡.
 - Backup belongs to one account and keeps running for it while another account is shown (the Backup screen says which) 🟡.
@@ -283,6 +292,11 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 "Not backed up yet" on the Backup screen (iOS, iPadOS, macOS): the device's photos the options select that the ledger
   doesn't have completely on the server, newest first, as PhotoKit thumbnails with a badge for failed / only in iCloud.
   Classification ✅ unit-tested; UI compiled, not looked at.
+- 🟡 §7.18.9 mirror device albums into Nextcloud albums (iOS, opt-in, picked albums): mirror logic ✅ unit-tested with a fake
+  library and server; PhotoKit album reading and the Backup › Albums screen compiled for iOS, **not run on a device**.
+- 🟡 §7.18.10 Google Takeout import (Mac): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
+  (duplicates, albums, comments, journal, stop/resume) ✅ unit-tested and ✅ end-to-end against 8089, 8091 and 8093 (dates
+  as mtime, album, second import uploads nothing); the import window 🟡 compiled, not looked at (screen locked).
 - ⬜ Most-compatible video conversion (HEVC → H.264); images only.
 - ✅ Run state machine unit-tested with a fake library and server: pause and resume (Wi-Fi, Low Data, Low Power, lost connection),
   stop on full quota / invalid login / refused upload (`BackupStatus.blocker`), retry delays for failing files, skipping assets the

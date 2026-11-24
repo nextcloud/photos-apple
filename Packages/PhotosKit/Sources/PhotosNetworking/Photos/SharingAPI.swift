@@ -104,6 +104,18 @@ extension PhotosAPI {
             body: try JSONEncoder().encode(Body(message: message)))
     }
 
+    /// Adds a comment to a file (`comments/files/<fileId>`), where the Files app's sidebar shows it. Stock Nextcloud.
+    public func addFileComment(fileId: FileID, message: String) async throws {
+        struct Body: Encodable {
+            var actorType = "users"
+            var verb = "comment"
+            var message: String
+        }
+        _ = try await dav.send(
+            "POST", connection.davURL("comments/files/\(fileId)"), headers: ["Content-Type": "application/json"],
+            body: try JSONEncoder().encode(Body(message: message)))
+    }
+
     public func deleteComment(albumId: Int, commentId: Int) async throws {
         try await dav.delete(commentsURL(albumId: albumId).appending(path: String(commentId)))
     }

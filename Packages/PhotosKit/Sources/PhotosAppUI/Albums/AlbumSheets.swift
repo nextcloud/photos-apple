@@ -286,7 +286,7 @@ struct CollaboratorsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(String(localized: "Share with people and groups", bundle: .module)) {
+                Section {
                     TextField(String(localized: "Search users or groups", bundle: .module), text: $query)
                         .autocorrectionDisabled()
                     ForEach(results) { sharee in
@@ -311,6 +311,14 @@ struct CollaboratorsSheet: View {
                             .help(String(localized: "Remove \(collaborator.label)", bundle: .module))
                         }
                     }
+                } header: {
+                    Text("Share with people and groups", bundle: .module)
+                } footer: {
+                    // Albums are shared by the Photos app on the server, which only knows users, groups and one public
+                    // link; the rest of Nextcloud's sharing works on files and folders (SPEC SH-7).
+                    Text(
+                        "Albums can be shared with people and groups on this server and by public link. The Photos app on your server cannot share an album with people on other servers, by email or in Talk. Single photos and folders can be shared that way: choose Share via Nextcloud… on a photo or a folder.",
+                        bundle: .module)
                 }
                 Section {
                     Toggle(

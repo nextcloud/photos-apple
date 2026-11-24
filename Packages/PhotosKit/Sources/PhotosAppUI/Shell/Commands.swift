@@ -13,6 +13,8 @@ public struct MainActions {
     var upload: () -> Void
     var openPublicLink: () -> Void
     var syncNow: () -> Void
+    /// Import from Google Takeout (Mac only).
+    var importTakeout: (() -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -80,6 +82,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Upload Photos…", bundle: .module)) { main?.upload() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(main == nil)
+            #if os(macOS)
+                Button(String(localized: "Import from Google Takeout…", bundle: .module)) { main?.importTakeout?() }
+                    .disabled(main?.importTakeout == nil)
+            #endif
             Button(Self.exportTitle) { grid?.export?() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(grid?.export == nil || selectionCount == 0)
