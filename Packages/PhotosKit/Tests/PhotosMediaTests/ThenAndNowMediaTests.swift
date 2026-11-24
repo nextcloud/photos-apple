@@ -20,7 +20,8 @@ import Testing
         context.setFillColor(CGColor(red: gray, green: 0.3, blue: 1 - gray, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(x: square.x * CGFloat(width), y: square.y * CGFloat(height), width: CGFloat(width) / 4, height: CGFloat(height) / 4))
+        let side = CGSize(width: CGFloat(width) / 4, height: CGFloat(height) / 4)
+        context.fill(CGRect(origin: CGPoint(x: square.x * CGFloat(width), y: square.y * CGFloat(height)), size: side))
         return context.makeImage()!
     }
 

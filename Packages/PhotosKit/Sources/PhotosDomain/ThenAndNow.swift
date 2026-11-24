@@ -82,7 +82,9 @@ public enum ThenAndNow {
     /// two years. The photo itself leads its year. `nearby` may contain more (a box around it from the index).
     public static func spot(around item: LocatedItem, nearby: [LocatedItem], calendar: Calendar = .current) -> ThenAndNowSpot? {
         guard item.coordinate.isValid else { return nil }
-        var close = nearby.filter { $0.fileId != item.fileId && $0.coordinate.isValid && $0.coordinate.distance(to: item.coordinate) <= radius }
+        var close = nearby.filter { other in
+            other.fileId != item.fileId && other.coordinate.isValid && other.coordinate.distance(to: item.coordinate) <= radius
+        }
         close.append(item)
         return spot(of: close, anchor: item.fileId, calendar: calendar)
     }
@@ -107,7 +109,8 @@ public enum ThenAndNow {
             }
             return ThenAndNowSpot.Year(year: year, items: ordered.map(\.fileId))
         }
-        let seed = anchor.flatMap { id in items.first { $0.fileId == id } } ?? items.min { ($0.timestamp, $0.fileId) < ($1.timestamp, $1.fileId) }!
+        let oldest = items.min { ($0.timestamp, $0.fileId) < ($1.timestamp, $1.fileId) }!
+        let seed = anchor.flatMap { id in items.first { $0.fileId == id } } ?? oldest
         return ThenAndNowSpot(
             id: "spot-\(seed.fileId)", center: center, placeName: mostFrequent(items.map(\.place)),
             countryCode: mostFrequent(items.map(\.countryCode)), years: years)
