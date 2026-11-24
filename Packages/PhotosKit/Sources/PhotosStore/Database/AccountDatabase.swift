@@ -274,6 +274,23 @@ public final class AccountDatabase: Sendable {
             // Album content in album order.
             try db.create(index: "albumItem_position", on: "albumItem", columns: ["albumId", "position"])
         }
+        // Outbox (SPEC §5.4.5): operations on different files run side by side, so the file of each operation is a column;
+        // the ETag lets deletes and moves address the file without looking it up first; 423 has its own give-up counter.
+        migrator.registerMigration("v3-outbox") { db in
+            try db.alter(table: "operation") { t in
+                t.add(column: "fileId", .integer)
+                t.add(column: "etag", .text)
+                t.add(column: "lockedAttempts", .integer).notNull().defaults(to: 0)
+            }
+            let decoder = JSONDecoder()
+            for row in try Row.fetchAll(db, sql: "SELECT id, payload FROM operation") {
+                let payload: String = row["payload"]
+                guard let operation = try? decoder.decode(PendingOperation.self, from: Data(payload.utf8)) else { continue }
+                let id: Int64 = row["id"]
+                try db.execute(sql: "UPDATE operation SET fileId = ? WHERE id = ?", arguments: [operation.fileId, id])
+            }
+            try db.create(index: "operation_file", on: "operation", columns: ["fileId", "id"])
+        }
         return migrator
     }
 }

@@ -100,12 +100,22 @@ public struct DAVClient: Sendable {
         }
     }
 
-    public func delete(_ url: URL) async throws {
-        try await send("DELETE", url)
+    /// - Parameter ifMatch: only when the resource has this ETag (412 otherwise).
+    public func delete(_ url: URL, ifMatch etag: String? = nil) async throws {
+        try await send("DELETE", url, headers: Self.ifMatch(etag))
     }
 
-    public func move(_ source: URL, to destination: URL, overwrite: Bool = false) async throws {
-        try await send("MOVE", source, headers: ["Destination": destination.absoluteString, "Overwrite": overwrite ? "T" : "F"])
+    /// - Parameter ifMatch: only when the source has this ETag (412 otherwise).
+    public func move(_ source: URL, to destination: URL, overwrite: Bool = false, ifMatch etag: String? = nil) async throws {
+        try await send(
+            "MOVE", source,
+            headers: ["Destination": destination.absoluteString, "Overwrite": overwrite ? "T" : "F"].merging(Self.ifMatch(etag)) { $1 })
+    }
+
+    /// The `If-Match` header for an ETag as the index stores it (without quotes).
+    static func ifMatch(_ etag: String?) -> [String: String] {
+        guard let etag, !etag.isEmpty else { return [:] }
+        return ["If-Match": "\"\(etag)\""]
     }
 
     public func copy(_ source: URL, to destination: URL, overwrite: Bool = false) async throws {

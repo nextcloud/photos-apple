@@ -419,7 +419,8 @@ import Testing
         #expect(try await outbox.failedOperations().isEmpty)
         #expect(server.file(9) != nil)
         #expect(server.file(1) == nil)
-        #expect(server.requests(.delete).map(\.path) == ["/Photos/renamed.jpg"])
+        // The delete at the stored path only goes through for the file with the ETag the index knows (If-Match): refused.
+        #expect(server.requests(.delete).map(\.path) == ["/Photos/a.jpg", "/Photos/renamed.jpg"])
     }
 
     @Test func queuedDeleteOfAFileDeletedElsewhereLeavesItsSuccessorAlone() async throws {
@@ -429,9 +430,9 @@ import Testing
         }
         #expect(try await outbox.failedOperations().isEmpty)
         #expect(server.file(9) != nil)
-        #expect(server.requests(.delete).isEmpty)
-        // One lookup by id is all it cost.
-        #expect(server.requests.count == 1)
+        // The delete at the stored path was refused (another ETag there), and one lookup by id found nothing to delete.
+        #expect(server.requests(.delete).map(\.path) == ["/Photos/a.jpg"])
+        #expect(server.requests.count == 2)
     }
 
     @Test func queuedArchiveDoesNotMoveAnotherFileAtTheSamePath() async throws {
@@ -470,11 +471,11 @@ import Testing
 
     /// Not for ever: the operations behind it wait.
     @Test func lockedFileIsGivenUpEventually() async throws {
-        #expect(Outbox.shouldRetry(.locked, attempts: 0))
-        #expect(Outbox.shouldRetry(.locked, attempts: Outbox.maxLockedAttempts - 2))
-        #expect(!Outbox.shouldRetry(.locked, attempts: Outbox.maxLockedAttempts - 1))
-        #expect(Outbox.shouldRetry(.offline, attempts: 1000))
-        #expect(!Outbox.shouldRetry(.forbidden(message: nil), attempts: 0))
+        #expect(Outbox.shouldRetry(.locked, lockedAttempts: 0))
+        #expect(Outbox.shouldRetry(.locked, lockedAttempts: Outbox.maxLockedAttempts - 2))
+        #expect(!Outbox.shouldRetry(.locked, lockedAttempts: Outbox.maxLockedAttempts - 1))
+        #expect(Outbox.shouldRetry(.offline, lockedAttempts: 1000))
+        #expect(!Outbox.shouldRetry(.forbidden(message: nil), lockedAttempts: 0))
 
         server.statusOverride.withLock { $0 = { $0.kind == .delete ? 423 : nil } }
         let outbox = outbox(retryDelay: 0)
@@ -545,6 +546,23 @@ import Testing
         try await engine.restoreRows()
         #expect(try library.item(1) != nil)
         #expect(try library.item(2) == nil)
+    }
+
+    /// Restoring rows after a failed operation does not add files the timeline does not show (an album photo stored
+    /// outside the source folders); rows the index already has are updated wherever the file is.
+    @Test func restoreKeepsFilesOutsideTheTimelineOutOfTheIndex() async throws {
+        server.put(FakeDAVServer.File(id: 5, path: "/Elsewhere/e.jpg", etag: "e5", modified: 1000, captured: 1000))
+        server.put(FakeDAVServer.File(id: 6, path: "/Elsewhere/f.jpg", etag: "e6", modified: 1000, captured: 1000))
+        try library.upsert([MediaItem(fileId: 6, path: "/Photos/f.jpg", mimeType: "image/jpeg", etag: "e6")])
+        try await database.writer.write { db in
+            try db.execute(sql: "DELETE FROM media WHERE fileId = 1")
+            try SyncEngine.requestRestore([1, 5, 6], db: db)
+        }
+        try await engine.restoreRows()
+        #expect(try library.item(1) != nil)
+        #expect(try library.item(5) == nil)
+        #expect(try library.item(6)?.path == "/Elsewhere/f.jpg")
+        #expect(try database.syncValue(SyncEngine.Key.restoreFileIds) == nil)
     }
 
     @Test func discardBringsTheRowBack() async throws {

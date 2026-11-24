@@ -301,16 +301,18 @@ public struct PhotosAPI: Sendable {
         try await dav.proppatch(connection.filesURL(userPath), set: [(DAVProp.favorite, .text(favorite ? "1" : "0"))])
     }
 
-    public func delete(userPath: String) async throws {
-        try await dav.delete(connection.filesURL(userPath))
+    /// - Parameter ifMatch: only when the file at the path has this ETag (`NetworkError.preconditionFailed` otherwise).
+    public func delete(userPath: String, ifMatch etag: String? = nil) async throws {
+        try await dav.delete(connection.filesURL(userPath), ifMatch: etag)
     }
 
-    public func move(userPath: String, to destination: String) async throws {
+    /// - Parameter ifMatch: only when the file at the path has this ETag (`NetworkError.preconditionFailed` otherwise).
+    public func move(userPath: String, to destination: String, ifMatch etag: String? = nil) async throws {
         do {
-            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination))
+            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination), ifMatch: etag)
         } catch NetworkError.conflict {
             try await dav.mkcolRecursive(userPath: (destination as NSString).deletingLastPathComponent)
-            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination))
+            try await dav.move(connection.filesURL(userPath), to: connection.filesURL(destination), ifMatch: etag)
         }
     }
 

@@ -431,13 +431,21 @@ public actor SyncEngine {
 
     /// Reads the rows marked by `requestRestore` from the server: the optimistic change of an operation that never
     /// reached the server is undone (a deleted photo comes back, a favourite or archive flag is what the server has).
-    /// A file the server no longer has is removed from the index. Files with operations still queued are left alone.
+    /// A file the server no longer has is removed from the index. Files with operations still queued are left alone, and
+    /// so are files outside the timeline (an album photo stored elsewhere) that the index has no row for.
     public func restoreRows() async throws {
         let requested = try await database.writer.read { db in try Self.restoreRequests(db) }
         guard !requested.isEmpty else { return }
         let ids = requested.sorted()
-        let items = try await api.items(fileIds: ids, properties: indexProperties)
-        let found = Set(items.map(\.fileId))
+        let fetched = try await api.items(fileIds: ids, properties: indexProperties)
+        let found = Set(fetched.map(\.fileId))
+        let indexed = try await database.writer.read { db in
+            Set(
+                try FileID.fetchAll(
+                    db, sql: "SELECT fileId FROM media WHERE fileId IN (\(databaseQuestionMarks(count: ids.count)))",
+                    arguments: StatementArguments(ids)))
+        }
+        let items = fetched.filter { indexed.contains($0.fileId) || isInTimeline($0) }
         try await database.writer.write { db in
             let pending = try Outbox.pendingFileIds(db)
             let gone = requested.subtracting(found).subtracting(pending)
@@ -449,6 +457,20 @@ public actor SyncEngine {
                 arguments: [Key.restoreFileIds, remaining.isEmpty ? nil : remaining.sorted().map(String.init).joined(separator: ",")])
         }
         try upsertFromServer(items)
+    }
+
+    /// Reads these files from the server again (files restored from the trash bin come back into the index).
+    public func restore(fileIds: some Sequence<FileID> & Sendable) async throws {
+        try await database.writer.write { db in try Self.requestRestore(fileIds, db: db) }
+        try await restoreRows()
+    }
+
+    /// Whether the timeline indexes a file like this one: a type it shows, below a source folder or the archive.
+    func isInTimeline(_ item: MediaItem) -> Bool {
+        mimeTypes.contains(item.mimeType)
+            && scopes.contains { scope in
+                scope == "/" || item.path == scope || item.path.hasPrefix(scope.hasSuffix("/") ? scope : scope + "/")
+            }
     }
 
     // MARK: Collections
