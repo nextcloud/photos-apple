@@ -281,8 +281,18 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
   Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
   structure read from the running app; the same commands are the keyboard shortcuts on iPadOS 🟡.
-  ⬜ Image ▸ Rotate (only inside the editor), Edit ▸ Copy of photos, "Add to Album" as a submenu, Share… in the grid's context
-  menu (toolbar and File menu only), opening an album in a new window, View ▸ Square Tiles.
+  🟡 Image ▸ Rotate Left ⌘R / Rotate Right ⌥⌘R on the selection (as in Photos; Sync Now moved to ⇧⌘R), also in the grid's
+  context menu: saved like the editor's "Overwrite original" — a new version of each file, only replacing the version the app
+  knows (`If-Match`), read-only shares/videos/RAW-GIF-WebP left alone and reported; save path ✅ run against the 8089 server
+  (`PhotoEditSavingIntegrationTests`: 1920×1280 → 1280×1920, stale ETag → 412, nothing overwritten), menu items ✅ read from
+  the running app (key equivalents), run from the menu 🟡 (Mac locked, menus need a focused window). Edit ▸ Copy (⌘C, and
+  "Copy" in the context menu) downloads the originals (≤ 100) and puts image data + file URLs (Mac) / item providers (iPad) on
+  the pasteboard 🟡 (compiled, unit-tested wording only). "Add to Album" is a submenu (Image menu, context menu, selection
+  menu): New Album… with the selection, the albums used last in this app (`recent-albums.json` in the account folder) then
+  the most recently changed, All Albums… 🟡 (Image menu structure ✅ read from the app). Share… in the grid's context menu (the
+  system Share menu on the Mac, share sheet on iPhone/iPad, originals downloaded on demand) 🟡. Albums open in their own window
+  (`WindowGroup(for: AlbumWindowValue)`): File ▸ Open in New Window, the album card's context menu, ⌥-click 🟡 (built for
+  macOS/iOS/visionOS, not run: Mac locked). ⬜ View ▸ Square Tiles (timeline area).
 - Mac: "Export…" saves the originals of the selection into a folder 🟡 (the panel was not driven by hand).
 
 ## M2 Albums, sharing, upload, offline — ✅
@@ -453,12 +463,21 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
 ## M5 Advanced — 🟡
 Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API; restore sends `Overwrite: T` — it was refused with 412 before; "Delete permanently" asks first and errors are shown; the screen itself 🟡: it is behind the device unlock, not opened in the test run), duplicates 🟡, free up space 🟡, extract text (server OCR or
 Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 🟡, video renditions 🟡, App Intents and App Shortcuts 🟡.
-- ⬜ Free-form crop (aspect presets only).
+- Free-form crop 🟡: the crop tool shows the whole picture with a frame (corner and edge handles, drag inside to move, thirds
+  lines, dimmed outside), a lock for the aspect, presets Freeform/Original/Square/4:3/16:9/3:2 (they set the largest centred
+  area and lock it); the crop turns and mirrors with the picture; VoiceOver adjusts its size. Geometry ✅ unit-tested
+  (`CropAndSaveTests`); the UI built for macOS, iOS and visionOS but not run (Mac locked). Fixed on the way: "Flip" mirrored
+  top-to-bottom after a turn; "Overwrite original" wrote JPEG data over PNG/TIFF and is now only offered for formats that can
+  be written back; "Save as copy" was named after the cache file.
 - Free up space works on the **server** (title "Free up server space"): screenshots by file name or PNG with a phone-screen size and no
   location — never every PNG (`PhotosDomain/Cleanup.swift`); the confirmation names the server, all devices and trash bin vs. permanent.
   Freeing device storage is §7.18.8 (Backup), 🟡.
 - Duplicates: suggested copy to keep (favorite, own file, oldest upload) with the reason shown, user can pick another one.
-  ⬜ Warning when a deleted copy is in an album.
+  Warning when a deleted copy is in an album 🟡: the confirmation names the albums the deleted copies are in and the kept copy
+  is not, from the album content in the local index (albums never opened on the device are counted as "not checked"), and offers
+  "Keep in albums and move N items to the trash bin" (the kept copy is added first); filter albums are left out, a kept copy
+  shared with the user can't be added. Logic ✅ unit-tested with the store (`DuplicateAlbumNoteTests`); the dialog not run (Mac
+  locked).
 - ⬜ Spotlight indexing of albums/people/places; App Intent entities (albums, people) and search intent.
 - ⬜ visionOS spatial photos / immersive panoramas.
 - Accessibility and localisation audit 🟡: every module and target with user-facing text has a string catalog

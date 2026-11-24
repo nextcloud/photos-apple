@@ -507,20 +507,59 @@
                 let shown = (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.picture
                 preview = { GridMenuPreviewController(item: item, services: services, placeholder: shown) }
             }
-            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { _ in
-                // Each group is an inline menu: UIKit draws the separators between them.
-                let groups: [UIMenuElement] = GridMenuAction.groups(actions).map { group in
-                    UIMenu(
-                        options: .displayInline,
-                        children: group.map { action in
-                            UIAction(
-                                title: action.title, image: UIImage(systemName: action.systemImage),
-                                attributes: action.isDestructive ? .destructive : []
-                            ) { _ in action.handler(ids) }
-                        })
-                }
-                return UIMenu(children: groups)
+            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { [weak self] _ in
+                UIMenu(children: self?.menuElements(actions, ids: ids, at: indexPaths[0]) ?? [])
             }
+        }
+
+        /// Each group is an inline menu (UIKit draws the separators between them); actions with children are submenus,
+        /// sharing opens the share sheet from the tile.
+        func menuElements(_ actions: [GridMenuAction], ids: [FileID], at indexPath: IndexPath) -> [UIMenuElement] {
+            GridMenuAction.groups(actions).map { group in
+                UIMenu(
+                    options: .displayInline,
+                    children: group.map { action -> UIMenuElement in
+                        let image = UIImage(systemName: action.systemImage)
+                        if !action.children.isEmpty {
+                            let children: [UIMenuElement] = menuElements(action.children, ids: ids, at: indexPath)
+                            return UIMenu(title: action.title, image: image, children: children)
+                        }
+                        if let share = action.share {
+                            return UIAction(title: action.title, image: image) { [weak self] _ in
+                                self?.presentShareSheet(share(), from: indexPath)
+                            }
+                        }
+                        return UIAction(title: action.title, image: image, attributes: action.isDestructive ? .destructive : []) { _ in
+                            action.handler(ids)
+                        }
+                    })
+            }
+        }
+
+        func presentShareSheet(_ providers: [NSItemProvider], from indexPath: IndexPath) {
+            guard !providers.isEmpty else { return }
+            let sheet = UIActivityViewController(activityItemsConfiguration: UIActivityItemsConfiguration(itemProviders: providers))
+            if let popover = sheet.popoverPresentationController {
+                if let cell = collectionView.cellForItem(at: indexPath) {
+                    popover.sourceView = cell
+                    popover.sourceRect = cell.bounds
+                } else {
+                    popover.sourceView = collectionView
+                }
+            }
+            present(sheet, animated: true)
+        }
+
+        // MARK: Edit ▸ Copy (⌘C on iPad)
+
+        override func copy(_ sender: Any?) {
+            guard !selected.ids.isEmpty else { return }
+            callbacks?.copy?(Array(selected.ids))
+        }
+
+        override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            if action == #selector(copy(_:)) { return callbacks?.copy != nil && !selected.ids.isEmpty }
+            return super.canPerformAction(action, withSender: sender)
         }
 
         /// A tap on the menu's preview opens the photo.
@@ -778,7 +817,7 @@
         override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
             get {
                 guard let fileId, let actions = menuActions?() else { return nil }
-                return actions.map { action in
+                return GridMenuAction.flattened(actions).map { action in
                     UIAccessibilityCustomAction(name: action.title) { _ in
                         action.handler([fileId])
                         return true

@@ -409,6 +409,8 @@ struct AlbumNotes: View {
 /// Create or edit an album (name, location, description).
 struct AlbumEditor: View {
     let album: Album?
+    /// A new album is created with these photos in it ("Add to Album ▸ New Album…").
+    var items: [MediaItem] = []
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -461,7 +463,11 @@ struct AlbumEditor: View {
                 if let album {
                     try await session.updateAlbum(album, location: location, description: description)
                 } else {
-                    try await session.createAlbum(name: name, location: location, description: description)
+                    let created = try await session.createAlbum(name: name, location: location, description: description)
+                    if !items.isEmpty {
+                        RecentAlbumsStore.note(created, account: session.account.id)
+                        await session.addToAlbum(items, album: created)
+                    }
                 }
                 dismiss()
             } catch {

@@ -355,6 +355,7 @@ The structure mirrors the web app's navigation (including the extended "Advanced
 - Backup status row at the bottom; account switcher in the sidebar header.
 
 **macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square Tiles ⌥⌘S; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
+Decided in round 4 (as in Photos): Image ▸ Rotate Left ⌘R and Rotate Right ⌥⌘R work on the selection and save like the editor's "Overwrite original" (a new file version; not offered for read-only shares or formats that can't be written back), View ▸ Sync Now is ⇧⌘R; Edit ▸ Copy puts the originals on the pasteboard (image data and file URL; at most 100 items, Export for more); "Add to Album" is a submenu (New Album…, the albums used last in this app, then the most recently changed, All Albums…); the grid's context menu has Copy, Rotate, Share (system share menu/sheet) and the same submenu; an album opens in its own window from File ▸ Open in New Window, its card's context menu or ⌥-click (one window per album, restored with the app; it shows the album only while its account is the active one).
 
 **visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5).
 
@@ -501,7 +502,7 @@ Requires: `files.undelete`. Lists trashed media (`PROPFIND /remote.php/dav/trash
 
 ### 7.15 Duplicates and Free up space — M5
 
-- **Duplicates**: groups by `size + captureTime + width×height` over the whole index (exact copies; `photos-extended-api.md` duplicates-view). Review UI per group: keep the best (largest/oldest path heuristics, user can change), delete the rest; "Merge favourites/albums" is not possible server-side — warn if the deleted copies are in albums.
+- **Duplicates**: groups by `size + captureTime + width×height` over the whole index (exact copies; `photos-extended-api.md` duplicates-view). Review UI per group: keep the best (largest/oldest path heuristics, user can change), delete the rest; "Merge favourites/albums" is not possible server-side — warn if the deleted copies are in albums. Decided in round 4: the warning uses the album content in the local index only (albums never opened on the device are reported as not checked, no extra server requests), names the albums the kept copy is not in, and offers to add the kept copy to them before deleting (own files only; albums filled by filters are left out).
 - **Free up space**: screenshots, screen recordings, large videos (> 100 MiB) heuristics from the web (patterns in `photos-extended-api.md` free-up-space), sorted by size, bulk delete with total size shown.
 - Device storage ("Remove backed-up photos from this device") is part of Backup (§7.18.8), not this screen.
 
@@ -510,7 +511,7 @@ Requires: `files.undelete`. Lists trashed media (`PROPFIND /remote.php/dav/trash
 #### 7.16.1 Photo editor
 
 Core Image pipeline (`PhotosMedia/Editing`), non-destructive while editing, rendered at full resolution on save:
-- Crop (free, original, square, 4:3, 16:9, …), rotate 90°, straighten (±45°), flip.
+- Crop (free, original, square, 4:3, 16:9, …), rotate 90°, straighten (±45°), flip. Free crop: the crop tool shows the whole picture with a frame (corner and edge handles, drag inside to move); a lock keeps the aspect; presets set the largest centred area of their ratio (in the photo's orientation) and lock it; the crop is stored as fractions of the straightened, turned and mirrored picture and turns/mirrors with it. Flip mirrors left to right as the picture is shown.
 - Auto-enhance (`CIImage.autoAdjustmentFilters`).
 - Filters (system photo effects: Vivid, Vivid Warm/Cool, Dramatic, Mono, Silvertone, Noir…).
 - Adjust: exposure, brilliance/highlights/shadows, contrast, brightness, black point, saturation, vibrance, warmth, tint, sharpness, vignette.
@@ -519,7 +520,7 @@ Core Image pipeline (`PhotosMedia/Editing`), non-destructive while editing, rend
 
 #### 7.16.2 Saving
 
-"Save as copy" (default): writes `<name> (edited).<ext>` next to the original (HEIC if the original was HEIC, else JPEG), so the stacking rule groups it with the original; the copy is added to the same own albums. "Overwrite original": PUT over the original; tell the user that the previous version stays in Nextcloud's file versions (if `files_versions` is enabled). Not available for files without write permission.
+"Save as copy" (default): writes `<name> (edited).<ext>` next to the original (HEIC if the original was HEIC, else JPEG), so the stacking rule groups it with the original; the copy is added to the same own albums. "Overwrite original": PUT over the original; tell the user that the previous version stays in Nextcloud's file versions (if `files_versions` is enabled). Not available for files without write permission. The original keeps its format and name (only formats Image I/O can write: JPEG, HEIC/HEIF, PNG, TIFF; others can only be saved as a copy), and the PUT carries `If-Match` with the ETag the app edited, so a newer version on the server is never replaced.
 
 #### 7.16.3 Metadata editing
 

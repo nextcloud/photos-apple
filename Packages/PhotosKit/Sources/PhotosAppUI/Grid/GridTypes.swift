@@ -29,6 +29,25 @@ struct GridMenuAction: Identifiable {
     /// A separator goes before this action in menus.
     var startsGroup = false
     var handler: @MainActor ([FileID]) -> Void
+    /// A submenu (Add to Album ▸ …). Menus show these instead of running `handler`; where there are no submenus
+    /// (accessibility actions) `handler` offers the same in another way.
+    var children: [GridMenuAction] = []
+    /// The system's share menu (Mac) or sheet (iPhone, iPad) with these items, instead of `handler`.
+    var share: (@MainActor () -> [NSItemProvider])? = nil
+
+    /// The actions without submenus, for accessibility actions: a submenu's entries are actions of their own
+    /// ("Add to Album: Holidays"); sharing needs its menu or sheet and is left out.
+    static func flattened(_ actions: [GridMenuAction]) -> [GridMenuAction] {
+        actions.filter { $0.share == nil }.flatMap { action in
+            action.children.isEmpty
+                ? [action]
+                : action.children.map { child in
+                    var entry = child
+                    entry.title = "\(action.title): \(child.title)"
+                    return entry
+                }
+        }
+    }
 
     /// The actions split where a group starts (for menus that separate groups by nesting them, as UIKit does).
     static func groups(_ actions: [GridMenuAction]) -> [[GridMenuAction]] {
@@ -57,6 +76,8 @@ struct GridCallbacks {
     var refresh: (@MainActor () async -> Void)?
     /// Says where a tile is, for the zoom transition into the viewer and back (iPhone, iPad). Nil: not needed.
     var tileLocator: GridTileLocator?
+    /// Edit ▸ Copy (⌘C) with the selection; nil: the grid does not copy.
+    var copy: (@MainActor ([FileID]) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
