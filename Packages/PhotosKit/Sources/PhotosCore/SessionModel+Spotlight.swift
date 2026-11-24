@@ -18,7 +18,7 @@ extension SessionModel {
             // Spotlight shows results outside the app, also on the lock screen: nothing while app lock is on.
             if force || spotlightEntries != [] {
                 spotlightEntries = []
-                await SpotlightIndexer.shared.removeAll()
+                Task { await SpotlightIndexer.shared.removeAll() }
             }
             return
         }
@@ -29,8 +29,14 @@ extension SessionModel {
         }.value
         guard !isStopped, force || entries != spotlightEntries else { return }
         spotlightEntries = entries
-        await SpotlightIndexer.shared.update(account, entries: entries)
-        Self.collectionsIndexed()
+        // Not awaited: Core Spotlight may answer late or not at all (it never does in the iOS test host), and the sync that
+        // called this must not wait for it, because logout waits for the session's tasks. The indexer is an actor, so the
+        // writes still happen in order.
+        let account = account
+        Task {
+            await SpotlightIndexer.shared.update(account, entries: entries)
+            Self.collectionsIndexed()
+        }
     }
 
     /// The albums and named people that Shortcuts and Siri can offer (`AlbumEntity`, `PersonEntity`): the same as Spotlight,

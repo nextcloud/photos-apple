@@ -105,7 +105,10 @@ public enum HiddenPeopleFile {
 /// a whole when its library changed, and deleted when the account is logged out or wiped (`AppModel.purge`); all items go
 /// while app lock is on.
 public actor SpotlightIndexer {
-    public static let shared = SpotlightIndexer(index: .default())
+    /// No index in unit tests: a test host has no app identity for Spotlight (on iOS its calls never return), and tests must
+    /// not fill the Mac's Spotlight with test accounts.
+    public static let shared = SpotlightIndexer(
+        index: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil ? .default() : nil)
 
     private let index: CSSearchableIndex?
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "spotlight")
