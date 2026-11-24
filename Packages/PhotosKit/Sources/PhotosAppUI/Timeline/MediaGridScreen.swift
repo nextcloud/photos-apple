@@ -484,7 +484,9 @@ struct MediaGridScreen<Accessory: View>: View {
             })
         if session.features.has(.systemtags) {
             actions.append(
-                GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { _ in tagEditor = PickedItems(items: items) })
+                GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { ids in
+                    withItems(ids) { tagEditor = PickedItems(items: $0) }
+                })
         }
         let exportTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
