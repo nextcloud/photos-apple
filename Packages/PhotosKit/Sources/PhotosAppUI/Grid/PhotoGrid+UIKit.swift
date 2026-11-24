@@ -65,6 +65,7 @@
         private var isSelecting = false
         /// The pinch in progress: the photo under the fingers and where they are (SPEC §15.5).
         private var pinch: GridPinch?
+        private weak var pinchRecognizer: UIPinchGestureRecognizer?
         /// After a pinch changed the zoom step: the photo that stays under the fingers through the relayout.
         private var pinchAnchor: (id: FileID, y: CGFloat)?
         /// Haptic ticks at year boundaries while scrolling fast or scrubbing the year index (SPEC §15.5).
@@ -114,6 +115,7 @@
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             collectionView.addGestureRecognizer(pinch)
+            pinchRecognizer = pinch
             offsetObservation = collectionView.observe(\.contentOffset, options: []) { [weak self] _, _ in
                 // UIKit changes the offset on the main thread.
                 MainActor.assumeIsolated { self?.contentOffsetChanged() }
@@ -615,7 +617,9 @@
         }
 
         func collectionView(_ collectionView: UICollectionView, shouldBeginMultipleSelectionInteractionAt indexPath: IndexPath) -> Bool {
-            fileId(at: indexPath) != nil
+            // Two fingers that pinch are zooming, not selecting.
+            let pinching = pinch != nil || pinchRecognizer?.state == .began || pinchRecognizer?.state == .changed
+            return !pinching && fileId(at: indexPath) != nil
         }
 
         /// A two-finger drag over the tiles starts the selection mode (as in Photos and Files): UIKit only selects

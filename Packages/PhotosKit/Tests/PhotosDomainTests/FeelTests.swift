@@ -39,7 +39,7 @@ import Testing
         #expect(LibraryZoomGesture.steps(projectedScale: 1.3) == 1)
         #expect(LibraryZoomGesture.steps(projectedScale: 1 / 1.3) == -1)
         // A long pinch moves further, but never more than three steps.
-        #expect(LibraryZoomGesture.steps(projectedScale: 1.22 * 2.6 * 1.01) == 2)
+        #expect(LibraryZoomGesture.steps(projectedScale: 1.22 * 3.0 * 1.01) == 2)
         #expect(LibraryZoomGesture.steps(projectedScale: 2.2) == 1)
         #expect(LibraryZoomGesture.steps(projectedScale: 100) == 3)
         #expect(LibraryZoomGesture.steps(projectedScale: .nan) == 0)
@@ -54,6 +54,8 @@ import Testing
         // A pinch that is coming back loses its step.
         #expect(LibraryZoomGesture.steps(projectedScale: LibraryZoomGesture.projectedScale(scale: 1.3, velocity: -4)) == 0)
         #expect(LibraryZoomGesture.projectedScale(scale: 0, velocity: 1) == 1)
+        // However fast, a pinch that alone is one step does not become two.
+        #expect(LibraryZoomGesture.steps(projectedScale: LibraryZoomGesture.projectedScale(scale: 2.2, velocity: 40)) == 1)
     }
 
     @Test func theContentResistsAtTheEndsOfTheLadder() {

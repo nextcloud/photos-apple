@@ -69,9 +69,11 @@ public enum LibraryZoomGesture {
     /// Scale factor of a pinch that commits one step; less springs back.
     public static let commitScale = 1.22
     /// Each further factor of this moves one more step (a long or fast pinch).
-    public static let stepScale = 2.6
+    public static let stepScale = 3.0
     /// Seconds of the pinch's speed that are carried on after the release.
     public static let momentum = 0.12
+    /// The most the speed adds (in log scale, a factor of 1.42): enough to commit a short quick pinch, not to skip levels.
+    public static let maximumMomentum = 0.35
     /// No pinch moves more than this many steps.
     public static let maximumSteps = 3
 
@@ -83,7 +85,8 @@ public enum LibraryZoomGesture {
         guard scale.isFinite, scale > 0 else { return 1 }
         let speed = velocity.isFinite ? velocity : 0
         // In log space, so that pinching in and out are symmetric.
-        let logScale = log(scale) + (speed / scale) * momentum
+        let carried = min(max((speed / scale) * momentum, -maximumMomentum), maximumMomentum)
+        let logScale = log(scale) + carried
         return exp(min(max(logScale, -4), 4))
     }
 

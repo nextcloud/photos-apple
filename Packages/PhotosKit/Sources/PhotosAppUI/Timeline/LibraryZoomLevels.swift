@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import OSLog
 import PhotosCore
 import PhotosDomain
 import PhotosModel
@@ -47,11 +48,15 @@ final class LibraryZoomModel {
     @ObservationIgnored var gridTopItem: @MainActor () -> FileID? = { nil }
     /// Changes the grid's zoom step (set by the timeline screen).
     @ObservationIgnored var setGridStep: @MainActor (Int) -> Void = { _ in }
+    /// When the last pinch on a summary level ended; taps right after it are the fingers lifting, not taps.
+    @ObservationIgnored var pinchEnded: ContinuousClock.Instant?
+    var acceptsTaps: Bool { pinchEnded.map { ContinuousClock.now - $0 > .milliseconds(500) } ?? true }
     @ObservationIgnored private var builtRevision = -1
     @ObservationIgnored private var building: Task<Void, Never>?
     @ObservationIgnored private let defaults: UserDefaults
 
     let ladder = LibraryZoomLadder(gridSteps: GridColumns.options)
+    static let logger = Logger(subsystem: "com.nextcloud.photos", category: "zoom")
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -98,6 +103,7 @@ final class LibraryZoomModel {
     ) {
         guard steps != 0, level != .all else { return }
         let target = ladder.moved(stop(for: level, gridStep: lastGridStep), by: steps)
+        Self.logger.debug("zoom from \(level.rawValue, privacy: .public) by \(steps) to \(target.level.rawValue, privacy: .public)")
         anchor = point
         zoomedIn = steps > 0
         if case .grid = target {
@@ -412,15 +418,15 @@ struct LibrarySummaryView: View {
         switch level {
         case .years:
             SummaryCard(bucket: bucket, title: DayLabel.yearLabel(for: bucket.date), aspect: 4 / 3, large: true) {
-                zoom(by: 1, bucket: bucket, at: anchor(of: bucket))
+                tap(bucket, at: anchor(of: bucket))
             }
         case .months:
             SummaryCard(bucket: bucket, title: DayLabel.monthYearLabel(for: bucket.date), aspect: 1, large: false) {
-                zoom(by: 1, bucket: bucket, at: anchor(of: bucket))
+                tap(bucket, at: anchor(of: bucket))
             }
         default:
             DayMosaic(bucket: bucket) { photo in
-                zoom(by: 1, bucket: bucket, photo: photo, at: anchor(of: bucket))
+                tap(bucket, photo: photo, at: anchor(of: bucket))
             }
         }
     }
@@ -428,6 +434,13 @@ struct LibrarySummaryView: View {
     func anchor(of bucket: LibrarySummary.Bucket) -> UnitPoint {
         guard let frame = frames.frames[bucket.id], size.width > 0, size.height > 0 else { return .center }
         return UnitPoint(x: frame.midX / size.width, y: min(max(frame.minY / size.height, 0), 1))
+    }
+
+    /// A tap on a card zooms into it, unless it is the end of a pinch: the lifted fingers would tap a card of the level
+    /// the pinch just arrived at.
+    func tap(_ bucket: LibrarySummary.Bucket, photo: FileID? = nil, at point: UnitPoint) {
+        guard pinchStart == nil, model.acceptsTaps else { return }
+        zoom(by: 1, bucket: bucket, photo: photo, at: point)
     }
 
     func zoom(by steps: Int, bucket: LibrarySummary.Bucket?, photo: FileID? = nil, at point: UnitPoint) {
@@ -451,9 +464,12 @@ struct LibrarySummaryView: View {
             .onEnded { value in
                 let projected = LibraryZoomGesture.projectedScale(scale: Double(value.magnification), velocity: Double(value.velocity))
                 let steps = LibraryZoomGesture.steps(projectedScale: projected)
+                LibraryZoomModel.logger.debug(
+                    "pinch ended: scale \(Double(value.magnification)), velocity \(Double(value.velocity)), steps \(steps)")
                 let start = pinchStart ?? value.startLocation
                 let bucket = frames.card(at: start).flatMap { id in buckets.first { $0.id == id } } ?? topBucket
                 pinchStart = nil
+                model.pinchEnded = .now
                 withAnimation(.smooth(duration: 0.3)) { pinch = 1 }
                 guard steps != 0, steps > 0 || level != .years else { return }
                 LibraryZoomHaptics.trackpadLevelChange()
