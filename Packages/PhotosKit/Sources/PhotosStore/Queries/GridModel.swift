@@ -22,15 +22,22 @@ public struct GridSection: Hashable, Sendable, Identifiable {
     public var year: Int?
     /// Range into `GridModel.items`.
     public var range: Range<Int>
+    /// Tiles after the items that stand for photos not loaded yet (`TimelineSkeleton`, during the first sync). They
+    /// have no item: the grid draws an empty tile.
+    public var placeholders: Int
 
-    public init(id: Int, kind: Kind, date: Date, startsMonth: Bool, year: Int?, range: Range<Int>) {
+    public init(id: Int, kind: Kind, date: Date, startsMonth: Bool, year: Int?, range: Range<Int>, placeholders: Int = 0) {
         self.id = id
         self.kind = kind
         self.date = date
         self.startsMonth = startsMonth
         self.year = year
         self.range = range
+        self.placeholders = placeholders
     }
+
+    /// Tiles of the section: its items and its placeholders.
+    public var tileCount: Int { range.count + placeholders }
 }
 
 /// How a grid cuts its items into sections.
@@ -47,37 +54,49 @@ public struct GridModel: Sendable {
     public private(set) var items: [GridMedia]
     public private(set) var sections: [GridSection]
     public private(set) var sectioning: GridSectioning
+    /// The month counts the timeline is completed with while the first sync runs; nil otherwise.
+    public private(set) var skeleton: TimelineSkeleton?
     private var indexById: [FileID: Int]
 
     public static let empty = GridModel(items: [], sectioning: .flat)
 
-    public init(items: [GridMedia], sectioning: GridSectioning, calendar: Calendar = .current) {
+    public init(items: [GridMedia], sectioning: GridSectioning, skeleton: TimelineSkeleton? = nil, calendar: Calendar = .current) {
         self.items = items
         self.sectioning = sectioning
-        sections = Self.makeSections(items, sectioning: sectioning, calendar: calendar)
+        self.skeleton = skeleton
+        sections = Self.makeSections(items, sectioning: sectioning, skeleton: skeleton, calendar: calendar)
         var index: [FileID: Int] = [:]
         index.reserveCapacity(items.count)
         for (position, item) in items.enumerated() where index[item.fileId] == nil { index[item.fileId] = position }
         indexById = index
     }
 
-    /// The same items cut differently (zoom changed the granularity): only the sections are rebuilt.
-    public func resectioned(_ sectioning: GridSectioning, calendar: Calendar = .current) -> GridModel {
-        guard sectioning != self.sectioning else { return self }
+    /// The same items cut differently (zoom changed the granularity, the skeleton came or went): only the sections are
+    /// rebuilt.
+    public func resectioned(_ sectioning: GridSectioning, skeleton: TimelineSkeleton?, calendar: Calendar = .current) -> GridModel {
+        guard sectioning != self.sectioning || skeleton != self.skeleton else { return self }
         var copy = self
         copy.sectioning = sectioning
-        copy.sections = Self.makeSections(items, sectioning: sectioning, calendar: calendar)
+        copy.skeleton = skeleton
+        copy.sections = Self.makeSections(items, sectioning: sectioning, skeleton: skeleton, calendar: calendar)
         return copy
     }
 
-    static func makeSections(_ items: [GridMedia], sectioning: GridSectioning, calendar: Calendar) -> [GridSection] {
+    /// The same items cut differently, with the same skeleton.
+    public func resectioned(_ sectioning: GridSectioning, calendar: Calendar = .current) -> GridModel {
+        resectioned(sectioning, skeleton: skeleton, calendar: calendar)
+    }
+
+    static func makeSections(
+        _ items: [GridMedia], sectioning: GridSectioning, skeleton: TimelineSkeleton?, calendar: Calendar
+    ) -> [GridSection] {
         switch sectioning {
         case .flat:
             guard !items.isEmpty, let first = items.first else { return [] }
             return [GridSection(id: 0, kind: .flat, date: first.timestamp, startsMonth: false, year: nil, range: 0..<items.count)]
         case .timeline(let granularity):
             let months = TimelineSections.group(items, calendar: calendar) { $0.timestamp }
-            return TimelineSections.sections(of: months, granularity: granularity).map { section in
+            let sections = TimelineSections.sections(of: months, granularity: granularity).map { section in
                 let kind: GridSection.Kind =
                     switch section.granularity {
                     case .day: .day
@@ -88,12 +107,45 @@ public struct GridModel: Sendable {
                     id: section.id, kind: kind, date: section.date, startsMonth: section.startsMonth, year: section.year,
                     range: section.range)
             }
+            guard let skeleton, !skeleton.isEmpty else { return sections }
+            return completed(sections, itemCount: items.count, skeleton: skeleton, granularity: granularity, calendar: calendar)
         }
+    }
+
+    /// The loaded sections with the skeleton's placeholders after them: the rest of the oldest loaded month as
+    /// placeholder tiles of the last section, and a section of placeholder tiles for every older month (or year).
+    /// Months at day granularity get a month section, with the id `YYYYMM00`, so that ids still go down.
+    static func completed(
+        _ loaded: [GridSection], itemCount: Int, skeleton: TimelineSkeleton, granularity: TimelineGranularity, calendar: Calendar
+    ) -> [GridSection] {
+        var sections = loaded
+        let lastBucket = loaded.last.map { TimelineSkeleton.bucket(ofSectionId: $0.id, granularity: granularity) }
+        var loadedInLast = 0
+        if let lastBucket {
+            for section in loaded.reversed() {
+                guard TimelineSkeleton.bucket(ofSectionId: section.id, granularity: granularity) == lastBucket else { break }
+                loadedInLast += section.range.count
+            }
+        }
+        let missing = skeleton.placeholders(granularity: granularity, lastBucket: lastBucket, loadedInLastBucket: loadedInLast)
+        if missing.trailing > 0, !sections.isEmpty { sections[sections.count - 1].placeholders = missing.trailing }
+        for bucket in missing.older {
+            let year = granularity == .year ? bucket.key : bucket.key / 100
+            let month = granularity == .year ? 1 : bucket.key % 100
+            let date = calendar.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date(timeIntervalSince1970: 0)
+            sections.append(
+                GridSection(
+                    id: granularity == .day ? bucket.key * 100 : bucket.key, kind: granularity == .year ? .year : .month, date: date,
+                    startsMonth: true, year: year, range: itemCount..<itemCount, placeholders: bucket.count))
+        }
+        return sections
     }
 
     // MARK: Lookup
 
     public var isEmpty: Bool { items.isEmpty }
+    /// The grid has something to show: items, or the skeleton's placeholder tiles.
+    public var hasTiles: Bool { !sections.isEmpty }
     public var count: Int { items.count }
     public var hasHeaders: Bool { sectioning != .flat }
 
@@ -111,8 +163,9 @@ public struct GridModel: Sendable {
         return item >= 0 && index < range.upperBound ? items[index] : nil
     }
 
+    /// Tiles of a section, placeholders included.
     public func numberOfItems(inSection section: Int) -> Int {
-        sections.indices.contains(section) ? sections[section].range.count : 0
+        sections.indices.contains(section) ? sections[section].tileCount : 0
     }
 
     /// Position of a flat index as (section, item).
@@ -220,6 +273,7 @@ public struct GridModel: Sendable {
                 let after = sections[newIndex]
                 if before.kind != after.kind || before.date != after.date || before.startsMonth != after.startsMonth
                     || before.year != after.year || before.range.count != after.range.count
+                    || before.placeholders != after.placeholders
                 {
                     changes.reloaded.insert(oldIndex)
                 } else {

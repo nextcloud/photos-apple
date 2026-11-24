@@ -38,6 +38,14 @@ struct TimelineScreen: View {
         Query(kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [])
     }
 
+    /// While the first sync runs, the whole library's shape from the server's month counts (extended Photos API): the
+    /// grid and its year index reach back to the oldest photo before it is loaded. Only for the unfiltered library,
+    /// which is what the counts are of. Stock servers have no counts: the grid shows what is loaded.
+    var skeleton: TimelineSkeleton? {
+        guard mediaKind == .all, case .initialSync = session.syncStatus else { return nil }
+        return session.initialSyncSkeleton
+    }
+
     init(filter: MediaFilter) {
         self.filter = filter
         _mediaKind = State(initialValue: filter)
@@ -102,6 +110,7 @@ struct TimelineScreen: View {
             gridSelection = state
         }
         .task(id: query) { observe() }
+        .onChange(of: skeleton, initial: true) { _, skeleton in feed.setSkeleton(skeleton) }
         .dropDestination(for: URL.self) { urls, _ in
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
