@@ -89,5 +89,10 @@ The app has no accessibility identifiers yet; the tests find elements by role an
 the app in English. They are not part of CI because they need a server and, for now, have only been compiled
 (`build-for-testing` for macOS and iOS), not run.
 
+`UITests/MemoryFilmTourTests.swift` (iPhone and iPad) plays a memory as a film (title card, scrubbing, skip, landscape),
+exports it as a video, plays a trip and swipes through the year in review; `PHOTOS_UITEST_SHOTS=<directory>` writes a
+screenshot and the accessibility tree of each step there, `PHOTOS_UITEST_TRIP=<part of a trip's title>` picks the trip
+(one with stops more than 30 km apart shows the map flights). Run in the iOS 27.2 simulator.
+
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
