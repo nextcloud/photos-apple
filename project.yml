@@ -103,6 +103,12 @@ targets:
           # not known at build time. The app asks before it signs in over http and before it trusts an unknown
           # certificate. App Review justification: docs/PRIVACY-AND-EXPORT.md.
           NSAllowsArbitraryLoads: true
+        # A photo of the library dragged between the app's windows (`LibraryItemReference`); never leaves the app.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.nextcloud.photos.library-item
+            UTTypeDescription: Nextcloud Photos library item
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification: {}
         CFBundleURLTypes:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]

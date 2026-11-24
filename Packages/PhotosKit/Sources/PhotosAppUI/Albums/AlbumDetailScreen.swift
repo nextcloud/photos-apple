@@ -142,10 +142,19 @@ struct AlbumDetailScreen: View {
         } message: {
             Text(error ?? "")
         }
-        .dropDestination(for: URL.self) { urls, _ in
+        .dropDestination(for: AlbumDrop.self) { drops, _ in
             guard isOwn else { return false }
-            session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) }, album: album)
-            return true
+            // Photos of the library (from a grid in another window) are added as they are; files are uploaded into it.
+            let (fileIds, files) = AlbumDrop.split(drops, account: session.account.id.rawValue)
+            if !files.isEmpty {
+                session.transfers.upload(files.map { UploadSource(file: $0, isTemporary: false) }, album: album)
+            }
+            let items: [MediaItem] = fileIds.compactMap { try? session.services?.library.item($0) }
+            if !items.isEmpty {
+                let album = album
+                Task { await session.addToAlbum(items, album: album) }
+            }
+            return !files.isEmpty || !items.isEmpty
         }
     }
 
