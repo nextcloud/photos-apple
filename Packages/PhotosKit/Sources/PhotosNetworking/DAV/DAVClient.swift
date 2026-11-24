@@ -88,14 +88,21 @@ public struct DAVClient: Sendable {
     }
 
     /// Creates every missing folder of a user path (`/a/b/c`), ignoring existing ones.
+    ///
+    /// Several requests may create the same folder at once (the outbox archives a few photos of one folder side by side):
+    /// Nextcloud answers the one that loses the race with 403 "Could not create directory". A folder that exists after a
+    /// failed `MKCOL` counts as created.
     public func mkcolRecursive(userPath: String) async throws {
         var current = ""
         for component in userPath.split(separator: "/") {
             current += "/\(component)"
+            let url = connection.filesURL(current)
             do {
-                try await mkcol(connection.filesURL(current))
+                try await mkcol(url)
             } catch NetworkError.conflict {
                 continue  // 405: exists
+            } catch {
+                guard (try? await propfind(url, depth: 0, properties: [DAVProp.resourceType]))?.isEmpty == false else { throw error }
             }
         }
     }

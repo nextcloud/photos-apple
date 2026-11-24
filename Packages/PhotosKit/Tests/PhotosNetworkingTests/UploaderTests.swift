@@ -65,6 +65,20 @@ import Testing
 
     var chunkPuts: [String] { server.lines.filter { $0.hasPrefix("PUT /uploads/") }.map { String($0.split(separator: "/").last ?? "") } }
 
+    // MARK: Folders
+
+    /// Two requests create the same folder at once (the outbox archives several photos of one folder side by side): the
+    /// one that loses gets 403 "Could not create directory" from Nextcloud. The folder is there, so that is no failure.
+    @Test func aFolderCreatedMeanwhileByAnotherRequestCounts() async throws {
+        server.fail("MKCOL", suffix: "/Photos", with: .status(403), sideEffect: { $0.folders.insert("/Photos") })
+        try await server.dav.mkcolRecursive(userPath: "/Photos/2026")
+        #expect(server.state.withLock { $0.folders.isSuperset(of: ["/Photos", "/Photos/2026"]) })
+
+        // Refused for another reason (the folder is not there): still an error.
+        server.fail("MKCOL", suffix: "/Other", with: .status(403))
+        await #expect(throws: NetworkError.forbidden(message: nil)) { try await server.dav.mkcolRecursive(userPath: "/Other/2026") }
+    }
+
     // MARK: Retry
 
     @Test func aSmallFileIsSentAgainAfterATimeout() async throws {
