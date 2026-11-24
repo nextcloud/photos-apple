@@ -19,6 +19,34 @@ struct ImportLibrarySheet: View {
 
     static let allowedTypes: [UTType] = [.folder, .zip, .json, .commaSeparatedText, .image, .movie]
 
+    /// Debug builds: `PHOTOS_DEBUG_IMPORT=<folder or ZIP>` opens the import at launch and reads it (screenshots, UI
+    /// tests); `PHOTOS_DEBUG_IMPORT_DESTINATION` sets the server folder, `PHOTOS_DEBUG_IMPORT_START=1` starts at once.
+    static var debugExport: URL? {
+        #if DEBUG
+            if let path = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_IMPORT"], !path.isEmpty {
+                return URL(fileURLWithPath: path)
+            }
+        #endif
+        return nil
+    }
+
+    @State private var debugStarted = false
+
+    /// Reads (and starts) the debug export once.
+    func runDebugImport() {
+        #if DEBUG
+            guard !debugStarted, let url = Self.debugExport, controller.stage == .choose else { return }
+            debugStarted = true
+            let environment = ProcessInfo.processInfo.environment
+            controller.read([url], session: session)
+            Task {
+                while controller.stage == .reading { try? await Task.sleep(for: .milliseconds(200)) }
+                if let destination = environment["PHOTOS_DEBUG_IMPORT_DESTINATION"] { controller.options.destination = destination }
+                if environment["PHOTOS_DEBUG_IMPORT_START"] == "1", controller.stage == .ready { controller.start(session: session) }
+            }
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             content
@@ -31,6 +59,7 @@ struct ImportLibrarySheet: View {
                     guard case .success(let urls) = result, !urls.isEmpty else { return }
                     controller.read(urls, session: session)
                 }
+                .onAppear { runDebugImport() }
         }
         #if os(macOS)
             .frame(minWidth: 600, idealWidth: 660, minHeight: 600, idealHeight: 700)
@@ -66,7 +95,8 @@ struct ImportLibrarySheet: View {
         ToolbarItem(placement: .cancellationAction) {
             switch controller.stage {
             case .running:
-                Button(String(localized: "Stop Import", bundle: .module, comment: "Import: stops the running import (it can be resumed).")) {
+                Button(String(localized: "Stop Import", bundle: .module, comment: "Import: stops the running import (it can be resumed)."))
+                {
                     controller.cancel()
                 }
             case .finished where controller.progress.phase == .finished:
@@ -139,7 +169,8 @@ struct ImportChooseView: View {
             Guide(
                 source: .instagram, symbol: "camera",
                 steps: String(
-                    localized: "In Instagram's Accounts Center, choose “Download your information”, the format JSON and high media quality.",
+                    localized:
+                        "In Instagram's Accounts Center, choose “Download your information”, the format JSON and high media quality.",
                     bundle: .module, comment: "Import: how to get the Instagram export. Keep “JSON” untranslated."),
                 link: URL(string: "https://accountscenter.instagram.com/info_and_permissions/dyi/")!),
         ]
@@ -158,26 +189,6 @@ struct ImportChooseView: View {
                 #if os(macOS)
                     libraryCard
                 #endif
-                VStack(spacing: 8) {
-                    Button {
-                        choosing = true
-                    } label: {
-                        Label(
-                            String(localized: "Choose Export Files…", bundle: .module, comment: "Import: the button that opens the file picker."),
-                            systemImage: "folder"
-                        )
-                        .frame(maxWidth: 360)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    Text(
-                        "Choose the ZIP files as they are, or the folder they were unpacked into. You can choose exports of several services at once.",
-                        bundle: .module, comment: "Import: below the file picker button."
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                }
                 if let error = controller.error {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.callout)
                 }
@@ -185,6 +196,37 @@ struct ImportChooseView: View {
             .padding()
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
+        }
+        // The one thing to do here stays in reach while the guides scroll.
+        .safeAreaInset(edge: .bottom) {
+            chooseButton
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+        }
+    }
+
+    var chooseButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                choosing = true
+            } label: {
+                Label(
+                    String(localized: "Choose Export Files…", bundle: .module, comment: "Import: the button that opens the file picker."),
+                    systemImage: "folder"
+                )
+                .frame(maxWidth: 360)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            Text(
+                "Choose the ZIP files as they are, or the folder they were unpacked into. You can choose exports of several services at once.",
+                bundle: .module, comment: "Import: below the file picker button."
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
         }
     }
 
@@ -226,7 +268,9 @@ struct ImportChooseView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label(String(localized: "Unfinished import", bundle: .module, comment: "Import: title of the resume card."), systemImage: "clock.arrow.circlepath")
+            Label(
+                String(localized: "Unfinished import", bundle: .module, comment: "Import: title of the resume card."),
+                systemImage: "clock.arrow.circlepath")
         }
     }
 
@@ -236,9 +280,11 @@ struct ImportChooseView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(
                         "Imports every photo and video of the Photos app on this Mac, originals kept in iCloud included, with favourites and albums.",
-                        bundle: .module, comment: "Import (Mac): what importing the Photos library does.")
+                        bundle: .module, comment: "Import (Mac): what importing the Photos library does."
+                    )
                     .foregroundStyle(.secondary)
-                    Button(String(localized: "Import Photos Library", bundle: .module, comment: "Import (Mac): reads the Photos library.")) {
+                    Button(String(localized: "Import Photos Library", bundle: .module, comment: "Import (Mac): reads the Photos library."))
+                    {
                         Task {
                             let status = await PhotoLibrarySource.requestAuthorization()
                             guard status == .authorized || status == .limited else {
@@ -383,7 +429,7 @@ struct ImportReviewForm: View {
                         Text(name).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
                 } label: {
-                    LabeledContent(ImportSummary.explanation(of: reason), value: (plan.skipped[reason] ?? 0).formatted())
+                    SkipReasonLabel(reason: reason, count: plan.skipped[reason] ?? 0)
                 }
             }
         } header: {
@@ -408,7 +454,8 @@ struct ImportReviewForm: View {
                 .foregroundStyle(.orange)
             }
             Toggle(
-                String(localized: "A folder per service", bundle: .module, comment: "Import option: Google Photos, iCloud Photos… folders."),
+                String(
+                    localized: "A folder per service", bundle: .module, comment: "Import option: Google Photos, iCloud Photos… folders."),
                 isOn: $controller.options.folderPerSource)
             Toggle(String(localized: "Sort into a folder per year", bundle: .module), isOn: $controller.options.yearSubfolders)
             Toggle(String(localized: "Create albums", bundle: .module), isOn: $controller.options.createAlbums)
@@ -491,7 +538,8 @@ struct ImportRunningView: View {
                     if progress.failed > 0 { row(String(localized: "Could not be uploaded", bundle: .module), progress.failed) }
                     if progress.bytesTotal > 0 {
                         GridRow {
-                            Text("Data", bundle: .module, comment: "Import progress: amount of data handled so far.").foregroundStyle(.secondary)
+                            Text("Data", bundle: .module, comment: "Import progress: amount of data handled so far.").foregroundStyle(
+                                .secondary)
                             Text("\(Formatters.bytes(Int64(progress.bytesDone))) / \(Formatters.bytes(Int64(progress.bytesTotal)))")
                                 .monospacedDigit()
                         }
@@ -527,7 +575,8 @@ struct ImportRunningView: View {
                 localized: "You can close this window; the import goes on while the app is open.", bundle: .module)
         #else
             String(
-                localized: "You can leave the app: the import goes on and shows its progress. If it is stopped, it continues where it stopped.",
+                localized:
+                    "You can leave the app: the import goes on and shows its progress. If it is stopped, it continues where it stopped.",
                 bundle: .module, comment: "Import (iPhone, iPad): the import runs in the background.")
         #endif
     }
@@ -571,7 +620,8 @@ struct PreviewStack: View {
                 PreviewTile(data: data)
                     .rotationEffect(.degrees(Double(offset - previews.count + 1) * 6))
                     .offset(x: CGFloat(offset - previews.count + 1) * 14)
-                    .transition(reduceMotion ? .opacity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                    .transition(
+                        reduceMotion ? .opacity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
             }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.3), value: previews)
@@ -602,5 +652,23 @@ struct PreviewTile: View {
         #else
             UIImage(data: data).map { Image(uiImage: $0) }
         #endif
+    }
+}
+
+/// A reason things were left out, with its count at the end of the first line (also for long, wrapping reasons).
+struct SkipReasonLabel: View {
+    let reason: ImportSkipReason
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(ImportSummary.explanation(of: reason))
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(count.formatted())
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

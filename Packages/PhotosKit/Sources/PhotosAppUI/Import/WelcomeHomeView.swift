@@ -66,7 +66,8 @@ struct WelcomeHomeView: View {
                 if reportURL != nil {
                     Text(
                         "The report is also in \(summary.destination) on your Nextcloud.", bundle: .module,
-                        comment: "Import summary: where the uploaded report is. The value is a folder path.")
+                        comment: "Import summary: where the uploaded report is. The value is a folder path."
+                    )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
@@ -121,21 +122,29 @@ struct WelcomeHomeView: View {
         }
     }
 
+    /// One chip per source: in a row when they fit, otherwise two per line.
     var sourceChips: some View {
-        HStack(spacing: 8) {
-            ForEach(summary.sources) { entry in
-                Label {
-                    Text("\(ImportSummary.title(of: entry.source)) \(entry.count.formatted())")
-                } icon: {
-                    Image(systemName: ImportSourceStyle.symbol(entry.source))
-                }
-                .font(.footnote)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.6), in: Capsule())
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { chips }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) { chips }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder var chips: some View {
+        ForEach(summary.sources) { entry in
+            Label {
+                Text("\(ImportSummary.title(of: entry.source)) \(entry.count.formatted())")
+                    .lineLimit(1)
+            } icon: {
+                Image(systemName: ImportSourceStyle.symbol(entry.source))
+            }
+            .font(.footnote)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.6), in: Capsule())
+        }
     }
 
     var details: some View {
@@ -145,7 +154,8 @@ struct WelcomeHomeView: View {
                 line(String(localized: "Already on your Nextcloud", bundle: .module, comment: "Import summary line."), summary.alreadyThere)
                 if summary.copiesInExports > 0 {
                     line(
-                        String(localized: "Copies imported once", bundle: .module, comment: "Import summary line."), summary.copiesInExports)
+                        String(localized: "Copies imported once", bundle: .module, comment: "Import summary line."), summary.copiesInExports
+                    )
                 }
                 if summary.favorites > 0 { line(String(localized: "Favourites", bundle: .module), summary.favorites) }
                 if summary.captions > 0 {
@@ -157,7 +167,8 @@ struct WelcomeHomeView: View {
                         summary.metadataAdded)
                 }
                 if summary.archived > 0 {
-                    line(String(localized: "Hidden, now in the archive", bundle: .module, comment: "Import summary line."), summary.archived)
+                    line(
+                        String(localized: "Hidden, now in the archive", bundle: .module, comment: "Import summary line."), summary.archived)
                 }
             }
             .font(.callout)
@@ -171,11 +182,7 @@ struct WelcomeHomeView: View {
                             Text(name).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                     } label: {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(ImportSummary.explanation(of: reason)).font(.callout)
-                            Spacer()
-                            Text((summary.skipped[reason] ?? 0).formatted()).monospacedDigit().foregroundStyle(.secondary)
-                        }
+                        SkipReasonLabel(reason: reason, count: summary.skipped[reason] ?? 0)
                     }
                 }
                 if summary.failed > 0 {
@@ -217,9 +224,9 @@ struct WelcomeHomeView: View {
                 let middle = Double(shownPreviews.count - 1) / 2
                 let position = Double(offset) - middle
                 PreviewTile(data: data)
-                    .scaleEffect(0.75)
-                    .rotationEffect(.degrees(appeared || reduceMotion ? position * 9 : 0))
-                    .offset(x: appeared || reduceMotion ? position * 46 : 0, y: appeared || reduceMotion ? abs(position) * 10 : 40)
+                    .scaleEffect(0.7)
+                    .rotationEffect(.degrees(appeared || reduceMotion ? position * 8 : 0))
+                    .offset(x: appeared || reduceMotion ? position * 30 : 0, y: appeared || reduceMotion ? abs(position) * 8 : 40)
                     .opacity(appeared || reduceMotion ? 1 : 0)
                     .animation(reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.35).delay(Double(offset) * 0.06), value: appeared)
             }

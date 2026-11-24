@@ -116,7 +116,8 @@ enum AppleICloudExport: ExportAdapter {
                 }
                 if let sharedAlbum { found.addAlbum(sharedAlbum, source: source) }
                 let item = ImportItem(
-                    id: ImportItem.key(source: source, name: file.path, size: file.size, takenAt: nil), origin: .file(file), name: file.name,
+                    id: ImportItem.key(source: source, name: file.path, size: file.size, takenAt: nil), origin: .file(file),
+                    name: file.name,
                     size: file.size, kind: kind, source: source, metadata: metadata, albums: sharedAlbum.map { [$0] } ?? [])
                 if found.add(item, index: &index) {
                     if row == nil { found.withoutDetails += 1 }
@@ -172,7 +173,9 @@ enum AppleICloudExport: ExportAdapter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
-        for format in ["EEEE MMMM d,yyyy h:mm a zzz", "EEEE MMMM d, yyyy h:mm a zzz", "MMMM d,yyyy h:mm a zzz", "EEEE MMMM d,yyyy H:mm zzz"] {
+        for format in [
+            "EEEE MMMM d,yyyy h:mm a zzz", "EEEE MMMM d, yyyy h:mm a zzz", "MMMM d,yyyy h:mm a zzz", "EEEE MMMM d,yyyy H:mm zzz",
+        ] {
             formatter.dateFormat = format
             if let date = formatter.date(from: trimmed) { return date }
         }

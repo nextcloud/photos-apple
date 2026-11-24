@@ -29,7 +29,9 @@ enum MetaExport {
     }
 
     /// Folders with conversations: their photos are not the user's to import.
-    static let messageFolders: Set<String> = ["messages", "inbox", "message_requests", "archived_threads", "filtered_threads", "e2ee_cutover"]
+    static let messageFolders: Set<String> = [
+        "messages", "inbox", "message_requests", "archived_threads", "filtered_threads", "e2ee_cutover",
+    ]
     /// Keys whose objects are not media of their own (a video's still, subtitles, other sizes of the same photo).
     static let skippedKeys: Set<String> = ["thumbnail", "subtitles", "media_variants", "dubbing_info", "music_genre"]
 
@@ -330,11 +332,12 @@ enum FacebookExport: ExportAdapter {
     static func read(_ files: ExportFiles, unclaimed: [Int]) throws -> ImportFindings {
         let flavor = MetaExport.Flavor.facebook
         // An export's root: the folder holding `your_facebook_activity` (or the older folders).
-        let roots = Set(unclaimed.compactMap { position -> String? in
-            let file = files.files[position]
-            guard file.pathExtension == "json" else { return nil }
-            return MetaExport.root(of: file.path, flavor: flavor)
-        })
+        let roots = Set(
+            unclaimed.compactMap { position -> String? in
+                let file = files.files[position]
+                guard file.pathExtension == "json" else { return nil }
+                return MetaExport.root(of: file.path, flavor: flavor)
+            })
         return try MetaExport.read(files, unclaimed: unclaimed, flavor: flavor, roots: roots) { path, object in
             describe(path, object)
         }
@@ -350,7 +353,9 @@ enum FacebookExport: ExportAdapter {
         if name.hasPrefix("trash") || name.hasPrefix("recently_deleted") { return (nil, true, false) }
         if name.hasPrefix("archive") { return (nil, false, true) }
         // Posts, uncategorized photos, videos, stories, profile and cover photos, group posts: the user's own media.
-        let ownMedia = ["your_posts", "your_uncategorized_photos", "your_videos", "archived_stories", "your_stories", "profile_", "your_group"]
+        let ownMedia = [
+            "your_posts", "your_uncategorized_photos", "your_videos", "archived_stories", "your_stories", "profile_", "your_group",
+        ]
         if ownMedia.contains(where: { name.hasPrefix($0) }) || components.contains("posts") || components.contains("stories") {
             return (nil, false, false)
         }
@@ -425,7 +430,9 @@ enum InstagramExport: ExportAdapter {
             }
             found.claimed.insert(position)
             let root = file.directory
-            for (key, album) in [("photos", nil), ("videos", nil), ("stories", storiesAlbum), ("profile", profileAlbum)] as [(String, String?)] {
+            for (key, album) in [("photos", nil), ("videos", nil), ("stories", storiesAlbum), ("profile", profileAlbum)]
+                as [(String, String?)]
+            {
                 for entry in object[key] as? [[String: Any]] ?? [] {
                     guard let path = entry["path"] as? String, ExportFiles.kind(of: path) != nil else { continue }
                     let reference = root.isEmpty ? path : root + "/" + path

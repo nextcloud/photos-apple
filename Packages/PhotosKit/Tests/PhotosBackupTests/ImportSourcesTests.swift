@@ -4,6 +4,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import Synchronization
 import Testing
 import UniformTypeIdentifiers
 
@@ -115,7 +116,9 @@ enum ImportFixtures {
         try fixture.write("your_facebook_activity/messages/inbox/anna_123/photos/9.jpg", Data(repeating: 9, count: 300))
         try fixture.write(
             "your_facebook_activity/messages/inbox/anna_123/message_1.json",
-            json(#"{"messages":[{"photos":[{"uri":"your_facebook_activity/messages/inbox/anna_123/photos/9.jpg","creation_timestamp":1}]}]}"#))
+            json(
+                #"{"messages":[{"photos":[{"uri":"your_facebook_activity/messages/inbox/anna_123/photos/9.jpg","creation_timestamp":1}]}]}"#
+            ))
     }
 
     /// Instagram 2025–2026: a post with two photos (caption on the post), a single WebP post (caption on the photo), a story,
@@ -148,10 +151,14 @@ enum ImportFixtures {
             json(#"{"ig_profile_picture":[{"uri":"media/other/p1.jpg","creation_timestamp":1600000000,"title":""}]}"#))
         try fixture.write(
             "\(index)/archived_posts.json",
-            json(#"{"ig_archived_post_media":[{"media":[{"uri":"media/archived_posts/202301/a1.jpg","creation_timestamp":1672600000,"title":"old"}]}]}"#))
+            json(
+                #"{"ig_archived_post_media":[{"media":[{"uri":"media/archived_posts/202301/a1.jpg","creation_timestamp":1672600000,"title":"old"}]}]}"#
+            ))
         try fixture.write(
             "\(index)/recently_deleted_content.json",
-            json(#"{"ig_recently_deleted_media":[{"media":[{"uri":"media/recently_deleted/202401/d1.jpg","creation_timestamp":1704300000,"title":""}]}]}"#))
+            json(
+                #"{"ig_recently_deleted_media":[{"media":[{"uri":"media/recently_deleted/202401/d1.jpg","creation_timestamp":1704300000,"title":""}]}]}"#
+            ))
     }
 }
 
@@ -356,7 +363,8 @@ enum ImportFixtures {
         metadata.originalWidth = width
         metadata.originalHeight = height
         return ImportItem(
-            origin: .file(ExportFiles.File(path: name, size: size)), name: name, size: size, kind: .image, source: source, metadata: metadata)
+            origin: .file(ExportFiles.File(path: name, size: size)), name: name, size: size, kind: .image, source: source,
+            metadata: metadata)
     }
 
     func candidate(_ name: String, size: Int64, at seconds: TimeInterval, width: Int? = nil, height: Int? = nil, id: FileID = 1)
@@ -483,7 +491,7 @@ enum ImportFixtures {
         #expect(!summary.nothingLost, "a photo the export names is missing")
         #expect(summary.notImported == 1)
         let report = summary.reportText()
-        #expect(report.contains("3 photos and videos · 1 albums · from 2023"))
+        #expect(report.contains("3 photos and videos · 1 album · from 2023"), "English plurals")
         #expect(report.contains("missing.jpg"))
         let url = try #require(await importer.writeReport(summary, upload: true))
         #expect(try String(contentsOf: url, encoding: .utf8) == report)
@@ -515,6 +523,66 @@ enum ImportFixtures {
         #expect(remote.state.withLock { $0.favorites } == ["/Photos/2024/IMG_0001.HEIC"], "the server's copy becomes a favourite")
         let hidden = try #require(remote.state.withLock { $0.uploads.first { $0.name == "IMG_0002.JPG" } })
         #expect(hidden.folder == "/.archive/Photos/iCloud Photos/2024")
+    }
+
+    @Test func uploadsSeveralFilesAtATimeEachOnce() async throws {
+        let fixture = try TakeoutFixture()
+        defer { fixture.remove() }
+        for index in 0..<12 {
+            try fixture.write("Takeout/Google Photos/Photos from 2020/IMG_\(index).jpg", Data(repeating: UInt8(index), count: 100 + index))
+            try fixture.sidecar("Takeout/Google Photos/Photos from 2020/IMG_\(index).jpg.json", time: 1_590_000_000 + index * 60)
+        }
+        let files = try ExportFiles.open([fixture.root])
+        let plan = try ImportPlanner.plan(files)
+        let remote = FakeImportRemote()
+        let journal = fixture.root.appending(path: "j")
+        let importer = LibraryImporter(
+            files: files, plan: plan, remote: remote, options: ImportOptions(destination: "/Photos"), journalDirectory: journal,
+            parallelUploads: 4)
+        let result = await importer.run { _ in }
+        #expect(result.phase == .finished)
+        #expect(result.uploaded == 12 && result.processed == 12)
+        #expect(Set(remote.state.withLock { $0.uploads.map(\.name) }).count == 12)
+        #expect(remote.state.withLock { $0.uploads.count } == 12)
+        #expect(ImportJournal.load(from: journal, planKey: plan.key)?.completed == 12)
+    }
+
+    @Test func photosLibraryItemsAreExportedOneAtATime() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "library-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resource = BackupResource(
+            localIdentifier: "A1/L0/001", kind: .photo, mediaKind: .image, originalName: "IMG_0042.HEIC",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000), pixelWidth: 40, pixelHeight: 30, byteSize: 100)
+        var metadata = ImportMetadata(takenAt: resource.createdAt, favorite: true, hidden: true)
+        metadata.latitude = 47.4
+        metadata.longitude = 8.5
+        let item = ImportItem(
+            id: "photosLibrary|A1/L0/001|photo", origin: .asset(resource), name: resource.originalName, size: 100, kind: .image,
+            source: .photosLibrary, metadata: metadata, albums: ["Garden"])
+        let plan = ImportPlan(items: [item], albums: [ImportAlbum(title: "Garden", source: .photosLibrary)])
+        let exported = Mutex<[String]>([])
+        let remote = FakeImportRemote()
+        let result = await LibraryImporter(
+            files: nil, plan: plan, remote: remote, options: ImportOptions(destination: "/Photos"),
+            journalDirectory: directory.appending(path: "j"), calendar: utc,
+            exportAsset: { resource in
+                exported.withLock { $0.append(resource.localIdentifier) }
+                // As PhotoKit does: a folder of its own that the importer removes afterwards.
+                let folder = directory.appending(path: UUID().uuidString)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let file = folder.appending(path: resource.originalName)
+                try Data(repeating: 1, count: 100).write(to: file)
+                return file
+            }
+        ).run { _ in }
+        #expect(result.phase == .finished && result.uploaded == 1)
+        #expect(exported.withLock { $0 } == ["A1/L0/001"])
+        let upload = try #require(remote.state.withLock { $0.uploads.first })
+        #expect(upload.folder == "/.archive/Photos/Photos Library/2023", "hidden in Photos: into the archive")
+        #expect(remote.state.withLock { $0.favorites } == ["/.archive/Photos/Photos Library/2023/IMG_0042.HEIC"])
+        #expect(remote.state.withLock { $0.albumItems["Garden"] } == ["/.archive/Photos/Photos Library/2023/IMG_0042.HEIC"])
+        let left = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0 != "j" }
+        #expect(left.isEmpty, "the exported file is removed after the upload")
     }
 
     @Test func stopsBeforeTheDeviceRunsFull() async throws {

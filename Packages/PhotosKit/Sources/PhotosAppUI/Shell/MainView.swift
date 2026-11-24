@@ -307,6 +307,7 @@ struct MainView: View {
     func restoreOnce() {
         guard !restored else { return }
         restored = true
+        if ImportLibrarySheet.debugExport != nil { importingLibrary = true }
         if let destination = Self.debugDestination {
             selection = destination
         } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),

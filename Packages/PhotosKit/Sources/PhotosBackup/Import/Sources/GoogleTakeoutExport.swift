@@ -75,7 +75,9 @@ enum GoogleTakeoutExport: ExportAdapter {
             for position in media.sorted(by: { files.files[$0].name < files.files[$1].name }) {
                 let file = files.files[position]
                 var metadata: ImportMetadata?
-                if let sidecar = sidecarOf[position], let read = (try? files.data(of: files.files[sidecar])).flatMap(GoogleTakeoutSidecars.read) {
+                if let sidecar = sidecarOf[position],
+                    let read = (try? files.data(of: files.files[sidecar])).flatMap(GoogleTakeoutSidecars.read)
+                {
                     if read.trashed {
                         found.skip(.deleted, file.name)
                         continue

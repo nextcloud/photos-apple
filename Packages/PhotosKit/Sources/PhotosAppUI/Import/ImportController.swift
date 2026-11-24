@@ -96,7 +96,8 @@ final class ImportController {
         let includeLibrary = includePhotosLibrary
         stage = .reading
         error = nil
-        readingStatus = String(localized: "Reading the exports…", bundle: .module, comment: "Import: status while the chosen files are read.")
+        readingStatus = String(
+            localized: "Reading the exports…", bundle: .module, comment: "Import: status while the chosen files are read.")
         let journalDirectory = Self.journalDirectory(session)
         options.destination = session.features.userConfig.photosLocation
         options.captionsAsComments = session.features.has(.comments)
@@ -130,7 +131,9 @@ final class ImportController {
                 }
                 self.files = files
                 self.plan = plan
-                alreadyDone = journalDirectory.flatMap { ImportJournal.load(from: $0, planKey: plan.key)?.completed } ?? 0
+                // An unfinished import of the same files continues; a finished one is checked against the server again.
+                let journal = journalDirectory.flatMap { ImportJournal.load(from: $0, planKey: plan.key) }
+                alreadyDone = journal?.finishedAt == nil ? journal?.completed ?? 0 : 0
                 stage = .ready
             } catch is CancellationError {
                 stage = .choose
@@ -209,19 +212,18 @@ final class ImportController {
         }
     }
 
+    /// Progress arrives through tasks of their own; one that comes after the end of the run is not shown.
     private func update(_ progress: ImportProgress) {
-        guard stage == .running else { return }
-        if let preview = progress.currentPreview, preview != previews.last {
-            previews.append(preview)
-            if previews.count > 24 { previews.removeFirst(previews.count - 24) }
-        }
+        guard stage == .running, progress.processed >= self.progress.processed else { return }
         self.progress = progress
+        previews = progress.recentPreviews
     }
 
     private func finish(
         _ result: ImportProgress, importer: LibraryImporter, plan: ImportPlan, options: ImportOptions, journalDirectory: URL
     ) async {
         progress = result
+        if !result.recentPreviews.isEmpty { previews = result.recentPreviews }
         let journal = await importer.currentJournal
         let summary = ImportSummary.make(plan: plan, journal: journal, progress: result, options: options)
         self.summary = summary
@@ -279,8 +281,20 @@ final class ImportController {
 
     // MARK: Resuming after a relaunch
 
+    /// The Mac's sandbox keeps access to chosen files across launches only through security-scoped bookmarks
+    /// (`com.apple.security.files.bookmarks.app-scope`); on iPhone and iPad a bookmark of a picked file carries its scope.
+    #if os(macOS)
+        static let bookmarkCreation: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
+        static let bookmarkResolution: URL.BookmarkResolutionOptions = [.withSecurityScope]
+    #else
+        static let bookmarkCreation: URL.BookmarkCreationOptions = []
+        static let bookmarkResolution: URL.BookmarkResolutionOptions = []
+    #endif
+
     private func rememberSession(plan: ImportPlan, in directory: URL) {
-        let bookmarks = urls.compactMap { try? $0.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) }
+        let bookmarks = urls.compactMap {
+            try? $0.bookmarkData(options: Self.bookmarkCreation, includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
         let record = ImportSessionRecord(
             bookmarks: bookmarks, names: urls.map(\.lastPathComponent), includesPhotosLibrary: includePhotosLibrary, options: options,
             planKey: plan.key, total: plan.items.count)
@@ -294,7 +308,9 @@ final class ImportController {
         var urls: [URL] = []
         for bookmark in record.bookmarks {
             var stale = false
-            if let url = try? URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) {
+            if let url = try? URL(
+                resolvingBookmarkData: bookmark, options: Self.bookmarkResolution, relativeTo: nil, bookmarkDataIsStale: &stale)
+            {
                 urls.append(url)
             }
         }

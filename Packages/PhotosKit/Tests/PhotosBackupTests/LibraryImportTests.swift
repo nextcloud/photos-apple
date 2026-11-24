@@ -256,9 +256,19 @@ final class FakeImportRemote: ImportRemote {
         let size = (try? Data(contentsOf: file).count) ?? -1
         let result: UploadedFile = try state.withLock { state in
             if state.failNames.contains(fileName) { throw NetworkError.http(status: 500, message: "boom") }
+            let path = folder + "/" + fileName
+            // The uploader's "same name and size is this file".
+            if let existing = state.candidates.first(where: { $0.path == path && $0.size == Int64(size) }) {
+                return UploadedFile(fileId: existing.fileId, path: path, etag: nil)
+            }
             state.uploads.append((fileName, folder, capturedAt, size))
             state.nextId += 1
-            return UploadedFile(fileId: state.nextId, path: folder + "/" + fileName, etag: nil)
+            // What the server's search finds from now on (the capture time arrives as the file's time).
+            let kind: MediaKind = ExportFiles.kind(of: fileName) ?? .image
+            state.candidates.append(
+                RemoteCandidate(
+                    fileId: state.nextId, path: path, kind: kind, size: Int64(size), capturedAt: nil, modifiedAt: capturedAt ?? Date()))
+            return UploadedFile(fileId: state.nextId, path: path, etag: nil)
         }
         onUpload.withLock { $0 }?()
         return result
@@ -335,7 +345,9 @@ final class FakeImportRemote: ImportRemote {
             journalDirectory: journal, calendar: utc
         ).run { _ in }
         #expect(again.phase == .finished)
-        #expect(again.uploaded == 3 && again.duplicates == 1)
+        // A finished import is checked against the server again: everything is there.
+        #expect(again.duplicates == 3, "found by the server search")
+        #expect(again.uploaded == 1, "the photo without a capture time is found by its name and size where it went")
         #expect(remote.state.withLock { $0.uploads.count } == 3)
         #expect(remote.state.withLock { $0.albumItems["Lisbon - Porto"]?.count } == 1)
     }
@@ -356,8 +368,10 @@ final class FakeImportRemote: ImportRemote {
         running.withLock { $0 = task }
         let first = await task.value
         #expect(first.phase == .cancelled)
-        #expect(remote.state.withLock { $0.uploads.count } == 1)
-        #expect(ImportJournal.load(from: journal, planKey: plan.key)?.completed == 1)
+        // Uploads run a few at a time: those under way when the import stopped may finish; the journal knows each one.
+        let uploadedFirst = remote.state.withLock { $0.uploads.count }
+        #expect(uploadedFirst >= 1 && uploadedFirst < 4)
+        #expect(ImportJournal.load(from: journal, planKey: plan.key)?.completed == uploadedFirst)
 
         remote.onUpload.withLock { $0 = nil }
         let second = await LibraryImporter(files: source, plan: plan, remote: remote, options: options, journalDirectory: journal)

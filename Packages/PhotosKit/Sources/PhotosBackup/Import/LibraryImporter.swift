@@ -70,6 +70,8 @@ public struct ImportProgress: Equatable, Sendable {
     public var currentSource: ImportSourceKind?
     /// A small JPEG of the photo being imported, for the progress screen.
     public var currentPreview: Data?
+    /// Small JPEGs of the last photos imported (at most 12), newest last: the progress screen and the welcome summary.
+    public var recentPreviews: [Data] = []
     /// Failures with their reason, for the summary (at most 50).
     public var failures: [String] = []
 
@@ -170,13 +172,18 @@ public actor LibraryImporter {
     let exportAsset: @Sendable (BackupResource) async throws -> URL
     /// Free space on the device the next file needs beyond its own size.
     let spaceMargin: Int64
+    /// Files uploaded at the same time (each waits for the server between its requests).
+    let parallelUploads: Int
     private var journal: ImportJournal
+    /// The journal of an earlier, finished import of the same plan.
+    private var previous: ImportJournal?
     private var progress = ImportProgress()
+    private var sinceSave = 0
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "import")
 
     init(
         files: ExportFiles?, plan: ImportPlan, remote: any ImportRemote, options: ImportOptions, journalDirectory: URL,
-        calendar: Calendar = .current, spaceMargin: Int64 = 200 << 20,
+        calendar: Calendar = .current, spaceMargin: Int64 = 200 << 20, parallelUploads: Int = 3,
         exportAsset: @escaping @Sendable (BackupResource) async throws -> URL = LibraryImporter.exportFromPhotos
     ) {
         self.files = files
@@ -186,8 +193,17 @@ public actor LibraryImporter {
         self.journalDirectory = journalDirectory
         self.calendar = calendar
         self.spaceMargin = spaceMargin
+        self.parallelUploads = max(1, parallelUploads)
         self.exportAsset = exportAsset
-        journal = ImportJournal.load(from: journalDirectory, planKey: plan.key) ?? ImportJournal(planKey: plan.key)
+        let loaded = ImportJournal.load(from: journalDirectory, planKey: plan.key)
+        if let loaded, loaded.finishedAt != nil {
+            // A finished import of the same files runs again from the start: what is on the server now is looked up
+            // again (the user may have deleted photos since), and only the albums it filled are remembered.
+            previous = loaded
+            journal = ImportJournal(planKey: plan.key)
+        } else {
+            journal = loaded ?? ImportJournal(planKey: plan.key)
+        }
     }
 
     /// For the app: imports into the account behind `api`.
@@ -208,7 +224,7 @@ public actor LibraryImporter {
         try await PhotoLibrarySource().export(resource, settings: PhotosLibraryExport.settings, allowNetwork: true)
     }
 
-    /// Items handled by an earlier run of the same plan.
+    /// Items handled by an earlier, unfinished run of the same plan.
     public var alreadyDone: Int { journal.completed }
 
     /// The journal as it is now (for the summary).
@@ -257,7 +273,7 @@ public actor LibraryImporter {
         }
     }
 
-    func importItems(temporary: URL, onProgress: @Sendable (ImportProgress) -> Void) async throws {
+    func importItems(temporary: URL, onProgress: @escaping @Sendable (ImportProgress) -> Void) async throws {
         var pending: [ImportItem] = []
         for item in plan.items {
             switch journal.entries[item.id]?.state {
@@ -273,43 +289,83 @@ public actor LibraryImporter {
             }
         }
         onProgress(progress)
-        var sinceSave = 0
-        for window in Self.windows(pending) {
-            try Task.checkCancellation()
-            let candidates = try await candidates(for: window)
-            var index = BackupMatcher.Index(candidates: candidates, locals: window.map(ImportMatcher.resource(for:)))
-            for item in window {
+        // One group for the whole import: the uploads of a window go on while the next window is looked up.
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var running = 0
+            for window in Self.windows(pending) {
                 try Task.checkCancellation()
-                progress.currentName = item.name
-                progress.currentSource = item.source
-                onProgress(progress)
-                do {
+                let candidates = try await candidates(for: window)
+                var index = BackupMatcher.Index(candidates: candidates, locals: window.map(ImportMatcher.resource(for:)))
+                for item in window {
+                    try Task.checkCancellation()
                     if let (match, rule) = ImportMatcher.match(item, index: &index, candidates: candidates) {
-                        try await recordDuplicate(item, path: match.path, fileId: match.fileId, rule: rule.rawValue)
-                    } else {
-                        try await importFile(item, temporary: temporary, onProgress: onProgress)
+                        // On the server already (known from the search): nothing to upload.
+                        progress.currentName = item.name
+                        progress.currentSource = item.source
+                        do {
+                            try await recordDuplicate(item, path: match.path, fileId: match.fileId, rule: rule.rawValue)
+                        } catch {
+                            try recordFailure(item, error)
+                        }
+                        finished(item, onProgress: onProgress)
+                        continue
                     }
-                } catch {
-                    if Self.stopsImport(error) { throw error }
-                    logger.error("import: a file failed: \(error.localizedDescription, privacy: .public)")
-                    journal.entries[item.id] = ImportJournal.Entry(state: .failed, error: error.localizedDescription)
-                    progress.failed += 1
-                    if progress.failures.count < 50 { progress.failures.append("\(item.name): \(error.localizedDescription)") }
-                }
-                progress.processed += 1
-                progress.bytesDone += item.size
-                sinceSave += 1
-                if sinceSave >= 20 {
-                    try? journal.save(to: journalDirectory)
-                    sinceSave = 0
+                    if running >= parallelUploads {
+                        try await group.next()
+                        running -= 1
+                    }
+                    try Task.checkCancellation()
+                    group.addTask { try await self.importOne(item, temporary: temporary, onProgress: onProgress) }
+                    running += 1
                 }
             }
+            try await group.waitForAll()
+        }
+        onProgress(progress)
+    }
+
+    /// Uploads one item; a failure that concerns only this file is recorded, one that concerns every file is thrown.
+    func importOne(_ item: ImportItem, temporary: URL, onProgress: @escaping @Sendable (ImportProgress) -> Void) async throws {
+        try Task.checkCancellation()
+        progress.currentName = item.name
+        progress.currentSource = item.source
+        onProgress(progress)
+        do {
+            try await importFile(item, temporary: temporary, onProgress: onProgress)
+        } catch {
+            try recordFailure(item, error)
+        }
+        finished(item, onProgress: onProgress)
+    }
+
+    func recordFailure(_ item: ImportItem, _ error: any Error) throws {
+        if Self.stopsImport(error) { throw error }
+        logger.error("import: a file failed: \(error.localizedDescription, privacy: .public)")
+        journal.entries[item.id] = ImportJournal.Entry(state: .failed, error: error.localizedDescription)
+        progress.failed += 1
+        if progress.failures.count < 50 { progress.failures.append("\(item.name): \(error.localizedDescription)") }
+    }
+
+    /// Counts an item as handled and saves the journal now and then.
+    func finished(_ item: ImportItem, onProgress: @Sendable (ImportProgress) -> Void) {
+        progress.processed += 1
+        progress.bytesDone += item.size
+        sinceSave += 1
+        if sinceSave >= 20 {
+            try? journal.save(to: journalDirectory)
+            sinceSave = 0
         }
         onProgress(progress)
     }
 
     func recordDuplicate(_ item: ImportItem, path: String, fileId: FileID, rule: String) async throws {
         var entry = ImportJournal.Entry(state: .duplicate, path: path, fileId: fileId, rule: rule)
+        if let earlier = previous?.entries[item.id], earlier.path == path {
+            // Imported by the earlier run: its albums are filled already.
+            entry.albums = earlier.albums
+            entry.commented = earlier.commented
+            entry.metadataAdded = earlier.metadataAdded
+        }
         // The copy on the server becomes a favourite too: favourites stay favourites.
         if options.favorites, item.metadata.favorite {
             do {
@@ -352,6 +408,10 @@ public actor LibraryImporter {
             }
         }
         progress.currentPreview = present.flatMap { _ in Self.preview(of: file) }
+        if let preview = progress.currentPreview {
+            progress.recentPreviews.append(preview)
+            if progress.recentPreviews.count > 12 { progress.recentPreviews.removeFirst() }
+        }
         onProgress(progress)
         var upload = file
         var metadataAdded = false
@@ -509,7 +569,8 @@ public actor LibraryImporter {
         }
         if upload {
             var base =
-                options.destination.hasSuffix("/") && options.destination.count > 1 ? String(options.destination.dropLast()) : options.destination
+                options.destination.hasSuffix("/") && options.destination.count > 1
+                ? String(options.destination.dropLast()) : options.destination
             if base == "/" { base = "" }
             _ = try? await remote.upload(file: url, fileName: name, folder: base.isEmpty ? "/" : base, capturedAt: nil)
         }

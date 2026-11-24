@@ -147,7 +147,8 @@ public struct ImportSummary: Sendable, Equatable {
         if let years {
             parts.append(
                 years.lowerBound == years.upperBound
-                    ? String(localized: "from \(String(years.lowerBound))", bundle: .module, comment: "Import summary: the year of the photos.")
+                    ? String(
+                        localized: "from \(String(years.lowerBound))", bundle: .module, comment: "Import summary: the year of the photos.")
                     : String(
                         localized: "from \(String(years.lowerBound)) to \(String(years.upperBound))", bundle: .module,
                         comment: "Import summary: the years of the oldest and newest photo."))
@@ -171,7 +172,9 @@ public struct ImportSummary: Sendable, Equatable {
         lines.append("")
         lines.append(String(localized: "Uploaded: \(uploaded)", bundle: .module, comment: "Import report line."))
         lines.append(
-            String(localized: "Already on your Nextcloud: \(alreadyThere)", bundle: .module, comment: "Import report line: not uploaded twice."))
+            String(
+                localized: "Already on your Nextcloud: \(alreadyThere)", bundle: .module, comment: "Import report line: not uploaded twice."
+            ))
         if copiesInExports > 0 {
             lines.append(
                 String(
@@ -189,7 +192,8 @@ public struct ImportSummary: Sendable, Equatable {
                     comment: "Import report line: the import wrote the capture date, location or caption into these files."))
         }
         if archived > 0 {
-            lines.append(String(localized: "Hidden photos put into the archive: \(archived)", bundle: .module, comment: "Import report line."))
+            lines.append(
+                String(localized: "Hidden photos put into the archive: \(archived)", bundle: .module, comment: "Import report line."))
         }
         lines.append(String(localized: "Destination: \(destination)", bundle: .module, comment: "Import report line: the server folder."))
         if !sources.isEmpty {

@@ -68,7 +68,8 @@ public struct PhotosLibraryExport: Sendable {
             collections.enumerateObjects { collection, _, _ in
                 if let album = collection as? PHAssetCollection, album.assetCollectionSubtype == .albumRegular {
                     var identifiers: [String] = []
-                    PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in identifiers.append(asset.localIdentifier) }
+                    PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in identifiers.append(asset.localIdentifier)
+                    }
                     result.append((album.localizedTitle ?? "", identifiers))
                 } else if let folder = collection as? PHCollectionList {
                     visit(PHCollection.fetchCollections(in: folder, options: nil))

@@ -37,7 +37,8 @@ enum ImportMetadataWriter {
         let offset = exif[kCGImagePropertyExifOffsetTimeOriginal] as? String
         let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
         // ImageIO keeps a JPEG's caption in IPTC (`Caption/Abstract`); TIFF-based formats also in `ImageDescription`.
-        let description = ((tiff[kCGImagePropertyTIFFImageDescription] as? String) ?? (iptc[kCGImagePropertyIPTCCaptionAbstract] as? String))?
+        let description =
+            ((tiff[kCGImagePropertyTIFFImageDescription] as? String) ?? (iptc[kCGImagePropertyIPTCCaptionAbstract] as? String))?
             .trimmingCharacters(in: .whitespaces)
         return Present(
             captureDate: original.flatMap { exifDate($0, offset: offset) }, hasCaptureTime: original != nil,
