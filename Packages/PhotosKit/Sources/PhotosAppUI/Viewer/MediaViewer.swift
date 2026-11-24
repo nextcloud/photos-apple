@@ -153,7 +153,7 @@ struct MediaViewer: View {
                 if let item = currentItem { InfoPanel(item: item, inInspector: true, showsPreview: false) }
             }
             .focusedSceneValue(\.gridActions, viewerActions)
-            .sheet(item: $editing) { item in EditorView(item: item) }
+            .photoEditor($editing)
             .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }

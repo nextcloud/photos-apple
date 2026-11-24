@@ -124,7 +124,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
-            .sheet(item: $editedItem) { item in EditorView(item: item) }
+            .photoEditor($editedItem)
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
