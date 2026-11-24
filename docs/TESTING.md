@@ -85,7 +85,14 @@ TEST_RUNNER_PHOTOS_UITEST_LOGIN='nc://login/server:http://127.0.0.1:8089&user:ad
   PHOTOS_BUNDLE_ID=com.example.nextcloudphotos.uitest
 ```
 
-The app has no accessibility identifiers yet; the tests find elements by role and by their English labels, and start
+`UITests/FeelTourTests.swift` (iPhone and iPad) tours the Library's zoom levels (picker, taps, pinches in and out of
+the grid) and "Show Similar" (context menu, screen, viewer menu), SPEC §15.5. With `TEST_RUNNER_PHOTOS_UITEST_SHOTS`
+set to a folder it also saves a screenshot of every step there; `-only-testing:NextcloudPhotosUITests/FeelTourTests`
+runs it alone. The simulator cannot run Vision's models, so the app analyses nothing there: to see "Show Similar"
+with results, compute prints of the simulator's cached previews on the Mac (Vision's `GenerateImageFeaturePrintRequest`
+and `FeatureSketcher` from PhotosDomain) and write them into the `similarity` table of the simulator's account database.
+
+The app has no accessibility identifiers yet (apart from `librarySummary`, the zoom levels' scroll view); the tests find elements by role and by their English labels, and start
 the app in English. They are not part of CI because they need a server and, for now, have only been compiled
 (`build-for-testing` for macOS and iOS), not run.
 

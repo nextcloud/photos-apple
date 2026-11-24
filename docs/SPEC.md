@@ -820,7 +820,80 @@ _To be written._
 
 ### 15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos [feel]
 
-_To be written._
+**Zoom levels (Library, all four filters).** Years › Months › Days › All Photos, as in Apple Photos.
+- *Ladder.* A pinch moves along one ladder (`LibraryZoomLadder`): years, months, days, then the grid from its densest
+  step to its largest tiles. Days sits before the densest grid: it shows a few photos of each day, the grid all of them.
+- *Years and months* are cards with a key photo and the date over it (year: large title and count; month: month and
+  year). *Days* show the date, the count and a mosaic of the day's best photos (one large and two small; the last one
+  says "+N" when there are more). Cards adapt their columns to the width (one year per row on iPhone, more on iPad,
+  Mac, Vision Pro). Drawn by SwiftUI over the grid, which stays underneath with its scroll position.
+- *Key photos* (`KeyPhoto`): a favourite first, then Vision's aesthetics score where this device worked it out
+  (`SimilarityIndex`), utility pictures (screenshots, documents), PNGs, videos and panoramas lose; a photo without a
+  preview is never chosen while there is another. A day's photos are its best five, shown in time order, the key photo
+  first. Built off the main actor from the grid's own items (`LibrarySummary`): 100 000 items in 80–190 ms in a debug
+  build (unit test budget 800 ms), rebuilt once after a burst of changes.
+- *Gesture.* The content follows the fingers (scaled around them; past the ends of the ladder it resists like a
+  rubber band). On release it settles on the stop the pinch was heading for: a pinch commits from a factor of 1.22,
+  each further factor of 3 is one more step (at most three), and the pinch's speed is carried on for 0.12 s (adding at most a factor of 1.42), so a
+  quick pinch goes further (`LibraryZoomGesture`). The photo or card under the fingers stays under them: zooming into
+  a month shows that month's days, out of the grid shows the day of the photo that was under the fingers. A pinch in
+  on the days goes to All Photos at the step the user had before (the default step when that was the densest one).
+- *Taps.* A year opens its months, a month its days, a day's photo All Photos at that photo, a day's date All Photos
+  at the day.
+- *Picker.* iPhone, iPad and Vision Pro: a segmented Years · Months · Days · All Photos picker floating at the bottom
+  (hidden while selecting). Mac: the same picker in the toolbar, as in Photos for Mac; the zoom slider is for All
+  Photos only. ⌘+/⌘− (View menu) move along the same ladder; ⌘− at the densest step goes to the days. Trackpad pinch
+  on the Mac steps through the grid while the fingers move (one step per 0.22 of magnification), anchored on the photo
+  under the pointer, and on to the days. The level is remembered on the device (`libraryZoomLevel`).
+- Transitions grow out of (or shrink into) the point the pinch started at; short cross-fades with Reduce Motion.
+
+**Haptics.** Following the system's settings (System Haptics on iPhone; the trackpad's force click feedback on the
+Mac), none on Vision Pro:
+- a selection tick when the year at the top of the grid changes while scrolling fast (> 2200 pt/s) or scrubbing the
+  year index, at most one per 70 ms (`YearBoundaryTicker`); not when the grid jumps after a relayout;
+- a light impact when a pinch snaps to another zoom step or level, and when the selection mode starts;
+- Mac: the trackpad's *level change* feedback on each zoom step of a pinch and *alignment* feedback when the date
+  scrubber is dragged past a year. No other haptics on the Mac.
+
+**No spinners.** Every screen shows the shape of what is coming instead of a spinner on an empty page (skeleton
+covers and rows that pulse softly, the grid skeleton, BlurHash and cached previews):
+albums, an album opened from a link or window, people, folders (Collections and the Settings folder picker), tags, the
+album picker of "Add to album", the sharing sheets (one and several photos), partner sharing, tag routes; the editor
+shows the cached preview until the original is decoded; the viewer shows nothing (not a spinner) for the milliseconds
+the local index takes; the first-sync caption no longer has a spinner beside the skeleton. Where nothing better is
+possible a spinner appears only after 0.9 s (`DelayedSpinner`): a video that takes long to start (its poster is shown
+meanwhile), slideshows and memory films before their first photo, a public album's full-size photo, the app's first
+moment while the account loads. Spinners that remain on purpose (they are progress of something the user started, or
+small status indicators): Saving… in the editor, Reading text… (Live Text/extract text), Looking for duplicates… and
+files to clean up (local scans with a caption), Preparing video… (server conversion), inline spinners of buttons
+(login, diagnostics export, partner and people actions, backup device checks, Takeout import), the "Syncing" row of
+Settings, the backup status icon while a pass runs, determinate progress bars (uploads, backup, export, sharing many).
+
+**Show Similar.** In the viewer's More menu and the grid's context menu, for photos (not videos).
+- Vision feature prints (revision 2: 768 floats of unit length) and aesthetics scores are computed on the device from
+  previews already in the cache (256 or 1024 bucket, decoded at 384 px), stored per photo version in the account
+  database (table `similarity`, migration `v5-similarity`; a row without a print marks a photo that could not be
+  analysed; rows go with their photos). Never uploaded.
+- Indexing is incremental (only new or changed versions) and battery-aware: a `BGProcessingTask` that requires power
+  (iPhone, iPad; `com.nextcloud.photos.similar`), an `NSBackgroundActivityScheduler` activity on the Mac, and while the
+  Library is on screen a trickle of 16 photos at a time with pauses, at background priority, only when not in Low
+  Power Mode, not warm and on battery above 35 % (`SimilarIndexing.Conditions`). Vision Pro only has the trickle.
+- Search: each print has a 128-byte sketch (a fixed random projection quantised to bytes) held in memory (12.8 MB for
+  100 000 photos); one matrix product scores them all (40 ms for 100 000 in a debug build, budget 250 ms), the best 360 are re-ranked by their full prints, and those at a
+  cosine of 0.62 or more are shown (at most 120), most alike first. Calibrated on the test library: unrelated photos
+  are below 0.56 in 99 % of pairs, strong crops of one photo above 0.74. A photo that was never indexed is analysed
+  on demand (its preview is loaded if needed). While the index is incomplete the screen says how many photos were
+  compared and searches again every 6 s.
+- *Best shot of a series.* Results at a cosine of 0.84 or more, taken in a chain of shots no more than 10 minutes
+  apart that reaches the photo, are its moment; its best shot is a favourite, else the best aesthetics score, else the
+  middle one. The screen shows it with "Keep Best…", which deletes the other shots (confirmation; to the trash bin,
+  through the outbox like every delete). Exact copies stay with Duplicates (§7.15): those are identical files, these
+  are different shots.
+- Settings › Search: "Find similar photos" (on by default), with the number of photos compared; off deletes the
+  stored prints.
+- The simulator cannot run Vision's models (they fail on its GPU and return one print for every picture on its CPU):
+  there nothing is analysed and "Show Similar" works only on prints made elsewhere (docs/TESTING.md).
+
 
 ### 15.6 Then and now, travel globe [places]
 
