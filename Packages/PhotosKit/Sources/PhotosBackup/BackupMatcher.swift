@@ -95,51 +95,178 @@ public enum BackupMatcher {
     ///    resource of that second has the same numbers (`isAmbiguousName`): the name cannot tell those apart.
     /// 3. same kind, capture second equal, same pixel size, and it is the only candidate on both sides → converted copy (not bursts).
     /// 4. capture times differ by whole hours (≤ 14 h), minutes and seconds equal, and the names agree → EXIF read without offset.
+    ///
+    /// For a whole batch, `Index` prepares the candidates once; this is the same for one resource.
     public static func match(_ resource: LocalResource, candidates: [RemoteCandidate], localSiblings: [LocalResource]) -> (
         RemoteCandidate, MatchReason
     )? {
-        let localIsRaw = isRaw(resource)
-        let sameKind = candidates.filter { $0.kind == resource.kind && isRawName($0.name) == localIsRaw }
-        // Names only say something when no other device resource of that second would fit the same server file.
-        let byName = !isAmbiguousName(resource, among: localSiblings)
+        var index = Index(candidates: candidates, locals: localSiblings)
+        return index.match(resource)
+    }
 
-        if let size = resource.byteSize, size > 0,
-            let exact = sameKind.first(where: { $0.size == size && sameSecond($0, resource.createdAt) })
+    /// The server candidates and the device resources of one reconciliation batch, prepared once for all of its lookups.
+    ///
+    /// Every rule needs a candidate of the same second (rules 1–3), or captured whole hours before or after it (rule 4),
+    /// so the candidates are looked up by their second instead of being compared one by one with every resource, and
+    /// what the rules ask of a name (RAW, edited, stem) is worked out once per candidate. The work for a batch grows with
+    /// its size, not with its size times the number of candidates.
+    struct Index {
+        struct Candidate {
+            var value: RemoteCandidate
+            var isRaw: Bool
+            var isEdited: Bool
+            var stem: String
+        }
+
+        struct Local {
+            var value: LocalResource
+            var isRaw: Bool
+            var stem: String
+            var numbers: [String]
+        }
+
+        let candidates: [Candidate]
+        /// Positions in `candidates` by the whole second of their capture time and of their modification time.
+        let candidatesBySecond: [Int64: [Int]]
+        /// Positions of candidates with a capture time, by its whole second (rule 4).
+        let candidatesByCaptureSecond: [Int64: [Int]]
+        let locals: [Local]
+        let localsBySecond: [Int64: [Int]]
+        /// How many candidates and device resources the lookups looked at (tests: the work grows with the batch, not with
+        /// its square).
+        private(set) var examined = 0
+
+        init(candidates: [RemoteCandidate], locals: [LocalResource]) {
+            self.candidates = candidates.map { candidate in
+                let name = candidate.name
+                return Candidate(value: candidate, isRaw: isRawName(name), isEdited: isEditedName(name), stem: stem(name))
+            }
+            var bySecond: [Int64: [Int]] = [:]
+            var byCaptureSecond: [Int64: [Int]] = [:]
+            for (position, candidate) in candidates.enumerated() {
+                let captured = candidate.capturedAt.flatMap(Self.second)
+                if let captured {
+                    bySecond[captured, default: []].append(position)
+                    byCaptureSecond[captured, default: []].append(position)
+                }
+                if let modified = Self.second(candidate.modifiedAt), modified != captured {
+                    bySecond[modified, default: []].append(position)
+                }
+            }
+            candidatesBySecond = bySecond
+            candidatesByCaptureSecond = byCaptureSecond
+            self.locals = locals.map { local in
+                Local(value: local, isRaw: isRaw(local), stem: stem(local.originalName), numbers: numbers(in: local.originalName))
+            }
+            var localsBySecond: [Int64: [Int]] = [:]
+            for (position, local) in locals.enumerated() {
+                if let second = Self.second(local.createdAt) { localsBySecond[second, default: []].append(position) }
+            }
+            self.localsBySecond = localsBySecond
+        }
+
+        /// The whole second of a date; nil for dates no second can hold.
+        static func second(_ date: Date) -> Int64? {
+            let seconds = date.timeIntervalSince1970.rounded(.down)
+            guard seconds.isFinite, abs(seconds) < 1e15 else { return nil }
+            return Int64(seconds)
+        }
+
+        /// The hours rule 4 allows between a capture time read without its offset and the real one.
+        static let shiftedHours = Array(-14...(-1)) + Array(1...14)
+
+        /// Positions under the keys around each of `keys`, in their original order and each once. Two times less than
+        /// `tolerance` (1.5 s) apart have whole seconds at most 2 apart.
+        private static func positions(around keys: [Int64], in index: [Int64: [Int]]) -> [Int] {
+            var result: [Int] = []
+            for key in keys {
+                for offset in -2...2 {
+                    if let found = index[key + Int64(offset)] { result.append(contentsOf: found) }
+                }
+            }
+            guard result.count > 1 else { return result }
+            result.sort()
+            var unique: [Int] = []
+            unique.reserveCapacity(result.count)
+            for position in result where position != unique.last { unique.append(position) }
+            return unique
+        }
+
+        /// See `BackupMatcher.match`.
+        mutating func match(_ resource: LocalResource) -> (RemoteCandidate, MatchReason)? {
+            guard let second = Self.second(resource.createdAt) else { return nil }
+            let localIsRaw = isRaw(resource)
+            let localStem = stem(resource.originalName)
+            let localNumbers = numbers(in: resource.originalName)
+            let isEdit = resource.rendition == .edited
+            // Everything that can share the resource's second, in the order the server listed it.
+            let near = Self.positions(around: [second], in: candidatesBySecond)
+            examined += near.count
+            let sameKind = near.map { candidates[$0] }.filter { $0.value.kind == resource.kind && $0.isRaw == localIsRaw }
+            // Names only say something when no other device resource of that second would fit the same server file.
+            let siblings = Self.positions(around: [second], in: localsBySecond).map { locals[$0] }
+            examined += siblings.count
+            let byName = !isAmbiguousName(resource, stem: localStem, numbers: localNumbers, isRaw: localIsRaw, among: siblings)
+
+            if let size = resource.byteSize, size > 0,
+                let exact = sameKind.first(where: { $0.value.size == size && sameSecond($0.value, resource.createdAt) })
+            {
+                return (exact.value, .serverTimeSize)
+            }
+            let atSameSecond = sameKind.filter { $0.isEdited == isEdit && sameSecond($0.value, resource.createdAt) }
+            if byName, let named = atSameSecond.first(where: { namesAgree(localStem, localNumbers, $0) }) {
+                return (named.value, .serverTimeName)
+            }
+            if let width = resource.pixelWidth, let height = resource.pixelHeight {
+                let sameSize = atSameSecond.filter { candidate in
+                    guard let w = candidate.value.width, let h = candidate.value.height else { return false }
+                    return (w == width && h == height) || (w == height && h == width)
+                }
+                // The other renditions of the same asset share its second; they are not burst siblings.
+                let localAtSameSecond = siblings.filter {
+                    $0.value.kind == resource.kind && $0.value.rendition == resource.rendition && $0.isRaw == localIsRaw
+                        && abs($0.value.createdAt.timeIntervalSince(resource.createdAt)) < tolerance
+                }
+                if sameSize.count == 1, atSameSecond.count == 1, localAtSameSecond.count <= 1 {
+                    return (sameSize[0].value, .serverTimeSize)
+                }
+            }
+            if byName {
+                // Captured whole hours before or after: looked up at each of those seconds.
+                let shifted = Self.positions(around: Self.shiftedHours.map { second + Int64($0) * 3600 }, in: candidatesByCaptureSecond)
+                examined += shifted.count
+                for position in shifted {
+                    let candidate = candidates[position]
+                    guard candidate.value.kind == resource.kind, candidate.isRaw == localIsRaw, candidate.isEdited == isEdit,
+                        let captured = candidate.value.capturedAt, namesAgree(localStem, localNumbers, candidate)
+                    else { continue }
+                    let difference = captured.timeIntervalSince(resource.createdAt)
+                    let hours = (difference / 3600).rounded()
+                    if hours != 0, abs(hours) <= 14, abs(difference - hours * 3600) < tolerance {
+                        return (candidate.value, .serverTimeName)
+                    }
+                }
+            }
+            return nil
+        }
+
+        private func namesAgree(_ localStem: String, _ localNumbers: [String], _ candidate: Candidate) -> Bool {
+            if localStem == candidate.stem { return true }
+            guard !localNumbers.isEmpty else { return false }
+            return localNumbers.allSatisfy { containsNumber(candidate.value.name, $0) }
+        }
+
+        private func isAmbiguousName(_ resource: LocalResource, stem: String, numbers: [String], isRaw raw: Bool, among siblings: [Local])
+            -> Bool
         {
-            return (exact, .serverTimeSize)
-        }
-        let compatible = sameKind.filter { isCompatible(resource, candidateName: $0.name) }
-        let atSameSecond = compatible.filter { sameSecond($0, resource.createdAt) }
-        if byName, let named = atSameSecond.first(where: { namesAgree(local: resource.originalName, server: $0.name) }) {
-            return (named, .serverTimeName)
-        }
-        if let width = resource.pixelWidth, let height = resource.pixelHeight {
-            let sameSize = atSameSecond.filter { candidate in
-                guard let w = candidate.width, let h = candidate.height else { return false }
-                return (w == width && h == height) || (w == height && h == width)
-            }
-            // The other renditions of the same asset share its second; they are not burst siblings.
-            let localAtSameSecond = localSiblings.filter {
-                $0.kind == resource.kind && $0.rendition == resource.rendition && isRaw($0) == localIsRaw
-                    && abs($0.createdAt.timeIntervalSince(resource.createdAt)) < tolerance
-            }
-            if sameSize.count == 1, atSameSecond.count == 1, localAtSameSecond.count <= 1 {
-                return (sameSize[0], .serverTimeSize)
+            siblings.contains { other in
+                guard other.value.localIdentifier != resource.localIdentifier, other.value.kind == resource.kind,
+                    other.value.rendition == resource.rendition, other.isRaw == raw,
+                    abs(other.value.createdAt.timeIntervalSince(resource.createdAt)) < tolerance
+                else { return false }
+                return other.stem == stem || other.numbers == numbers
             }
         }
-        if byName {
-            for candidate in compatible {
-                guard let captured = candidate.capturedAt, namesAgree(local: resource.originalName, server: candidate.name) else {
-                    continue
-                }
-                let difference = captured.timeIntervalSince(resource.createdAt)
-                let hours = (difference / 3600).rounded()
-                if hours != 0, abs(hours) <= 14, abs(difference - hours * 3600) < tolerance {
-                    return (candidate, .serverTimeName)
-                }
-            }
-        }
-        return nil
     }
 
     // MARK: Renditions
