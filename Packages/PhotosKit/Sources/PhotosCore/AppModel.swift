@@ -80,7 +80,13 @@ public final class AppModel {
             {
                 // PHOTOS_DEBUG_OFFER_BACKUP=1 shows the backup offer of a first login (UI tests don't want it).
                 let offer = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_OFFER_BACKUP"] != nil
-                Task { try? await self.addAccount(credentials, askForNotifications: false, offerBackup: offer) }
+                Task {
+                    do {
+                        try await self.addAccount(credentials, askForNotifications: false, offerBackup: offer)
+                    } catch {
+                        self.logger.error("debug login failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
             }
         #endif
     }
@@ -194,7 +200,15 @@ public final class AppModel {
         let account = Account(
             serverURL: credentials.serverURL, userId: profile.id, loginName: credentials.loginName,
             displayName: profile.displayname ?? profile.id, serverVersion: status.serverVersion)
-        try keychain.set(credentials.appPassword, for: Keychain.passwordKey(account.id.rawValue))
+        do {
+            try keychain.set(credentials.appPassword, for: Keychain.passwordKey(account.id.rawValue))
+        } catch {
+            // Without the app password the account would be signed out at once: the login fails, and the app password
+            // the server granted for it is revoked again.
+            logger.error("could not store the app password: \(error.localizedDescription, privacy: .public)")
+            await loginService().revoke(credentials, at: credentials.serverURL)
+            throw error
+        }
         registry.upsert(account)
         registry.activeAccountID = account.id
         saveRegistry()
@@ -345,7 +359,10 @@ public final class AppModel {
             logger.error("no password for account")
             var signedOut = account
             signedOut.isSignedOut = true
-            session = SessionModel(app: self, account: signedOut, password: nil)
+            let session = SessionModel(app: self, account: signedOut, password: nil)
+            // Not a login the server revoked (that is marked on the account): the keychain has none, or can't be read.
+            session.isLoginMissing = !account.isSignedOut
+            self.session = session
             return
         }
         session = SessionModel(app: self, account: account, password: password)

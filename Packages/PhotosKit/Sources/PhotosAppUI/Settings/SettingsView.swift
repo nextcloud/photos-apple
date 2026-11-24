@@ -313,7 +313,7 @@ public struct SettingsView: View {
                 Button(String(localized: "Log in again", bundle: .module)) { addingAccount = true }
             } label: {
                 Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
-                Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+                SignedOutView.reason(session)
             }
         }
     }
