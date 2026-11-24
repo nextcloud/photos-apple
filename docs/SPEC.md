@@ -539,6 +539,8 @@ Optional; off by default; on iOS, iPadOS and macOS (PhotoKit library); not on vi
    - **Yes, keep using Files** → Photos backup stays off; the Backup screen shows a read-only **backup status** (which device photos are already on the server, via reconciliation §7.18.4), so the user still sees what is missing.
 3. Choose account, folder, options; then a first reconciliation pass runs before any upload, showing "X photos are already on your server, Y will be uploaded".
 
+On iPhone and iPad this flow is offered once, as a full-screen step right after the first login and before the notification permission is asked ("Back up the photos of this iPhone?" · Start backup / Not now). The Files question is only part of it when the Files app is installed or has left data in its App Group. On the Mac, backup is set up in Settings › Backup with the same step; there is no offer after the login. The destination folder is chosen from the server's folders and must be one the timeline shows (`photosSourceFolders` or below); otherwise the app offers to add it to the timeline folders, and warns about an earlier folder outside them.
+
 #### 7.18.2 Options
 
 | Option | Default |
@@ -598,15 +600,16 @@ If the identifiers from §4.2 change or Apple rejects the extra App Groups, drop
 
 - Primary: the **PhotoKit background-upload extension** (iOS/iPadOS 27, extension point `com.apple.photos.background-upload`, `PHBackgroundResourceUploadJobExtension`; the Files app's implementation is a reference: `nextcloud-ios-and-nextcloudkit.md` §4.5). The app creates upload jobs only **after** reconciliation, one per resource, with the destination `PUT` request (headers: auth, user agent, `X-OC-MTime`, `X-OC-CTime`, `OC-Checksum`, `X-NC-WebDAV-Auto-Mkcol: 1`). Success = response has `OC-FileId`. Resources > 100 MB are handed back to the app for chunked upload. Check whether the extension point exists on macOS 27; if not, macOS uses the next mechanism.
 - Fallback / complement: background `URLSession` upload tasks, `BGProcessingTask` (`com.nextcloud.photos.processing`, requires network, prefers power) for reconciliation, hashing, Live Photo linking and metadata fix-ups, and `BGAppRefreshTask` for scanning new assets. No location-change or audio tricks.
+- A backup the user starts (the first one, or "Back up now" with many items waiting) runs as a `BGContinuedProcessingTask` on iOS/iPadOS: it shows system progress and goes on when the user leaves the app. Option "Keep screen on while backing up": the idle timer is off only while a pass runs and the app is in front.
 - After uploads: link Live Photo parts, PROPPATCH missing capture date/GPS where possible (`metadataEdit`), add to the local index immediately (the file appears in the timeline before the next sync).
 
 #### 7.18.7 Backup UI
 
-Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". Grid badge for device photos not yet backed up is not needed (the timeline shows server content).
+Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". Grid badge for device photos not yet backed up is not needed (the timeline shows server content); instead the Backup screen lists them ("Not backed up yet", local thumbnails, with failed / only-in-iCloud marks).
 
 #### 7.18.8 Free up device space (M5)
 
-"Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
+"Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before: the server lists the file with exactly the device's size, and the same file id when known; converted or name-only matches never qualify; RAW, edited version and Live Photo motion are required), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
 
 ### 7.19 Offline — M2
 
