@@ -18,7 +18,10 @@ struct BackupScreen: View {
     var body: some View {
         let backup = session.backup
         Group {
-            if !backup.isAvailable {
+            if backup.isDisabledByOrganization {
+                ContentUnavailableView(
+                    ManagedWording.backupDisabledTitle, systemImage: "icloud.slash", description: Text(ManagedWording.backupDisabled))
+            } else if !backup.isAvailable {
                 ContentUnavailableView(
                     BackupWording.notAvailable, systemImage: "icloud.slash")
             } else if backup.settings.isEnabled || backup.settings.filesAppMode == .keepFiles {

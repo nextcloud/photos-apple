@@ -29,6 +29,25 @@ struct GridMenuAction: Identifiable {
     /// A separator goes before this action in menus.
     var startsGroup = false
     var handler: @MainActor ([FileID]) -> Void
+    /// A submenu (Add to Album ▸ …). Menus show these instead of running `handler`; where there are no submenus
+    /// (accessibility actions) `handler` offers the same in another way.
+    var children: [GridMenuAction] = []
+    /// The system's share menu (Mac) or sheet (iPhone, iPad) with these items, instead of `handler`.
+    var share: (@MainActor () -> [NSItemProvider])? = nil
+
+    /// The actions without submenus, for accessibility actions: a submenu's entries are actions of their own
+    /// ("Add to Album: Holidays"); sharing needs its menu or sheet and is left out.
+    static func flattened(_ actions: [GridMenuAction]) -> [GridMenuAction] {
+        actions.filter { $0.share == nil }.flatMap { action in
+            action.children.isEmpty
+                ? [action]
+                : action.children.map { child in
+                    var entry = child
+                    entry.title = "\(action.title): \(child.title)"
+                    return entry
+                }
+        }
+    }
 
     /// The actions split where a group starts (for menus that separate groups by nesting them, as UIKit does).
     static func groups(_ actions: [GridMenuAction]) -> [[GridMenuAction]] {
@@ -57,6 +76,8 @@ struct GridCallbacks {
     var refresh: (@MainActor () async -> Void)?
     /// Says where a tile is, for the zoom transition into the viewer and back (iPhone, iPad). Nil: not needed.
     var tileLocator: GridTileLocator?
+    /// Edit ▸ Copy (⌘C) with the selection; nil: the grid does not copy.
+    var copy: (@MainActor ([FileID]) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
@@ -271,12 +292,36 @@ enum GridTile {
         !checkmarkShown || tileSide >= 88
     }
 
+    /// Where the picture sits in its tile. Square tiles are filled (the picture is cropped to the square). In the
+    /// aspect ratio grid (`TileStyle`) the whole picture is fitted into the square, centred, as in Apple Photos' "Aspect
+    /// Ratio Grid"; unknown or absurd ratios fall back to the square.
+    static func pictureFrame(in tile: CGRect, aspectRatio: Double, square: Bool) -> CGRect {
+        guard !square, aspectRatio.isFinite, aspectRatio > 0, tile.width > 0, tile.height > 0 else { return tile }
+        let ratio = min(max(aspectRatio, 0.2), 5)
+        let tileRatio = Double(tile.width / tile.height)
+        var size = tile.size
+        if ratio > tileRatio {
+            size.height = (tile.width / CGFloat(ratio)).rounded()
+        } else {
+            size.width = (tile.height * CGFloat(ratio)).rounded()
+        }
+        return CGRect(
+            x: tile.minX + ((tile.width - size.width) / 2).rounded(.down), y: tile.minY + ((tile.height - size.height) / 2).rounded(.down),
+            width: size.width, height: size.height)
+    }
+
     /// Size of the context menu's preview: the photo's shape, `longEdge` points on its long edge (UIKit scales it down
     /// to what fits on screen and keeps the shape).
     static func previewSize(aspectRatio: Double, longEdge: Double = 1200) -> CGSize {
         let ratio = aspectRatio.isFinite && aspectRatio > 0 ? min(max(aspectRatio, 0.2), 5) : 1
         return ratio >= 1 ? CGSize(width: longEdge, height: longEdge / ratio) : CGSize(width: longEdge * ratio, height: longEdge)
     }
+}
+
+/// Square tiles or the aspect ratio grid (SPEC §6.4). A setting of this device (Settings › On this device, View ›
+/// Square Tiles), on by default: the web's `croppedLayout` is not followed, see SPEC §6.4.
+enum TileStyle {
+    static let squareTilesKey = "squareTiles"
 }
 
 /// Dragging photos out of the grid (iPad: into other apps; the Mac grid uses file promises for the same originals).
@@ -333,8 +378,10 @@ extension AccountServices {
     /// - Parameters:
     ///   - tileSide: side of the tile in points.
     ///   - scale: backing scale of the window or screen the tile is on.
-    func previewRequest(for item: GridMedia, tileSide: Double, scale: Double) -> ImagePipeline.Request {
-        let pixels = PreviewSizing.neededPixels(tileSide: tileSide, scale: scale, aspectRatio: item.aspectRatio)
+    ///   - square: the tile crops the picture to a square (its short edge has to cover the tile); in the aspect ratio
+    ///     grid the long edge fits the tile.
+    func previewRequest(for item: GridMedia, tileSide: Double, scale: Double, square: Bool = true) -> ImagePipeline.Request {
+        let pixels = PreviewSizing.neededPixels(tileSide: tileSide, scale: scale, aspectRatio: square ? item.aspectRatio : 1)
         let bucket = PreviewSizing.bucket(forPixels: pixels, buckets: PhotosAPI.previewBuckets)
         return ImagePipeline.Request(
             fileId: item.fileId, etag: item.etag, bucket: bucket,

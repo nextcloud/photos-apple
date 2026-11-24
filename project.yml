@@ -38,6 +38,10 @@ targets:
         embed: true
       - target: Widgets
         embed: true
+      # PhotoKit's background uploads (SPEC §7.18.6); not on visionOS.
+      - target: BackgroundUpload
+        embed: true
+        destinationFilters: [iOS, macOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID)
@@ -82,6 +86,9 @@ targets:
         NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
         NSCameraUsageDescription: Nextcloud Photos uses the camera to scan a login QR code.
+        # iPhone and iPad: a song of the Music library as the music of memory slideshows (SPEC ME-4), only when the user
+        # picks one.
+        NSAppleMusicUsageDescription: Nextcloud Photos plays the song you choose from your music library during memory slideshows.
         # One text for every platform: Info.plist values cannot vary by device (a string catalog's device variations end
         # up in InfoPlist.stringsdict, which the system does not read for Info.plist keys), and the Mac must not say
         # Face ID. The system's own question already names Face ID or Optic ID.
@@ -218,6 +225,44 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  # PhotoKit's background-upload extension (SPEC §7.18.6): the system starts it while backup is on, also when the app is not
+  # running, and sends photos and videos up to 100 MB from the library. An ExtensionKit extension (`EXAppExtensionAttributes`).
+  BackgroundUpload:
+    type: extensionkit-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Extensions/BackgroundUpload
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).background-upload
+        PRODUCT_NAME: BackgroundUpload
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY: YES
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/BackgroundUpload/BackgroundUpload.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: Extensions/BackgroundUpload/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.photos.background-upload
   # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
   NextcloudPhotosUITests:
     type: bundle.ui-testing

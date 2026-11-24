@@ -12,10 +12,13 @@ struct MediaViewer: View {
     let ids: [FileID]
     /// Copies of one shot behind a tile of the grid, by the tile's id (`ViewerStart.stacks`).
     let stacks: [FileID: [FileID]]
+    /// Opened from the Library: "Show in library" is not offered.
+    let fromLibrary: Bool
     /// Told the tile of the photo shown whenever it changes: the zoom transition goes back into that tile.
     var currentChanged: (@MainActor (FileID) -> Void)?
-    /// Stacks whose other copies are pages of their own right now.
-    @State private var expandedStacks: Set<FileID> = []
+    /// The copy a stack's page shows, chosen in the strip of its copies, by the tile's id (SPEC VW-6).
+    @State private var chosenCopies: [FileID: FileID] = [:]
+    /// The page shown: a photo, or the tile of a stack (`currentFileId` is the copy it shows).
     @State private var current: FileID?
     @State private var chromeHidden = false
     @State private var showingInfo = false
@@ -25,6 +28,10 @@ struct MediaViewer: View {
     @State private var extractingText: MediaItem?
     @State private var addingToAlbum: MediaItem?
     @State private var tagging: MediaItem?
+    /// Nextcloud's own sharing of the photo shown (SPEC SH-7).
+    @State private var nextcloudShare: SharingTarget?
+    /// Slideshow from the photo shown through the viewer's photos (SPEC VW-5).
+    @State private var slideshow: SlideshowRequest?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -55,26 +62,39 @@ struct MediaViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.showInFolder) private var showInFolder
+    @Environment(\.showInTimeline) private var showInTimeline
 
     init(
-        ids: [FileID], startId: FileID, stacks: [FileID: [FileID]] = [:], currentChanged: (@MainActor (FileID) -> Void)? = nil
+        ids: [FileID], startId: FileID, stacks: [FileID: [FileID]] = [:], fromLibrary: Bool = false,
+        currentChanged: (@MainActor (FileID) -> Void)? = nil
     ) {
         self.ids = ids
         self.stacks = stacks
+        self.fromLibrary = fromLibrary
         self.currentChanged = currentChanged
-        _current = State(initialValue: startId)
+        // A copy that is not a tile of its own opens on its stack's page.
+        _current = State(initialValue: ids.contains(startId) ? startId : (ViewerStacks.tile(of: startId, in: stacks) ?? startId))
+        if !ids.contains(startId), let tile = ViewerStacks.tile(of: startId, in: stacks) {
+            _chosenCopies = State(initialValue: [tile: startId])
+        }
     }
 
     /// The row of the current photo, observed so the favourite heart (and the value the next toggle sends) follows
     /// changes made here or elsewhere — whatever screen opened the viewer.
     @State private var observedItem: MediaItem?
 
-    /// The pages: the context the viewer was opened with, with the copies of opened stacks, without what was deleted or
-    /// archived here.
+    /// The pages: the context the viewer was opened with (a stack is one page), without what was deleted or archived here.
     var shownIds: [FileID] {
-        let pages: [FileID] = ViewerStacks.pages(ids, stacks: stacks, expanded: expandedStacks)
-        return removed.isEmpty ? pages : pages.filter { !removed.contains($0) }
+        ViewerStacks.pages(ids, stacks: stacks, removed: removed)
     }
+
+    /// The photo a page shows: itself, or the copy of its stack chosen in the strip.
+    func fileId(ofPage page: FileID) -> FileID {
+        ViewerStacks.shown(page: page, stacks: stacks, chosen: chosenCopies, removed: removed) ?? page
+    }
+
+    /// The photo shown now.
+    var currentFileId: FileID? { current.map { fileId(ofPage: $0) } }
 
     struct PagerLayout: Hashable {
         var size: CGSize
@@ -82,10 +102,10 @@ struct MediaViewer: View {
     }
 
     var currentItem: MediaItem? {
-        guard let current else { return nil }
+        guard let shown = currentFileId else { return nil }
         // Right after paging, until the observation of the new photo has delivered its first value.
-        if let observedItem, observedItem.fileId == current { return observedItem }
-        return try? session.services?.library.item(current)
+        if let observedItem, observedItem.fileId == shown { return observedItem }
+        return try? session.services?.library.item(shown)
     }
 
     /// The paging scroll view. Its pages are as large as the scroll view, so whenever that changes size (sidebar,
@@ -97,7 +117,7 @@ struct MediaViewer: View {
                     let pages: [FileID] = shownIds
                     ForEach(pages, id: \.self) { id in
                         ViewerPage(
-                            fileId: id, isCurrent: id == current, playbackToggle: playbackToggle,
+                            fileId: fileId(ofPage: id), isCurrent: id == current, playbackToggle: playbackToggle,
                             position: pages.firstIndex(of: id).map { AccessibilityText.position(index: $0, count: pages.count) } ?? "",
                             actions: accessibilityActions, zoomCommand: zoomCommand, events: pageEvents
                         )
@@ -138,6 +158,10 @@ struct MediaViewer: View {
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
             .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
+            .sheet(item: $nextcloudShare) { target in
+                if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
+            }
+            .slideshow($slideshow) { last in showAfterSlideshow(last) }
             .mediaSaveStatus(saver)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
@@ -148,7 +172,7 @@ struct MediaViewer: View {
                         deletions += 1
                         let undoManager = undoManager
                         Task { await session.perform(.delete([item]), undoManager: undoManager) }
-                        moveOn(from: item.fileId)
+                        remove([item.fileId])
                     }
                 }
             }
@@ -181,7 +205,7 @@ struct MediaViewer: View {
                 hoverEdge = Self.edge(under: phase, width: pagerWidth)
             }
             .overlay { stepButtons }
-            .overlay(alignment: .top) { stackBar }
+            .overlay(alignment: .top) { stackStrip }
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
@@ -192,14 +216,18 @@ struct MediaViewer: View {
             #if os(iOS)
                 .statusBarHidden(chromeHidden)
                 .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
+                // The date in the bar as in Photos, not a large title over the photo; light on the black backdrop also
+                // in light mode (the title was black on black there).
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
             #endif
             .toolbar { toolbar }
             .onChange(of: current) { _, id in
                 zoomScale = ViewerZoom.minimumScale
-                if let id { currentChanged?(ViewerStacks.tile(of: id, in: stacks) ?? id) }
+                if let id { currentChanged?(id) }
             }
-            .task(id: current) {
-                guard let current, let library = session.services?.library else { return }
+            .task(id: currentFileId) {
+                guard let current = currentFileId, let library = session.services?.library else { return }
                 do {
                     for try await item in library.observeItem(current) { observedItem = item }
                 } catch {}
@@ -245,6 +273,7 @@ struct MediaViewer: View {
         actions.export = { save(item) }
         if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
         actions.shareTitle = item.name
+        actions.slideshow = { playSlideshow() }
         return actions
     }
 
@@ -270,7 +299,7 @@ struct MediaViewer: View {
             Task { await session.perform(.unarchive([item]), undoManager: undoManager) }
         } else {
             Task { await session.perform(.archive([item]), undoManager: undoManager) }
-            moveOn(from: item.fileId)
+            remove([item.fileId])
         }
     }
 
@@ -281,16 +310,9 @@ struct MediaViewer: View {
         case .none:
             break
         case .remove(let ids):
-            let gone: [FileID] = shownIds.filter { ids.contains($0) }
+            let gone: Set<FileID> = ids.filter { isInContext($0) }
             guard !gone.isEmpty else { return }
-            if let current, ids.contains(current) {
-                // The others first, so that the page shown next is one that stays.
-                removed.formUnion(gone.filter { $0 != current })
-                moveOn(from: current)
-            } else {
-                removed.formUnion(gone)
-                realignments += 1
-            }
+            remove(gone)
         case .restore(let ids):
             let library = session.services?.library
             // Only photos that are in the library again (a restore from the trash bin can fail).
@@ -301,15 +323,26 @@ struct MediaViewer: View {
         }
     }
 
-    /// The photo is gone from this context (deleted, archived): its page is taken out and the next photo shown —
-    /// the previous one after the last, and the viewer closes after the only one.
-    func moveOn(from id: FileID) {
-        guard let next = ViewerNavigation.neighbour(in: shownIds, of: id) else {
-            dismiss()
-            return
+    /// A photo of this viewer: a page, or a copy in a stack.
+    func isInContext(_ id: FileID) -> Bool {
+        ids.contains(id) || ViewerStacks.tile(of: id, in: stacks) != nil
+    }
+
+    /// The photos are gone from this context (deleted, archived). A stack's page stays while one of its copies does and
+    /// shows that one; a page that is gone is taken out and the next one shown — the previous one after the last, and
+    /// the viewer closes after the only one.
+    func remove(_ gone: Set<FileID>) {
+        let after: Set<FileID> = removed.union(gone)
+        if let current, ViewerStacks.pages([current], stacks: stacks, removed: after).isEmpty {
+            // The other pages first, so that the page shown next is one that stays.
+            removed = after.subtracting(ViewerStacks.copies(of: current, stacks: stacks))
+            guard let next = ViewerNavigation.neighbour(in: shownIds, of: current) else {
+                dismiss()
+                return
+            }
+            self.current = next
         }
-        current = next
-        removed.insert(id)
+        removed = after
         realignments += 1
     }
 
@@ -456,6 +489,10 @@ struct MediaViewer: View {
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 .help(String(localized: "Info", bundle: .module))
+                #if os(visionOS)
+                    // Spatial photos and panoramas (SPEC §6.2 visionOS specifics).
+                    SpatialViewerButton(item: item)
+                #endif
                 if item.kind == .image {
                     Button {
                         editing = item
@@ -504,6 +541,18 @@ struct MediaViewer: View {
             Label(PhotosCommands.exportTitle, systemImage: "square.and.arrow.down")
         }
         .disabled(saver.isRunning)
+        if item.permissions.canShare && session.services != nil {
+            Button {
+                nextcloudShare = SharingTarget(item: item)
+            } label: {
+                Label(String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus")
+            }
+        }
+        Button {
+            playSlideshow()
+        } label: {
+            Label(SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage)
+        }
         if showInFolder != nil {
             Button {
                 showFolder(item)
@@ -511,12 +560,11 @@ struct MediaViewer: View {
                 Label(ShowInFolderAction.title, systemImage: ShowInFolderAction.systemImage)
             }
         }
-        if let stack = currentStack {
-            let open: Bool = expandedStacks.contains(stack.tile)
+        if showInTimeline != nil, !fromLibrary, ShowInTimelineAction.isOffered(for: item) {
             Button {
-                toggleStack(stack.tile)
+                showTimeline(item)
             } label: {
-                Label(Self.stackTitle(open: open, count: stack.copies.count), systemImage: "square.stack")
+                Label(ShowInTimelineAction.title, systemImage: ShowInTimelineAction.systemImage)
             }
         }
         Divider()
@@ -554,65 +602,49 @@ struct MediaViewer: View {
         showInFolder(item)
     }
 
+    /// Opens the Library at the photo's day with the photo highlighted; the viewer closes.
+    func showTimeline(_ item: MediaItem) {
+        guard let showInTimeline else { return }
+        dismiss()
+        showInTimeline(item)
+    }
+
+    /// A slideshow of the viewer's photos, from the one shown on (SPEC VW-5).
+    func playSlideshow() {
+        let title: String = String(localized: "Slideshow", bundle: .module)
+        slideshow = SlideshowRequest(title: title, ids: shownIds.map { fileId(ofPage: $0) }, startId: currentFileId)
+    }
+
+    /// After the slideshow the viewer shows the photo it ended on.
+    func showAfterSlideshow(_ last: FileID) {
+        let page: FileID = shownIds.contains(last) ? last : (ViewerStacks.tile(of: last, in: stacks) ?? last)
+        guard shownIds.contains(page), page != current else { return }
+        current = page
+        realignments += 1
+    }
+
     // MARK: Stacks
 
-    /// The stack the photo shown belongs to: the tile's id and every copy, the tile's first.
-    var currentStack: (tile: FileID, copies: [FileID])? {
-        guard let current, let tile = ViewerStacks.tile(of: current, in: stacks), let copies = stacks[tile], copies.count > 1 else {
-            return nil
-        }
-        return (tile, copies)
+    /// The copies of the stack shown, the tile's first; nil for a photo that is in no stack (or has one copy left).
+    var currentStack: [FileID]? {
+        guard let current, stacks[current] != nil else { return nil }
+        let copies: [FileID] = ViewerStacks.copies(of: current, stacks: stacks, removed: removed)
+        return copies.count > 1 ? copies : nil
     }
 
-    /// Shows the other copies of a stack as pages after the tile's, or takes them out again (back on the tile's page).
-    func toggleStack(_ tile: FileID) {
-        withAnimation(reduceMotion ? nil : .default) {
-            if expandedStacks.contains(tile) {
-                if current != tile { current = tile }
-                expandedStacks.remove(tile)
-            } else {
-                expandedStacks.insert(tile)
-            }
-            realignments += 1
-        }
+    /// Shows another copy of the stack on its page.
+    func choose(copy: FileID) {
+        guard let current else { return }
+        chosenCopies[current] = copy
+        zoomScale = ViewerZoom.minimumScale
     }
 
-    /// "Show 2 copies" / "Hide copies" (title case on the Mac).
-    static func stackTitle(open: Bool, count: Int) -> String {
-        if open {
-            return PlatformWording.title(
-                mac: LocalizedStringResource("Hide Copies", bundle: .module),
-                other: LocalizedStringResource("Hide copies", bundle: .module))
-        }
-        return PlatformWording.title(
-            mac: LocalizedStringResource("Show \(count) Copies", bundle: .module),
-            other: LocalizedStringResource("Show \(count) copies", bundle: .module))
-    }
-
-    /// Above a stacked photo: how many copies there are and a button to show them; once shown, which copy this is.
-    @ViewBuilder var stackBar: some View {
-        if let stack = currentStack, !chromeHidden {
-            let open: Bool = expandedStacks.contains(stack.tile)
-            HStack(spacing: 10) {
-                if open, let current, let index = stack.copies.firstIndex(of: current) {
-                    Text(Self.copyPosition(index: index, count: stack.copies.count, name: currentItem?.name ?? ""))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Button {
-                    toggleStack(stack.tile)
-                } label: {
-                    Label(Self.stackTitle(open: open, count: stack.copies.count), systemImage: "square.stack")
-                }
-                .buttonStyle(.plain)
-                .fontWeight(.semibold)
-            }
-            .font(.callout)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(.black.opacity(0.55), in: .capsule)
-            .padding(.top, 10)
+    /// Above a stacked photo: a strip of its copies (RAW, HEIC, JPEG…); the one shown is marked, another one is shown
+    /// with a tap or click.
+    @ViewBuilder var stackStrip: some View {
+        if let copies = currentStack, let shown = currentFileId, !chromeHidden {
+            StackStrip(copies: copies, shown: shown) { copy in choose(copy: copy) }
+                .padding(.top, 10)
         }
     }
 

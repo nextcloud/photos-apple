@@ -13,12 +13,15 @@ struct SlideshowStart: Identifiable, Hashable {
     var title: String
     var subtitle: String?
     var ids: [FileID]
+    /// Plays the music chosen for memory slideshows (`memorySlideshowMusic`).
+    var playsMemoryMusic = false
 
     init(memory: Memory) {
         id = memory.id
         title = memory.title
         subtitle = Memories.dateLine(for: memory)
         ids = memory.items
+        playsMemoryMusic = true
     }
 }
 
@@ -100,6 +103,7 @@ struct MemorySlideshow: View {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsShown.toggle() }
         }
         .overlay(alignment: .top) { if controlsShown { topBar } }
+        .memorySlideshowMusic(enabled: start.playsMemoryMusic, playing: playing && !items.isEmpty, controlsShown: controlsShown)
         .overlay(alignment: .bottom) { if controlsShown { playbackBar } }
         #if os(iOS)
             .statusBarHidden(!controlsShown)

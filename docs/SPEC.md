@@ -102,6 +102,7 @@ photos-ios/
     ShareExtension/         # iOS + macOS
     Widgets/                # iOS, macOS, visionOS
     NotificationService/    # iOS + macOS, decrypts push payloads
+    BackgroundUpload/       # iOS + macOS, PhotoKit background-upload extension (§7.18.6)
   Packages/PhotosKit/       # one local Swift package; everything else is a target of it
     Sources/
       PhotosModel/          # value types, IDs, feature flags; no I/O
@@ -118,8 +119,8 @@ photos-ios/
   docs/  LICENSE  LICENSES/  REUSE.toml  .swift-format  .github/
 ```
 
-Not there yet: platform folders under `App/` (the platform differences live in `PhotosAppUI`), and the PhotoKit
-background-upload extension (`Extensions/BackgroundUpload`, §7.18.6). The Xcode project is not checked in. Targets depend
+Not there: platform folders under `App/` (the platform differences live in `PhotosAppUI`). The Xcode project is not
+checked in. Targets depend
 downwards only, see [ARCHITECTURE.md](ARCHITECTURE.md); `PhotosDomain` depends only on `PhotosModel` and is fully
 unit-testable on macOS without a server.
 
@@ -174,6 +175,8 @@ User-visible settings: global database. Server-side Photos user config (§7.25) 
 
 `nextcloudphotos://<accountId>/<route>` with routes mirroring the web app: `timeline`, `photos`, `videos`, `favorites`, `thisday`, `memories`, `map`, `albums/<name>`, `sharedalbums/<name>`, `places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`, `photo/<fileId>`. Also accept web URLs of the same account's server (`https://<host>/index.php/apps/photos/...`) when shared into the app, and public album links (`…/apps/photos/public/<token>`).
 
+*Decided (round 4):* the account is written as the user and server of the URL: `nextcloudphotos://<userId>@<host>[:port][/<server path>]/<route>` (the account id `"<userId> <serverURL>"` cannot be a URL host); a link without it opens in the account shown. A link for another logged-in account asks before switching; one for an account that is not logged in is explained (nothing is added). A web link of a server with several accounts on the device lets the user pick the account. Also `search/<text>` (the "Search photos" intent). Public album links open the "Open public link" sheet with the link filled in, so the user sees where it leads before anything loads.
+
 ### 4.9 Branding
 
 One `Brand` type (modelled on the Files app's `NCBrandOptions`) holds name, accent colour (`#0082C9`), logo assets, push proxy URL, default upload folder, privacy/source/help URLs, and MDM/AppConfig overrides. Optionally use the server's theming colour as accent (setting, default off).
@@ -199,7 +202,7 @@ One `Brand` type (modelled on the Files app's `NCBrandOptions`) holds name, acce
 6. **401 handling:** on a 401 from a request, re-verify with `cloud/user`. If it is a real 401: call `POST /index.php/core/wipe/check` with the app password; if wipe is requested, delete all local data of the account and confirm with `…/wipe/success`; otherwise mark the account "signed out" and ask the user to log in again (keep the local cache until they remove the account).
 7. **Logout / remove account:** unsubscribe push (server + proxy), **revoke the app password** (`DELETE /ocs/v2.php/core/apppassword`), delete keychain items, the account database, caches and offline files.
 8. **User agent:** `Mozilla/5.0 (<iOS|iPadOS|macOS|visionOS>) Nextcloud-Photos/<version>`. Before finalising, check the server's client regexes (`lib/public/IRequest.php`, e.g. `USER_AGENT_CLIENT_IOS`) and pick a string that is recognised as a mobile/desktop client where that matters (session naming in "Devices & sessions") but is not mistaken for the Files app.
-9. **MDM / AppConfig** (`com.apple.configuration.managed`), keys compatible with the Files app: `serverUrl`, `username`, `disable_multiaccount`, `enforce_passcode_lock`, `disable_log`, plus `disable_backup`.
+9. **MDM / AppConfig** (`com.apple.configuration.managed`), keys compatible with the Files app: `serverUrl`, `username`, `disable_multiaccount`, `enforce_passcode_lock`, `disable_log`, plus `disable_backup`. *Decided (round 4):* `serverUrl` fixes the login's address and refuses logins to any other server (QR codes and links too); `username` is proposed on the login page (`?user=`); `disable_multiaccount` allows logging in again to the existing account but no second one; `enforce_passcode_lock` turns app lock on and locks its switch; `disable_log` stops the kept log and diagnostics export; `disable_backup` turns backup off. Applied at launch and live; accounts that exist when a restriction arrives are not removed. `password`/`apppassword` of the Files app are not supported (credentials do not belong in a configuration profile).
 
 ### 5.2 Versions and the Photos app on each server
 
@@ -354,9 +357,10 @@ The structure mirrors the web app's navigation (including the extended "Advanced
 - Advanced (collapsed by default): Folders, Shared with you, Archive (lock icon), Recently deleted, Duplicates, Free up space
 - Backup status row at the bottom; account switcher in the sidebar header.
 
-**macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square tiles; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
+**macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square Tiles ⌥⌘S; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
+Decided in round 4 (as in Photos): Image ▸ Rotate Left ⌘R and Rotate Right ⌥⌘R work on the selection and save like the editor's "Overwrite original" (a new file version; not offered for read-only shares or formats that can't be written back), View ▸ Sync Now is ⇧⌘R; Edit ▸ Copy puts the originals on the pasteboard (image data and file URL; at most 100 items, Export for more); "Add to Album" is a submenu (New Album…, the albums used last in this app, then the most recently changed, All Albums…); the grid's context menu has Copy, Rotate, Share (system share menu/sheet) and the same submenu; an album opens in its own window from File ▸ Open in New Window, its card's context menu or ⌥-click (one window per album, restored with the app; it shows the album only while its account is the active one).
 
-**visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5).
+**visionOS specifics:** main window with sidebar; viewer opens in its own window that can be enlarged; spatial photos (stereo HEIC) are presented spatially; panoramas may open in an immersive space (M5). *Decided (round 4):* a spatial photo is recognised from the original's stereo pair group (read when a HEIC is viewed on Vision Pro) and shown with `ImagePresentationComponent`; a panorama (≥ 3000 px wide, ≥ 2:1, from the server's size) opens in an immersive space on a cylinder segment (aspect × 60°, at most 360°).
 
 ### 6.3 Empty, loading and error states
 
@@ -364,10 +368,10 @@ Every view has: first-load skeleton, empty state with a single helpful action (e
 
 ### 6.4 Photo grid
 
-- Square tiles by default; "Aspect ratio" mode mirrors the web's `croppedLayout=false` (justified rows). The setting syncs to the server config `croppedLayout`.
+- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting is per device (Settings › On this device › Square tiles, View ▸ Square Tiles ⌥⌘S) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
 - Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and a toolbar slider. Map the density to the server config `gridDensity` (small/medium/large) where available.
 - Section headers: **month** (sticky) and **day** headers (local calendar day of the capture time, "Today", "Yesterday", weekday names within the last week), each with a select-all checkbox while selecting.
-- **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync).
+- **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync). *Decided (simulator pass):* on iPhone, iPad and Vision Pro it is not UIKit's section index (which lists every year in a column over the photos, into the tab bar) but the Mac's scrubber: it runs between the bars, appears while the grid scrolls and fades out like Photos' scroll indicator, can be grabbed at the edge only while shown, leaves out year labels that do not fit (the newest and oldest stay), draws each label on a background of its own, and stays for VoiceOver as an adjustable element (a year per swipe).
 - Badges: video duration, Live, favourite (heart), stack count, shared-album origin, offline (pinned), cloud-only original state where relevant, archived.
 - Selection: tap "Select", then tap or **swipe across tiles to select ranges** (iOS), two-finger pan to multi-select, drag a rectangle / ⇧-click / ⌘-click (Mac), keyboard navigation with arrow keys, ⌘A select all.
 - Performance budget in §10.
@@ -391,7 +395,7 @@ Requires: core.
 - **TL-3** Memories strip at the top of "All media" when no filter is active: "N years ago" cards from the On-this-day query (§7.12), cover = first favourite or middle photo.
 - **TL-4** Filter bar / search entry (§7.7) applies to the timeline; "Save as smart album" and "Create album from filters" from an active filter.
 - **TL-5** Pull to refresh = incremental sync; sync status in the toolbar (spinner, "Updated just now", offline).
-- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2); (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation.
+- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2) *(decided, round 4: only bursts the camera marked in the file names (`BURST` + number, `COVER` frame shown) are stacked; iPhone bursts need Apple's BurstUUID, which stock servers do not report, and the time rule also stacks quick single shots, which Apple Photos never does)*; (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation *(decided, round 4: delete, favourite, archive, add to album, tags and date/location apply to all members, the delete confirmation counts them; open, info, edit, share and export use the shown copy, as Apple Photos does with RAW + JPEG)*.
 - **TL-7** Source folders: Settings → Library → "Timeline folders" edits `photosSourceFolders` (folder picker over the user's files) and writes the server config; changing it triggers a re-index.
 
 ### 7.2 Viewer — M1
@@ -399,9 +403,10 @@ Requires: core.
 - **VW-1** Full-screen pager over the current context (timeline, album, place, person, search result), swipe left/right, pinch and double-tap zoom, swipe down to close (iOS), arrow keys / space (Mac), keep position when returning to the grid (matched geometry transition).
 - **VW-2** Progressive loading (§5.5.2), Live Photos (§5.5.4), video playback with standard AVKit controls, AirPlay, Picture in Picture.
 - **VW-3** Toolbar: favourite, share, add to album, info, edit, delete; more menu: archive, download/export, edit date & location, tags, extract text, set as album cover (own album), remove from album, "Show in timeline", "Show in folder".
-- **VW-4** Live Text and Visual Look Up on photos (VisionKit `ImageAnalysisInteraction`/`ImageAnalysisOverlayView`); copy subject (lift subject) where the platform supports it.
-- **VW-5** Slideshow from any context: crossfade/Ken Burns, interval setting, loop, plays videos; on Mac full screen; AirPlay.
-- **VW-6** Stacks: a strip of stack members in the viewer.
+  "Show in timeline" is labelled "Show in library" ("Show in Library" on the Mac), after the place it opens (Apple: "Show in All Photos"); it is not offered in the Library itself or for archived photos, opens the Library at the photo's tile (its stack's tile; else the tile closest in time) and marks it (selected on the Mac, a short ring elsewhere).
+- **VW-4** Live Text and Visual Look Up on photos (VisionKit `ImageAnalysisInteraction`/`ImageAnalysisOverlayView`); copy subject (lift subject) where the platform supports it. Only the photo shown is analysed, from its preview, after a short pause; paging cancels it; nothing is analysed while the app is locked or its window is not active.
+- **VW-5** Slideshow from any context: crossfade/Ken Burns, interval setting, loop, plays videos; on Mac full screen; AirPlay. Started from the viewer (from the photo shown), a grid's context menu or selection (several selected: those; one: the grid from it) and File › Play Slideshow. Intervals 2/3/5/10/20 s (default 3), Repeat on by default (off: stops on the last photo). Videos play to their end. Mac: a window of its own in full screen. iPhone/iPad: AirPlay button for videos; photos reach a TV by Screen Mirroring.
+- **VW-6** Stacks: a strip of stack members in the viewer. A stack is one page; the strip (picture and format of each copy) chooses the copy the page shows and acts on.
 
 ### 7.3 Selection actions — M1 (album/tag actions in their milestones)
 
@@ -434,7 +439,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SH-4** **Quick share** a selection: create album "Shared on <date>" (suffix (2), (3)… if taken), copy the photos in, add a public link, present the share sheet with the link; roll back on failure (`photos-extended-api.md` quick-share-selection).
 - **SH-5** Comments on own and shared albums when `albumComments` (comments DAV `/remote.php/dav/comments/photos_album/<albumId>`): list, post, delete own; not for public links.
 - **SH-6** **Public album viewer**: open a public link (pasted, from the share sheet, or deep link) anonymously via `/remote.php/dav/photospublic/<token>` with `Authorization: Basic base64("<token>:")`, previews via `publicPreview`; read-only grid, viewer, slideshow, download/export. Does not need an account.
-- **SH-7** **Share via Nextcloud** (photo or folder): Nextcloud's own sharing through the OCS Files Sharing API (`/ocs/v2.php/apps/files_sharing/api/v1/shares`, recipients from `…/sharees`), on every server without a Photos change. Recipients: users, groups, users and groups on other servers (federation), email addresses, Teams, Talk conversations (when the `spreed` capability is there); what is offered follows `capabilities.files_sharing`. Public links with password, expiry date (enforced limits respected), permissions (folders: view, view and upload, file drop), hide download, label and note. Existing shares are listed and can be changed or removed. Albums keep SH-1/SH-2: the Photos server shares albums only with users, groups and one public link; the album sharing sheet says that other servers, email and Talk work for photos and folders, not for albums (that would need a server change). All links are shown and copied through one view (`SharedLinkView`, warns for http).
+- **SH-7** **Share via Nextcloud** (photo or folder): Nextcloud's own sharing through the OCS Files Sharing API (`/ocs/v2.php/apps/files_sharing/api/v1/shares`, recipients from `…/sharees`), on every server without a Photos change. Recipients: users, groups, users and groups on other servers (federation), email addresses, Teams, Talk conversations (when the `spreed` capability is there); what is offered follows `capabilities.files_sharing`. Public links with password, expiry date (enforced limits respected), permissions (folders: view, view and upload, file drop), hide download, label and note. Existing shares are listed and can be changed or removed. Albums keep SH-1/SH-2: the Photos server shares albums only with users, groups and one public link; the album sharing sheet says that other servers, email and Talk work for photos and folders, not for albums (that would need a server change). All links are shown and copied through one view (`SharedLinkView`, warns for http). Several photos at once: one share per photo and recipient (Nextcloud shares one file per share), email recipients left out (one email per photo); a public link to several photos is an album with a link (SH-4).
 - **SH-8** **Partner sharing**: Settings › Partner sharing lists folders shared with the user (received user/group shares); turning one on indexes it with the timeline folders (only that folder is read, no rebuild) and its photos get a partner badge; a toolbar button and a switch hide or show them in the timeline. "Share my photos with a partner…" opens SH-7 for the upload folder. Stored per account on the device; the server and the web app's timeline folders are not changed.
 - **SH-9** **Activity in shared albums**, without server changes: every listing of the albums (opening Albums, and after a sync at most every 15 minutes) is compared with the stored one; an album shared with the user, or an own album shared with people, that has more photos than before, and an album newly shared with the user, become an entry of a local activity list ("New in shared albums" row above the albums, list with "Mark all as seen"; opening the album marks it seen). Photos added in this app are not reported (the outbox raises the stored count first). Found by a background refresh while the app is not in front, it is also announced with a local notification (Settings › Shared albums, only if notifications are allowed; opens Shared albums). Instant push ("Anna added 12 photos") needs the server to send it (companion S5); the Photos server reports no adder either.
 
@@ -442,7 +447,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 
 - **SR-1** One search field with suggestion groups: Places, People, Tags, Dates, Albums, plus free text (file name and, when captions are searchable, caption). Diacritic- and case-insensitive substring matching, prefix matches first, max 6 per group; typed years and month names ("jun 2023") become date ranges (rules: `photos-extended-api.md` unified-photo-search). Suggestions come from the local store.
 - **SR-2** Selected suggestions become filter chips (AND between kinds, OR within a kind). Filtering runs **locally** on the index; tag and person filters use the cached memberships (fetch the tag/person membership on first use).
-- **SR-3** Free-text search also queries the local FTS index (names, places, captions, tags, people, album titles).
+- **SR-3** Free-text search also queries the local FTS index (names, places, captions, tags, people, album titles). Album titles are those of own and shared albums whose content was read (not opened public links). Photos that are only known as members of an album (another user's photos in a shared album, own albums' photos outside the timeline folders) are found too, by free text (name, place, caption, album titles) and by the album chip; searches without text or album stay in the library.
 - **SR-4** **Ask your photos** (natural language, e.g. "beach photos from summer 2023 in Italy"): turn the sentence into filters, never into an answer text. (a) If `taskText2Text` is available, use the server's TaskProcessing exactly as the web app does (prompt with today's date and the place/tag vocabulary, JSON reply, validation; `photos-extended-api.md` ask-your-photos). (b) Otherwise, if Apple Intelligence is available on the device, use the on-device **Foundation Models** framework with guided generation into the same filter struct. (c) Otherwise hide the feature.
 - **SR-5** **Smart albums** (saved filters): "Save as smart album" from active filters; list in Collections/sidebar. Stored in the server user config `smartAlbums` when the companion config read API exists (so it syncs with the web app); otherwise stored locally and labelled "On this device".
 - **SR-6** Spotlight & Shortcuts surface search (§7.23).
@@ -455,6 +460,7 @@ Requires: `places` for the Places list; Map works on any server from GPS in the 
 - **PL-1** Places list: grid of place covers with count, grouped by country when `placeCountry` (country name from `Locale.current.localizedString(forRegionCode:)`, "Other" for unknown), else flat and sorted by count. Place content as a timeline-like grid.
 - **PL-2** Note: server places only cover images in the user's own storage; the app shows the server's lists as they are (parity) and uses its own index for the Map.
 - **MP-1** Map (MapKit) of all photos with GPS in the local index (the whole library — not the web's 500), clustered with `MKClusterAnnotation`, cluster thumbnails; tap a cluster → grid of its photos; "Photos in this area" grid for the visible region; time slider filtering by month range.
+  Decided in round 4: an `MKMapView` (SwiftUI's `Map` cannot cluster). Its annotations are not the photos but grid cells the database adds up (power-of-two degrees, a 16th to an 8th of the visible span), which MapKit clusters where they overlap: one annotation per photo costs 1.45 s for 50 000 (budget 200 ms). A cluster shows its newest photo and the photos of all its cells. The map opens on the area of all geotagged photos. The time slider is a panel shown with "Time range" in the toolbar: two month sliders (From, To) from the month of the oldest to that of the newest geotagged photo, the months in its title, "All time" to reset; markers, cluster lists and "Photos in this area" follow it.
 - **MP-2** Place/map entry points from the info panel (photo location → map centred there).
 
 ### 7.9 People — M4
@@ -487,6 +493,7 @@ All computed locally over the whole index (constants in `photos-extended-api.md`
 - **ME-2** **Trips**: split by gaps > 2 days, keep clusters ≥ 8 photos, cover = photo nearest the middle time, title = most frequent place (+ second place if ≥ half as frequent, "A & B"), else the date range. Newest first.
 - **ME-3** **Year recap**: newest year with ≥ 30 photos, 60 highlights (favourites first, then evenly per month).
 - **ME-4** Memory player: full-screen slideshow of a memory with title card; share as quick-share link; "Save as album".
+  Decided in round 4: a memory's "More" menu has "Save as album" (an own album named after the memory: trip and recap titles, On this day by its dates; " (2)" when the name is taken; a trip's places as location; only the user's own photos, the others are counted in the confirmation), "Share as link…" (an album with a public link named after the memory, SH-4) and "Slideshow music". Music is optional and off by default; the app ships none (no licensed tracks). The user picks an audio file (copied into the app's storage) or, on iPhone and iPad, a song of the Music library (`MPMediaPickerController`, played through the app's queue of the system player); one choice for all memory slideshows. It fades in, pauses and stops with the slideshow and loops; a speaker button in the slideshow turns it off for that slideshow; files play in the `ambient` audio category (mixes, follows the Ring/Silent switch).
 
 ### 7.13 Archive and hidden photos — M4
 
@@ -500,7 +507,7 @@ Requires: `files.undelete`. Lists trashed media (`PROPFIND /remote.php/dav/trash
 
 ### 7.15 Duplicates and Free up space — M5
 
-- **Duplicates**: groups by `size + captureTime + width×height` over the whole index (exact copies; `photos-extended-api.md` duplicates-view). Review UI per group: keep the best (largest/oldest path heuristics, user can change), delete the rest; "Merge favourites/albums" is not possible server-side — warn if the deleted copies are in albums.
+- **Duplicates**: groups by `size + captureTime + width×height` over the whole index (exact copies; `photos-extended-api.md` duplicates-view). Review UI per group: keep the best (largest/oldest path heuristics, user can change), delete the rest; "Merge favourites/albums" is not possible server-side — warn if the deleted copies are in albums. Decided in round 4: the warning uses the album content in the local index only (albums never opened on the device are reported as not checked, no extra server requests), names the albums the kept copy is not in, and offers to add the kept copy to them before deleting (own files only; albums filled by filters are left out).
 - **Free up space**: screenshots, screen recordings, large videos (> 100 MiB) heuristics from the web (patterns in `photos-extended-api.md` free-up-space), sorted by size, bulk delete with total size shown.
 - Device storage ("Remove backed-up photos from this device") is part of Backup (§7.18.8), not this screen.
 
@@ -509,7 +516,7 @@ Requires: `files.undelete`. Lists trashed media (`PROPFIND /remote.php/dav/trash
 #### 7.16.1 Photo editor
 
 Core Image pipeline (`PhotosMedia/Editing`), non-destructive while editing, rendered at full resolution on save:
-- Crop (free, original, square, 4:3, 16:9, …), rotate 90°, straighten (±45°), flip.
+- Crop (free, original, square, 4:3, 16:9, …), rotate 90°, straighten (±45°), flip. Free crop: the crop tool shows the whole picture with a frame (corner and edge handles, drag inside to move); a lock keeps the aspect; presets set the largest centred area of their ratio (in the photo's orientation) and lock it; the crop is stored as fractions of the straightened, turned and mirrored picture and turns/mirrors with it. Flip mirrors left to right as the picture is shown.
 - Auto-enhance (`CIImage.autoAdjustmentFilters`).
 - Filters (system photo effects: Vivid, Vivid Warm/Cool, Dramatic, Mono, Silvertone, Noir…).
 - Adjust: exposure, brilliance/highlights/shadows, contrast, brightness, black point, saturation, vibrance, warmth, tint, sharpness, vignette.
@@ -518,7 +525,7 @@ Core Image pipeline (`PhotosMedia/Editing`), non-destructive while editing, rend
 
 #### 7.16.2 Saving
 
-"Save as copy" (default): writes `<name> (edited).<ext>` next to the original (HEIC if the original was HEIC, else JPEG), so the stacking rule groups it with the original; the copy is added to the same own albums. "Overwrite original": PUT over the original; tell the user that the previous version stays in Nextcloud's file versions (if `files_versions` is enabled). Not available for files without write permission.
+"Save as copy" (default): writes `<name> (edited).<ext>` next to the original (HEIC if the original was HEIC, else JPEG), so the stacking rule groups it with the original; the copy is added to the same own albums. "Overwrite original": PUT over the original; tell the user that the previous version stays in Nextcloud's file versions (if `files_versions` is enabled). Not available for files without write permission. The original keeps its format and name (only formats Image I/O can write: JPEG, HEIC/HEIF, PNG, TIFF; others can only be saved as a copy), and the PUT carries `If-Match` with the ETag the app edited, so a newer version on the server is never replaced.
 
 #### 7.16.3 Metadata editing
 
@@ -556,7 +563,7 @@ On iPhone and iPad this flow is offered once, as a full-screen step right after 
 | Destination folder | `photosLocation` (default `/Photos`), or Files' folder in "switch" mode |
 | Subfolders | Year/Month (`yyyy/MM`); options: none, year, year/month, year/month/day (by capture date, local time) |
 | File names | **Original names** (`IMG_1234.HEIC`); option "Like Nextcloud Files" (`yy-MM-dd HH-mm-ss NNNN.ext`, optional "Photo "/"Video " prefix, or Files' custom mask — `reference/nextcloud-ios-and-nextcloudkit.md` §4.2) |
-| Formats | **Originals** (HEIC, HEVC, ProRAW DNG); option "Most compatible" (JPEG/H.264) |
+| Formats | **Originals** (HEIC, HEVC, ProRAW DNG); option "Most compatible" (JPEG/H.264): HEIC/HEIF photos become JPEG, HEVC videos (also Live Photo motion parts) H.264 in a QuickTime file (`.mov`, what the camera's own "Most Compatible" records), metadata kept; RAW and what already is JPEG/H.264 stay as they are; a video that cannot be converted is uploaded as it is. The conversion happens next to the export and is removed with it. |
 | Edited photos | Original + edited version (edited uploaded as Apple's `IMG_E1234.*` resource name, stacked by the server/app); options: edited only, original only |
 | Live Photos | Upload the motion part and link it |
 | What | Photos and videos; option per type; whole library or "from date"; all photos or selected device albums; include shared-library photos (on) |
@@ -593,7 +600,9 @@ An asset is uploaded only if **none** of these layers finds it already on the se
 | Shifted EXIF time | as "Probable" but times differ by a whole number of hours (≤ 14 h) and minutes/seconds equal — EXIF local time read without offset by older servers | skip only if the name number also matches |
 | Otherwise | — | upload |
 
-5. **Destination check** — before each PUT, `PROPFIND` the destination; if a file with that name exists: same size → mark matched; different → upload as `name (2).ext` (never overwrite in backup).
+5. **Destination check** — before each PUT, `PROPFIND` the destination; if a file with that name exists: same size → mark matched; different → upload as `name (2).ext` (never overwrite in backup). For a resource that may be converted ("Most compatible") a file of that name whose modification time is the capture time (± 1 s, the upload sets `X-OC-MTime`) is also this file: a conversion does not give the same bytes each time.
+
+*Converted files (decision, round 4):* the ledger (layer 1) records the upload per asset and resource whatever format was uploaded. On the server a converted copy has the original's name with another extension and the capture time, but not the original's size, so layer 4 finds it by capture second and name number ("Probable") or pixel size ("Probable (converted)"), and layer 5 by name and capture time. "Free up space" (§7.18.8) never counts a converted copy.
 
 The reconciliation result is shown to the user in the first run and is reviewable ("Already on server: 4 210 · will upload: 312 · see details"). Users can force-upload an individual skipped item from the details list.
 
@@ -612,6 +621,9 @@ If the identifiers from §4.2 change or Apple rejects the extra App Groups, drop
 #### 7.18.6 Background execution
 
 - Primary: the **PhotoKit background-upload extension** (iOS/iPadOS 27, extension point `com.apple.photos.background-upload`, `PHBackgroundResourceUploadJobExtension`; the Files app's implementation is a reference: `nextcloud-ios-and-nextcloudkit.md` §4.5). The app creates upload jobs only **after** reconciliation, one per resource, with the destination `PUT` request (headers: auth, user agent, `X-OC-MTime`, `X-OC-CTime`, `OC-Checksum`, `X-NC-WebDAV-Auto-Mkcol: 1`). Success = response has `OC-FileId`. Resources > 100 MB are handed back to the app for chunked upload. Check whether the extension point exists on macOS 27; if not, macOS uses the next mechanism.
+
+  *Implementation (round 4):* `Extensions/BackgroundUpload` (ExtensionKit, `EXExtensionPointIdentifier` `com.apple.photos.background-upload`), on iOS/iPadOS **and macOS**: the macOS 27 SDK has the API and macOS 27.3 defines the extension point (`/System/Library/ExtensionKit/ExtensionPoints/com.apple.photos.background-upload.appexpt`: platforms iOS and macOS, `EXRequiredEntitlements` `com.apple.photos.background-upload`). Not on visionOS (no API). The app turns it on with `PHPhotoLibrary.enableUploadJobExtension(with:)` while backup is on with **full** library access (PhotoKit requires it) and the App Group is there, off otherwise; "Wi-Fi only" is `PHAssetResourceUploadJobOptions.preventsExpensiveNetworkAccess`, videos with "Wi-Fi only for videos" and Low Data Mode go per request. Each run (`processJobs`) opens the backup account from the shared container and: records the jobs that ended (file id from `responseHeaderFields`, else the destination with the resource's size; a failed job is retried once under a freshly looked-up name; then it is a failure like any other), acknowledges them, then scans and reconciles exactly like a pass of the app (ledger, Files app, server search) and creates jobs for what is not on the server, oldest first, up to `min(jobLimit, 20)`. Decisions: PhotoKit sends the resource's bytes as they are, so it takes only resources ≤ 100 MB of known size that are not converted ("Most compatible" photos and videos, everything > 100 MB and of unknown size stay with the app); **no `OC-Checksum`** on its jobs (the bytes are not read here; layers 1, 4 and 5 do not need it); PhotoKit downloads from iCloud by itself, so with "Download originals from iCloud" off it creates no jobs; in Low Power Mode (with "pause") none either. The app and PhotoKit never take the same resource: the extension records a job (`<account>/UploadJobs.json`) before creating it and skips what the app's session has; the app skips the resources of that record and keeps their names free; every PUT has `If-None-Match: *`. Unverified: a real device (the entitlement has to be provisioned).
+- Files larger than 100 MB go in chunks (chunking v2) through the app's background `URLSession`: the app prepares the upload (name, upload folder — the same one an upload by the app itself would use, so either continues the other), moves the export into its container and hands 8 chunk `PUT`s at a time to the system, each from a file of its own; every report (also to a later launch) hands over the next ones, the final `MOVE` (empty body, `Overwrite: F`) too. One such file at a time. A lost answer to the `MOVE` is settled by looking at the destination. The user's pause takes the chunks back, the next pass sends only what the server does not have; turning backup off removes what waits.
 - Fallback / complement: background `URLSession` upload tasks, `BGProcessingTask` (`com.nextcloud.photos.processing`, requires network, prefers power) for reconciliation, hashing, Live Photo linking and metadata fix-ups, and `BGAppRefreshTask` for scanning new assets. No location-change or audio tricks.
 - A backup the user starts (the first one, or "Back up now" with many items waiting) runs as a `BGContinuedProcessingTask` on iOS/iPadOS: it shows system progress and goes on when the user leaves the app. Option "Keep screen on while backing up": the idle timer is off only while a pass runs and the app is in front.
 - After uploads: link Live Photo parts, PROPPATCH missing capture date/GPS where possible (`metadataEdit`), add to the local index immediately (the file appears in the timeline before the next sync).
@@ -675,17 +687,19 @@ Widgets read the account store (read-only) and the preview cache from the App Gr
 - **Entities**: `PhotoEntity`, `AlbumEntity`, `PersonEntity`, `PlaceEntity`, `TagEntity` (indexed entities for Spotlight).
 - **Intents**: Search photos (place, person, date range, tag, favourites), Open album/person/place, Show On this day, Start slideshow (of album/memory), Add photos to album, Upload photos/files (accepts images from Shortcuts) to the upload folder or an album, Create album, Toggle backup / Back up now, Share album link.
 - **App Shortcuts** with Siri phrases ("Show my photos from Paris in Nextcloud Photos", "On this day in Nextcloud Photos").
-- **Spotlight**: index albums, people, places and smart albums (not every photo in v1; optional setting to index captions later). Archived content is never indexed.
+- **Spotlight**: index albums, people, places and smart albums (not every photo in v1; optional setting to index captions later). Archived content is never indexed. *Decided (round 4):* one Core Spotlight domain per account, removed on logout and remote wipe; nothing is indexed while app lock is on; people hidden on the device and unnamed people are not indexed; a place only while a non-archived photo has it; no thumbnails. Smart albums are not indexed yet.
 
 ### 7.24 Share extension, drag & drop, export — M2
 
 - **Share extension** (iOS, macOS): receive images/videos (and Live Photos) from any app → choose account, upload folder (default `photosLocation`), optional own album (create new allowed) → upload in a background session; shows progress and completion.
+
+  *Implementation (round 4):* each share gets a background `URLSession` of its own (`share-upload.<uuid>`, with the App Group as shared container); the copies of the shared files move into the App Group container (`ShareUploads/<session>/`), files up to 100 MB are one PUT, larger ones go in chunks (as backup, §7.18.6). "Continue in Background" closes the sheet while the system goes on. When the extension has ended, the system launches the app for the session's events (iOS) and the app takes the share over from its record (album, chunks, lost requests); at launch the app also continues shares whose extension stopped renewing its claim (45 s), e.g. on the Mac. What still fails is told in a local notification (when notifications are allowed); the files are removed when the share is through.
 - **Drag & drop** (iPad, Mac, visionOS): drag photos out of the grid/viewer (file promises — originals download lazily), drop into albums/folders/sidebar albums (upload and/or add), drag between albums (add), reorder is not supported by the server.
 - **Export / Save to device Photos library** with add-only permission; keeps capture date and location (create the asset from the original file, Live Photo with both resources).
 
 ### 7.25 Settings — M1 (grows per milestone)
 
-- **Library (server, synced with the web app)**: Timeline folders (`photosSourceFolders`), Upload folder (`photosLocation`), Square tiles (`croppedLayout`), Grid size (`gridDensity`, Nextcloud ≥ 35), Album sort orders (extended), On this day notifications (extended). Written with `PUT /index.php/apps/photos/api/v1/config/<key>` body `{"value":"<string>"}` and `OCS-APIRequest: true`; read via §5.3 step 2.
+- **Library (server, synced with the web app)**: Timeline folders (`photosSourceFolders`), Upload folder (`photosLocation`), Square tiles (`croppedLayout`; *decided, round 4: a setting of this device, see §6.4*), Grid size (`gridDensity`, Nextcloud ≥ 35), Album sort orders (extended), On this day notifications (extended). Written with `PUT /index.php/apps/photos/api/v1/config/<key>` body `{"value":"<string>"}` and `OCS-APIRequest: true`; read via §5.3 step 2.
 - **App**: stack similar photos, show RAW files, play Live Photos in the grid, load originals automatically (Wi-Fi/always/never), accent colour from server theme, app lock (+ timeout: immediately, 1, 5, 15 min), Backup (§7.18), Notifications, Storage (§7.19), Accounts, Advanced (logging, re-index library, server features list for support), About (version, licences of dependencies, source code link, privacy).
 
 ---
@@ -782,6 +796,43 @@ Places & map, people, tags, folders & shared with you, memories & On this day, s
 ### M5 — Advanced and polish
 Editing (§7.16), metadata editing, recently deleted, duplicates, free up space, free up device space, ask your photos, extract text / Live Text / Visual Look Up, captions in UI, video renditions, App Intents/Siri/Spotlight, visionOS spatial/immersive extras, accessibility & localisation audit, App Store assets and review notes.
 **Accept:** full parity matrix (Appendix A) green; accessibility audit has no blockers; App Store submission ready.
+
+## 15. M6 — Delight
+
+Round 5 (2026-11-24): features that go beyond the other photo apps. No server changes; everything uses stock
+Nextcloud/Photos APIs and on-device frameworks. Each subsection is owned by one work package (name in brackets).
+
+### 15.1 Memory films and Year in Review [memories]
+
+_To be written._
+
+### 15.2 Photographer's Mac: import, culling, compare, external editors [macpro]
+
+_To be written._
+
+### 15.3 New platforms: Apple TV and Apple Watch [tvwatch]
+
+_To be written._
+
+### 15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room [ambient]
+
+_To be written._
+
+### 15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos [feel]
+
+_To be written._
+
+### 15.6 Then and now, travel globe [places]
+
+_To be written._
+
+### 15.7 Bring everything home: imports [import]
+
+_To be written._
+
+### 15.8 Smart offline and fun extras: stickers, collages, photo of the day [extras]
+
+_To be written._
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

@@ -5,13 +5,14 @@ A short map of the code. The target design, with its reasons, is in [SPEC.md](SP
 
 ## Targets
 
-The Xcode project is generated from `project.yml` (XcodeGen). It has four small targets that contain little more than
+The Xcode project is generated from `project.yml` (XcodeGen). It has five small targets that contain little more than
 entry points; all other code is in the local Swift package `Packages/PhotosKit`.
 
 | Target | Platforms | Links | Contents |
 |---|---|---|---|
 | `NextcloudPhotos` (app) | iOS, iPadOS, macOS, visionOS | `PhotosAppUI`, `PhotosCore` | `App`, app delegates (push, background sessions), background tasks, App Intents |
-| `ShareExtension` | iOS, macOS | `PhotosAppUI` | Upload from the share sheet |
+| `ShareExtension` | iOS, macOS | `PhotosAppUI` | Upload from the share sheet, in a background session the app finishes (`PhotosCore/ShareUploads`) |
+| `BackgroundUpload` | iOS, macOS | `PhotosCore` | PhotoKit's background-upload extension (ExtensionKit, `com.apple.photos.background-upload`): backup uploads PhotoKit sends while the app is not running |
 | `NotificationService` | iOS, macOS | `PhotosCore` | Decrypts push payloads, hides what is not about photos |
 | `Widgets` | iOS, macOS, visionOS | `PhotosCore` | "On this day" and "Favorites" widgets |
 | `NextcloudPhotosUITests` | iOS, macOS | – | XCUITest smoke tests ([TESTING.md](TESTING.md)) |

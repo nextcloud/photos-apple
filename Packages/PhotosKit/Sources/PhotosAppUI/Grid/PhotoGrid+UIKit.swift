@@ -18,6 +18,8 @@
         var selection: Set<FileID>
         var isSelecting: Bool
         var showsHeaders: Bool
+        /// Square tiles, or each picture whole in its tile (`TileStyle`).
+        var squareTiles = true
         var services: AccountServices
         var callbacks: GridCallbacks
 
@@ -33,7 +35,9 @@
                 callbacks.refresh = { await refresh() }
             }
             controller.callbacks = callbacks
-            controller.update(update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders)
+            controller.update(
+                update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders,
+                squareTiles: squareTiles)
         }
     }
 
@@ -59,8 +63,13 @@
         private var isSelecting = false
         private var pinchHandled = false
         private var selected = GridSelectionTracker()
+        /// Date scrubber along the trailing edge (SPEC §6.4).
+        private let scrubber = GridScrubberView()
+        /// Top of every section in the document, plus its height as last element (scrubber positions).
+        private var sectionOffsets: [Double] = []
 
         var model: GridModel { core.model }
+        var squareTiles: Bool { core.squareTiles }
         private var zoomStep: Int { core.zoomStep }
         private var headerMetrics: GridHeaderMetrics { core.headerMetrics }
 
@@ -94,6 +103,11 @@
                 SectionHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                 withReuseIdentifier: SectionHeader.reuseIdentifier)
             view.addSubview(collectionView)
+            scrubber.isHidden = true
+            scrubber.labelAt = { [weak self] fraction in self?.scrubberLabel(at: fraction) ?? "" }
+            scrubber.onScrub = { [weak self] fraction in self?.scroll(toFraction: fraction) }
+            scrubber.onStep = { [weak self] delta in self?.scrollToYear(delta: delta) }
+            view.addSubview(scrubber)
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             collectionView.addGestureRecognizer(pinch)
@@ -102,6 +116,7 @@
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.core.headerMetrics = Self.currentHeaderMetrics
                 controller.collectionView.collectionViewLayout.invalidateLayout()
+                controller.reloadScrubber()
             }
             registerForTraitChanges([UITraitDisplayScale.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.refreshVisibleTiles()
@@ -168,9 +183,11 @@
 
         // MARK: Updates
 
-        func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, isSelecting: Bool, showsHeaders: Bool) {
+        func update(
+            _ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, isSelecting: Bool, showsHeaders: Bool, squareTiles: Bool
+        ) {
             loadViewIfNeeded()
-            let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders)
+            let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders, squareTiles: squareTiles)
             if plan.relayouts {
                 let anchor = anchorItem()
                 core.show(update.model, relayout: true)
@@ -203,6 +220,7 @@
                 setSelecting(isSelecting)
             }
             syncSelection(selection, modelChanged: plan.relayouts || plan.sectionChanges != nil)
+            if plan.relayouts || plan.sectionChanges != nil { reloadScrubber() }
         }
 
         /// Some sections came, went or changed (an upload, a sync page): only those are updated, in one batch, instead
@@ -345,6 +363,116 @@
             core.resizeAnchor = nil
             if core.sideChanged(width: gridWidth) { refreshVisibleTiles() }
             core.noteLayout(width: gridWidth)
+            layoutScrubber()
+        }
+
+        // MARK: Date scrubber
+
+        /// The scrubber runs along the part of the grid that is not under the bars, inside the safe area.
+        private func layoutScrubber() {
+            guard isViewLoaded else { return }
+            let insets = collectionView.adjustedContentInset
+            let width = min(GridScrubberView.width, view.bounds.width)
+            let frame = CGRect(
+                x: view.bounds.maxX - view.safeAreaInsets.right - width, y: insets.top, width: width,
+                height: max(view.bounds.height - insets.top - insets.bottom, 0))
+            let resized = frame.size != scrubber.frame.size
+            scrubber.frame = frame
+            if resized { reloadScrubber() }
+        }
+
+        /// Height of the part of the grid between the bars.
+        private var visibleHeight: Double {
+            let insets = collectionView.adjustedContentInset
+            return Double(collectionView.bounds.height - insets.top - insets.bottom)
+        }
+
+        /// How far the grid scrolls, as document offsets of its top edge.
+        private var scrollRange: Double { max((sectionOffsets.last ?? 0) - visibleHeight, 0) }
+
+        private func reloadScrubber() {
+            guard isViewLoaded else { return }
+            let visibleHeight = visibleHeight
+            guard headersShown, visibleHeight > 0 else {
+                setScrubberShown(false)
+                return
+            }
+            let sections = model.sections
+            // Placeholder tiles (the first sync's skeleton) count: the scrubber covers the whole library.
+            sectionOffsets = geometry.sectionOffsets(
+                itemCounts: sections.map(\.tileCount), headerHeights: sections.map { headerMetrics.height(for: $0) })
+            let range = scrollRange
+            // Not worth it for a library that fits on two screens.
+            guard range > visibleHeight else {
+                setScrubberShown(false)
+                return
+            }
+            setScrubberShown(true)
+            scrubber.ticks = model.yearStarts.map { entry in
+                GridScrubberView.Tick(fraction: min(sectionOffsets[entry.section] / range, 1), label: String(entry.year))
+            }
+            updateScrubberPosition(userInitiated: false)
+        }
+
+        /// One indicator at the edge: the scrubber's handle where it is shown, else the scroll view's own.
+        private func setScrubberShown(_ shown: Bool) {
+            scrubber.isHidden = !shown
+            collectionView.showsVerticalScrollIndicator = !shown
+        }
+
+        private func section(atFraction fraction: Double) -> GridSection? {
+            // The section under the pinned header, i.e. the one whose items are at the top.
+            guard let index = GridGeometry.section(at: fraction * scrollRange + 1, in: sectionOffsets) else { return nil }
+            return model.sections[safe: index]
+        }
+
+        private func scrubberLabel(at fraction: Double) -> String {
+            section(atFraction: fraction).map(GridHeaderTexts.scrubberLabel) ?? ""
+        }
+
+        private var scrollFraction: Double {
+            let range = scrollRange
+            return range > 0 ? min(max(Double(collectionView.contentOffset.y + topInset) / range, 0), 1) : 0
+        }
+
+        private func scroll(toFraction fraction: Double) {
+            scroll(toDocumentY: fraction * scrollRange)
+        }
+
+        private func scroll(toDocumentY y: Double) {
+            let offset = GridAnchor.offset(
+                documentY: y, topInset: Double(topInset), contentHeight: sectionOffsets.last ?? 0,
+                bottomInset: Double(collectionView.adjustedContentInset.bottom), viewportHeight: Double(collectionView.bounds.height))
+            collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: CGFloat(offset)), animated: false)
+        }
+
+        /// Jumps to the start of the next older (+1) or newer (−1) year.
+        private func scrollToYear(delta: Int) {
+            let years = model.yearStarts
+            guard !years.isEmpty, let current = section(atFraction: scrollFraction)?.year,
+                let index = years.firstIndex(where: { $0.year == current })
+            else { return }
+            let target = years[max(0, min(years.count - 1, index + delta))]
+            guard target.section < sectionOffsets.count else { return }
+            scroll(toDocumentY: sectionOffsets[target.section])
+            updateScrubberPosition(userInitiated: false)
+            UIAccessibility.post(notification: .pageScrolled, argument: scrubberLabel(at: scrollFraction))
+        }
+
+        private func updateScrubberPosition(userInitiated: Bool) {
+            guard !scrubber.isHidden else { return }
+            let fraction = scrollFraction
+            scrubber.scrolled(to: fraction, label: scrubberLabel(at: fraction), userInitiated: userInitiated)
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            // Only the user's scrolling shows the scrubber, not a jump to a photo or a relayout.
+            updateScrubberPosition(userInitiated: scrollView.isTracking || scrollView.isDecelerating)
+        }
+
+        func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
+            layoutScrubber()
+            reloadScrubber()
         }
 
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
@@ -395,6 +523,9 @@
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PhotoCell.reuseIdentifier, for: indexPath) as! PhotoCell
             if let item = model.item(section: indexPath.section, item: indexPath.item) {
                 cell.configure(item: item, owner: self, tileSide: geometry.side, scale: previewScale)
+            } else {
+                // A photo the first sync has not loaded yet.
+                cell.showPlaceholder()
             }
             return cell
         }
@@ -412,18 +543,16 @@
             return header
         }
 
-        /// Year index (native section index as date scrubber).
-        func indexTitles(for collectionView: UICollectionView) -> [String]? {
-            guard headersShown else { return nil }
-            let years = model.yearStarts
-            return years.count > 1 ? years.map { String($0.year) } : nil
-        }
-
-        func collectionView(_ collectionView: UICollectionView, indexPathForIndexTitle title: String, at index: Int) -> IndexPath {
-            IndexPath(item: 0, section: model.yearStarts[safe: index]?.section ?? 0)
-        }
-
         // MARK: Delegate
+
+        /// Placeholder tiles of the first sync's skeleton cannot be tapped, selected or focused.
+        func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+            fileId(at: indexPath) != nil
+        }
+
+        func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+            fileId(at: indexPath) != nil
+        }
 
         func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
             guard let id = fileId(at: indexPath) else { return }
@@ -442,7 +571,9 @@
             callbacks?.selectionChanged(selected.ids)
         }
 
-        func collectionView(_ collectionView: UICollectionView, canFocusItemAt indexPath: IndexPath) -> Bool { true }
+        func collectionView(_ collectionView: UICollectionView, canFocusItemAt indexPath: IndexPath) -> Bool {
+            fileId(at: indexPath) != nil
+        }
 
         /// Return on the focused tile (hardware keyboard). A tap also ends up here after `didSelectItemAt`; opening the
         /// same photo twice is one and the same viewer.
@@ -452,7 +583,7 @@
         }
 
         func collectionView(_ collectionView: UICollectionView, shouldBeginMultipleSelectionInteractionAt indexPath: IndexPath) -> Bool {
-            true
+            fileId(at: indexPath) != nil
         }
 
         /// A two-finger drag over the tiles starts the selection mode (as in Photos and Files): UIKit only selects
@@ -486,20 +617,59 @@
                 let shown = (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.picture
                 preview = { GridMenuPreviewController(item: item, services: services, placeholder: shown) }
             }
-            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { _ in
-                // Each group is an inline menu: UIKit draws the separators between them.
-                let groups: [UIMenuElement] = GridMenuAction.groups(actions).map { group in
-                    UIMenu(
-                        options: .displayInline,
-                        children: group.map { action in
-                            UIAction(
-                                title: action.title, image: UIImage(systemName: action.systemImage),
-                                attributes: action.isDestructive ? .destructive : []
-                            ) { _ in action.handler(ids) }
-                        })
-                }
-                return UIMenu(children: groups)
+            return UIContextMenuConfiguration(identifier: identifier, previewProvider: preview) { [weak self] _ in
+                UIMenu(children: self?.menuElements(actions, ids: ids, at: indexPaths[0]) ?? [])
             }
+        }
+
+        /// Each group is an inline menu (UIKit draws the separators between them); actions with children are submenus,
+        /// sharing opens the share sheet from the tile.
+        func menuElements(_ actions: [GridMenuAction], ids: [FileID], at indexPath: IndexPath) -> [UIMenuElement] {
+            GridMenuAction.groups(actions).map { group in
+                UIMenu(
+                    options: .displayInline,
+                    children: group.map { action -> UIMenuElement in
+                        let image = UIImage(systemName: action.systemImage)
+                        if !action.children.isEmpty {
+                            let children: [UIMenuElement] = menuElements(action.children, ids: ids, at: indexPath)
+                            return UIMenu(title: action.title, image: image, children: children)
+                        }
+                        if let share = action.share {
+                            return UIAction(title: action.title, image: image) { [weak self] _ in
+                                self?.presentShareSheet(share(), from: indexPath)
+                            }
+                        }
+                        return UIAction(title: action.title, image: image, attributes: action.isDestructive ? .destructive : []) { _ in
+                            action.handler(ids)
+                        }
+                    })
+            }
+        }
+
+        func presentShareSheet(_ providers: [NSItemProvider], from indexPath: IndexPath) {
+            guard !providers.isEmpty else { return }
+            let sheet = UIActivityViewController(activityItemsConfiguration: UIActivityItemsConfiguration(itemProviders: providers))
+            if let popover = sheet.popoverPresentationController {
+                if let cell = collectionView.cellForItem(at: indexPath) {
+                    popover.sourceView = cell
+                    popover.sourceRect = cell.bounds
+                } else {
+                    popover.sourceView = collectionView
+                }
+            }
+            present(sheet, animated: true)
+        }
+
+        // MARK: Edit ▸ Copy (⌘C on iPad)
+
+        override func copy(_ sender: Any?) {
+            guard !selected.ids.isEmpty else { return }
+            callbacks?.copy?(Array(selected.ids))
+        }
+
+        override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            if action == #selector(copy(_:)) { return callbacks?.copy != nil && !selected.ids.isEmpty }
+            return super.canPerformAction(action, withSender: sender)
         }
 
         /// A tap on the menu's preview opens the photo.
@@ -573,6 +743,9 @@
         private let tilePicture = GridTilePicture()
         var fileId: FileID? { tilePicture.fileId }
         private var menuActions: (() -> [GridMenuAction])?
+        /// Square tile, or the picture whole in the photo's shape (`TileStyle`).
+        private var square = true
+        private var aspectRatio = 1.0
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -625,33 +798,38 @@
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            let bounds = contentView.bounds
+            // The picture's place in the tile: all of it, or the photo's shape in the aspect ratio grid. Badges and
+            // the selection mark go with the picture.
+            let bounds = GridTile.pictureFrame(in: contentView.bounds, aspectRatio: aspectRatio, square: square)
+            let x = bounds.minX
+            let y = bounds.minY
             imageView.frame = bounds
             let glyph = min(max(bounds.width * 0.34, 14), 44)
-            placeholderIcon.frame = CGRect(x: (bounds.width - glyph) / 2, y: (bounds.height - glyph) / 2, width: glyph, height: glyph)
-            gradient.frame = CGRect(x: 0, y: bounds.height * 0.6, width: bounds.width, height: bounds.height * 0.4)
+            placeholderIcon.frame = CGRect(
+                x: x + (bounds.width - glyph) / 2, y: y + (bounds.height - glyph) / 2, width: glyph, height: glyph)
+            gradient.frame = CGRect(x: x, y: y + bounds.height * 0.6, width: bounds.width, height: bounds.height * 0.4)
             // The selection mark sits in the bottom trailing corner, as in Apple Photos; duration and video badge
             // move left of it.
-            let mark = CGFloat(GridTile.checkmarkSide(tileSide: Double(bounds.width)))
-            checkmark.frame = CGRect(x: bounds.width - mark - 4, y: bounds.height - mark - 4, width: mark, height: mark)
+            let mark = CGFloat(GridTile.checkmarkSide(tileSide: Double(min(bounds.width, bounds.height))))
+            checkmark.frame = CGRect(x: bounds.maxX - mark - 4, y: bounds.maxY - mark - 4, width: mark, height: mark)
             let markShown = !checkmark.isHidden
             let trailingBadges = GridTile.showsTrailingBadges(tileSide: Double(bounds.width), checkmarkShown: markShown)
             durationLabel.alpha = trailingBadges ? 1 : 0
             videoIcon.alpha = trailingBadges ? 1 : 0
             durationLabel.sizeToFit()
-            var right = markShown ? checkmark.frame.minX - 4 : bounds.width - 4
+            var right = markShown ? checkmark.frame.minX - 4 : bounds.maxX - 4
             if !durationLabel.isHidden {
                 durationLabel.frame.origin = CGPoint(
-                    x: right - durationLabel.bounds.width, y: bounds.height - durationLabel.bounds.height - 3)
+                    x: right - durationLabel.bounds.width, y: bounds.maxY - durationLabel.bounds.height - 3)
                 right = durationLabel.frame.minX - 3
             }
-            videoIcon.frame = CGRect(x: right - 16, y: bounds.height - 16, width: 16, height: 12)
-            favoriteIcon.frame = CGRect(x: 4, y: bounds.height - 16, width: 13, height: 12)
-            liveIcon.frame = CGRect(x: 4, y: 4, width: 16, height: 16)
-            stackIcon.frame = CGRect(x: bounds.width - 20, y: 4, width: 16, height: 16)
+            videoIcon.frame = CGRect(x: right - 16, y: bounds.maxY - 16, width: 16, height: 12)
+            favoriteIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 16, width: 13, height: 12)
+            liveIcon.frame = CGRect(x: x + 4, y: y + 4, width: 16, height: 16)
+            stackIcon.frame = CGRect(x: bounds.maxX - 20, y: y + 4, width: 16, height: 16)
             // Both in the top trailing corner: the partner badge moves left of the stack badge.
-            let partnerRight = stackIcon.isHidden ? bounds.width - 4 : stackIcon.frame.minX - 3
-            partnerIcon.frame = CGRect(x: partnerRight - 17, y: 4, width: 17, height: 14)
+            let partnerRight = stackIcon.isHidden ? bounds.maxX - 4 : stackIcon.frame.minX - 3
+            partnerIcon.frame = CGRect(x: partnerRight - 17, y: y + 4, width: 17, height: 14)
         }
 
         /// The picture the tile shows right now (first picture of the context menu's preview).
@@ -685,11 +863,28 @@
         /// picture then stays until a sharper one has loaded (no flash).
         func configure(item: GridMedia, owner: PhotoGridController, tileSide: Double, scale: Double) {
             let services = owner.services
+            if square != owner.squareTiles || aspectRatio != item.aspectRatio {
+                square = owner.squareTiles
+                aspectRatio = item.aspectRatio
+                setNeedsLayout()
+            }
             updateBadges(item, owner: owner)
             setNeedsUpdateConfiguration()
             tilePicture.configure(
-                item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale),
+                item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
                 source: GridTilePicture.Source(services: services))
+        }
+
+        /// A tile of the first sync's skeleton: grey, nothing on it, nothing to open.
+        func showPlaceholder() {
+            tilePicture.reset()
+            square = true
+            let badges: [UIView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon]
+            for badge in badges { badge.isHidden = true }
+            gradient.isHidden = true
+            menuActions = nil
+            accessibilityLabel = String(localized: "Loading…", bundle: .module)
+            setNeedsLayout()
         }
 
         private func show(_ display: GridTilePicture.Display) {
@@ -732,7 +927,7 @@
         override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
             get {
                 guard let fileId, let actions = menuActions?() else { return nil }
-                return actions.map { action in
+                return GridMenuAction.flattened(actions).map { action in
                     UIAccessibilityCustomAction(name: action.title) { _ in
                         action.handler([fileId])
                         return true

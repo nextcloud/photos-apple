@@ -180,12 +180,13 @@
             // Opaque with Increase Contrast or Reduce Transparency, so the tiles behind do not show through the labels.
             let workspace = NSWorkspace.shared
             let opaque = workspace.accessibilityDisplayShouldIncreaseContrast || workspace.accessibilityDisplayShouldReduceTransparency
-            var lastY = -CGFloat.infinity
-            for tick in ticks {
-                let tickY = y(for: tick.fraction)
-                // Year labels that would run into each other or into the month label are left out.
-                guard tickY - lastY >= 18, bubbleText.isEmpty || abs(tickY - bubbleY) >= 22 else { continue }
-                lastY = tickY
+            // Year labels that would run into each other or into the month label are left out.
+            let positions: [Double] = ticks.map { (tick: Tick) -> Double in Double(y(for: tick.fraction)) }
+            let shown: [Int] = GridScrubberTrack.visibleLabels(
+                at: positions, spacing: 18, bubbleY: bubbleText.isEmpty ? nil : Double(bubbleY), clearance: 22)
+            for index in shown {
+                let tick = ticks[index]
+                let tickY = CGFloat(positions[index])
                 let text = NSAttributedString(string: tick.label, attributes: tickAttributes)
                 let size = text.size()
                 let pill = NSRect(

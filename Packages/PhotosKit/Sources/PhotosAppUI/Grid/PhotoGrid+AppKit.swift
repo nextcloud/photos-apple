@@ -19,6 +19,8 @@
         var selection: Set<FileID>
         var isSelecting: Bool
         var showsHeaders: Bool
+        /// Square tiles, or each picture whole in its tile (`TileStyle`).
+        var squareTiles = true
         var services: AccountServices
         var callbacks: GridCallbacks
 
@@ -28,13 +30,18 @@
 
         func updateNSView(_ view: PhotoGridScrollView, context: Context) {
             view.callbacks = callbacks
-            view.update(update, zoomStep: zoomStep, selection: selection, showsHeaders: showsHeaders)
+            view.update(update, zoomStep: zoomStep, selection: selection, showsHeaders: showsHeaders, squareTiles: squareTiles)
         }
     }
 
     final class PhotoGridScrollView: NSScrollView, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewPrefetching {
         let services: AccountServices
-        var callbacks: GridCallbacks?
+        var callbacks: GridCallbacks? {
+            didSet {
+                // "Show in library" scrolls to a tile (the zoom transition the locator serves elsewhere is not the Mac's).
+                callbacks?.tileLocator?.reveal = { [weak self] id in self?.reveal(id) }
+            }
+        }
         let collectionView = GridCollectionView()
         /// Model, zoom, anchor and layout bookkeeping, shared with the UIKit grid.
         private let core: GridCore
@@ -46,6 +53,7 @@
         private lazy var promiseDelegate = FilePromiseDelegate(services: services)
 
         var model: GridModel { core.model }
+        var squareTiles: Bool { core.squareTiles }
         private var zoomStep: Int { core.zoomStep }
         private var headerMetrics: GridHeaderMetrics { core.headerMetrics }
 
@@ -114,8 +122,8 @@
 
         // MARK: Updates
 
-        func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, showsHeaders: Bool) {
-            let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders)
+        func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, showsHeaders: Bool, squareTiles: Bool) {
+            let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders, squareTiles: squareTiles)
             if plan.relayouts {
                 let anchor = anchorItem()
                 core.show(update.model, relayout: true)
@@ -236,6 +244,21 @@
             scroll(toDocumentY: frame.minY - CGFloat(headerHeight(section: indexPath.section)))
         }
 
+        /// Scrolls the tile into the middle of the visible area if it is not wholly visible.
+        func reveal(_ id: FileID) {
+            guard let indexPath = core.indexPath(for: id) else { return }
+            collectionView.layoutSubtreeIfNeeded()
+            if let height = collectionView.collectionViewLayout?.collectionViewContentSize.height, collectionView.frame.height < height {
+                collectionView.setFrameSize(NSSize(width: collectionView.frame.width, height: height))
+            }
+            guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+            var visible: NSRect = contentView.bounds
+            visible.origin.y += topInset
+            visible.size.height -= topInset
+            guard !visible.contains(frame) else { return }
+            scroll(toDocumentY: frame.midY - visible.height / 2)
+        }
+
         /// Scrolls so that the document offset `y` is at the top of the visible area (below the toolbar).
         private func scroll(toDocumentY y: CGFloat) {
             let offset = GridAnchor.offset(
@@ -303,8 +326,9 @@
                 return
             }
             let sections = model.sections
+            // Placeholder tiles (the first sync's skeleton) count: the scrubber covers the whole library.
             sectionOffsets = geometry.sectionOffsets(
-                itemCounts: sections.map(\.range.count), headerHeights: sections.map { headerMetrics.height(for: $0) })
+                itemCounts: sections.map(\.tileCount), headerHeights: sections.map { headerMetrics.height(for: $0) })
             let total = sectionOffsets.last ?? 0
             let range = total - visibleHeight
             // Not worth it for a library that fits on two screens.
@@ -368,6 +392,9 @@
             let tile = collectionView.makeItem(withIdentifier: PhotoItem.identifier, for: indexPath) as! PhotoItem
             if let item = model.item(section: indexPath.section, item: indexPath.item) {
                 tile.configure(item: item, owner: self, tileSide: geometry.side, scale: backingScale)
+            } else {
+                // A photo the first sync has not loaded yet.
+                tile.showPlaceholder()
             }
             return tile
         }
@@ -459,15 +486,40 @@
                 callbacks.selectionChanged(ids)
             }
             let targets = Array(ids)
-            let menu = NSMenu()
-            for action in callbacks.menu(targets) {
-                if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
-                let item = MenuActionItem(title: action.title, handler: { action.handler(targets) })
-                item.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: nil)
-                menu.addItem(item)
-            }
+            let menu = Self.menu(callbacks.menu(targets), targets: targets)
             return menu.items.isEmpty ? nil : menu
         }
+
+        /// The actions as menu items; submenus for actions with children, the system's Share menu for sharing.
+        static func menu(_ actions: [GridMenuAction], targets: [FileID]) -> NSMenu {
+            let menu = NSMenu()
+            for action in actions {
+                if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
+                let item: NSMenuItem
+                if let share = action.share {
+                    item = NSSharingServicePicker(items: share()).standardShareMenuItem
+                } else if !action.children.isEmpty {
+                    item = NSMenuItem(title: action.title, action: nil, keyEquivalent: "")
+                    item.submenu = Self.menu(action.children, targets: targets)
+                } else {
+                    item = MenuActionItem(title: action.title, handler: { action.handler(targets) })
+                }
+                if action.share == nil {
+                    item.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: nil)
+                }
+                menu.addItem(item)
+            }
+            return menu
+        }
+
+        /// Edit ▸ Copy (⌘C) while the grid has the focus.
+        func copySelection() {
+            let ids = currentSelection()
+            guard !ids.isEmpty else { return }
+            callbacks?.copy?(Array(ids))
+        }
+
+        var canCopy: Bool { callbacks?.copy != nil && !currentSelection().isEmpty }
 
         // MARK: Drag out (Finder, Mail…): file promises download the original only when dropped.
 
@@ -483,6 +535,11 @@
             let provider = NSFilePromiseProvider(fileType: type.identifier, delegate: promiseDelegate)
             provider.userInfo = ["fileId": item.fileId, "name": item.name]
             return provider
+        }
+
+        /// Placeholder tiles of the first sync's skeleton cannot be selected.
+        func collectionView(_ collectionView: NSCollectionView, shouldSelectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> {
+            indexPaths.filter { fileId(at: $0) != nil }
         }
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
@@ -585,6 +642,17 @@
             owner?.clearSelection()
         }
 
+        /// Edit ▸ Copy: the standard menu item reaches the grid through the responder chain.
+        @objc func copy(_ sender: Any?) {
+            owner?.copySelection()
+        }
+
+        /// Copy is offered while something is selected.
+        @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+            if item.action == #selector(copy(_:)) { return owner?.canCopy ?? false }
+            return true
+        }
+
         override func menu(for event: NSEvent) -> NSMenu? {
             let point = convert(event.locationInWindow, from: nil)
             guard let indexPath = indexPathForItem(at: point) else { return nil }
@@ -668,7 +736,7 @@
         /// The context menu actions (favourite, archive, delete…) as accessibility actions.
         override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
             guard let fileId, let actions = actions?(), !actions.isEmpty else { return nil }
-            return actions.map { action in
+            return GridMenuAction.flattened(actions).map { action in
                 NSAccessibilityCustomAction(name: action.title) {
                     action.handler([fileId])
                     return true
@@ -717,14 +785,18 @@
         /// Loads the preview and says what to draw; shared with the UIKit grid.
         private let picture = GridTilePicture()
         var fileId: FileID? { picture.fileId }
+        /// Square tile, or the picture whole in the photo's shape (`TileStyle`).
+        private var square = true
+        private var aspectRatio = 1.0
 
         override func loadView() {
             picture.show = { [weak self] display in self?.show(display) }
             let container = tileView
             container.wantsLayer = true
-            container.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             container.layer?.masksToBounds = true
             photoView.wantsLayer = true
+            // The tile's grey is the picture's: in the aspect ratio grid it has the photo's shape.
+            photoView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             photoView.layer?.contentsGravity = .resizeAspectFill
             photoView.layer?.masksToBounds = true
             placeholderIcon.contentTintColor = .tertiaryLabelColor
@@ -765,25 +837,30 @@
 
         override func viewDidLayout() {
             super.viewDidLayout()
-            let bounds = view.bounds
+            // The picture's place in the tile: all of it, or the photo's shape in the aspect ratio grid. Badges and
+            // the selection ring go with the picture.
+            let bounds = GridTile.pictureFrame(in: view.bounds, aspectRatio: aspectRatio, square: square)
+            let x = bounds.minX
+            let y = bounds.minY
             photoView.frame = bounds
             selectionRing.frame = bounds
             let glyph = min(max(bounds.width * 0.34, 14), 44)
-            placeholderIcon.frame = CGRect(x: (bounds.width - glyph) / 2, y: (bounds.height - glyph) / 2, width: glyph, height: glyph)
-            shade.frame = CGRect(x: 0, y: 0, width: bounds.width, height: min(bounds.height * 0.4, 36))
+            placeholderIcon.frame = CGRect(
+                x: x + (bounds.width - glyph) / 2, y: y + (bounds.height - glyph) / 2, width: glyph, height: glyph)
+            shade.frame = CGRect(x: x, y: y, width: bounds.width, height: min(bounds.height * 0.4, 36))
             durationLabel.sizeToFit()
-            var right = bounds.width - 5
+            var right = bounds.maxX - 5
             if !durationLabel.isHidden {
-                durationLabel.frame.origin = CGPoint(x: right - durationLabel.frame.width, y: 3)
+                durationLabel.frame.origin = CGPoint(x: right - durationLabel.frame.width, y: y + 3)
                 right = durationLabel.frame.minX - 3
             }
-            videoIcon.frame = CGRect(x: right - 16, y: 4, width: 16, height: 12)
-            favoriteIcon.frame = CGRect(x: 5, y: 4, width: 13, height: 12)
-            liveIcon.frame = CGRect(x: 4, y: bounds.height - 20, width: 16, height: 16)
-            stackIcon.frame = CGRect(x: bounds.width - 20, y: bounds.height - 20, width: 16, height: 16)
+            videoIcon.frame = CGRect(x: right - 16, y: y + 4, width: 16, height: 12)
+            favoriteIcon.frame = CGRect(x: x + 5, y: y + 4, width: 13, height: 12)
+            liveIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 20, width: 16, height: 16)
+            stackIcon.frame = CGRect(x: bounds.maxX - 20, y: bounds.maxY - 20, width: 16, height: 16)
             // Both in the top trailing corner: the partner badge moves left of the stack badge.
-            let partnerRight = stackIcon.isHidden ? bounds.width - 4 : stackIcon.frame.minX - 3
-            partnerIcon.frame = CGRect(x: partnerRight - 17, y: bounds.height - 18, width: 17, height: 14)
+            let partnerRight = stackIcon.isHidden ? bounds.maxX - 4 : stackIcon.frame.minX - 3
+            partnerIcon.frame = CGRect(x: partnerRight - 17, y: bounds.maxY - 18, width: 17, height: 14)
         }
 
         override var isSelected: Bool {
@@ -798,10 +875,29 @@
         /// picture then stays until a sharper one has loaded (no flash).
         func configure(item: GridMedia, owner: PhotoGridScrollView, tileSide: Double, scale: Double) {
             let services = owner.services
+            if square != owner.squareTiles || aspectRatio != item.aspectRatio {
+                square = owner.squareTiles
+                aspectRatio = item.aspectRatio
+                view.needsLayout = true
+            }
+            photoView.isHidden = false
             updateBadges(item, owner: owner)
             picture.configure(
-                item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale),
+                item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
                 source: GridTilePicture.Source(services: services))
+        }
+
+        /// A tile of the first sync's skeleton: grey, nothing on it, nothing to open.
+        func showPlaceholder() {
+            picture.reset()
+            square = true
+            let badges: [NSView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, shade]
+            for badge in badges { badge.isHidden = true }
+            tileView.fileId = nil
+            tileView.label = String(localized: "Loading…", bundle: .module)
+            tileView.onPress = nil
+            tileView.actions = nil
+            view.needsLayout = true
         }
 
         private func show(_ display: GridTilePicture.Display) {

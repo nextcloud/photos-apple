@@ -57,6 +57,9 @@
         }
       }
     },
+    "%lld items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more." : {
+      "comment" : "Text of a notification: %lld is the number of shared items that could not be uploaded after the share sheet was closed."
+    },
     "%lld new photos" : {
       "comment" : "Notification body about a shared album (its title is the title): how many photos others added.",
       "localizations" : {
@@ -82,6 +85,9 @@
     },
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
+    },
+    "Album" : {
+      "comment" : "Spotlight: kind of a result that is an album."
     },
     "An album was shared with you." : {
       "comment" : "Notification body; the title is the album's title."
@@ -203,14 +209,26 @@
     "Only the photos you selected for Nextcloud Photos are backed up." : {
       "comment" : "Added to the result of a backup run when the user gave the app access to selected photos only (limited Photos access). \"Nextcloud Photos\" is the app's name."
     },
+    "Only your own photos can be added to an album." : {
+      "comment" : "Error when saving a memory as an album: none of its photos is the user's own (all are in shared folders)."
+    },
     "Only your own photos can be shared by link." : {
       "comment" : "Error message when the user tries to create a share link for photos that someone else shared with them."
+    },
+    "Person" : {
+      "comment" : "Spotlight: kind of a result that is a person."
+    },
+    "Place" : {
+      "comment" : "Spotlight: kind of a result that is a place."
     },
     "Remove from Album" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Album\"): photos were removed from an album. Title-style capitalisation as in the menu bar."
     },
     "Remove from Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Favorites\"): photos are no longer favourites. Title-style capitalisation as in the menu bar."
+    },
+    "Shared items were not uploaded" : {
+      "comment" : "Title of a notification: items the user shared to Nextcloud Photos from another app could not be uploaded after the share sheet was closed."
     },
     "Shared on %@" : {
       "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
@@ -220,6 +238,15 @@
     },
     "Uploading %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."
+    },
+    "Your login could not be saved in the keychain (error %@)." : {
+      "comment" : "Shown when a login cannot be completed because the app could not store the app password in the system keychain. The placeholder is the system's error number (e.g. -34018), not formatted."
+    },
+    "Your organization allows only one account in this app." : {
+      "comment" : "Login refused by the device management: a second account cannot be added."
+    },
+    "Your organization only allows logging in to %@." : {
+      "comment" : "Login refused by the device management. %@ is the server's host name."
     },
     "Your photos are backed up." : {
       "comment" : "Result of a backup run when there was nothing left to upload."

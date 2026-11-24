@@ -103,7 +103,15 @@ extension View {
             sheet(isPresented: isPresented) { NavigationStack { content() } }
         #else
             inspector(isPresented: isPresented) {
-                content().inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+                content()
+                    .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+                    #if os(iOS)
+                        // iPhone (and narrow iPad windows), where the inspector is a sheet: half height first, so the
+                        // photo stays in view above the info as in Photos, and the photo can still be paged meanwhile.
+                        .presentationDetents([.medium, .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                        .presentationDragIndicator(.visible)
+                    #endif
             }
         #endif
     }

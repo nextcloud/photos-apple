@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 import LocalAuthentication
-import MapKit
 import PhotosCore
 import PhotosDomain
 import PhotosModel
@@ -24,7 +23,8 @@ struct MemoriesScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if !onThisDay.isEmpty {
-                    section(String(localized: "On this day", bundle: .module), onThisDay)
+                    // The On this day screen is titled so already: no heading that repeats the title.
+                    section(onlyOnThisDay ? nil : String(localized: "On this day", bundle: .module), onThisDay)
                 }
                 if !onlyOnThisDay {
                     if let recap { section(String(localized: "Year in review", bundle: .module), [recap]) }
@@ -54,9 +54,9 @@ struct MemoriesScreen: View {
         }
     }
 
-    func section(_ title: String, _ memories: [Memory]) -> some View {
+    func section(_ title: String?, _ memories: [Memory]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            if let title { Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {
@@ -151,209 +151,6 @@ struct MemoryCard: View {
     /// Stronger with Increase Contrast or Reduce Transparency, so the white titles stay readable on bright photos.
     var scrimOpacity: Double {
         OverlayLegibility.scrimOpacity(base: 0.6, increased: contrast == .increased || reduceTransparency)
-    }
-}
-
-// MARK: - Map (SPEC MP-1)
-
-struct MapScreen: View {
-    @Environment(SessionModel.self) private var session
-    /// One marker per grid cell of the visible region, aggregated by the database. The located items are never loaded.
-    @State private var cells: [MapCell] = []
-    @State private var region: MKCoordinateRegion?
-    @State private var position: MapCameraPosition = .automatic
-    @State private var selected: Selection?
-
-    /// What the sheet lists: the items of a marker or of the visible area.
-    enum Selection: Identifiable, Hashable {
-        case cell(MapCell)
-        case area(MapRegion, count: Int)
-
-        var id: String {
-            switch self {
-            case .cell(let cell): "cell-\(cell.id)-\(cell.cover.fileId)-\(cell.count)"
-            case .area(let area, let count):
-                "area-\(area.minLatitude)-\(area.minLongitude)-\(area.maxLatitude)-\(area.maxLongitude)-\(count)"
-            }
-        }
-
-        var count: Int {
-            switch self {
-            case .cell(let cell): cell.count
-            case .area(_, let count): count
-            }
-        }
-    }
-
-    /// Identifies a region for `.task(id:)`.
-    struct RegionKey: Hashable {
-        var latitude: Double
-        var longitude: Double
-        var latitudeDelta: Double
-        var longitudeDelta: Double
-
-        init?(_ region: MKCoordinateRegion?) {
-            guard let region else { return nil }
-            latitude = region.center.latitude
-            longitude = region.center.longitude
-            latitudeDelta = region.span.latitudeDelta
-            longitudeDelta = region.span.longitudeDelta
-        }
-    }
-
-    /// The query for a camera region: cells of an eighth of the visible span, for the visible region and half a screen
-    /// around it (so markers are there when the map is dragged a little).
-    static func query(for key: RegionKey) -> (region: MapRegion, cellLatitude: Double, cellLongitude: Double) {
-        let area = MapRegion(
-            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta,
-            longitudeReach: key.longitudeDelta)
-        return (area, max(key.latitudeDelta / 8, 0.0001), max(key.longitudeDelta / 8, 0.0001))
-    }
-
-    var body: some View {
-        Map(position: $position) {
-            ForEach(cells) { cell in
-                let label = AccessibilityText.mapMarker(place: cell.place, count: cell.count, newest: cell.cover.timestamp)
-                // The title ("Lisbon, 12 photos") is drawn under the marker when there is room, and it is what VoiceOver and
-                // Voice Control get for the marker: MapKit does not pass on the button's own label, and with hidden titles
-                // the markers had no name at all.
-                Annotation(coordinate: CLLocationCoordinate2D(latitude: cell.latitude, longitude: cell.longitude)) {
-                    MapMarkerButton(cell: cell, label: label) { selected = .cell(cell) }
-                } label: {
-                    Text(label)
-                }
-            }
-        }
-        .onMapCameraChange(frequency: .onEnd) { context in region = context.region }
-        .navigationTitle(String(localized: "Map", bundle: .module))
-        .toolbar {
-            Button {
-                Task { await selectVisibleArea() }
-            } label: {
-                Label(String(localized: "Photos in this area", bundle: .module), systemImage: "square.grid.2x2")
-            }
-        }
-        .sheet(item: $selected) { selection in
-            NavigationStack {
-                MapItemsScreen(title: AccessibilityText.photos(selection.count), total: selection.count) { library, limit, offset in
-                    switch selection {
-                    case .cell(let cell): try await library.mapGridItems(in: cell, limit: limit, offset: offset)
-                    case .area(let area, _): try await library.mapGridItems(in: area, limit: limit, offset: offset)
-                    }
-                }
-            }
-            .frame(minWidth: 600, minHeight: 500)
-        }
-        .task(id: RegionKey(region)) { await loadCells() }
-    }
-
-    /// Aggregates the markers of the current region in the database, off the main thread; the query also brings the
-    /// covers' place names, so nothing is read per marker.
-    func loadCells() async {
-        guard let key = RegionKey(region), let library = session.services?.library else { return }
-        let query = Self.query(for: key)
-        guard
-            let loaded = try? await library.mapCells(in: query.region, cellLatitude: query.cellLatitude, cellLongitude: query.cellLongitude)
-        else { return }
-        // The camera has moved on; the newer region is being loaded.
-        guard !Task.isCancelled else { return }
-        if loaded != cells { cells = loaded }
-    }
-
-    func selectVisibleArea() async {
-        guard let key = RegionKey(region), let library = session.services?.library else { return }
-        let area = MapRegion(
-            centerLatitude: key.latitude, centerLongitude: key.longitude, latitudeReach: key.latitudeDelta / 2,
-            longitudeReach: key.longitudeDelta / 2)
-        guard let count = try? await library.mapItemCount(in: area) else { return }
-        selected = .area(area, count: count)
-    }
-}
-
-/// The photos of a map marker or of the visible area, newest first. An area can hold most of the library: the grid
-/// loads a page of rows from the index and offers the next one, instead of every item at once.
-struct MapItemsScreen: View {
-    let title: String
-    /// How many items there are (the marker's or the area's count).
-    let total: Int
-    let load: @MainActor (LibraryStore, _ limit: Int, _ offset: Int) async throws -> [GridMedia]
-
-    @Environment(SessionModel.self) private var session
-    @State private var feed = GridFeed()
-    @State private var items: [GridMedia] = []
-    @State private var loading = false
-    @State private var error: String?
-    @AppStorage("gridColumns") private var columns = GridColumns.default
-
-    static let pageSize = 2000
-
-    var body: some View {
-        MediaGridScreen(
-            feed: feed, title: title, showsHeaders: true,
-            emptyTitle: error
-                ?? (feed.loaded ? String(localized: "Nothing here", bundle: .module) : String(localized: "Loading…", bundle: .module)),
-            emptyMessage: "", columns: $columns
-        ) {
-            if items.count < total && !items.isEmpty {
-                let showMore: String = PlatformWording.title(
-                    mac: LocalizedStringResource("Show More", bundle: .module),
-                    other: LocalizedStringResource("Show more", bundle: .module))
-                Button {
-                    Task { await loadMore() }
-                } label: {
-                    Label(showMore, systemImage: "arrow.down.circle")
-                }
-                .disabled(loading)
-                .help(showMore)
-            }
-        }
-        .task { await loadMore() }
-    }
-
-    func loadMore() async {
-        guard !loading, let library = session.services?.library else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await load(library, Self.pageSize, items.count)
-            items += page
-            error = nil
-            feed.apply(items, flat: false)
-        } catch {
-            self.error = error.localizedDescription
-            feed.apply(items, flat: false)
-        }
-    }
-}
-
-/// A map marker: the newest photo of a cell with the number of photos there.
-struct MapMarkerButton: View {
-    let cell: MapCell
-    /// "Lisbon, 12 photos".
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            PreviewImage(
-                fileId: cell.cover.fileId, etag: cell.cover.etag, bucket: 256, blurhash: cell.cover.blurhash,
-                hasPreview: cell.cover.hasPreview, mimeType: cell.cover.mimeType,
-                path: cell.cover.directory == "/" ? "/" + cell.cover.name : cell.cover.directory + "/" + cell.cover.name
-            )
-            .frame(width: 52, height: 52)
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white, lineWidth: 2))
-            .overlay(alignment: .topTrailing) {
-                if cell.count > 1 {
-                    Text(cell.count, format: .number).font(.caption2.bold()).padding(4).background(.tint, in: .capsule)
-                        .foregroundStyle(.white).offset(x: 8, y: -8)
-                }
-            }
-            .shadow(radius: 3)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .help(label)
     }
 }
 

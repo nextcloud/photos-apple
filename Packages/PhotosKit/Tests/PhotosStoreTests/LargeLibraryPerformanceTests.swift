@@ -200,6 +200,30 @@ struct LargeLibraryPerformanceTests {
             #expect(!cells.value.isEmpty)
             #expect(cells.milliseconds < 1000)
         }
+        // The cells MapKit clusters (`MapGrid`: a 16th to an 8th of the visible span, for twice the span), with and without the
+        // time slider, and the list of a cluster of them.
+        let lastYears =
+            Date(
+                timeIntervalSince1970: SyntheticLibrary.newest - 5 * 365.25 * 86_400)..<Date(
+                timeIntervalSince1970: SyntheticLibrary.newest + 1)
+        let europe = MapRegion(minLatitude: 20, maxLatitude: 80, minLongitude: -55, maxLongitude: 65)
+        for (name, period) in [("all time", nil), ("the last five years", lastYears)] as [(String, Range<Date>?)] {
+            let cells = try await Self.measure("map cells for MapKit clustering, Europe, \(name)") {
+                try await library.mapCells(in: europe, cellLatitude: 2, cellLongitude: 4, during: period)
+            }
+            print("PERF   \(cells.value.count) cells, \(cells.value.map(\.count).reduce(0, +)) items")
+            #expect(!cells.value.isEmpty)
+            #expect(cells.milliseconds < 1000)
+            let cluster = Array(cells.value.sorted { $0.count > $1.count }.prefix(40))
+            let page = try await Self.measure("map cluster of 40 cells, first page (\(name))") {
+                try await library.mapGridItems(in: cluster, limit: 2000)
+            }
+            #expect(!page.value.isEmpty)
+            #expect(page.milliseconds < 1000)
+        }
+        let overview = try await Self.measure("map overview (time slider ends, opening area)") { try await library.mapOverview() }
+        #expect(overview.value != nil)
+        #expect(overview.milliseconds < 1000)
 
         // MARK: Other hot queries
         let recent = try await Self.measure("recent uploads, the query before (LIMIT 500 on every sync)") {

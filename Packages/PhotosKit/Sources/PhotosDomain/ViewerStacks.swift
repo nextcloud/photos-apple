@@ -3,20 +3,29 @@
 
 import Foundation
 
-/// Stacked copies of a photo in the viewer (SPEC VW-6): the tile's copy is a page, the other copies become pages
-/// right after it once the stack is opened.
+/// Stacked copies of a photo in the viewer (SPEC VW-6): a stack is one page, and a strip of its copies chooses the copy
+/// the page shows. Copies that are deleted or archived while the viewer is open leave the strip; the page goes only
+/// with its last copy.
 public enum ViewerStacks {
-    /// The pages for `ids`: each opened stack's other copies follow its tile.
+    /// The copies of the page `page` that are still there, in the strip's order (the tile's own first). A photo that is
+    /// in no stack is a stack of one.
     /// - Parameter stacks: the copies of each stack by the id of its tile, the tile's own id first.
-    public static func pages<ID: Hashable>(_ ids: [ID], stacks: [ID: [ID]], expanded: Set<ID>) -> [ID] {
-        guard !expanded.isEmpty else { return ids }
-        var result: [ID] = []
-        result.reserveCapacity(ids.count)
-        for id in ids {
-            result.append(id)
-            if expanded.contains(id), let copies = stacks[id] { result.append(contentsOf: copies.filter { $0 != id }) }
-        }
-        return result
+    public static func copies<ID: Hashable>(of page: ID, stacks: [ID: [ID]], removed: Set<ID> = []) -> [ID] {
+        let copies: [ID] = stacks[page] ?? [page]
+        return removed.isEmpty ? copies : copies.filter { !removed.contains($0) }
+    }
+
+    /// The copy the page `page` shows: the one chosen in the strip while it is there, else the first copy left.
+    public static func shown<ID: Hashable>(page: ID, stacks: [ID: [ID]], chosen: [ID: ID], removed: Set<ID> = []) -> ID? {
+        let left: [ID] = copies(of: page, stacks: stacks, removed: removed)
+        if let pick = chosen[page], left.contains(pick) { return pick }
+        return left.first
+    }
+
+    /// The pages left of `ids`: a stack stays while one of its copies does.
+    public static func pages<ID: Hashable>(_ ids: [ID], stacks: [ID: [ID]], removed: Set<ID>) -> [ID] {
+        guard !removed.isEmpty else { return ids }
+        return ids.filter { !copies(of: $0, stacks: stacks, removed: removed).isEmpty }
     }
 
     /// The tile of the stack `id` belongs to (`id` itself for the tile), nil when it is in no stack.

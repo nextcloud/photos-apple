@@ -59,10 +59,11 @@ Release builds are signed with the entitlement files (`App/NextcloudPhotos.entit
 
 | What | Value | Needed by |
 |---|---|---|
-| App IDs | `com.nextcloud.photos`, `.share`, `.notification-service`, `.widgets` | app and extensions |
-| App Group | `group.com.nextcloud.photos`, enabled on all four App IDs | accounts, databases and caches shared with the extensions |
+| App IDs | `com.nextcloud.photos`, `.share`, `.notification-service`, `.widgets`, `.background-upload` | app and extensions |
+| App Group | `group.com.nextcloud.photos`, enabled on all five App IDs | accounts, databases and caches shared with the extensions; the share extension's uploads that the app finishes |
 | App Groups of the Files app | `group.com.nextcloud.apps`, `group.it.twsweb.Crypto-Cloud`, enabled on the app's App ID | backup: reading what the Files app already uploaded |
-| Keychain Sharing | group `$(AppIdentifierPrefix)com.nextcloud.photos` (needs no registration; all four targets must be signed by the same team) | app passwords and push keys for the extensions |
+| Keychain Sharing | group `$(AppIdentifierPrefix)com.nextcloud.photos` (needs no registration; all five targets must be signed by the same team) | app passwords and push keys for the extensions |
+| PhotoKit background uploads | `com.apple.photos.background-upload` on `com.nextcloud.photos.background-upload` (iOS and macOS). The extension point requires it (`EXRequiredEntitlements` of `com.apple.photos.background-upload` on macOS 27.3); it is in `Extensions/BackgroundUpload/BackgroundUpload.entitlements`. **Has to be enabled for Nextcloud's App ID** (check in the developer portal whether Apple grants it on request, as for the Files app's extension). Without it the system never starts the extension and the backup uses the app's own background session only | backup (SPEC §7.18.6) |
 | Push Notifications | capability on `com.nextcloud.photos`, and an APNs key or certificate for it | push |
 | Push proxy | `push-notifications.nextcloud.com` must accept the topic `com.nextcloud.photos` (server side, not in the developer portal) | push |
 | Notification filtering | `com.apple.developer.usernotifications.filtering` on the notification service extension. **Apple grants it on request only.** It is not in the entitlement file yet: add it to `Extensions/NotificationService/NotificationService.entitlements` once granted. Without it the extension cannot hide notifications of the server that are not about photos | push |

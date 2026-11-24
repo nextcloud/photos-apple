@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import PhotosModel
 import SwiftUI
 
 /// Actions of the focused window, used by the menu bar (macOS) and keyboard shortcuts (iPadOS).
@@ -39,11 +40,37 @@ public struct GridActions {
     /// Originals of the selection for the system share sheet.
     var shareItems: [ShareableMedia] = []
     var shareTitle: String = ""
+    /// Plays a slideshow of the selection, or of the grid or viewer's photos (SPEC VW-5).
+    var slideshow: (() -> Void)? = nil
+    /// Image ▸ Rotate Left/Right (`true`: right); nil when nothing selected can be rotated (read-only shares, videos…).
+    var rotate: ((_ clockwise: Bool) -> Void)? = nil
+    /// The albums the "Add to Album" submenu lists first.
+    var recentAlbums: [Album] = []
+    var addToRecentAlbum: ((Album) -> Void)? = nil
+    /// "Add to Album ▸ New Album…" with the selection.
+    var addToNewAlbum: (() -> Void)? = nil
+}
+
+/// An album opened in a window of its own (File ▸ Open in New Window, the album's context menu, ⌥-click; SPEC §6.2).
+/// Codable: the window and its album are restored with the app.
+public struct AlbumWindowValue: Codable, Hashable, Sendable {
+    public var account: String
+    public var albumId: String
+
+    public init(account: String, albumId: String) {
+        self.account = account
+        self.albumId = albumId
+    }
+
+    /// The scene's id (`WindowGroup(id:for:)`).
+    public static let sceneId = "album"
 }
 
 extension FocusedValues {
     @Entry public var mainActions: MainActions?
     @Entry public var gridActions: GridActions?
+    /// The album the focused window shows (File ▸ Open in New Window).
+    @Entry public var shownAlbum: AlbumWindowValue?
 }
 
 /// Wording that differs between the Mac (title case in menus, "Export…") and the other platforms.
@@ -62,6 +89,11 @@ enum PlatformWording {
 public struct PhotosCommands: Commands {
     @FocusedValue(\.mainActions) private var main
     @FocusedValue(\.gridActions) private var grid
+    /// View ▸ Square Tiles: the same setting as Settings › On this device › Square tiles (`TileStyle`).
+    @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
+    @FocusedValue(\.shownAlbum) private var shownAlbum
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
 
     public init() {}
 
@@ -76,6 +108,13 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Open Public Album Link…", bundle: .module)) { main?.openPublicLink() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(main == nil)
+            if supportsMultipleWindows {
+                // The album the window shows, in a window of its own.
+                Button(String(localized: "Open in New Window", bundle: .module)) {
+                    if let shownAlbum { openWindow(id: AlbumWindowValue.sceneId, value: shownAlbum) }
+                }
+                .disabled(shownAlbum == nil)
+            }
         }
 
         CommandGroup(replacing: .importExport) {
@@ -98,6 +137,9 @@ public struct PhotosCommands: Commands {
             } else {
                 Button(String(localized: "Share…", bundle: .module)) {}.disabled(true)
             }
+            Divider()
+            Button(SlideshowRequest.menuTitle) { grid?.slideshow?() }
+                .disabled(grid?.slideshow == nil)
         }
 
         CommandGroup(before: .sidebar) {
@@ -110,9 +152,12 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Zoom to Fit", bundle: .module)) { grid?.zoomToFit?() }
                 .keyboardShortcut("0")
                 .disabled(grid?.zoomToFit == nil)
+            Toggle(String(localized: "Square Tiles", bundle: .module), isOn: $squareTiles)
+                .keyboardShortcut("s", modifiers: [.command, .option])
             Divider()
+            // ⇧⌘R: ⌘R is Image ▸ Rotate Left, as in Photos.
             Button(String(localized: "Sync Now", bundle: .module)) { main?.syncNow() }
-                .keyboardShortcut("r")
+                .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(main == nil)
             Divider()
         }
@@ -129,6 +174,13 @@ public struct PhotosCommands: Commands {
                 .disabled(grid?.edit == nil)
             Button(String(localized: "Edit Date and Location…", bundle: .module)) { grid?.editDateAndLocation?() }
                 .disabled(grid?.editDateAndLocation == nil)
+            // As in Photos: ⌘R turns to the left, ⌥⌘R to the right.
+            Button(String(localized: "Rotate Left", bundle: .module)) { grid?.rotate?(false) }
+                .keyboardShortcut("r")
+                .disabled(grid?.rotate == nil)
+            Button(String(localized: "Rotate Right", bundle: .module)) { grid?.rotate?(true) }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(grid?.rotate == nil)
             Divider()
             Button(
                 grid?.allFavorite == true
@@ -136,9 +188,23 @@ public struct PhotosCommands: Commands {
             ) { grid?.toggleFavorite() }
             .keyboardShortcut(".")
             .disabled(selectionCount == 0)
-            Button(String(localized: "Add to Album…", bundle: .module)) { grid?.addToAlbum() }
+            Menu(String(localized: "Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album….")) {
+                Button(String(localized: "New Album…", bundle: .module)) { grid?.addToNewAlbum?() }
+                    .disabled(grid?.addToNewAlbum == nil)
+                let albums: [Album] = grid?.recentAlbums ?? []
+                if !albums.isEmpty {
+                    Divider()
+                    ForEach(albums) { album in
+                        Button(album.title) { grid?.addToRecentAlbum?(album) }
+                    }
+                }
+                Divider()
+                Button(String(localized: "All Albums…", bundle: .module, comment: "Add to Album submenu: choose from every album.")) {
+                    grid?.addToAlbum()
+                }
                 .keyboardShortcut("a", modifiers: [.command, .control])
-                .disabled(selectionCount == 0)
+            }
+            .disabled(selectionCount == 0)
             Divider()
             Button(String(localized: "Delete…", bundle: .module)) { grid?.delete() }
                 .keyboardShortcut(.delete)

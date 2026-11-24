@@ -311,6 +311,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v3-search-labels") { db in try SearchLabels.migrate(db) }
         // What is new in shared albums, noticed while syncing (SPEC SH-9).
         migrator.registerMigration("v3-album-activity") { db in try SharedAlbumActivity.migrate(db) }
+        // Album titles in the search index (SPEC SR-3).
+        migrator.registerMigration("v4-search-albums") { db in try SearchAlbums.migrate(db) }
         return migrator
     }
 }

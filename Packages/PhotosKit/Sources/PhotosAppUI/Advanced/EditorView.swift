@@ -19,6 +19,10 @@ struct EditorView: View {
     @State private var future: [PhotoEdits] = []
     @State private var source: CIImage?
     @State private var preview: CGImage?
+    /// The crop tool shows the whole picture with the crop's frame over it.
+    @State private var uncropped: CGImage?
+    /// The crop while a handle is dragged; it becomes an edit (one undo step) when the drag ends.
+    @State private var draftCrop: CropRect?
     @State private var originalFile: URL?
     @State private var tab = 0
     @State private var saving = false
@@ -32,20 +36,7 @@ struct EditorView: View {
             VStack(spacing: 0) {
                 ZStack {
                     Color.black
-                    if let image = showOriginal ? source.flatMap(render(original:)) : preview {
-                        Image(decorative: image, scale: 1).resizable().scaledToFit()
-                    } else {
-                        ProgressView().tint(.white)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(
-                    showOriginal ? Text("Original photo", bundle: .module) : Text("Edited photo", bundle: .module)
-                )
-                .accessibilityAddTraits(.isImage)
-                .onLongPressGesture(minimumDuration: 0.1) {
-                } onPressingChanged: {
-                    showOriginal = $0
+                    picture
                 }
                 Picker(String(localized: "Tools", bundle: .module), selection: $tab) {
                     Text("Adjust", bundle: .module).tag(0)
@@ -84,7 +75,8 @@ struct EditorView: View {
                     .disabled(future.isEmpty)
                     Menu(String(localized: "Save", bundle: .module)) {
                         Button(String(localized: "Save as copy", bundle: .module)) { save(overwrite: false) }
-                        if item.permissions.canWrite {
+                        // Not for read-only shares or formats that can't be written back (SPEC §7.16.2).
+                        if PhotoEditSaving.overwriteProblem(item) == nil {
                             Button(String(localized: "Overwrite original", bundle: .module)) { save(overwrite: true) }
                         }
                     }
@@ -112,6 +104,75 @@ struct EditorView: View {
             future = []
             updatePreview()
         }
+        .onChange(of: tab) { _, _ in updatePreview() }
+    }
+
+    var isCropping: Bool { tab == 2 }
+
+    /// The edited photo; in the crop tool the whole picture with the crop's frame and handles. Pressing and holding shows
+    /// the original (not while cropping: there a press starts a drag).
+    @ViewBuilder var picture: some View {
+        if isCropping, let uncropped {
+            let size = CGSize(width: uncropped.width, height: uncropped.height)
+            let current: CropRect = PhotoEditor.cropArea(edits, size: size) ?? .full
+            // The frame is the accessible element (its value and adjustable action), not the picture under it.
+            Image(decorative: uncropped, scale: 1).resizable().scaledToFit()
+                .accessibilityHidden(true)
+                .overlay {
+                    CropOverlay(
+                        area: draftCrop ?? current, pictureSize: size, locksAspect: edits.aspectLocked,
+                        changing: { draftCrop = $0 },
+                        changed: { area in
+                            draftCrop = nil
+                            if area != current { edits.crop = area }
+                        })
+                }
+                .padding(12)
+        } else if let image = showOriginal ? source.flatMap(render(original:)) : preview {
+            Image(decorative: image, scale: 1).resizable().scaledToFit()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    showOriginal ? Text("Original photo", bundle: .module) : Text("Edited photo", bundle: .module)
+                )
+                .accessibilityAddTraits(.isImage)
+                .onLongPressGesture(minimumDuration: 0.1) {
+                } onPressingChanged: {
+                    showOriginal = $0
+                }
+        } else {
+            ProgressView().tint(.white)
+        }
+    }
+
+    /// The size of the picture the crop works on (after straighten, turns and flip), in proxy pixels.
+    var cropPictureSize: CGSize? {
+        uncropped.map { CGSize(width: $0.width, height: $0.height) }
+    }
+
+    /// A preset: its ratio is locked and its largest area in the middle is the new crop ("Free" only unlocks).
+    func choose(_ aspect: PhotoEdits.Aspect) {
+        var next = edits
+        next.aspect = aspect
+        next.aspectLocked = aspect != .free
+        if aspect != .free, let size = cropPictureSize, let ratio = aspect.pixelAspect(for: size) {
+            next.crop = CropRect.centered(aspect: ratio, in: size)
+        }
+        edits = next
+    }
+
+    var aspectLock: Binding<Bool> {
+        Binding(
+            get: { edits.aspectLocked },
+            set: { locked in
+                var next = edits
+                next.aspectLocked = locked
+                // Unlocked, the frame is free: the preset no longer applies.
+                if !locked {
+                    if next.crop == nil, let size = cropPictureSize { next.crop = PhotoEditor.cropArea(next, size: size) }
+                    next.aspect = .free
+                }
+                edits = next
+            })
     }
 
     @ViewBuilder var controls: some View {
@@ -150,20 +211,38 @@ struct EditorView: View {
             VStack {
                 HStack {
                     Button {
-                        edits.rotation = (edits.rotation + 3) % 4
+                        edits.rotate(clockwise: false)
                     } label: {
-                        Label(String(localized: "Rotate", bundle: .module), systemImage: "rotate.left")
+                        Label(String(localized: "Rotate Left", bundle: .module), systemImage: "rotate.left")
                     }
                     Button {
-                        edits.flipped.toggle()
+                        edits.rotate(clockwise: true)
+                    } label: {
+                        Label(String(localized: "Rotate Right", bundle: .module), systemImage: "rotate.right")
+                    }
+                    Button {
+                        edits.flip()
                     } label: {
                         Label(
                             String(localized: "Flip", bundle: .module),
                             systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                     }
-                    Picker(String(localized: "Aspect", bundle: .module), selection: $edits.aspect) {
+                }
+                HStack {
+                    Picker(
+                        String(localized: "Aspect", bundle: .module),
+                        selection: Binding<PhotoEdits.Aspect>(get: { edits.aspect }, set: { choose($0) })
+                    ) {
                         ForEach(PhotoEdits.Aspect.allCases, id: \.self) { Text(Self.title(of: $0)).tag($0) }
                     }
+                    .fixedSize()
+                    Toggle(isOn: aspectLock) {
+                        Label(
+                            String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."),
+                            systemImage: edits.aspectLocked ? "lock" : "lock.open")
+                    }
+                    .toggleStyle(.button)
+                    .help(String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."))
                 }
                 slider(String(localized: "Straighten", bundle: .module), $edits.straighten, -45...45)
                 Button(String(localized: "Reset", bundle: .module)) { edits = PhotoEdits() }
@@ -196,6 +275,7 @@ struct EditorView: View {
 
     static func title(of aspect: PhotoEdits.Aspect) -> String {
         switch aspect {
+        case .free: String(localized: "Freeform", bundle: .module, comment: "Crop aspect ratio: any, dragged by hand.")
         case .original: String(localized: "Original", bundle: .module, comment: "Crop aspect ratio: the photo's own.")
         case .square: String(localized: "Square", bundle: .module, comment: "Crop aspect ratio.")
         // Ratios read the same in every language.
@@ -226,32 +306,29 @@ struct EditorView: View {
 
     func updatePreview() {
         guard let source else { return }
-        let output = PhotoEditor.apply(edits, to: source)
-        preview = PhotoEditor.context.createCGImage(output, from: output.extent)
+        if isCropping {
+            let output = PhotoEditor.applyWithoutCrop(edits, to: source)
+            uncropped = PhotoEditor.context.createCGImage(output, from: output.extent)
+        } else {
+            let output = PhotoEditor.apply(edits, to: source)
+            preview = PhotoEditor.context.createCGImage(output, from: output.extent)
+        }
     }
 
     func save(overwrite: Bool) {
         guard let originalFile, let services = session.services else { return }
         saving = true
+        let item = item
+        let edits = edits
         Task {
             defer { saving = false }
             do {
-                let directory = FileManager.default.temporaryDirectory.appending(path: "Edits/\(UUID().uuidString)")
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let rendered = try PhotoEditor.render(edits, original: originalFile, to: directory)
+                // Rendered off the main thread (`PhotoEditSaving` is not bound to it): the UI stays responsive.
                 if overwrite {
-                    _ = try await services.dav.put(services.connection.filesURL(item.path), file: rendered)
+                    try await PhotoEditSaving.overwrite(item, with: edits, original: originalFile, services: services)
                 } else {
-                    let uploaded = try await Uploader(dav: services.dav).upload(
-                        file: rendered, fileName: rendered.lastPathComponent, folder: item.directory, capturedAt: item.capturedAt)
-                    // Keep the copy in the same own albums.
-                    for album in (try? services.collections.albums(.own)) ?? [] {
-                        if (try? services.collections.albumItems(albumId: album.id).contains { $0.fileId == item.fileId }) == true {
-                            try? await services.api.addToAlbum(album, userPath: uploaded.path)
-                        }
-                    }
+                    try await PhotoEditSaving.saveCopy(item, with: edits, original: originalFile, services: services)
                 }
-                try? FileManager.default.removeItem(at: directory)
                 await session.syncNow()
                 dismiss()
             } catch {

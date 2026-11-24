@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import CoreSpotlight
 import PhotosAppUI
 import PhotosCore
 import PhotosDomain
@@ -22,6 +23,8 @@ struct NextcloudPhotosApp: App {
             NSWindow.allowsAutomaticWindowTabbing = false
         #endif
         AppLock.shared.observeApplication()
+        // Siri's phrases with an album or a person follow the albums and people Spotlight has (SPEC §7.23).
+        SessionModel.collectionsIndexed = { PhotosShortcuts.updateAppShortcutParameters() }
     }
 
     var body: some Scene {
@@ -32,11 +35,19 @@ struct NextcloudPhotosApp: App {
                     .frame(minWidth: 760, minHeight: 480)
                 #endif
                 .onOpenURL { url in
-                    // nextcloudphotos://<destination>, …/album/<name>, …/photo/<fileId> from widgets, notifications and other apps.
-                    // The link can arrive before the window is active again: lock first if the app was away long enough, so
-                    // it waits for the unlock (`MainView.openRequested`).
+                    // nextcloudphotos://[<user>@<server>/]<route> from widgets, notifications and other apps, and web links of
+                    // an account's server (SPEC §4.8). The link can arrive before the window is active again: lock first if
+                    // the app was away long enough, so it waits for the unlock (`MainView.openRequested`).
                     AppLock.shared.refresh()
-                    if let link = DeepLink(url: url) { app.requestedDestination = link.request }
+                    app.open(url)
+                }
+                // A Spotlight result: its identifier is the link of the album, person or place (`SpotlightIndexer`).
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    AppLock.shared.refresh()
+                    if let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String, let url = URL(string: identifier)
+                    {
+                        app.open(url)
+                    }
                 }
                 // A link is shown in a window that is already open, not in a new window per link.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
@@ -59,6 +70,25 @@ struct NextcloudPhotosApp: App {
             #endif
             PhotosCommands()
         }
+
+        // An album in a window of its own (File ▸ Open in New Window, ⌥-click, the album's context menu). It takes no
+        // links: those go to the main window.
+        WindowGroup(id: AlbumWindowValue.sceneId, for: AlbumWindowValue.self) { $value in
+            AlbumWindowView(value: $value)
+                .environment(app)
+        }
+        .handlesExternalEvents(matching: [])
+        #if os(macOS)
+            .defaultSize(width: 1000, height: 700)
+            .windowToolbarStyle(.unified)
+        #endif
+
+        #if os(visionOS)
+            // A panorama around the viewer, opened from the viewer's "Immersive" button.
+            ImmersiveSpace(id: PanoramaImmersion.spaceID, for: PanoramaImmersion.Request.self) { $request in
+                if let request { PanoramaSpace(request: request) }
+            }
+        #endif
 
         #if os(macOS)
             Settings {

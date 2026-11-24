@@ -68,17 +68,39 @@ protocol BackupRemote: Sendable {
     ///
     /// Requests are repeated after transient failures, and a large file that was interrupted continues where it stopped
     /// (`Uploader`).
-    func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile
+    ///
+    /// - Parameter conflict: `.skipIfSameSize`, or `.skipIfSameSizeOrTime` for a converted file (its bytes differ each time
+    ///   it is converted).
+    func upload(file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy) async throws
+        -> UploadedFile
 
     /// The first half of an upload that the system sends (`BackgroundUploads`): the same lookups as `upload`, and the PUT
     /// request instead of sending it.
     ///
     /// - Parameter reserved: destinations of uploads that are still on their way; they count as taken.
-    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
-        -> Uploader.Prepared
+    func prepareUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.Prepared
 
     /// The second half: what the server answered to the PUT. Throws what the answer's status stands for.
     func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile
+
+    /// A large file that the system uploads in chunks: the same lookups as `upload`, and the upload folder is created (or
+    /// what an earlier attempt sent there is found). `chunkedServer` does the rest with `ChunkedUploadDriver`.
+    func prepareChunkedUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.PreparedChunked
+
+    /// What the app asks the server about chunked uploads the system sends.
+    var chunkedServer: any ChunkedUploadServer { get }
+
+    /// An upload that PhotoKit sends from the photo library (SPEC §7.18.6 background-upload extension): the lookups for data
+    /// of this size (layer 5), without a file here and without `OC-Checksum`.
+    func prepareJobUpload(size: Int64, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+        -> Uploader.Prepared
+
+    /// The file at `path` when it has this size.
+    func existingFile(at path: String, size: Int64) async throws -> UploadedFile?
 
     /// Removes what interrupted uploads left on the server and nobody continued. Best effort.
     func removeStaleUploads() async
@@ -137,15 +159,37 @@ struct PhotosBackupRemote: BackupRemote {
         }
     }
 
-    func upload(file: URL, fileName: String, folder: String, capturedAt: Date) async throws -> UploadedFile {
-        try await uploader.upload(file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize)
+    func upload(file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy) async throws
+        -> UploadedFile
+    {
+        try await uploader.upload(file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict)
     }
 
-    func prepareUpload(file: URL, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
+    func prepareUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.Prepared {
+        try await uploader.prepare(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, reserved: reserved)
+    }
+
+    func prepareChunkedUpload(
+        file: URL, fileName: String, folder: String, capturedAt: Date, conflict: Uploader.ConflictPolicy, reserved: Set<String>
+    ) async throws -> Uploader.PreparedChunked {
+        try await uploader.prepareChunked(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, reserved: reserved)
+    }
+
+    var chunkedServer: any ChunkedUploadServer { uploader }
+
+    func prepareJobUpload(size: Int64, fileName: String, folder: String, capturedAt: Date, reserved: Set<String>) async throws
         -> Uploader.Prepared
     {
         try await uploader.prepare(
-            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize, reserved: reserved)
+            size: size, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: .skipIfSameSize, reserved: reserved)
+    }
+
+    func existingFile(at path: String, size: Int64) async throws -> UploadedFile? {
+        try await uploader.existingFile(at: path, size: size)
     }
 
     func finishUpload(path: String, response: HTTPResponse) async throws -> UploadedFile {
@@ -482,6 +526,12 @@ enum BackupPolicy {
             if (resource.byteSize ?? 0) > backgroundLimit { last.append(resource) } else { first.append(resource) }
         }
         return (first, last)
+    }
+
+    /// SPEC §7.18.4 layer 5 for a resource: a file of the same name and size at the destination is this one; for one that
+    /// may be converted ("Most compatible", `MostCompatible`), also a file of the same name and capture time.
+    static func conflictPolicy(_ resource: BackupResource, settings: BackupSettings) -> Uploader.ConflictPolicy {
+        MostCompatible.mayConvert(resource, settings: settings) ? .skipIfSameSizeOrTime(resource.createdAt) : .skipIfSameSize
     }
 
     /// Exports above this size are kept when an upload is interrupted, so the next attempt does not read (or download

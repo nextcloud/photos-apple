@@ -10,6 +10,12 @@ public struct UploadedFile: Sendable, Hashable {
     public var fileId: FileID
     public var path: String
     public var etag: String?
+
+    public init(fileId: FileID, path: String, etag: String?) {
+        self.fileId = fileId
+        self.path = path
+        self.etag = etag
+    }
 }
 
 /// Remembers the upload folders an uploader left on the server for a later attempt, so that those nobody continues can be
@@ -47,11 +53,24 @@ public struct Uploader: Sendable {
 
     var connection: ServerConnection { dav.connection }
 
-    public enum ConflictPolicy: Sendable {
+    public enum ConflictPolicy: Sendable, Equatable {
         /// Append " (2)", " (3)"… (manual upload).
         case rename
         /// Treat an existing file with the same size as already uploaded (backup).
         case skipIfSameSize
+        /// Also treat an existing file as already uploaded when its modification time is this capture time (± 1 s): a
+        /// converted file (JPEG, H.264) is not the same bytes each time it is converted, but its name and the capture time
+        /// the upload sets (`X-OC-MTime`) are (backup with "Most compatible").
+        case skipIfSameSizeOrTime(Date)
+
+        func isSameFile(size: Int64, existingSize: Int64?, existingModified: Date?) -> Bool {
+            switch self {
+            case .rename: false
+            case .skipIfSameSize: existingSize == size
+            case .skipIfSameSizeOrTime(let capturedAt):
+                existingSize == size || existingModified.map { abs($0.timeIntervalSince(capturedAt)) <= 1 } == true
+            }
+        }
     }
 
     /// Uploads a local file to `<folder>/<fileName>`.
@@ -108,7 +127,7 @@ public struct Uploader: Sendable {
     static let maxNameAttempts = 3
 
     /// The file at `path` when it has this size.
-    func existingFile(at path: String, size: Int64) async throws -> UploadedFile? {
+    public func existingFile(at path: String, size: Int64) async throws -> UploadedFile? {
         do {
             let existing = try await dav.propfind(
                 connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag]
@@ -144,6 +163,17 @@ public struct Uploader: Sendable {
         file: URL, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy, checksum: Bool, reserved: Set<String>
     ) async throws -> Resolved {
         let size = Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        return try await resolve(
+            size: size, checksumOf: checksum ? file : nil, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict,
+            reserved: reserved)
+    }
+
+    /// The same for data of a known size that is not in a file here (PhotoKit sends it): without `checksumOf` no
+    /// `OC-Checksum` is sent.
+    func resolve(
+        size: Int64, checksumOf file: URL?, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy,
+        reserved: Set<String>
+    ) async throws -> Resolved {
         try await ensureFolder(folder)
         let name = try await freeName(fileName, in: folder, size: size, conflict: conflict, reserved: reserved)
         if case .existing(let existing) = name { return .existing(existing) }
@@ -155,7 +185,7 @@ public struct Uploader: Sendable {
             headers["X-OC-MTime"] = seconds
             headers["X-OC-CTime"] = seconds
         }
-        let digest = checksum ? try? Self.sha256(of: file) : nil
+        let digest = file.flatMap { try? Self.sha256(of: $0) }
         if let digest { headers["OC-Checksum"] = "SHA256:\(digest)" }
         return .free(Target(path: path, size: size, headers: headers, digest: digest))
     }
@@ -190,6 +220,111 @@ public struct Uploader: Sendable {
                 method: "PUT", url: connection.filesURL(target.path), headers: dav.headers(target.newFileHeaders), timeout: 3600)
             return .put(path: target.path, request: request)
         }
+    }
+
+    /// The same for data of a known size that someone else reads and sends (the PhotoKit background-upload extension):
+    /// no `OC-Checksum`, the data is not read here.
+    public func prepare(
+        size: Int64, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy = .rename, reserved: Set<String> = []
+    ) async throws -> Prepared {
+        switch try await resolve(
+            size: size, checksumOf: nil, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict,
+            reserved: reserved)
+        {
+        case .existing(let existing): return .existing(existing)
+        case .free(let target):
+            let request = HTTPRequest(
+                method: "PUT", url: connection.filesURL(target.path), headers: dav.headers(target.newFileHeaders), timeout: 3600)
+            return .put(path: target.path, request: request)
+        }
+    }
+
+    /// A chunked upload that is ready to be handed to a background transfer session (`ChunkedUpload`).
+    public enum PreparedChunked: Sendable {
+        /// A file with this name and size is there already.
+        case existing(UploadedFile)
+        /// The upload folder exists; hand over what `ChunkedUpload.next` says.
+        case chunked(ChunkedUpload)
+    }
+
+    /// Does the lookups of a large upload and creates its upload folder (or finds what an earlier attempt sent there),
+    /// for a background transfer session that sends the chunks while the app is suspended (SPEC §7.18.6). The upload
+    /// folder is the one `upload` would use for the same file and destination.
+    ///
+    /// - Parameter reserved: destination paths that count as taken although nothing is there yet: uploads still on their way.
+    public func prepareChunked(
+        file: URL, fileName: String, folder: String, capturedAt: Date?, conflict: ConflictPolicy = .rename, checksum: Bool = true,
+        reserved: Set<String> = []
+    ) async throws -> PreparedChunked {
+        let target: Target
+        switch try await resolve(
+            file: file, fileName: fileName, folder: folder, capturedAt: capturedAt, conflict: conflict, checksum: checksum,
+            reserved: reserved)
+        {
+        case .existing(let existing): return .existing(existing)
+        case .free(let free): target = free
+        }
+        let chunkSize = effectiveChunkSize(for: target.size)
+        let uploadFolder = uploadFolder(
+            path: target.path, size: target.size, chunkSize: chunkSize, fingerprint: target.digest ?? Self.fingerprint(of: file))
+        var upload = ChunkedUpload(
+            id: UUID().uuidString, path: target.path, size: target.size, chunkSize: chunkSize, folder: uploadFolder,
+            destination: connection.filesURL(target.path), headers: target.headers)
+        try await openFolder(&upload)
+        return .chunked(upload)
+    }
+
+    /// Creates the upload folder of a chunked upload, or lists the chunks an earlier attempt left in it.
+    public func openFolder(_ upload: inout ChunkedUpload) async throws {
+        folders?.touch(upload.folder.lastPathComponent, at: Date())
+        var existing: [Int: Int64] = [:]
+        do {
+            try await dav.send("MKCOL", upload.folder, headers: upload.commonHeaders)
+        } catch NetworkError.conflict {
+            // 405: the folder of an earlier attempt.
+            existing = try await existingChunks(in: upload.folder)
+        }
+        upload.folderReady(existing: existing)
+    }
+
+    /// The request of one step of a chunked upload, to be sent by a background transfer session: a chunk's `PUT` (the
+    /// chunk's bytes are the body) or the final `MOVE` (with an empty body). The `MOVE` does not overwrite: a file that
+    /// appeared at the destination meanwhile makes it fail with 412.
+    public func request(for step: ChunkedUpload.Step, of upload: ChunkedUpload) -> HTTPRequest {
+        switch step {
+        case .chunk(let number):
+            return HTTPRequest(
+                method: "PUT", url: upload.folder.appending(path: String(number)), headers: dav.headers(upload.commonHeaders),
+                timeout: 3600)
+        case .assemble:
+            var headers = upload.headers.merging(upload.commonHeaders) { $1 }
+            headers["Overwrite"] = "F"
+            return HTTPRequest(
+                method: "MOVE", url: upload.folder.appending(path: ".file"), headers: dav.headers(headers), timeout: 3600)
+        }
+    }
+
+    /// The file at the destination of a chunked upload, when it has the upload's size: the server put it together
+    /// although the answer to the `MOVE` got lost.
+    public func assembledFile(of upload: ChunkedUpload) async throws -> UploadedFile? {
+        try await existingFile(at: upload.path, size: upload.size)
+    }
+
+    /// Turns the answer to the `MOVE` of a chunked upload into the uploaded file.
+    public func finish(_ upload: ChunkedUpload, status: Int, headers: [String: String]) async throws -> UploadedFile {
+        let uploaded = try await finish(path: upload.path, response: HTTPResponse(status: status, headers: headers))
+        folders?.remove(upload.folder.lastPathComponent)
+        return uploaded
+    }
+
+    /// A chunked upload is given up: its chunks are removed, unless a later attempt can still continue them
+    /// (`keepsUploadFolder`). Best effort.
+    public func abandon(_ upload: ChunkedUpload, after error: (any Error)?) async {
+        if let error, Self.keepsUploadFolder(after: error) { return }
+        var once = dav
+        once.retry = nil
+        try? await once.delete(upload.folder)
+        folders?.remove(upload.folder.lastPathComponent)
     }
 
     /// Turns the answer to an upload's last request into the uploaded file; throws what the answer's status stands for.
@@ -234,12 +369,14 @@ public struct Uploader: Sendable {
                 let existing: DAVResource?
                 do {
                     existing = try await dav.propfind(
-                        connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag]
+                        connection.filesURL(path), depth: 0, properties: [DAVProp.fileId, DAVProp.size, DAVProp.etag, DAVProp.lastModified]
                     ).first
                 } catch NetworkError.notFound {
                     return .free(candidate)
                 }
-                if conflict == .skipIfSameSize, let existing, existing.int64(DAVProp.size) == size,
+                if let existing,
+                    conflict.isSameFile(
+                        size: size, existingSize: existing.int64(DAVProp.size), existingModified: existing.httpDate(DAVProp.lastModified)),
                     let fileId = existing.int64(DAVProp.fileId)
                 {
                     return .existing(UploadedFile(fileId: fileId, path: path, etag: existing.string(DAVProp.etag)))
@@ -425,7 +562,7 @@ public struct Uploader: Sendable {
     }
 
     /// `OC-FileId` is the numeric id zero-padded and followed by the instance id, e.g. `00000123ocabcdef`.
-    static func parseFileId(_ header: String?) -> FileID? {
+    public static func parseFileId(_ header: String?) -> FileID? {
         guard let header else { return nil }
         let digits = header.prefix(while: \.isNumber)
         return digits.isEmpty ? nil : FileID(digits)

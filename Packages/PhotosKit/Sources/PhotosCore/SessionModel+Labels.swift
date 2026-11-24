@@ -3,6 +3,7 @@
 
 import Foundation
 import OSLog
+import PhotosDomain
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -23,6 +24,8 @@ extension SessionModel {
         defer { afterSyncRunning = false }
         await refreshLabelsIfDue()
         await checkSharedAlbumActivity()
+        // After the labels: people come from them.
+        await updateSpotlight()
     }
 
     // MARK: Search labels
@@ -144,12 +147,15 @@ extension SessionModel {
     // MARK: First sync
 
     /// The number of photos and videos the first sync will find, where the server can tell cheaply: the day counts of
-    /// the extended Photos API. Stock servers have no count; the progress then shows what has arrived so far.
+    /// the extended Photos API, kept per month as the timeline's skeleton. Stock servers have no count; the progress then
+    /// shows what has arrived so far, and the timeline only what is loaded.
     public func loadInitialSyncTotal() async {
         guard initialSyncTotal == nil, features.has(.timelineDays), let services else { return }
         do {
             let days = try await services.api.timelineDays()
-            let total = days.reduce(0) { $0 + $1.count }
+            let skeleton = TimelineSkeleton(days: days)
+            let total = skeleton.total
+            initialSyncSkeleton = skeleton
             initialSyncTotal = total
             Self.labelsLogger.info("first sync: the server counts \(total) items")
         } catch {

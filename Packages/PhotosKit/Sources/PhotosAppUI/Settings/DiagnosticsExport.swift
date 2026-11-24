@@ -41,9 +41,11 @@ struct DiagnosticsSection: View {
                     }
                 }
             }
-            .disabled(exporting)
+            .disabled(exporting || app.managed.disablesLog)
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            if app.managed.disablesLog { Text(ManagedWording.logDisabled).font(.footnote).foregroundStyle(.secondary) }
             Toggle(String(localized: "Keep log across restarts", bundle: .module), isOn: $keepsLog)
+                .disabled(app.managed.disablesLog)
                 .onChange(of: keepsLog) { _, keep in
                     if !keep { Task { await DiagnosticsLogWriter.shared.removeAll() } }
                 }

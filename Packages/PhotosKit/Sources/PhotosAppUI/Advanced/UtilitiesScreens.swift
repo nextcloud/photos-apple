@@ -162,6 +162,17 @@ enum ServerDeleteWording {
                 bundle: .module)
     }
 
+    /// Duplicates whose copies are in albums: the kept copy is added to those albums first.
+    static func keepInAlbumsButton(count: Int, trashbin: Bool) -> String {
+        trashbin
+            ? String(
+                localized: "Keep in albums and move \(count) items to the trash bin", bundle: .module,
+                comment: "Duplicates: add the kept copy to the deleted copies' albums, then delete them.")
+            : String(
+                localized: "Keep in albums and delete \(count) items permanently", bundle: .module,
+                comment: "Duplicates: add the kept copy to the deleted copies' albums, then delete them.")
+    }
+
     static func button(count: Int, trashbin: Bool) -> String {
         trashbin
             ? String(localized: "Move \(count) items to the trash bin", bundle: .module)
@@ -172,7 +183,64 @@ enum ServerDeleteWording {
 /// Files waiting for the user's confirmation, and what to do in the list once they are queued for deletion.
 struct PendingServerDeletion {
     var items: [MediaItem]
+    /// Duplicates: the albums the deleted copies are in (SPEC §7.15).
+    var albums: DuplicateAlbumNote? = nil
     var done: @MainActor () -> Void
+}
+
+/// Deleting duplicates takes them out of their albums: the albums they are in and the kept copy is not, so it can be
+/// added to them before the others go (SPEC §7.15). Only what the app knows: the content of albums opened on this device.
+struct DuplicateAlbumNote {
+    var kept: MediaItem
+    var albums: [Album]
+    /// Albums with photos whose content the app has not read yet: they could not be checked.
+    var unchecked: Int
+
+    /// The kept copy can be put into the albums (only the user's own files can be added to albums).
+    var canKeepMemberships: Bool { kept.isOwnStorage && !albums.isEmpty }
+
+    @MainActor static func make(deleting items: [MediaItem], kept: MediaItem, services: AccountServices) -> DuplicateAlbumNote {
+        let ids = items.map(\.fileId) + [kept.fileId]
+        let placements: [Duplicates.AlbumPlacement] = ((try? services.collections.memberships(of: ids)) ?? []).map {
+            Duplicates.AlbumPlacement(albumId: $0.albumId, fileId: $0.fileId, byFilter: $0.origin == "filters")
+        }
+        let losing = Duplicates.albumsLosingPhoto(deleted: items.map(\.fileId), kept: kept.fileId, placements: placements)
+        let albums: [Album] = losing.compactMap { try? services.collections.album(id: $0) }
+            .filter { $0.kind != .publicLink }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        let all: [Album] = (((try? services.collections.albums(.own)) ?? []) + ((try? services.collections.albums(.shared)) ?? []))
+        let unchecked = all.filter { album in
+            album.itemCount > 0 && (try? services.collections.albumContentFetchedAt(albumId: album.id)) == nil
+        }.count
+        return DuplicateAlbumNote(kept: kept, albums: albums, unchecked: unchecked)
+    }
+
+    /// What the confirmation adds about albums; nil when there is nothing to say.
+    var message: String? {
+        var parts: [String] = []
+        if !albums.isEmpty {
+            let names = albums.map { "“\($0.title)”" }.formatted(.list(type: .and))
+            parts.append(
+                String(
+                    localized:
+                        "The copies to be deleted are in albums the kept copy is not in: \(names). Deleting them takes the photo out of these albums.",
+                    bundle: .module, comment: "Duplicates: warning in the delete confirmation. The names are album titles in quotes."))
+            if !kept.isOwnStorage {
+                parts.append(
+                    String(
+                        localized: "The kept copy is shared with you, so it can't be added to the albums instead.", bundle: .module,
+                        comment: "Duplicates: the kept copy is not the user's own file."))
+            }
+        }
+        if unchecked > 0 {
+            parts.append(
+                String(
+                    localized:
+                        "\(unchecked) albums haven't been opened on this device yet; whether the copies are in them couldn't be checked.",
+                    bundle: .module, comment: "Duplicates: albums whose content is not known to the app."))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
 }
 
 extension View {
@@ -181,7 +249,21 @@ extension View {
         let items: [MediaItem] = pending.wrappedValue?.items ?? []
         let trashbin = session.features.has(.trashbin)
         let presented = Binding<Bool>(get: { pending.wrappedValue != nil }, set: { if !$0 { pending.wrappedValue = nil } })
+        let note: DuplicateAlbumNote? = pending.wrappedValue?.albums
+        let base: String = ServerDeleteWording.message(trashbin: trashbin, bytes: items.reduce(0) { $0 + $1.size })
+        let message: String = note?.message.map { "\($0)\n\n\(base)" } ?? base
         return confirmationDialog(ServerDeleteWording.title(count: items.count), isPresented: presented, titleVisibility: .visible) {
+            if let note, note.canKeepMemberships {
+                // First the kept copy goes into the albums (queued before the deletes), then the copies are deleted.
+                Button(ServerDeleteWording.keepInAlbumsButton(count: items.count, trashbin: trashbin), role: .destructive) {
+                    guard let request = pending.wrappedValue else { return }
+                    Task {
+                        for album in note.albums { await session.addToAlbum([note.kept], album: album) }
+                        await session.delete(request.items)
+                        request.done()
+                    }
+                }
+            }
             Button(ServerDeleteWording.button(count: items.count, trashbin: trashbin), role: .destructive) {
                 guard let request = pending.wrappedValue else { return }
                 Task {
@@ -191,7 +273,7 @@ extension View {
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         } message: {
-            Text(ServerDeleteWording.message(trashbin: trashbin, bytes: items.reduce(0) { $0 + $1.size }))
+            Text(message)
         }
     }
 }
@@ -257,7 +339,12 @@ struct DuplicatesScreen: View {
                         group: group, keptId: chosen[group.id] ?? group.suggested.fileId, userChose: chosen[group.id] != nil,
                         keep: { id in chosen[group.id] = id == group.suggested.fileId ? nil : id },
                         delete: { items in
-                            pending = PendingServerDeletion(items: items) { sets.removeAll { $0.id == group.id } }
+                            let keptId: FileID = chosen[group.id] ?? group.suggested.fileId
+                            var note: DuplicateAlbumNote?
+                            if let services = session.services, let kept = group.copies.first(where: { $0.fileId == keptId }) {
+                                note = DuplicateAlbumNote.make(deleting: items, kept: kept, services: services)
+                            }
+                            pending = PendingServerDeletion(items: items, albums: note) { sets.removeAll { $0.id == group.id } }
                         })
                 }
             }

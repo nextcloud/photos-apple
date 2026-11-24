@@ -67,18 +67,31 @@ public final class BackgroundUploadSession: BackgroundUploading {
     private let delegate: BackgroundSessionDelegate
     private let completion = BackgroundEventsCompletion()
 
-    public init(identifier: String, trustStore: TrustStore, clientCredentials: ClientCredentialProvider? = nil) {
+    /// - Parameter sharedContainer: the App Group whose container the session's files are in. An app extension needs it
+    ///   (its uploads are finished by the app when the extension has ended), and so does the app when it takes over such a
+    ///   session.
+    public init(
+        identifier: String, sharedContainer: String? = nil, trustStore: TrustStore, clientCredentials: ClientCredentialProvider? = nil
+    ) {
         self.identifier = identifier
         let (signals, continuation) = AsyncStream.makeStream(of: BackgroundUploadSignal.self)
         self.signals = signals
         let delegate = BackgroundSessionDelegate(
             trust: SessionDelegate(trustStore: trustStore, clientCredentials: clientCredentials), continuation: continuation)
         self.delegate = delegate
-        session = URLSession(configuration: Self.configuration(identifier: identifier), delegate: delegate, delegateQueue: nil)
+        session = URLSession(
+            configuration: Self.configuration(identifier: identifier, sharedContainer: sharedContainer), delegate: delegate,
+            delegateQueue: nil)
     }
 
-    static func configuration(identifier: String) -> URLSessionConfiguration {
+    /// Lets the uploads that were started finish and then releases the session (its identifier may be used again).
+    public func finishAndInvalidate() {
+        session.finishTasksAndInvalidate()
+    }
+
+    static func configuration(identifier: String, sharedContainer: String? = nil) -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+        configuration.sharedContainerIdentifier = sharedContainer
         // Wake the app when uploads have finished, so it can hand over the next ones.
         configuration.sessionSendsLaunchEvents = true
         // The user asked for a backup; the system still schedules what is started in the background as it sees fit.

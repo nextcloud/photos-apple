@@ -69,7 +69,9 @@ public struct SettingsView: View {
                             Button(String(localized: "Remove", bundle: .module), role: .destructive) { removeAccount = account }
                         }
                     }
-                    Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+                    if app.canAddAccount {
+                        Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+                    }
                 }
             }
 
@@ -91,7 +93,11 @@ public struct SettingsView: View {
                         }
                     }
                     // A picker over the server's folders, not a path to type.
-                    Button(String(localized: "Add Folder…", bundle: .module)) { pickingFolder = true }
+                    Button(
+                        PlatformWording.title(
+                            mac: LocalizedStringResource("Add Folder…", bundle: .module),
+                            other: LocalizedStringResource("Add folder…", bundle: .module))
+                    ) { pickingFolder = true }
                     if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
                 } header: {
                     Text("Timeline folders", bundle: .module)
@@ -142,10 +148,14 @@ public struct SettingsView: View {
             if shows(.general) {
                 Section {
                     Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
+                        // Required by the organisation (SPEC §5.1.9): on, and it can't be turned off.
+                        .disabled(app.managed.enforcesAppLock)
                         // Widgets show a placeholder instead of photos while app lock is on.
                         .onChange(of: appLock) { _, _ in
                             AppLock.shared.settingChanged()
                             app.reloadWidgets()
+                            // Nothing in Spotlight while app lock is on; indexed again when it is turned off.
+                            Task { await session.updateSpotlight(force: true) }
                         }
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
@@ -158,7 +168,10 @@ public struct SettingsView: View {
                 } header: {
                     Text("Privacy", bundle: .module)
                 } footer: {
-                    Text(DeviceLockWording.current.archiveNote)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if app.managed.enforcesAppLock { Text(ManagedWording.appLockRequired) }
+                        Text(DeviceLockWording.current.archiveNote)
+                    }
                 }
             }
 
@@ -304,7 +317,7 @@ public struct SettingsView: View {
                 Button(String(localized: "Log in again", bundle: .module)) { addingAccount = true }
             } label: {
                 Label(String(localized: "Signed out", bundle: .module), systemImage: "person.crop.circle.badge.exclamationmark")
-                Text("Your login for \(session.account.hostDisplayName) is no longer valid. Please log in again.", bundle: .module)
+                SignedOutView.reason(session)
             }
         }
     }

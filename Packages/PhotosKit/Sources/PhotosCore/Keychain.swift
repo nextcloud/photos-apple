@@ -32,8 +32,20 @@ public struct Keychain: Sendable {
         self.fileStore = DevelopmentSecretStore(directory: directory)
     }
 
-    public enum KeychainError: Error {
+    public enum KeychainError: Error, Equatable, LocalizedError {
         case status(OSStatus)
+
+        public var errorDescription: String? {
+            switch self {
+            case .status(let status):
+                String(
+                    localized: "Your login could not be saved in the keychain (error \(String(status))).", bundle: .module,
+                    comment: """
+                        Shown when a login cannot be completed because the app could not store the app password in the system \
+                        keychain. The placeholder is the system's error number (e.g. -34018), not formatted.
+                        """)
+            }
+        }
     }
 
     func baseQuery(_ key: String, dataProtection: Bool) -> [CFString: Any] {
@@ -55,16 +67,25 @@ public struct Keychain: Sendable {
             try fileStore.set(data, for: "\(service).\(key)")
             return
         }
-        for dataProtection in [true, false] {
+        let attempts = [true, false]
+        for (index, dataProtection) in attempts.enumerated() {
             let query = baseQuery(key, dataProtection: dataProtection)
             SecItemDelete(query as CFDictionary)
             var add = query
             add[kSecValueData] = data
             add[kSecAttrAccessible] = Self.accessibility
             let status = SecItemAdd(add as CFDictionary, nil)
-            if status == errSecSuccess { return }
-            if status != errSecMissingEntitlement { throw KeychainError.status(status) }
+            if try Self.isStored(status, lastAttempt: index == attempts.count - 1) { return }
         }
+    }
+
+    /// Whether an attempt to add an item stored it; false: try the next keychain. Throws when nothing can store it,
+    /// also when the last keychain lacks the entitlement too (an unsigned build): the caller must not go on as if the
+    /// secret had been saved — a login would end up "signed out" at once.
+    static func isStored(_ status: OSStatus, lastAttempt: Bool) throws -> Bool {
+        if status == errSecSuccess { return true }
+        if status == errSecMissingEntitlement && !lastAttempt { return false }
+        throw KeychainError.status(status)
     }
 
     public func data(for key: String) -> Data? {
