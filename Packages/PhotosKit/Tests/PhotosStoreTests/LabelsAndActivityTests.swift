@@ -173,6 +173,39 @@ import Testing
         #expect(operation.withPath("/elsewhere.jpg") == operation)
     }
 
+    /// Tag changes are stored with their file like every other operation (`v3-outbox`): the file's state from the server
+    /// waits for them, and two changes of one file run in order while other files go on side by side.
+    @Test func tagChangesAreOrderedPerFile() async throws {
+        let server = FakeDAVServer()
+        server.statusOverride.withLock { $0 = { $0.method == "PUT" ? 201 : nil } }
+        let outbox = Outbox(api: server.api, database: database, retryDelay: { _ in 3600 })
+        try labels.mergeTags([SystemTag(id: 5, name: "Dog")])
+        server.setOffline(true)
+        try await outbox.enqueue([
+            .tag(TagChange(fileId: 1, tagId: 5, tagName: "Dog", assign: true)),
+            .tag(TagChange(fileId: 1, tagId: 5, tagName: "Dog", assign: false)),
+            .tag(TagChange(fileId: 2, tagId: 5, tagName: "Dog", assign: true)),
+        ])
+        await outbox.waitUntilIdle()
+        let stored = try await database.writer.read { db in
+            try FileID.fetchAll(db, sql: "SELECT fileId FROM operation WHERE kind = 'tag' ORDER BY id")
+        }
+        #expect(stored == [1, 1, 2])
+        #expect(try await database.writer.read { db in try Outbox.pendingFileIds(db) } == [1, 2])
+        // Both files were tried once; the second change of file 1 waits behind the first.
+        let attempts = try await database.writer.read { db in try Int.fetchAll(db, sql: "SELECT attempts FROM operation ORDER BY id") }
+        #expect(attempts == [1, 0, 1])
+
+        server.setOffline(false)
+        server.clearRequests()
+        await outbox.kickNow()
+        await outbox.waitUntilIdle()
+        #expect(try await outbox.pendingCount() == 0)
+        let fileOne = server.requests.filter { $0.path.hasSuffix("/files/1/5") }.map(\.method)
+        #expect(fileOne == ["PUT", "DELETE"])
+        #expect(try labels.tagIds(of: [1, 2]) == [2: [5]])
+    }
+
     // MARK: Label refresh
 
     /// The tag listing and the file ids of each tag, as a stock Nextcloud answers them.
