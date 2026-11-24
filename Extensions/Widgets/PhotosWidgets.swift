@@ -10,6 +10,10 @@ import SwiftUI
 import WidgetKit
 
 /// Widgets: On this day and favourite photos (SPEC §7.22).
+///
+/// Privacy (SPEC §8): with app lock on they show a placeholder; on a locked device (lock screen, StandBy) the photo, place
+/// and date are redacted; the app reloads them when an account is added, switched, removed or wiped, and when app lock
+/// is switched.
 @main
 struct PhotosWidgets: WidgetBundle {
     var body: some Widget {
@@ -24,11 +28,20 @@ struct PhotoEntry: TimelineEntry {
     var title: String
     var subtitle: String
     var destination: String
+    /// App lock is on: the widget shows no photo, place or date (SPEC §8).
+    var isLocked = false
 }
 
 /// Reads the active account's index and preview cache from the App Group; fetches a missing preview when it can.
 enum WidgetData {
     static func entry(kind: String, now: Date) async -> PhotoEntry {
+        // With app lock on, nothing of the library is read, let alone shown: the app reloads the widgets when the setting
+        // changes.
+        if AppLockSettings.isEnabled() {
+            return PhotoEntry(
+                date: now, image: nil, title: String(localized: "Nextcloud Photos"), subtitle: String(localized: "Locked"),
+                destination: "library", isLocked: true)
+        }
         let registry = AccountRegistry.load()
         guard let account = registry.activeAccount, let database = try? AccountDatabase(url: AppPaths.database(account.id), readOnly: true)
         else {
@@ -99,23 +112,38 @@ struct PhotoProvider: TimelineProvider {
 
 struct PhotoWidgetView: View {
     let entry: PhotoEntry
+    /// `.privacy` while the device is locked (lock screen, StandBy, iPad lock screen): the photo, place and date are left out.
+    @Environment(\.redactionReasons) private var redactionReasons
+
+    /// The photo is shown: there is one, app lock is off and the device is not locked.
+    var showsPhoto: Bool { entry.image != nil && !entry.isLocked && !redactionReasons.contains(.privacy) }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if entry.image == nil {
-                Text(entry.subtitle).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !showsPhoto {
+                Group {
+                    if entry.isLocked || entry.image != nil {
+                        Image(systemName: "lock.fill").font(.title2).accessibilityLabel(Text("Locked"))
+                    } else {
+                        Text(entry.subtitle).font(.caption)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title).font(.headline).lineLimit(1)
-                if entry.image != nil { Text(entry.subtitle).font(.caption) }
+                if showsPhoto { Text(entry.subtitle).font(.caption) }
             }
-            .foregroundStyle(entry.image == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
-            .shadow(radius: entry.image == nil ? 0 : 3)
+            // The place in the title and the date are private too.
+            .privacySensitive(entry.image != nil)
+            .foregroundStyle(showsPhoto ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .shadow(radius: showsPhoto ? 3 : 0)
             .padding(12)
         }
         .containerBackground(for: .widget) {
-            if let image = entry.image {
-                Image(decorative: image, scale: 1).resizable().scaledToFill()
+            if showsPhoto, let image = entry.image {
+                Image(decorative: image, scale: 1).resizable().scaledToFill().privacySensitive()
             } else {
                 Color.secondary.opacity(0.15)
             }

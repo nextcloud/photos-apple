@@ -26,6 +26,13 @@ public struct LoginView: View {
     /// The QR code scanner is open (iPhone, iPad).
     @State private var scanning = false
     @State private var scanError: String?
+    /// The scanner found a login link; it is confirmed once the scanner has closed.
+    @State private var scannedLink = false
+    /// A login link or QR code waiting for the user to confirm the server and user it names.
+    @State private var confirmingLink: LinkLogin?
+    /// Hosts whose certificate was trusted in this login. Unless the login ends with an account on them, the trust is taken
+    /// back when the login is cancelled or left (`AppModel.forgetUnusedTrust`).
+    @State private var trustedHosts: Set<String> = []
     var isAddingAccount = false
 
     public init(isAddingAccount: Bool = false) {
@@ -42,12 +49,32 @@ public struct LoginView: View {
     /// A login to a plain-http server that waits for the user's confirmation.
     enum UnencryptedLogin: Equatable {
         case address(host: String)
-        case link(host: String)
+        /// A login link names the user too; confirming the unencrypted connection also confirms the server and user.
+        case link(LinkLogin)
 
         var host: String {
             switch self {
-            case .address(let host), .link(let host): host
+            case .address(let host): host
+            case .link(let link): link.host
             }
+        }
+    }
+
+    /// What a login link or QR code would add: shown before anything is sent, so a planted code can't add an account on
+    /// another server unnoticed (SPEC §5.1).
+    struct LinkLogin: Equatable, Identifiable {
+        var id: String { "\(user)@\(host)" }
+        var host: String
+        var user: String
+
+        init(_ credentials: LoginService.Credentials) {
+            let url = credentials.serverURL
+            if let name = url.host(percentEncoded: false) {
+                host = url.port.map { "\(name):\($0)" } ?? name
+            } else {
+                host = url.absoluteString
+            }
+            user = credentials.loginName
         }
     }
 
@@ -60,8 +87,17 @@ public struct LoginView: View {
         }
         .certificateTrustAlert($untrusted) { untrusted in
             try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
+            trustedHosts.insert(untrusted.host.lowercased())
             startLogin()
         }
+        .onDisappear { forgetUnusedTrust() }
+    }
+
+    /// Takes back the trust in certificates accepted during this login for hosts that did not become an account.
+    func forgetUnusedTrust() {
+        guard !trustedHosts.isEmpty else { return }
+        app.forgetUnusedTrust(trustedHosts)
+        trustedHosts = []
     }
 
     var form: some View {
@@ -127,13 +163,32 @@ public struct LoginView: View {
             Button(String(localized: "Log in anyway", bundle: .module), role: .destructive) {
                 switch pending {
                 case .address: startLogin(allowUnencrypted: true)
-                case .link: loginWithLink(allowUnencrypted: true)
+                case .link: loginWithLink(confirmed: true)
                 }
             }
             Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
         } message: { pending in
+            switch pending {
+            case .address:
+                Text(
+                    "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                    bundle: .module)
+            case .link(let link):
+                Text(
+                    "This link logs in to \(link.host) as \(link.user). The server uses http:// instead of https://: your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if this is your server and you trust the network between you and it.",
+                    bundle: .module)
+            }
+        }
+        .alert(
+            String(localized: "Add this account?", bundle: .module),
+            isPresented: Binding(get: { confirmingLink != nil }, set: { shown in if !shown { confirmingLink = nil } }),
+            presenting: confirmingLink
+        ) { _ in
+            Button(String(localized: "Log in", bundle: .module)) { loginWithLink(confirmed: true) }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { link in
             Text(
-                "\(pending.host) uses http:// instead of https://. Your password and all your photos would be sent unencrypted, and anyone on the network could read them. Only continue if you trust the network between you and this server.",
+                "Log in to \(link.host) as \(link.user)? Your photos will be shown from this server, and backup will upload to it. Only continue if this is your own Nextcloud.",
                 bundle: .module)
         }
     }
@@ -226,11 +281,21 @@ public struct LoginView: View {
             Text(qrLoginTitle)
         }
         #if os(iOS)
-            .sheet(isPresented: $scanning) {
+            // The confirmation of the scanned link comes once the scanner is gone: an alert can't be shown while the sheet
+            // is still being dismissed.
+            .sheet(
+                isPresented: $scanning,
+                onDismiss: {
+                    if scannedLink {
+                        scannedLink = false
+                        loginWithLink()
+                    }
+                }
+            ) {
                 QRCodeScannerSheet { link in
-                    scanning = false
                     pasteLink = link
-                    loginWithLink()
+                    scannedLink = true
+                    scanning = false
                 }
             }
         #endif
@@ -271,6 +336,7 @@ public struct LoginView: View {
         loginTask?.cancel()
         loginTask = nil
         phase = .idle
+        forgetUnusedTrust()
     }
 
     func startLogin(allowUnencrypted: Bool = false) {
@@ -297,18 +363,23 @@ public struct LoginView: View {
                         using: flow.loginURL, callbackURLScheme: "nc", preferredBrowserSession: .ephemeral)
                 }
                 defer { browser.cancel() }
-                let credentials = try await service.waitForGrant(flow)
+                var credentials = try await service.waitForGrant(flow)
                 browser.cancel()
-                // The server may name another address for itself than the one that was typed.
+                // The server may name another address for itself than the one that was typed. The same host typed with
+                // https:// stays on https://.
+                credentials.serverURL = LoginService.securedServerURL(credentials.serverURL, typed: serverURL)
                 if !allowUnencrypted, LoginService.isUnencrypted(credentials.serverURL) {
                     error = String(
                         localized:
                             "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that.",
                         bundle: .module)
+                    // The app password was already granted: it is revoked again, over the address that was typed.
+                    await service.revoke(credentials, at: serverURL)
                     return
                 }
                 phase = .finishing
                 try await app.addAccount(credentials)
+                forgetUnusedTrust()
                 if isAddingAccount { dismiss() }
             } catch is CancellationError {
             } catch let networkError as NetworkError {
@@ -323,11 +394,16 @@ public struct LoginView: View {
         }
     }
 
-    func loginWithLink(allowUnencrypted: Bool = false) {
+    /// - Parameter confirmed: the user saw which server and user the link names and wants to log in.
+    func loginWithLink(confirmed: Bool = false) {
         let parsed = LoginService.parseLoginURL(pasteLink) ?? LoginService.parseOnetimeLoginURL(pasteLink)
-        if !allowUnencrypted, let serverURL = parsed?.serverURL, LoginService.isUnencrypted(serverURL) {
+        if !confirmed, let parsed {
             error = nil
-            unencrypted = .link(host: serverURL.host() ?? serverURL.absoluteString)
+            if LoginService.isUnencrypted(parsed.serverURL) {
+                unencrypted = .link(LinkLogin(parsed))
+            } else {
+                confirmingLink = LinkLogin(parsed)
+            }
             return
         }
         let service = app.loginService()

@@ -4,7 +4,8 @@
   SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
   SPDX-License-Identifier: MIT
 
-  Privacy manifest of PhotosBackup: reads the Nextcloud Files app's auto-upload options from the shared App Group.
+  Privacy manifest of PhotosBackup: reads the Nextcloud Files app's auto-upload options from the shared App Group;
+  checks the free space on the device before it exports a photo for upload.
   The reasons are explained in docs/PRIVACY-AND-EXPORT.md; keep both in step with the code.
 -->
 <plist version="1.0">
@@ -23,6 +24,14 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>1C8F.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
 			</array>
 		</dict>
 	</array>

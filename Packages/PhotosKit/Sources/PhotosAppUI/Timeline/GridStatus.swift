@@ -92,7 +92,7 @@ struct GridStatusBanner: View {
             }
         }
         .sheet(isPresented: $relogin) { AddAccountSheet() }
-        .certificateTrustAlert($reviewedCertificate, changed: true) { problem in
+        .certificateReview($reviewedCertificate) { problem in
             Task { await session.trust(problem) }
         }
     }

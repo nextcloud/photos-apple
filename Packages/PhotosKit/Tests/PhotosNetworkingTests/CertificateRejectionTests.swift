@@ -81,4 +81,37 @@ import Testing
         #expect(client.rejectedCertificate(for: Self.host) == nil)
         #expect(delegate.networkError(for: URLError(.cancelled), url: Self.url) == .cancelled)
     }
+
+    /// A request that is answered went over a connection with an acceptable certificate, also one that was open before the
+    /// refusal and asked no new question: the refusal ends, and the account's "certificate changed" state with it.
+    @Test func anAnsweredRequestEndsTheRefusal() throws {
+        let delegate = SessionDelegate(trustStore: TrustStore(directory: nil), clientCredentials: nil)
+        #expect(try !delegate.accepts(Self.serverTrust(), host: Self.host))
+        #expect(delegate.isRejected(Self.host))
+        // Plain http and other hosts don't say anything about this host's certificate.
+        delegate.didReceiveResponse(from: URL(string: "http://cloud.example.test/status.php")!)
+        delegate.didReceiveResponse(from: URL(string: "https://other.example.test/status.php")!)
+        #expect(delegate.isRejected(Self.host))
+        delegate.didReceiveResponse(from: URL(string: "https://Cloud.Example.Test/remote.php/dav/files/alice/")!)
+        #expect(!delegate.isRejected(Self.host))
+        #expect(delegate.networkError(for: URLError(.cancelled), url: Self.url) == .cancelled)
+    }
+
+    /// The trust dialog compares the certificate the user trusted before with the new one.
+    @Test func theStoreKnowsTheCertificateTrustedBefore() throws {
+        let store = TrustStore(directory: nil)
+        #expect(store.trustedCertificate(for: Self.host) == nil)
+        try store.trust(certificate: Data([1, 2, 3]), for: "Cloud.Example.Test")
+        #expect(store.trustedCertificate(for: Self.host) == Data([1, 2, 3]))
+        #expect(store.trustedHosts == [Self.host])
+        // The server now presents another certificate: refused, and both are known.
+        #expect(try !store.evaluate(Self.serverTrust(), host: Self.host))
+        #expect(store.lastFailure(for: Self.host) == Self.certificate)
+        #expect(store.lastAccepted(for: Self.host) == nil)
+        try store.trust(certificate: Self.certificate, for: Self.host)
+        #expect(try store.evaluate(Self.serverTrust(), host: Self.host))
+        #expect(store.lastAccepted(for: Self.host) == Self.certificate)
+        #expect(TrustStore.fingerprint(of: Self.certificate).count == 32 * 3 - 1)
+        #expect(TrustStore.subject(of: Self.certificate) == Self.host)
+    }
 }

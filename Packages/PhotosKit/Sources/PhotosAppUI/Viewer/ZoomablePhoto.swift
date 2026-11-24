@@ -75,7 +75,7 @@ struct ZoomablePhoto: View {
         if let cached = services.images.cache.bestMemoryImage(fileId: item.fileId, etag: item.etag, upTo: bucket) { image = cached }
         let request = ImagePipeline.Request(
             fileId: item.fileId, etag: item.etag, bucket: bucket, hasPreview: item.hasPreview, mimeType: item.mimeType,
-            originalURL: services.connection.filesURL(item.path))
+            originalURL: services.originalURL(for: item))
         if let loaded = await services.images.preview(request) { image = loaded }
     }
 }

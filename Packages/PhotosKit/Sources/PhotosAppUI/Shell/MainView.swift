@@ -129,8 +129,10 @@ struct MainView: View {
     @State private var selection: AppDestination = .library
     @State private var paths: [AppDestination: [AppRoute]] = [:]
     @State private var restored = false
-    /// Selected destination and open album of this window (`NavigationSnapshot`), restored with the scene.
-    @SceneStorage("navigation") private var storedNavigation = ""
+    /// Selected destination and open album of this window (`NavigationSnapshot`), restored with the scene. Owned by `RootView`,
+    /// which drops it when its account is removed.
+    @Binding var storedNavigation: String
+    @State private var lock = AppLock.shared
     #if !os(macOS)
         @SceneStorage("tabCustomization") private var customization: TabViewCustomization
         @Environment(\.horizontalSizeClass) private var sizeClass
@@ -177,13 +179,12 @@ struct MainView: View {
 
     var body: some View {
         navigation
-            .onChange(of: app.requestedDestination, initial: true) { _, raw in
+            .onChange(of: app.requestedDestination, initial: true) { _, _ in
                 restoreOnce()
-                if let raw {
-                    if let link = DeepLink(request: raw) { open(link) }
-                    app.requestedDestination = nil
-                }
+                openRequested()
             }
+            // A link that came in while the app was locked is opened once it is unlocked.
+            .onChange(of: lock.isLocked) { _, _ in openRequested() }
             .onChange(of: selection) { _, _ in remember() }
             .onChange(of: paths) { _, _ in remember() }
             .focusedSceneValue(
@@ -225,6 +226,13 @@ struct MainView: View {
         #endif
     }
 
+    /// Opens what was requested from outside (a link, a notification, a widget), unless the app is locked: then it waits.
+    func openRequested() {
+        guard let raw = app.requestedDestination, !lock.requiresUnlock else { return }
+        app.requestedDestination = nil
+        if let link = DeepLink(request: raw) { open(link) }
+    }
+
     func open(_ link: DeepLink) {
         switch link {
         case .destination(let raw):
@@ -235,6 +243,8 @@ struct MainView: View {
             selection = destination
             paths[destination] = [.album(id: id)]
         case .photo(let fileId):
+            // Only what the library shows: not archived photos (they need the Archive's unlock) or unknown ids.
+            guard DeepLink.mayOpen(try? session.services?.library.item(fileId)) else { return }
             #if os(iOS)
                 linkedPhoto = ViewerStart(ids: [fileId], startId: fileId)
             #else
@@ -250,7 +260,7 @@ struct MainView: View {
         restored = true
         if let destination = Self.debugDestination {
             selection = destination
-        } else if let snapshot = NavigationSnapshot(stored: storedNavigation),
+        } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),
             let destination = AppDestination(rawValue: snapshot.destination),
             visible(destination)
         {
@@ -264,7 +274,8 @@ struct MainView: View {
     }
 
     func remember() {
-        storedNavigation = NavigationSnapshot(destination: selection.rawValue, routes: paths[selection] ?? []).stored
+        storedNavigation =
+            NavigationSnapshot(destination: selection.rawValue, routes: paths[selection] ?? [], account: session.account.id.rawValue).stored
     }
 
     func focusSearch() {

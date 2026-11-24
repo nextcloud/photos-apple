@@ -18,6 +18,7 @@ struct DiagnosticsSection: View {
     @Environment(SessionModel.self) private var session
     @State private var exporting = false
     @State private var error: String?
+    @AppStorage(PersistentLog.enabledKey) private var keepsLog = true
     #if !os(macOS)
         @State private var shared: SharedFile?
 
@@ -42,15 +43,20 @@ struct DiagnosticsSection: View {
             }
             .disabled(exporting)
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            Toggle(String(localized: "Keep log across restarts", bundle: .module), isOn: $keepsLog)
+                .onChange(of: keepsLog) { _, keep in
+                    if !keep { Task { await DiagnosticsLogWriter.shared.removeAll() } }
+                }
         } header: {
             Text("Diagnostics", bundle: .module)
         } footer: {
             Text(
-                "A text file with what the app logged since it was opened (the last two days at most), its version, the system version, the server version and the detected server features. It contains no account names, server addresses, file names or passwords. Attach it when you report a problem.",
+                "A text file with what the app logged since it was opened (the last two days at most), its version, the system version, the server version and the detected server features. With \"Keep log across restarts\", it also contains the log of earlier runs, which the app keeps on this device (1 MB at most). It contains no account names, server addresses, file names or passwords. Attach it when you report a problem.",
                 bundle: .module)
         }
         #if !os(macOS)
-            .sheet(item: $shared) { file in ActivitySheet(items: [file.url]) }
+            // The report is not kept once the share sheet is closed.
+            .sheet(item: $shared, onDismiss: { Diagnostics.removeExports() }) { file in ActivitySheet(items: [file.url]) }
         #endif
     }
 

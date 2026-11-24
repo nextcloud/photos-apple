@@ -100,7 +100,8 @@ public enum Diagnostics {
     // MARK: Report
 
     /// The report as text. Every line that comes from the log is redacted.
-    public static func report(context: Context, entries: [Entry], hours: Int, now: Date = Date()) -> String {
+    /// - Parameter earlierRuns: lines of the log that survives restarts (`PersistentLog`), already redacted when written.
+    public static func report(context: Context, entries: [Entry], hours: Int, earlierRuns: [String] = [], now: Date = Date()) -> String {
         let stamp = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
         var lines: [String] = [
             "Nextcloud Photos diagnostics",
@@ -112,6 +113,15 @@ public enum Diagnostics {
             "Features: \(context.features.isEmpty ? "none" : context.features.sorted().joined(separator: ", "))",
         ]
         lines += context.state.map { redact($0, secrets: context.secrets) }
+        if !earlierRuns.isEmpty {
+            lines.append("")
+            lines.append(
+                "Log of earlier runs of the app, kept on this device (\(earlierRuns.count) entries). Account names, addresses, file names and tokens are removed."
+            )
+            lines.append("")
+            // Redacted again with today's accounts: a line written before an account was added still loses its names.
+            lines += earlierRuns.map { redact($0, secrets: context.secrets) }
+        }
         lines.append("")
         lines.append(
             "Log of this run of the app, last \(hours) hours (\(entries.count) entries). Account names, addresses, file names and tokens are removed."
@@ -162,10 +172,7 @@ public enum Diagnostics {
     @MainActor public static func context(app: AppModel, session: SessionModel?) -> Context {
         var context = Context(appVersion: app.appVersion, system: systemDescription)
         // Every account's strings are kept out, not only the active one's.
-        for account in app.accounts {
-            context.secrets += [account.userId, account.loginName, account.displayName, account.id.rawValue]
-            if let host = account.serverURL.host() { context.secrets.append(host) }
-        }
+        context.secrets = secrets(of: app.accounts)
         context.state.append("Accounts: \(app.accounts.count)")
         guard let session else { return context }
         context.serverVersion = session.features.serverVersion.string
@@ -183,16 +190,39 @@ public enum Diagnostics {
     /// Writes the report into a temporary file and returns it. Reading the log takes a moment: it runs off the main actor.
     @MainActor public static func export(app: AppModel, session: SessionModel?, hours: Int = 48) async throws -> URL {
         let context = context(app: app, session: session)
+        let writer = DiagnosticsLogWriter.shared
+        await writer.flush(secrets: context.secrets)
+        let earlierRuns = PersistentLog.isEnabled() ? await writer.earlierRuns() : []
         return try await Task.detached(priority: .userInitiated) {
             let now = Date()
             let entries = try entries(since: now.addingTimeInterval(-Double(hours) * 3600))
-            let text = report(context: context, entries: entries, hours: hours, now: now)
+            let text = report(context: context, entries: entries, hours: hours, earlierRuns: earlierRuns, now: now)
             let name = "NextcloudPhotos-diagnostics-\(now.formatted(.iso8601.year().month().day().dateSeparator(.dash))).txt"
-            let directory = FileManager.default.temporaryDirectory.appending(path: "diagnostics-\(UUID().uuidString)")
+            let directory = exportsDirectory.appending(path: UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let file = directory.appending(path: name)
             try Data(text.utf8).write(to: file, options: .atomic)
             return file
         }.value
+    }
+
+    /// Where exported reports wait until the share sheet or save panel is done with them.
+    static var exportsDirectory: URL { FileManager.default.temporaryDirectory.appending(path: "Diagnostics") }
+
+    /// Removes exported reports: after the share sheet closed, at launch and when an account is removed.
+    public static func removeExports() {
+        try? FileManager.default.removeItem(at: exportsDirectory)
+    }
+
+    /// The strings of every account that the log must not contain.
+    @MainActor static func secrets(of accounts: [Account]) -> [String] {
+        accounts.flatMap { account in
+            [account.userId, account.loginName, account.displayName, account.id.rawValue] + (account.serverURL.host().map { [$0] } ?? [])
+        }
+    }
+
+    /// Copies new log entries into the log that survives restarts (`PersistentLog`).
+    @MainActor public static func persistLog(app: AppModel) async {
+        await DiagnosticsLogWriter.shared.flush(secrets: secrets(of: app.accounts))
     }
 }

@@ -104,7 +104,42 @@ public struct LoginService: Sendable {
         guard let body = try? JSONDecoder().decode(Body.self, from: response.data),
             let login = URL(string: body.login), let endpoint = URL(string: body.poll.endpoint)
         else { throw NetworkError.invalidResponse("login/v2") }
-        return Flow(loginURL: login, pollEndpoint: endpoint, token: body.poll.token)
+        return Flow(
+            loginURL: Self.keepingEncryption(login, of: serverURL), pollEndpoint: Self.keepingEncryption(endpoint, of: serverURL),
+            token: body.poll.token)
+    }
+
+    /// A URL the server named for itself, upgraded to `https://` when the address the user typed is `https://`.
+    ///
+    /// A server behind a proxy that terminates TLS, without `overwriteprotocol`, names its own addresses with `http://`. The
+    /// browser login and the poll (whose answer carries the app password) must not fall back to plain http because of that:
+    /// the server answered the typed `https://` address, so it is reachable that way. The port of the typed address is
+    /// used when the server named the same host on the default http port.
+    public static func keepingEncryption(_ url: URL, of typed: URL) -> URL {
+        guard typed.scheme?.lowercased() == "https", url.scheme?.lowercased() == "http",
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return url }
+        components.scheme = "https"
+        if components.port == 80 { components.port = nil }
+        if components.port == nil, url.host()?.lowercased() == typed.host()?.lowercased() { components.port = typed.port }
+        return components.url ?? url
+    }
+
+    /// The account address a finished login uses: the one the server returned, upgraded to `https://` when it is the same
+    /// host the user typed with `https://` (the misconfigured-proxy case of `keepingEncryption`). Another host keeps the
+    /// address the server named; the login screen then decides whether plain http is acceptable.
+    public static func securedServerURL(_ returned: URL, typed: URL) -> URL {
+        guard returned.host()?.lowercased() == typed.host()?.lowercased() else { return returned }
+        return ServerConnection.normalized(keepingEncryption(returned, of: typed))
+    }
+
+    /// Revokes an app password that was granted but will not be used (the login was refused afterwards). Sent to `serverURL`,
+    /// which must be the encrypted address the login ran on: the password never travels over plain http for this.
+    public func revoke(_ credentials: Credentials, at serverURL: URL) async {
+        let connection = ServerConnection(
+            serverURL: serverURL, userId: credentials.loginName, loginName: credentials.loginName,
+            appPassword: credentials.appPassword, userAgent: userAgent)
+        try? await AccountAPI(ocs: OCSClient(http: http, connection: connection)).revokeAppPassword()
     }
 
     /// One poll. Returns `nil` while the user hasn't granted access yet (HTTP 404).

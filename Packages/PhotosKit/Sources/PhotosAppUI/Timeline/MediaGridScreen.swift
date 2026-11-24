@@ -506,7 +506,7 @@ struct LinkShareSheet: View {
                     Image(decorative: qr, scale: 1).interpolation(.none).resizable().frame(width: 180, height: 180)
                 }
                 HStack {
-                    Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copy(url.absoluteString) }
+                    Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copyLink(url.absoluteString) }
                     ShareLink(item: url)
                 }
             }

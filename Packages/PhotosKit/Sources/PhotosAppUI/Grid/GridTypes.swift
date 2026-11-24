@@ -328,7 +328,7 @@ extension AccountServices {
             fileId: item.fileId, etag: item.etag, bucket: bucket,
             hasPreview: item.hasPreview,
             mimeType: item.mimeType,
-            originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"),
+            originalURL: originalURL(of: item),
             // Decoded at the size the tile shows, not at the size of the bucket (memory stays bounded at any zoom).
             maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
     }
@@ -337,7 +337,14 @@ extension AccountServices {
     func menuPreviewRequest(for item: GridMedia) -> ImagePipeline.Request {
         ImagePipeline.Request(
             fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: item.hasPreview, mimeType: item.mimeType,
-            originalURL: connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)"))
+            originalURL: originalURL(of: item))
+    }
+
+    /// The original of a grid item, for a file without a server preview. A file of someone else's shared album has no path
+    /// in the user's files (`MediaItem.collectionChildMountType`) and the grid row lacks its child name: no original then.
+    func originalURL(of item: GridMedia) -> URL? {
+        guard item.directory.hasPrefix("/") else { return nil }
+        return connection.filesURL(item.directory == "/" ? "/\(item.name)" : "\(item.directory)/\(item.name)")
     }
 }
 

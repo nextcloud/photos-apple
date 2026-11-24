@@ -12,6 +12,8 @@ struct OpenPublicLinkSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var link = ""
     @State private var opened: PublicLink?
+    /// An `http://` link waiting for the user's confirmation.
+    @State private var unencrypted: PublicLink?
 
     struct PublicLink: Hashable, Identifiable {
         var id: String { token }
@@ -36,7 +38,9 @@ struct OpenPublicLinkSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(String(localized: "Open", bundle: .module)) {
                         if let parsed = PublicAlbumAPI.parse(link: link) {
-                            opened = PublicLink(serverURL: parsed.serverURL, token: parsed.token)
+                            let target = PublicLink(serverURL: parsed.serverURL, token: parsed.token)
+                            // Plain http: the album and everyone's photos in it travel unencrypted. Ask first.
+                            if LoginService.isUnencrypted(parsed.serverURL) { unencrypted = target } else { opened = target }
                         }
                     }
                     .disabled(PublicAlbumAPI.parse(link: link) == nil)
@@ -44,6 +48,18 @@ struct OpenPublicLinkSheet: View {
             }
         }
         .frame(minWidth: 520, minHeight: 600)
+        .alert(
+            String(localized: "This link is not encrypted", bundle: .module),
+            isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
+            presenting: unencrypted
+        ) { target in
+            Button(String(localized: "Open anyway", bundle: .module), role: .destructive) { opened = target }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: { target in
+            Text(
+                "\(target.serverURL.host() ?? target.serverURL.absoluteString) uses http:// instead of https://. The album and its photos would be sent unencrypted, and anyone on the network could see them.",
+                bundle: .module)
+        }
     }
 }
 

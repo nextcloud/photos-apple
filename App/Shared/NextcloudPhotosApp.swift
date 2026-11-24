@@ -21,6 +21,7 @@ struct NextcloudPhotosApp: App {
             // the app does not support (each window has its own sidebar and toolbar).
             NSWindow.allowsAutomaticWindowTabbing = false
         #endif
+        AppLock.shared.observeApplication()
     }
 
     var body: some Scene {
@@ -32,6 +33,9 @@ struct NextcloudPhotosApp: App {
                 #endif
                 .onOpenURL { url in
                     // nextcloudphotos://<destination>, …/album/<name>, …/photo/<fileId> from widgets, notifications and other apps.
+                    // The link can arrive before the window is active again: lock first if the app was away long enough, so
+                    // it waits for the unlock (`MainView.openRequested`).
+                    AppLock.shared.refresh()
                     if let link = DeepLink(url: url) { app.requestedDestination = link.request }
                 }
                 // A link is shown in a window that is already open, not in a new window per link.

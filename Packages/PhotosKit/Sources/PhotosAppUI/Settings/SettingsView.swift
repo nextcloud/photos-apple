@@ -19,9 +19,10 @@ public struct SettingsView: View {
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
     @State private var reviewedCertificate: CertificateProblem?
-    @AppStorage("appLockEnabled") private var appLock = false
+    /// In the App Group: the widgets and the share extension follow it.
+    @AppStorage(AppLockSettings.enabledKey, store: AppLockSettings.defaults) private var appLock = false
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
-    @AppStorage("appLockTimeout") private var appLockTimeout = 60.0
+    @AppStorage(AppLockSettings.timeoutKey, store: AppLockSettings.defaults) private var appLockTimeout = AppLockSettings.defaultTimeout
 
     /// A Settings page. iOS shows all pages in one list; the macOS Settings window shows one per tab.
     public enum Page: Hashable, Sendable {
@@ -137,6 +138,11 @@ public struct SettingsView: View {
             if shows(.general) {
                 Section {
                     Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
+                        // Widgets show a placeholder instead of photos while app lock is on.
+                        .onChange(of: appLock) { _, _ in
+                            AppLock.shared.settingChanged()
+                            app.reloadWidgets()
+                        }
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
                             Text("Immediately", bundle: .module).tag(0.0)
@@ -212,6 +218,7 @@ public struct SettingsView: View {
                         String(localized: "Source code", bundle: .module),
                         destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
                     Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
+                    NavigationLink(String(localized: "Licences", bundle: .module)) { LicensesView() }
                     Text(
                         "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT).",
                         bundle: .module
@@ -238,7 +245,7 @@ public struct SettingsView: View {
             pins = (try? await session.offline?.pins()) ?? []
         }
         .sheet(isPresented: $addingAccount) { AddAccountSheet() }
-        .certificateTrustAlert($reviewedCertificate, changed: true) { problem in
+        .certificateReview($reviewedCertificate) { problem in
             Task { await session.trust(problem) }
         }
         .confirmationDialog(
@@ -543,6 +550,11 @@ struct ServerFolderList: View {
         public init() {}
 
         public var body: some View {
+            // The Settings window is a window of its own: it needs the lock too.
+            AppLockGate { settings }
+        }
+
+        @ViewBuilder var settings: some View {
             if let session = app.session {
                 TabView {
                     Tab(String(localized: "General", bundle: .module), systemImage: "gearshape") { SettingsView(page: .general) }
@@ -554,7 +566,9 @@ struct ServerFolderList: View {
                     Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
                         NavigationStack { SettingsView(page: .server) }
                     }
-                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") { SettingsView(page: .about) }
+                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") {
+                        NavigationStack { SettingsView(page: .about) }
+                    }
                 }
                 .environment(session)
             } else {

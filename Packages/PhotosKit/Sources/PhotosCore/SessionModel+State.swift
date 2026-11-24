@@ -13,11 +13,23 @@ public struct CertificateProblem: Sendable, Equatable, Identifiable {
     public var host: String
     /// The leaf certificate the server presented (DER).
     public var certificate: Data
+    /// The certificate the user had trusted for this host (a certificate the system doesn't trust that was replaced). Nil when
+    /// the system trusted the server: then the new certificate can't be accepted from this dialog (`canTrustInApp`).
+    public var previouslyTrusted: Data?
+    /// The certificate the server presented before, when the app saw it during this run (for the comparison in the dialog).
+    public var previous: Data?
 
-    public init(host: String, certificate: Data) {
+    public init(host: String, certificate: Data, previouslyTrusted: Data? = nil, previous: Data? = nil) {
         self.host = host
         self.certificate = certificate
+        self.previouslyTrusted = previouslyTrusted
+        self.previous = previous ?? previouslyTrusted
     }
+
+    /// Accepting the new certificate in place is offered only when the user had trusted a certificate of this host already:
+    /// a self-signed certificate that was renewed. A server whose certificate the system trusted, and that now presents one it
+    /// doesn't, is what someone intercepting the connection looks like; trusting it takes a new login (SPEC §8).
+    public var canTrustInApp: Bool { previouslyTrusted != nil }
 }
 
 extension SyncStatus {
@@ -43,8 +55,8 @@ extension SessionModel {
         if previous?.logName != status.logName {
             Self.stateLogger.info("sync: \(previous?.logName ?? "-", privacy: .public) → \(status.logName, privacy: .public)")
         }
-        // A sync that stopped (failed, offline, cancelled) may have stopped at the certificate; one that ran through
-        // has been shown an acceptable certificate, which ends the refusal.
+        // A sync that stopped (failed, offline, cancelled) may have stopped at the certificate; one that ran through got
+        // answers, which ends the refusal (`HTTPClient` clears it on every response, also on a connection that was open).
         if !status.isWorking { refreshCertificateProblem() }
     }
 
@@ -55,16 +67,24 @@ extension SessionModel {
             certificateProblem = nil
             return
         }
-        let problem = CertificateProblem(host: host, certificate: certificate)
+        let store = app?.http.trustStore
+        let problem = CertificateProblem(
+            host: host, certificate: certificate, previouslyTrusted: store?.trustedCertificate(for: host),
+            previous: store?.lastAccepted(for: host))
         if certificateProblem != problem {
             Self.stateLogger.error("certificate: the server presents a certificate that is not trusted")
             certificateProblem = problem
         }
     }
 
-    /// The user looked at the changed certificate and accepts it: trust it for this host and sync again.
+    /// The user compared the old and the new certificate and explicitly accepted the new one: trust it for this host and
+    /// sync again. Nothing has been sent to the server with this certificate before (the connection was refused at the
+    /// handshake), so the app password only goes to it from here on. Refused when the server was trusted by the system.
     public func trust(_ problem: CertificateProblem) async {
-        guard let app else { return }
+        guard let app, problem.canTrustInApp else {
+            Self.stateLogger.error("certificate: a certificate of a server the system trusted can only be accepted by logging in again")
+            return
+        }
         do {
             try app.http.trustStore.trust(certificate: problem.certificate, for: problem.host)
         } catch {

@@ -7,6 +7,7 @@ import PhotosModel
 import PhotosNetworking
 import PhotosStore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Pick own photos from the library to add to an album (SPEC AL-4).
 ///
@@ -325,7 +326,7 @@ struct CollaboratorsSheet: View {
                     if let link = session.publicLink(of: album) {
                         Text(link.absoluteString).font(.footnote).textSelection(.enabled)
                         HStack {
-                            Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copy(link.absoluteString) }
+                            Button(String(localized: "Copy link", bundle: .module)) { Clipboard.copyLink(link.absoluteString) }
                             ShareLink(item: link)
                         }
                         if let qr = QRCode.image(for: link.absoluteString) {
@@ -474,12 +475,27 @@ struct CommentsSheet: View {
     }
 }
 
+/// Copies text for pasting on this device only: not through Universal Clipboard to the user's other devices (SPEC §8).
 enum Clipboard {
+    /// How long a copied link stays on the pasteboard (iPhone, iPad, Vision Pro; the Mac's pasteboard has no expiry).
+    static let linkLifetime: TimeInterval = 10 * 60
+
     @MainActor static func copy(_ string: String) {
+        copy(string, expiresAfter: nil)
+    }
+
+    /// A share link: whoever has it can open the album or the files.
+    @MainActor static func copyLink(_ string: String) {
+        copy(string, expiresAfter: linkLifetime)
+    }
+
+    @MainActor static func copy(_ string: String, expiresAfter lifetime: TimeInterval?) {
         #if canImport(UIKit)
-            UIPasteboard.general.string = string
+            var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
+            if let lifetime { options[.expirationDate] = Date().addingTimeInterval(lifetime) }
+            UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: string]], options: options)
         #else
-            NSPasteboard.general.clearContents()
+            NSPasteboard.general.prepareForNewContents(with: .currentHostOnly)
             NSPasteboard.general.setString(string, forType: .string)
         #endif
     }

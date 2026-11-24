@@ -8,6 +8,9 @@ import Security
 ///
 /// Uses the data-protection keychain with the app's default access group (shared with its extensions).
 /// Unsigned development builds on macOS lack the entitlement; they fall back to the login keychain.
+///
+/// Items are readable after the first unlock (background uploads and push need them) and never leave the device: they are
+/// not in backups or restored to another device (`…ThisDeviceOnly`, SPEC §8).
 public struct Keychain: Sendable {
     public let service: String
     /// Items are kept as files in this directory instead of the keychain: unsigned Debug builds on the Mac, and unit
@@ -57,7 +60,7 @@ public struct Keychain: Sendable {
             SecItemDelete(query as CFDictionary)
             var add = query
             add[kSecValueData] = data
-            add[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
+            add[kSecAttrAccessible] = Self.accessibility
             let status = SecItemAdd(add as CFDictionary, nil)
             if status == errSecSuccess { return }
             if status != errSecMissingEntitlement { throw KeychainError.status(status) }
@@ -89,6 +92,21 @@ public struct Keychain: Sendable {
         for dataProtection in [true, false] {
             SecItemDelete(baseQuery(key, dataProtection: dataProtection) as CFDictionary)
         }
+    }
+
+    /// When items can be read: after the first unlock, on this device only.
+    static var accessibility: CFString { kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly }
+
+    /// Items written by earlier versions could move to another device through a backup: they are switched to this device
+    /// only, once.
+    public func restrictToThisDevice(defaults: UserDefaults) {
+        let key = "keychainItemsThisDeviceOnly"
+        guard fileStore == nil, !defaults.bool(forKey: key) else { return }
+        // Only the data-protection keychain: on the Mac, touching items of the login keychain (unsigned builds) can make the
+        // system ask for the user's password, and accessibility classes are a data-protection keychain feature anyway.
+        let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecUseDataProtectionKeychain: true]
+        let status = SecItemUpdate(query as CFDictionary, [kSecAttrAccessible: Self.accessibility] as CFDictionary)
+        if [errSecSuccess, errSecItemNotFound, errSecMissingEntitlement].contains(status) { defaults.set(true, forKey: key) }
     }
 
     // MARK: Conventions
