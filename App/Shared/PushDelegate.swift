@@ -31,6 +31,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
             // Creates the app model now, whether or not a window follows.
             _ = AppHost.model
             PushNotifications.install(delegate: NotificationRouter.shared) { NSApplication.shared.registerForRemoteNotifications() }
+            // On-device recognition for search, while the Mac is idle (opt-in).
+            ContentLabeling.register { AppHost.model }
         }
 
         func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

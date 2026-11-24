@@ -431,7 +431,7 @@ struct TagsScreen: View {
             LazyVGrid(columns: tileColumns, spacing: 20) {
                 ForEach(tags) { tag in
                     NavigationLink {
-                        ItemsScreen(title: tag.name) { services in try await services.api.tagContent(tag.id) }
+                        TagScreen(tag: tag)
                     } label: {
                         CollectionTile(
                             title: tag.name, subtitle: AccessibilityText.photos(tag.itemCount),
@@ -445,7 +445,35 @@ struct TagsScreen: View {
         }
         .navigationTitle(String(localized: "Tags", bundle: .module))
         .task {
-            do { tags = try await session.services?.api.tagsInUse() ?? [] } catch { self.error = error.localizedDescription }
+            do {
+                tags = try await session.services?.api.tagsInUse() ?? []
+            } catch {
+                // Offline: the tags known from the last refresh, with their photos in the library.
+                let local = session.services.flatMap { try? LabelStore(database: $0.database).tags() } ?? []
+                tags = local.filter { $0.itemCount != 0 }
+                if tags.isEmpty { self.error = error.localizedDescription }
+            }
+        }
+    }
+}
+
+/// The photos of one tag, with "Remove tag" for a selection.
+struct TagScreen: View {
+    let tag: SystemTag
+    @Environment(SessionModel.self) private var session
+
+    var body: some View {
+        ItemsScreen(
+            title: tag.name,
+            extraActions: { items in
+                [
+                    GridMenuAction(id: "untag", title: String(localized: "Remove tag", bundle: .module), systemImage: "tag.slash") { _ in
+                        Task { await session.setTag(tag, on: items, assigned: false) }
+                    }
+                ]
+            }
+        ) { _ in
+            try await session.tagItems(tag.id)
         }
     }
 }

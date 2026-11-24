@@ -39,6 +39,7 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var showingInfo = false
     @State private var actionError: String?
     @State private var albumPicker: PickedItems?
+    @State private var tagEditor: PickedItems?
     @State private var sharedLink: SharedLink?
     @State private var metadataItems: PickedItems?
     @State private var editedItem: MediaItem?
@@ -94,6 +95,7 @@ struct MediaGridScreen<Accessory: View>: View {
                         : String(localized: "The trash bin is disabled on your server: deleted items cannot be restored.", bundle: .module))
             }
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
+            .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $editedItem) { item in EditorView(item: item) }
@@ -128,6 +130,7 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             .mediaViewer($viewerStart, zoom: zoomSource)
             .mediaSaveStatus(saver)
+            .task(id: isInitialSync) { if isInitialSync { await session.loadInitialSyncTotal() } }
             .alert(
                 String(localized: "Something went wrong", bundle: .module),
                 isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
@@ -247,10 +250,16 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var loadingCaption: String? {
         guard waitsForFirstSync else { return nil }
-        if case .initialSync(let count) = session.syncStatus, count > 0 {
-            return String(localized: "Loading library… \(count)", bundle: .module)
+        if case .initialSync(let count) = session.syncStatus {
+            return InitialSyncProgress.text(count: count, total: session.initialSyncTotal)
         }
         return String(localized: "Loading your library…", bundle: .module)
+    }
+
+    /// The first sync is running: its total is asked for once ("N of M").
+    var isInitialSync: Bool {
+        if case .initialSync = session.syncStatus { return true }
+        return false
     }
 
     var selectionTitle: String {
@@ -473,6 +482,10 @@ struct MediaGridScreen<Accessory: View>: View {
             GridMenuAction(id: "album", title: albumTitle, systemImage: "rectangle.stack.badge.plus", startsGroup: true) { ids in
                 withItems(ids) { albumPicker = PickedItems(items: $0) }
             })
+        if session.features.has(.systemtags) {
+            actions.append(
+                GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { _ in tagEditor = PickedItems(items: items) })
+        }
         let exportTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(

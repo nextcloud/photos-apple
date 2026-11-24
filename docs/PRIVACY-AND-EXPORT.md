@@ -16,7 +16,7 @@ need.
 
 | API category | Reason | Where the code uses it |
 |---|---|---|
-| User defaults | `CA92.1` (the app's own defaults) | Settings: `@AppStorage` in `PhotosAppUI`; `PushNotifications.enabledKey`, offline Wi-Fi switch in `PhotosCore`; cache limits in `PhotosMedia` |
+| User defaults | `CA92.1` (the app's own defaults) | Settings: `@AppStorage` in `PhotosAppUI`; `PushNotifications.enabledKey`, offline Wi-Fi switch, `ContentLabeling.enabledKey`, `SharedAlbumNotifications.enabledKey` in `PhotosCore`; cache limits in `PhotosMedia` |
 | User defaults | `1C8F.1` (defaults of an App Group of the same developer) | `PhotosBackup/FilesAppLedger`: reads the auto-upload options of the Nextcloud Files app from `group.com.nextcloud.apps`, to avoid uploading its photos twice |
 | File timestamps | `C617.1` (files in the app's containers) | `PhotosMedia`: `PreviewCache` and `ImagePipeline` set and read the modification time of cached files to trim the least recently used |
 | File timestamps | `3B52.1` (files the user gave the app access to) | `PhotosNetworking/Uploader.fingerprint`: size and modification time of a file being uploaded identify an interrupted upload that can be continued |
@@ -35,6 +35,12 @@ listed boot-time APIs; the diagnostics log rotates by size (`fileSizeKey`), not 
 
 The photos, metadata and credentials go to the Nextcloud server the user chose; the developer of the app never
 receives them, so they are not "collected" in Apple's sense.
+
+On-device labels (Settings › Search, off by default; SPEC SR-7): Vision's classifier runs on previews already in the
+cache, on the device, and its words ("dog", "beach") are stored only in the account's database on the device, for
+search. They are never uploaded, not to the user's server either, and turning the switch off deletes them. Tag and
+people names that the search index also holds come from the user's own server. Shared-album notifications are local
+notifications the app posts itself; nothing is registered for them anywhere.
 
 One thing does reach a service run by Nextcloud GmbH: for push notifications the app registers its **APNs device
 token**, a per-account public key and the device identifier issued by the user's server with

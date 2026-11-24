@@ -70,6 +70,8 @@ final class FakeDAVServer: Sendable {
     let statusOverride = Mutex<(@Sendable (Request) -> Int?)?>(nil)
     /// Runs after a response was computed (the response does not include what it changes).
     let afterResponse = Mutex<(@Sendable (Request, inout State) -> Void)?>(nil)
+    /// Answers requests the fake does not model itself (system tags, Recognize); nil lets the fake answer.
+    let responder = Mutex<(@Sendable (Request) -> Response?)?>(nil)
 
     init() {
         StubURLProtocol.servers.withLock { $0[host] = self }
@@ -163,9 +165,11 @@ final class FakeDAVServer: Sendable {
         if let gate = gate.withLock({ $0 }) { await gate(request) }
         let after = afterResponse.withLock { $0 }
         let forcedStatus = statusOverride.withLock { $0 }?(request)
+        let custom = responder.withLock { $0 }?(request)
         return state.withLock { state in
             if state.offline { return .failure(.notConnectedToInternet) }
             if let forcedStatus { return .http(status: forcedStatus, body: "") }
+            if let custom { return custom }
             let response = respond(to: request, headers: headers, state: &state)
             after?(request, &state)
             return response

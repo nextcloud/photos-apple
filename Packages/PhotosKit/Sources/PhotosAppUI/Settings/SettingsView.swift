@@ -137,6 +137,8 @@ public struct SettingsView: View {
                 }
             }
 
+            if shows(.general) { SearchAndActivitySettings() }
+
             if shows(.general) {
                 Section {
                     Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)

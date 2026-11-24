@@ -143,6 +143,10 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 - Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
   were only exercised through accessibility, not with a real pointer).
 - Skeleton grid during the first load and the first sync ✅; the empty state only after a completed sync.
+- First-sync progress "Loading your library — 12,000 of 48,213" where the extended server's `timelineDays` gives the total
+  (summed once per session; no total once more items arrived than it counted, since it leaves out shared folders); stock
+  servers have no cheap count and show "Loading your library — 12,000" 🟡 (text unit-tested, total read from the extended
+  test server; not looked at on screen: the Mac was locked).
 - Keyboard and accessibility in the Mac grid ✅: tiles are buttons (press opens, the context menu actions are accessibility
   actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape 🟡 (not run).
 - TL-6 stacks, the conservative part 🟡 (unit-tested; Mac UI not checked, the screen was locked): copies of one shot — images in
@@ -193,8 +197,15 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   place names with the cell query (no reads per marker), and "Photos in this area" loads grid rows in pages of 2000.
   The preview cache writes "last used" in batches and at most once a day per file.
 - Search index: FTS5 (trigram, `rowid = fileId`), kept current by triggers on `media`, used for free-text search (SR-3) over
-  file name, place, country, caption and folder path. ⬜ Tag, person and album names are not in the index (their memberships
-  are not stored locally); tag and person filters still ask the server.
+  file name, place, country, caption, folder path, and (migration `v3-search-labels`) the names of the file's system tags, of
+  the named people in it (Recognize) and the labels recognised on the device (SR-7). Tag and people memberships are copied
+  from the server by `LabelSync` (every 30 min, changed tags/people only, all once a day; file ids only) ✅ unit-tested and
+  against the stock and extended test servers. Tag and person filters still ask the server first and fall back to the stored
+  memberships offline. ⬜ Album titles are not in the index.
+- On-device labels (SR-7, opt-in in Settings › Search): Vision classification of cached previews into the index, in a
+  power-requiring `BGProcessingTask` (iOS) or an `NSBackgroundActivityScheduler` activity (Mac) 🟡: labelling unit-tested with a
+  real classifier run, labels checked on two test photos ("cat", "food"); the background scheduling was not seen to run
+  (iOS not run; on the Mac only the debug trigger `PHOTOS_DEBUG_LABEL_NOW=1` was used, with an empty preview cache).
 - Preview loading: a load is cancelled when nobody waits for it any more, loads are queued newest first with a limit, prefetches
   are taken back when the grid cancels them (`ImagePipeline.cancelPrefetch`), and previews are decoded at the tile's pixel size
   rather than the size of their bucket (a 400 px tile from the 1024 px bucket holds ~0.6 MB, not 3 MB). Preview and original caches are trimmed
@@ -371,7 +382,18 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   no way to hide a person, and the People screen says so under the grid ("N people are hidden on this device…", "Show hidden
   people"). Name check and hidden list ✅ unit-tested.
 - ⬜ Map time slider; MapKit native clustering (grid clustering is used).
-- ⬜ Tag assignment UI (API exists).
+- Tags ✅/🟡: "Tags…" in the viewer's More menu and the grid's context and selection menus opens a sheet with all
+  assignable tags (on all / some / none of the photos), a filter field and "New tag"; changes go through the outbox
+  (`PendingOperation.tag`) and show in search at once. Tag browsing falls back to the stored memberships offline and offers
+  "Remove tag" for a selection. Outbox, store and refresh ✅ unit-tested and against the stock (8093) and extended (8091)
+  servers (create, assign, refresh, search, remove); the sheet itself 🟡 (compiled for macOS, iOS and visionOS; not looked at:
+  the Mac was locked during this round). A photo whose tag was removed stays in the open tag grid until it is reloaded.
+- Activity in shared albums (SH-9) ✅/🟡: album listings are compared (counts) and new photos or newly shared albums become
+  entries of "New in shared albums" (row above Albums and Shared albums, list with "Mark all as seen"; opening the album marks
+  it seen); a background refresh posts a local notification (Settings › Shared albums). Detection ✅ unit-tested and run in
+  the Mac app against the stock server with a second user (new album, added photo, removal not reported, re-add reported);
+  the screens and the notification 🟡 (not seen: locked Mac, notifications not allowed for the test build). Instant push needs
+  the server (§S5).
 
 ## M5 Advanced — 🟡
 Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API; restore sends `Overwrite: T` — it was refused with 412 before; "Delete permanently" asks first and errors are shown; the screen itself 🟡: it is behind the device unlock, not opened in the test run), duplicates 🟡, free up space 🟡, extract text (server OCR or

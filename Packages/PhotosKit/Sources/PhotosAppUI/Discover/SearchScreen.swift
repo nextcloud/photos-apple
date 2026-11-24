@@ -10,25 +10,49 @@ import SwiftUI
 /// Evaluates search filters on the local index (SPEC SR-2): AND between kinds, OR within a kind.
 enum SearchEvaluator {
     /// The store query for a set of filter chips. Everything the index knows is answered by one SQL query (full-text
-    /// index and indexed columns, SPEC SR-3) on a database queue; only the tag and person memberships come from the server.
+    /// index and indexed columns, SPEC SR-3) on a database queue. Tag and person memberships are asked from the server,
+    /// which knows the latest; without a connection the copies stored for search answer (`LabelSync`).
     @MainActor static func search(for filters: [SearchFilter], session: SessionModel) async throws -> LibrarySearch? {
         guard let services = session.services else { return nil }
         var search = LibrarySearch(filters: filters)
+        let labels = LabelStore(database: services.database)
         let tagIds = filters.compactMap { if case .tag(let id, _) = $0 { id } else { nil } }
         if !tagIds.isEmpty {
             var allowed = Set<FileID>()
             // A tag of a smart album that no longer exists on the server matches nothing.
-            for id in tagIds where id != unknownTagId { allowed.formUnion(try await services.api.tagContent(id).map(\.fileId)) }
+            for id in tagIds where id != unknownTagId {
+                allowed.formUnion(
+                    try await membership(
+                        server: { try await services.api.tagContent(id).map(\.fileId) }, local: { try labels.fileIds(withTag: id) }))
+            }
             search.memberships.append(allowed)
         }
         let people = filters.compactMap { if case .person(let name) = $0 { name } else { nil } }
         if !people.isEmpty {
             var allowed = Set<FileID>()
             let key = await session.recognizeKey()
-            for name in people { allowed.formUnion(try await services.api.personPhotos(name, key: key).map(\.item.fileId)) }
+            for name in people {
+                allowed.formUnion(
+                    try await membership(
+                        server: { try await services.api.personPhotos(name, key: key).map(\.item.fileId) },
+                        local: { try labels.fileIds(ofPerson: name) }))
+            }
             search.memberships.append(allowed)
         }
         return search
+    }
+
+    /// The server's answer, or the stored copy when the server cannot be asked. Nothing stored: the server's error.
+    @MainActor static func membership(
+        server: () async throws -> [FileID], local: () throws -> Set<FileID>
+    ) async throws -> Set<FileID> {
+        do {
+            return Set(try await server())
+        } catch {
+            let stored = (try? local()) ?? []
+            if stored.isEmpty { throw error }
+            return stored
+        }
     }
 
     /// Search results as grid rows.
@@ -427,7 +451,12 @@ struct SearchScreen: View {
         case .tag: String(localized: "Tag", bundle: .module)
         case .album: String(localized: "Album", bundle: .module)
         case .dateRange: String(localized: "Date", bundle: .module)
-        case .text: String(localized: "Name or caption", bundle: .module)
+        case .text:
+            String(
+                localized: "Name, caption or tag", bundle: .module,
+                comment:
+                    "Kind of a search suggestion: the text is searched in file names, captions, places, tags, people and recognised content."
+            )
         case .favorites: String(localized: "Favorites", bundle: .module)
         case .videos: String(localized: "Videos", bundle: .module)
         }
@@ -442,13 +471,20 @@ struct SearchScreen: View {
         }
         vocabulary = SearchSuggestions.Vocabulary(places: places.sorted(), albums: albums)
         vocabularyRevision += 1
-        if session.features.has(.systemtags), let tags = try? await services.api.tagsInUse() {
+        // Tags and people from the server; offline, the ones stored for search.
+        let labels = LabelStore(database: services.database)
+        if session.features.has(.systemtags),
+            let tags = (try? await services.api.tagsInUse()) ?? (try? labels.tags().filter { $0.itemCount != 0 })
+        {
             vocabulary.tags = tags.map { ($0.id, $0.name) }
             vocabularyRevision += 1
         }
-        if session.features.has(.recognize), let people = try? await services.api.people(key: await session.recognizeKey()) {
-            vocabulary.people = people.filter { !$0.isUnnamed }.map(\.name)
-            vocabularyRevision += 1
+        if session.features.has(.recognize) {
+            let people = (try? await services.api.people(key: await session.recognizeKey()))?.filter { !$0.isUnnamed }.map(\.name)
+            if let names = people ?? (try? labels.personNames()) {
+                vocabulary.people = names
+                vocabularyRevision += 1
+            }
         }
     }
 

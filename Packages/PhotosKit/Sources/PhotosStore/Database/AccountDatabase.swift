@@ -307,6 +307,10 @@ public final class AccountDatabase: Sendable {
                 t.add(column: "checkedAt", .double)
             }
         }
+        // Tag, people and on-device labels in the search index (SPEC SR-3).
+        migrator.registerMigration("v3-search-labels") { db in try SearchLabels.migrate(db) }
+        // What is new in shared albums, noticed while syncing (SPEC SH-9).
+        migrator.registerMigration("v3-album-activity") { db in try SharedAlbumActivity.migrate(db) }
         return migrator
     }
 }
@@ -332,6 +336,8 @@ enum SearchIndex {
         return "concat_ws(' ', \(row).name, \(row).place, \(row).placeCountry, \(row).caption, \(folder))"
     }
 
+    /// The triggers as `v2-large-library` installs them; `v3-search-labels` replaces them with `SearchLabels.triggersSQL`,
+    /// which is what the index is rebuilt with now. Kept unchanged for that migration.
     static let triggersSQL = """
         CREATE TRIGGER media_search_insert AFTER INSERT ON media BEGIN
             INSERT INTO searchIndex(rowid, text) VALUES (NEW.fileId, \(textSQL("NEW")));

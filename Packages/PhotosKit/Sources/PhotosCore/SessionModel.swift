@@ -18,6 +18,8 @@ public final class SessionModel {
     public private(set) var syncStatus: SyncStatus = .idle(lastSync: nil)
     public private(set) var failedOperations: [FailedOperation] = []
     public private(set) var featureDetectionError: String?
+    /// How many items the first sync will find, when the server can tell (`loadInitialSyncTotal()`).
+    public internal(set) var initialSyncTotal: Int?
     /// The server presents a certificate the app does not trust (`SessionModel+State.swift`).
     public internal(set) var certificateProblem: CertificateProblem?
     /// The last undoable change, for the confirmation banner (`SessionModel+Undo.swift`).
@@ -32,6 +34,8 @@ public final class SessionModel {
     /// A partner's shared photos in this account's timeline (SPEC SH-8).
     public private(set) var partners: PartnerTimelineModel?
     @ObservationIgnored var albumsRefreshedAt: Date?
+    /// `afterSync()` runs (`SessionModel+Labels.swift`).
+    @ObservationIgnored var afterSyncRunning = false
     @ObservationIgnored weak var app: AppModel?
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -80,6 +84,7 @@ public final class SessionModel {
 
     func start() {
         guard let services, !isStopped else { return }
+        _ = ForegroundState.shared  // follows the app's activation from now on (shared-album notifications)
         track { [weak self] in
             await services.sync.setStatusHandler { status in
                 Task { @MainActor in
@@ -231,6 +236,9 @@ public final class SessionModel {
         await services.sync.sync(reconcile: reconcile)
         await services.outbox.kick()
         await refreshFailedOperations()
+        // Beside, not before, what the caller does next (a background task's backup pass): labels for search and
+        // shared-album activity are throttled extras.
+        if !afterSyncRunning { track { [weak self] in await self?.afterSync() } }
     }
 
     /// Called when the app comes to the foreground.

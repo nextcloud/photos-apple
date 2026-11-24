@@ -13,6 +13,9 @@
     "%@ now presents a different certificate, which is not trusted. Only trust it if you know that the certificate of your server was replaced.\n\n%@" : {
       "comment" : "Message of the dialog \"The server's certificate changed\" (opened from the account banner or Settings › Server). The first %@ is the server's host name, the second a summary of the new certificate (issuer, validity, fingerprint) on its own paragraph."
     },
+    "%@ of %@" : {
+      "comment" : "Progress of the on-device recognition in Settings › Search: photos looked at of all photos, e.g. \"1,234 of 5,000\"."
+    },
     "%@ presents a different certificate than before. This happens when the server's certificate is replaced, but it is also what someone intercepting your connection would show. Until you decide, nothing is sent to the server." : {
       "comment" : "Explanation at the top of the sheet \"The server's certificate changed\" (opened from the account banner or Settings › Server). %@ is the server's host name."
     },
@@ -361,6 +364,115 @@
         }
       }
     },
+    "%lld new photos" : {
+      "comment" : "Entry of the shared-album activity list: how many photos others added.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld new photos in %lld albums" : {
+      "comment" : "Banner above the albums: a number of photos added by others, in a number of shared albums. Both numbers have plural forms.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in %#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg albums"
+                    }
+                  }
+                }
+              }
+            },
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld new photos in “%@”" : {
+      "comment" : "Banner above the albums: a number of photos (with plural forms) added to an album (its title) by others.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in “%2$@”"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld of %lld" : {
       "comment" : "Position of the photo shown in the viewer (accessibility); backup progress: uploaded files of all files.",
       "localizations" : {
@@ -694,6 +806,9 @@
     },
     "Accounts" : {
       "comment" : "Title of the Settings section (and, on the Mac, the Settings tab) that lists the logged-in accounts."
+    },
+    "Add" : {
+      "comment" : "Button next to the new tag field: creates the tag and gives it to the photos."
     },
     "Add %lld" : {
       "comment" : "A button that adds the selected items to an album. The argument is the count of selected items.",
@@ -1066,6 +1181,9 @@
     },
     "Check that you are allowed to add files to the backup folder, or choose another folder." : {
       "comment" : "Advice on the Backup screen when the server refused an upload."
+    },
+    "Checked when the app refreshes in the background, so a notification can come hours later. Instant notifications would need your Nextcloud server to send them." : {
+      "comment" : "Footer of Settings › Shared albums."
     },
     "Checking library" : {
       "comment" : "A description of the current state of the library reconciliation process.",
@@ -1483,6 +1601,9 @@
       "comment" : "A label for the duration of a photo.",
       "isCommentAutoGenerated" : true
     },
+    "Earlier" : {
+      "comment" : "Section of the shared-album activity list: entries already looked at."
+    },
     "Edit" : {
       "comment" : "The title of the photo editor.",
       "isCommentAutoGenerated" : true
@@ -1633,6 +1754,9 @@
     "Filters" : {
       "comment" : "A tab in the photo editor.",
       "isCommentAutoGenerated" : true
+    },
+    "Find a tag" : {
+      "comment" : "Prompt of the search field of the tag sheet."
     },
     "Finishing…" : {
       "comment" : "The title of a button that is displayed while the user is being logged in.",
@@ -1869,12 +1993,14 @@
       "comment" : "A label for the number of items being loaded from the library.",
       "isCommentAutoGenerated" : true
     },
-    "Loading library… %lld" : {
-      "comment" : "A label that shows the number of photos being loaded.",
-      "isCommentAutoGenerated" : true
-    },
     "Loading video…" : {
       "comment" : "Accessibility label of the spinner on a video page in the viewer while the video is being loaded."
+    },
+    "Loading your library — %@" : {
+      "comment" : "Progress of the first sync when the total is not known: the number of photos and videos loaded so far."
+    },
+    "Loading your library — %@ of %@" : {
+      "comment" : "Progress of the first sync, shown over the timeline: photos and videos loaded so far (first number) and how many there are (second number), e.g. \"12,000 of 48,213\"."
     },
     "Loading your library…" : {
       "comment" : "Shown in the timeline while the photos are loaded from the server for the first time."
@@ -1977,6 +2103,9 @@
       "comment" : "The name of the map icon.",
       "isCommentAutoGenerated" : true
     },
+    "Mark all as seen" : {
+      "comment" : "Button of the shared-album activity list."
+    },
     "Media types" : {
       "comment" : "A section title that lists the media types detected by the server.",
       "isCommentAutoGenerated" : true
@@ -2077,6 +2206,9 @@
     "Name or group" : {
       "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field."
     },
+    "Name, caption or tag" : {
+      "comment" : "Kind of a search suggestion: the text is searched in file names, captions, places, tags, people and recognised content."
+    },
     "Name, email address or user@server" : {
       "comment" : "Sharing screen (Share via Nextcloud…): placeholder of the recipient search field; user@server is a Federated Cloud ID, keep it as is."
     },
@@ -2089,6 +2221,9 @@
     "Network and battery" : {
       "comment" : "A section in the backup options for network and battery settings.",
       "isCommentAutoGenerated" : true
+    },
+    "New" : {
+      "comment" : "Section of the shared-album activity list: entries not looked at yet."
     },
     "New Album…" : {
       "comment" : "Menu command on the Mac (title case) that creates an album."
@@ -2103,6 +2238,9 @@
     "New certificate" : {
       "comment" : "Section title in the sheet \"The server's certificate changed\" : the certificate the server presents now."
     },
+    "New in shared albums" : {
+      "comment" : "Title of the banner above the albums and of the list of what others added to shared albums."
+    },
     "New password (leave empty to keep it)" : {
       "comment" : "Sharing screen (Share via Nextcloud…): password field of a link that already has a password."
     },
@@ -2112,8 +2250,14 @@
     "New photos are uploaded here, in subfolders by date. Your library shows the photos in your timeline folders." : {
       "comment" : "Footer of the backup folder on the Backup screen."
     },
+    "New photos in shared albums" : {
+      "comment" : "Switch in Settings › Shared albums: notifications about photos others added to shared albums."
+    },
     "New public link" : {
       "comment" : "Sharing screen (Share via Nextcloud…): title of the sheet that creates a public link."
+    },
+    "New tag" : {
+      "comment" : "Placeholder of the field in the tag sheet where a new tag is typed."
     },
     "Newer Photos versions" : {
       "comment" : "Heading of a group of server features in Settings › Server features: features that need a newer version of the Photos app on the server."
@@ -2227,6 +2371,9 @@
     "No suggestions" : {
       "comment" : "Title shown in search when nothing matches what was typed so far."
     },
+    "No tags yet" : {
+      "comment" : "Empty state of the tag sheet."
+    },
     "No text found." : {
       "comment" : "A message displayed when no text is found in the image.",
       "isCommentAutoGenerated" : true
@@ -2275,6 +2422,9 @@
     "Nothing is synced until you have reviewed and trusted the new certificate." : {
       "comment" : "Explanation in Settings › Server under \"The server's certificate changed\", next to the \"Review…\" button."
     },
+    "Nothing new" : {
+      "comment" : "Empty state of the shared-album activity list."
+    },
     "Nothing on this day" : {
       "comment" : "A description of the view when there are no memories on this day.",
       "isCommentAutoGenerated" : true
@@ -2304,12 +2454,18 @@
       "comment" : "A description of the current sync status when the device is offline.",
       "isCommentAutoGenerated" : true
     },
+    "Offline: your changes are saved when the connection is back. New tags need the connection." : {
+      "comment" : "Footer of the tag sheet while the server cannot be reached."
+    },
     "Oldest first" : {
       "comment" : "A description of the oldest-first sorting option.",
       "isCommentAutoGenerated" : true
     },
     "On" : {
       "comment" : "Backup is turned on (shown next to the Backup row)."
+    },
+    "On some of the selected items" : {
+      "comment" : "Accessibility value of a tag in the tag sheet: only some of the selected photos have the tag."
     },
     "On this Mac" : {
       "comment" : "Header of the Backup screen's section about the Mac's Photos library."
@@ -2496,6 +2652,9 @@
       "comment" : "A button that displays a map of photos in the current area.",
       "isCommentAutoGenerated" : true
     },
+    "Photos looked at" : {
+      "comment" : "Settings › Search: progress of the on-device recognition."
+    },
     "Photos settings API" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
@@ -2506,6 +2665,9 @@
     "Photos that Files already uploaded are recognised and not uploaded again. If you switch, turn off auto upload in the Files app afterwards." : {
       "comment" : "A message that appears when the user is asked to switch from the Files app to Nextcloud Photos.",
       "isCommentAutoGenerated" : true
+    },
+    "Photos that others add to shared albums are listed here." : {
+      "comment" : "Empty state of the shared-album activity list."
     },
     "Photos this person added to the album are removed from it." : {
       "comment" : "A description of the effect of removing a collaborator from an album.",
@@ -2617,6 +2779,9 @@
     "Recognize key API" : {
       "comment" : "A server feature in the list under Settings › Server features."
     },
+    "Recognize what's in photos" : {
+      "comment" : "Switch in Settings › Search: recognise things like dogs or beaches in photos on this device."
+    },
     "Redo" : {
       "comment" : "A button that redos the last undone action.",
       "isCommentAutoGenerated" : true
@@ -2722,6 +2887,9 @@
     },
     "Remove person…" : {
       "comment" : "Destructive menu item on a person's page (People, face recognition): removes the person after a confirmation. The photos are not deleted."
+    },
+    "Remove tag" : {
+      "comment" : "Action for selected photos on the screen of one tag: takes the tag off them."
     },
     "Remove this account?" : {
       "comment" : "Title of the confirmation before an account is removed from the app."
@@ -3021,6 +3189,9 @@
       "comment" : "A title for the list of folders shared with the user.",
       "isCommentAutoGenerated" : true
     },
+    "Shared with you by %@" : {
+      "comment" : "Entry of the shared-album activity list: the album was newly shared by this person (display name)."
+    },
     "Share…" : {
       "comment" : "Menu command on the Mac that shares the selected photos."
     },
@@ -3193,6 +3364,12 @@
       "comment" : "The title of the screen that displays the user's tags.",
       "isCommentAutoGenerated" : true
     },
+    "Tags are shared with Files and the other Nextcloud apps." : {
+      "comment" : "Footer of the tag list in the tag sheet: tags are Nextcloud system tags."
+    },
+    "Tags…" : {
+      "comment" : "Menu item that opens the tags of the selected photos or of the photo shown."
+    },
     "Taken" : {
       "comment" : "A label for the date and time when the photo was taken.",
       "isCommentAutoGenerated" : true
@@ -3226,6 +3403,9 @@
     "The Files app backs up this device. This shows which photos are already on your Nextcloud." : {
       "comment" : "A description of the backup process.",
       "isCommentAutoGenerated" : true
+    },
+    "The app looks for new photos in shared albums whenever it refreshes. To be told the moment someone adds photos, your Nextcloud server would need to send notifications for it." : {
+      "comment" : "Footer of the shared-album activity list."
     },
     "The app's access to the account is revoked and all its data is removed from this device. Nothing is deleted on the server." : {
       "comment" : "Explanation in the confirmation before an account is removed."
@@ -3318,6 +3498,9 @@
     },
     "They stay on your Nextcloud. The system asks you once more and keeps them in Recently Deleted for 30 days. If you use iCloud Photos, they are also removed from iCloud and your other devices." : {
       "comment" : "Free up space: confirmation message."
+    },
+    "Things like “dog” or “beach” are recognized in the previews that are already downloaded, only while charging and not in use, so that search finds them. The labels stay in this app and are never uploaded. They are English words. Turning this off deletes them." : {
+      "comment" : "Footer of Settings › Search on iPhone and iPad."
     },
     "Thinking…" : {
       "comment" : "A placeholder text that appears when the app is thinking.",
@@ -3421,6 +3604,9 @@
     "Type" : {
       "comment" : "A label for the type of the file.",
       "isCommentAutoGenerated" : true
+    },
+    "Type a name above to create the first one." : {
+      "comment" : "Empty state of the tag sheet: how to create a tag."
     },
     "Unarchive" : {
       "comment" : "Text for unarchiving media items.",
@@ -3684,6 +3870,9 @@
     "You're offline" : {
       "comment" : "Title in the empty timeline when the device has no connection and nothing was loaded yet."
     },
+    "Your Mac recognizes things like “dog” or “beach” in the previews it has already downloaded, while it is idle, so that search finds them. The labels stay on this Mac and are never uploaded. They are English words. Turning this off deletes them." : {
+      "comment" : "Footer of Settings › Search on the Mac."
+    },
     "Your Nextcloud storage is full" : {
       "comment" : "Title on the Backup screen when the backup stopped because the user's storage on the server is used up."
     },
@@ -3799,6 +3988,9 @@
     },
     "with %@" : {
       "comment" : "Accessibility: the people in a photo."
+    },
+    "“%@” was shared with you" : {
+      "comment" : "Banner above the albums: an album (its title) was newly shared with the user."
     }
   },
   "version" : "1.1"

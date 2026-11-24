@@ -97,10 +97,14 @@ targets:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
-        # The last one is the user-started backup as a continued processing task (`ContinuedBackup`): its identifier must
-        # start with the bundle identifier, and the system expects a wildcard.
+        # Refresh, processing and on-device labels (`ContentLabeling`) have fixed identifiers. The last one is the
+        # user-started backup as a continued processing task (`ContinuedBackup`): its identifier must start with the bundle
+        # identifier, and the system expects a wildcard.
         BGTaskSchedulerPermittedIdentifiers:
-          [com.nextcloud.photos.refresh, com.nextcloud.photos.processing, $(PRODUCT_BUNDLE_IDENTIFIER).backup.*]
+          - com.nextcloud.photos.refresh
+          - com.nextcloud.photos.processing
+          - com.nextcloud.photos.labels
+          - $(PRODUCT_BUNDLE_IDENTIFIER).backup.*
         UIBackgroundModes: [fetch, processing, remote-notification]
   ShareExtension:
     type: app-extension

@@ -68,6 +68,8 @@ struct AlbumDetailScreen: View {
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
+            // What was new in this album has been seen now ("New in shared albums").
+            try? AlbumActivityStore(database: services.database).markSeen(albumId: albumId)
             Task {
                 do { try await session.refreshAlbumContent(album) } catch { self.error = error.localizedDescription }
             }

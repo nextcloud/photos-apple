@@ -36,6 +36,26 @@ enum GridBanner: Equatable {
     }
 }
 
+/// What the first sync says about its progress: "Loading your library — 12,000 of 48,213" where the server tells the
+/// total (the day counts of the extended Photos API), else how many arrived so far.
+enum InitialSyncProgress {
+    static func text(count: Int, total: Int?) -> String {
+        let fetched = count.formatted()
+        // The day counts leave out shared folders, so the sync can find more than they promised: then no total.
+        if let total, total > 0, count <= total {
+            return String(
+                localized: "Loading your library — \(fetched) of \(total.formatted())", bundle: .module,
+                comment: "Progress of the first sync: photos and videos loaded so far, and how many there are")
+        }
+        if count > 0 {
+            return String(
+                localized: "Loading your library — \(fetched)", bundle: .module,
+                comment: "Progress of the first sync when the total is not known: photos and videos loaded so far")
+        }
+        return String(localized: "Loading your library…", bundle: .module)
+    }
+}
+
 /// The banner at the bottom of a grid: failed sync, revoked login, changed certificate, failed changes, offline.
 struct GridStatusBanner: View {
     let hasItems: Bool
@@ -86,7 +106,8 @@ struct GridStatusBanner: View {
             case .offline:
                 pill(String(localized: "Offline – showing saved photos", bundle: .module), systemImage: "wifi.slash")
             case .loading(let count):
-                pill(String(localized: "Loading library… \(count)", bundle: .module), systemImage: "arrow.triangle.2.circlepath")
+                pill(
+                    InitialSyncProgress.text(count: count, total: session.initialSyncTotal), systemImage: "arrow.triangle.2.circlepath")
             case nil:
                 EmptyView()
             }

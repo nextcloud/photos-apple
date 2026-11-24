@@ -41,6 +41,7 @@ struct AlbumsScreen: View {
 
     var body: some View {
         ScrollView {
+            AlbumActivityBanner()
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
                 ForEach(sorted) { album in
                     // By value: the stack's path (MainView) knows which album is open.
