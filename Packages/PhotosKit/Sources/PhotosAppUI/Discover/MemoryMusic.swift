@@ -72,11 +72,32 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
     }
 
     static func fileURL(_ name: String, folder: URL = folder) -> URL { folder.appending(path: name) }
+
+    /// The music as a file the app may read (beat detection, video export): a chosen file, or a song of the Music
+    /// library that is stored on the device and not protected. Nil for Apple Music songs: their DRM lets them play but
+    /// not be read or put into a video.
+    static func readableURL(for music: SlideshowMusic) -> URL? {
+        switch music.source {
+        case .file(let name):
+            return fileURL(name)
+        case .library(let id):
+            #if os(iOS)
+                let query = MPMediaQuery.songs()
+                query.addFilterPredicate(
+                    MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
+                guard let song = query.items?.first, !song.hasProtectedAsset else { return nil }
+                return song.assetURL
+            #else
+                _ = id
+                return nil
+            #endif
+        }
+    }
 }
 
-/// Plays the chosen music while a memory slideshow plays: fades in, pauses with the slideshow, loops, and stops when
-/// the slideshow closes. On iPhone, iPad and Vision Pro a file plays in the `ambient` audio category: it mixes with other
-/// audio and is silenced by the Ring/Silent switch, as the slideshow's sound is not the point of it.
+/// Plays the chosen music while a memory film plays: fades in, follows the film's time when it is scrubbed, pauses with
+/// it, loops, and stops when the film closes. On iPhone, iPad and Vision Pro a file plays in the `ambient` audio
+/// category: it mixes with other audio and is silenced by the Ring/Silent switch, as in Photos.
 @MainActor final class SlideshowMusicPlayer {
     private var audio: AVAudioPlayer?
     private var loaded: SlideshowMusic?
@@ -87,7 +108,9 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
         private var previousCategory: AVAudioSession.Category?
     #endif
 
-    func play(_ music: SlideshowMusic) {
+    /// Plays (fading in), from `position` seconds into the music when given (a film's music follows the film's time;
+    /// past the music's end it starts over, as it loops).
+    func play(_ music: SlideshowMusic, at position: Double? = nil) {
         if loaded != music {
             stop()
             load(music)
@@ -95,6 +118,7 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
         switch music.source {
         case .file:
             guard let audio else { return }
+            if let position, audio.duration > 0 { audio.currentTime = position.truncatingRemainder(dividingBy: audio.duration) }
             if !audio.isPlaying {
                 audio.volume = 0
                 audio.play()
@@ -102,7 +126,12 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
             }
         case .library:
             #if os(iOS)
-                MPMusicPlayerController.applicationQueuePlayer.play()
+                let player = MPMusicPlayerController.applicationQueuePlayer
+                if let position {
+                    let length = player.nowPlayingItem?.playbackDuration ?? 0
+                    player.currentPlaybackTime = length > 0 ? position.truncatingRemainder(dividingBy: length) : position
+                }
+                player.play()
             #endif
         }
     }
@@ -158,62 +187,6 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
                 _ = id
             #endif
         }
-    }
-}
-
-extension View {
-    /// Plays the slideshow music of memories (when one is chosen) along with a slideshow, and shows a button that turns it
-    /// off and on for this slideshow next to the slideshow's own controls.
-    func memorySlideshowMusic(enabled: Bool, playing: Bool, controlsShown: Bool) -> some View {
-        modifier(SlideshowMusicModifier(enabled: enabled, playing: playing, controlsShown: controlsShown))
-    }
-}
-
-private struct SlideshowMusicModifier: ViewModifier {
-    let enabled: Bool
-    let playing: Bool
-    let controlsShown: Bool
-    @AppStorage(SlideshowMusicStore.key) private var stored = ""
-    @State private var player = SlideshowMusicPlayer()
-    @State private var muted = false
-
-    var music: SlideshowMusic? { enabled ? SlideshowMusic(stored: stored) : nil }
-
-    func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .topTrailing) {
-                if controlsShown, music != nil { muteButton }
-            }
-            .onAppear { update() }
-            .onChange(of: playing) { update() }
-            .onChange(of: muted) { update() }
-            .onChange(of: stored) { update() }
-            .onDisappear { player.stop() }
-    }
-
-    func update() {
-        if let music, playing, !muted { player.play(music) } else { player.pause() }
-    }
-
-    var muteButton: some View {
-        let title =
-            muted
-            ? String(localized: "Turn Music On", bundle: .module, comment: "Memory slideshow: plays the chosen music again.")
-            : String(localized: "Turn Music Off", bundle: .module, comment: "Memory slideshow: stops the chosen music for this slideshow.")
-        return Button {
-            muted.toggle()
-        } label: {
-            Label(title, systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .labelStyle(.iconOnly)
-                .font(.title3.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white)
-        .help(title)
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
     }
 }
 

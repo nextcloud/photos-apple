@@ -605,7 +605,30 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 ## M6 Delight (SPEC §15) — ⬜
 
 ### §15.1 Memory films and Year in Review
-- ⬜ Not started.
+- Memory films (MF-1) 🟡: memories play as films — title card, Ken Burns moves towards faces/salient regions (Vision, on
+  the device), cuts on the music's beat (on-device beat detection; steady 3.2 s rhythm without music, without a clear
+  beat and for Apple Music songs), dissolves at new days/stops, Live Photo motion and videos inline, map flights between a
+  trip's stops (MapKit satellite snapshot; standard map, then a night-blue grid as fallbacks), Previous/Play/Next,
+  scrubber, Mute, ← → Space M Esc, end card. Plan, camera, beat detection (click tracks at 75/100/128 BPM, noise,
+  silence), stops/km and map-flight geometry ✅ unit-tested (`MemoryFilmTests`, `YearInReviewTests`). ✅ run in the iOS
+  27.2 simulator (`UITests/MemoryFilmTourTests`: title card, cross-fades, faces framed, scrubbing, skip, landscape, a trip
+  Lisbon → Porto → Madrid with two flights; there MapKit cannot draw snapshots, so the grid fallback shows;
+  `ios-fix-shots/r5-memories/12…17`, `50-trip-*`). ✅ run on the Mac (AX only): film beside the sidebar, satellite map
+  flights with the route (`r5-memories/mac/61…64`). 🟡 Not run: music playback with beat cuts in the app (no audio file
+  chosen in the test containers), inline videos and Live Photos on screen (the test library has none; the export test
+  renders a clip), Vision Pro.
+- Export as video (MF-2) 🟡: 1080p H.264/HEVC with the music file or the clips' sound, progress and Cancel, Share…, Save to
+  Nextcloud…, Save to Mac…; temporary folders removed. Rendering, music mix, clips, map flights, cancel clean-up ✅
+  unit-tested (`FilmExporterTests`, real AVFoundation files; a 1080p 16 s film renders in about 2 s on this Mac). ✅
+  exported in the iOS simulator (51 s film, `18…20`) and on the Mac (51 s trip film in 15 s, 1920 × 1080 H.264, the
+  satellite flight in the video, `mac/65…67`); the temporary folder was empty after Done. 🟡 Share sheet targets and the
+  upload to Nextcloud not completed in a test.
+- Year in Review (MF-3) 🟡: swipeable cards (intro, busiest day, top month, streak, on the move, people, pet, first
+  snow/beach, favorites, best of), share as images or video, Play film; in Memories and in the strip in Dec/Jan. Numbers,
+  card choice, hidden/unnamed people, labels and the store queries ✅ unit-tested (`YearInReviewTests`,
+  `YearReviewStoreTests`). ✅ run in the iOS simulator (`30…42`: intro, busiest day, top month, streak, on the move with
+  9 places and km, best of, Play film) and on the Mac (`mac/68`). 🟡 People/pet/snow/beach cards not seen (no Recognize
+  and no on-device labels on the test server); the strip's seasonal card only shows in December/January.
 
 ### §15.2 Photographer's Mac: import, culling, compare, external editors
 - ✅ Culling (ratings 1–5, Pick/Reject as collaborative system tags, outbox, Undo, P/X/U/0–5 keys in grid and viewer,

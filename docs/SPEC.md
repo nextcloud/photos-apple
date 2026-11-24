@@ -804,7 +804,63 @@ Nextcloud/Photos APIs and on-device frameworks. Each subsection is owned by one 
 
 ### 15.1 Memory films and Year in Review [memories]
 
-_To be written._
+**MF-1 Memory films.** Every memory (On this day, trips, year recaps, and whatever the memory engine adds later) plays
+as a film instead of a slideshow ("Play slideshow" in the memory's toolbar and context menus, "Play film" in the year in
+review). Decided:
+- *Plan* (`FilmPlan`, shared by player and export): a title card first (title, date line, a trip's places; serif type
+  sized to the frame) over the cover photo, then at most 60 pictures (favourites first, the rest spread evenly, in the
+  order taken). A picture lasts 2/4/8/16 beats, whichever is closest to 3.4 s; favourites twice as long (≤ 7 s); videos
+  play inline for their length (2–10 s, whole beats); Live Photos play their motion (muted) at the start of their shot.
+  The last picture stays while the film fades to black.
+- *Rhythm*: with music the cuts land on the music's beats (`BeatDetection`: onset envelope, autocorrelation with a mild
+  preference for 120 BPM, period refined together with the phase; on the device, first 150 s decoded at 11 kHz). Within a
+  day/stop shots cut on the beat; a new day or stop dissolves in over one beat. Without music, or when the music has no
+  clear beat (correlation < 0.2), or when it is an Apple Music song (DRM: it plays but cannot be read), a steady rhythm:
+  3.2 s per picture with 0.8 s dissolves. The music starts with the film and follows scrubbing; it loops after its end.
+- *Camera* (`KenBurns`): a picture fills the frame when that keeps ≥ 55 % of it, else it is shown whole over a blurred
+  copy of itself. The move alternates zoom in / pull back / pan (factor 1.15, pans 1.08), always towards the faces
+  (Vision face rectangles, the larger ones, with room around them) or else the most salient region (attention-based
+  saliency); computed on the device when the picture loads and fixed before the shot appears. Videos are not moved.
+- *Trips*: the photos' coordinates are grouped into stops (`TravelRoute`, 25 km); before the first photo of a new stop
+  ≥ 30 km away (at most 6 times) the film flies over the map: a satellite map with labels (MapKit snapshot of the region
+  of both stops, like the Places map; only the region is sent to Apple Maps; the standard muted map where satellite imagery
+  is missing), the camera starts over the first stop, pulls back and comes down over the second while the route is drawn
+  as an arc, caption "A to B". Without any map (offline, or where MapKit cannot draw one, as in the iOS simulator): the
+  same flight over a night-blue grid with the stops placed by their coordinates.
+- *Controls*: tap shows/hides them (they hide after 3.5 s while playing); Close, Mute (music and the videos' sound),
+  Export; Previous/Play-Pause/Next and a scrubber with elapsed/total time; at the end "Play Again" and Export. Keyboard:
+  ← → (segments), Space, M (mute), Esc. With VoiceOver the film starts paused and each segment is described (title, place
+  caption, or the photo's kind, date and place). Reduce Motion: no camera moves, the map does not fly (dissolves stay).
+  The film pauses when the app leaves the foreground and keeps the display awake while playing.
+- *Privacy*: archived photos are left out (also when archived after the memory was computed); everything is computed on
+  the device; the films are inside the app and so behind the app lock.
+
+**MF-2 Export as video.** From the film's toolbar, its end card and the memory's More menu ("Export video…"). 1080p
+(1920 × 1080; year in review 1080 × 1920), 30 fps, H.264 (default, "most compatible") or HEVC ("smaller"), the choice
+remembered. The frames are rendered with Core Image from the same plan (same camera moves, title and captions rendered from
+the same SwiftUI views), at 4096-px previews; videos and Live Photo motion come from the originals cache. Sound: the chosen
+music *file* (or a non-protected Music-library song), looped and faded in/out; Apple Music songs cannot go into a video —
+the sheet says so before export and the video has no music; without music, the videos' own sound. Progress with Cancel;
+then Share… (system share sheet: Messages, Save Video, Files…), Save to Nextcloud… (folder picker, uploaded through the
+transfer queue from a copy of its own) and on the Mac Save to Mac…. Temporary files: one folder per export, removed when
+the sheet closes, on failure and on cancel; leftovers older than an hour are removed at the next export.
+
+**MF-3 Year in Review.** Swipeable story-shaped cards (360 × 640 pt design, scaled to fit; paging scroll, ← → keys,
+page dots) computed on the device from the index (`YearInReview`): intro (year, photos and videos over a mosaic of the
+best photos), busiest day (≥ 5 photos), top month with a 12-month chart (≥ 10 active days), longest streak (≥ 3 days),
+on the move (places ≥ 2, countries ≥ 2 from the server's place data, km between stops ≥ 50 "as the crow flies"; countries
+only where the server provides them — no reverse geocoding), your people (top 5 *named* people; unnamed Recognize clusters
+and people hidden on this device left out; round face crops found on the device), pet of the year (dog/cat in ≥ 3
+photos), first snow, first beach day, favorites, best of (3 × 3: favourites first, then spread over the year). Pets, snow
+and beach come from the on-device labels (Settings › Search › on-device recognition) and are absent without them. Numbers
+count up when a card comes into view (not with Reduce Motion). Toolbar: Play film (the year's recap memory, MF-1) and
+Share: "Share cards as images…" (1080 × 1920 PNGs) or "Export video…" (MF-2, cards cross-faded, about one picture each).
+Offered in the Memories screen ("Year in review": a card per year with ≥ 30 photos) and in the library's memories strip in
+December (the year ending) and January (the year just ended), where it replaces that year's recap card.
+
+Platforms: iPhone and iPad (film full screen), Mac and Vision Pro (pushed in the window); all features on all four.
+Not done: a MapKit camera *animation* (the flight moves over a snapshot instead, which also works in the export and
+offline-rendered video), per-memory music choice, beat-synced Ken Burns accents within a shot.
 
 ### 15.2 Photographer's Mac: import, culling, compare, external editors [macpro]
 

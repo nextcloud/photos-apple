@@ -103,6 +103,11 @@ opens a memory's room, with `PHOTOS_DEBUG_MEMORY_ROOM_FOCUS=1` bringing the firs
 pinch). With `PHOTOS_UITEST_SHOTS=<folder>` (`TEST_RUNNER_…`) the iPhone tests write their screenshots there; on Vision Pro
 `XCUIScreen` captures nothing, take them with `xcrun simctl io <udid> screenshot` while the test runs.
 
+`UITests/MemoryFilmTourTests.swift` (iPhone and iPad) plays a memory as a film (title card, scrubbing, skip, landscape),
+exports it as a video, plays a trip and swipes through the year in review; `PHOTOS_UITEST_SHOTS=<directory>` writes a
+screenshot and the accessibility tree of each step there, `PHOTOS_UITEST_TRIP=<part of a trip's title>` picks the trip
+(one with stops more than 30 km apart shows the map flights). Run in the iOS 27.2 simulator.
+
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
 
