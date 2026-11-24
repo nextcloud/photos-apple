@@ -233,6 +233,16 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - ✅ A new file is sent with `If-None-Match: *` (direct PUT and background session), so a file that appeared after the
   name check is never overwritten; 412 → the name is looked up again (same size = already uploaded, otherwise the next
   free name). Unit-tested against the stub server and the fake session; the header ✅ against the test server.
+- ✅ Large libraries (r3 items 22, 26): a pass only looks at the assets that changed since the last one (PhotoKit's
+  persistent change token; the whole library once a day after the uploads, on "Back up now", or when the options or the
+  selection change). What waits keeps its resource and the time the server was asked in the ledger, so a background
+  wake uploads it without reading the library or asking the server again (for 7 days). The server is asked a batch at a
+  time and the uploads start after the first one; an interrupted pass goes on where it stopped. The matcher looks up
+  candidates by second instead of comparing every pair, and writes a batch's matches in one transaction. Engine ✅
+  unit-tested with a fake library that hands out change tokens; 🟡 `PHPhotoLibrary.fetchPersistentChanges` and the
+  `localIdentifier IN` fetch are compiled, **not run against a real library**.
+- ✅ A file the server reports as locked (423) fails on its own and waits for its next attempt; the pass goes on with
+  the others (r3 item 5). Unit-tested for the app's own uploads and those the system reports.
 - ✅ Matcher: a server name only stands for a device file when it is the same name or has every number of it
   (`PXL_20240501_123045123`, `20240501_123045_001`, UUID names no longer collide), and never when two device files of
   that second would fit. The Files app's record covers the photo or video itself, not RAW / edit / motion part.

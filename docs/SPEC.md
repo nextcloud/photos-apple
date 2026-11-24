@@ -563,6 +563,12 @@ Deleting a photo on the device never deletes it on the server (backup is additiv
 
 `backupAsset(localIdentifier, resourceKind (photo/video/pairedVideo/edited/raw), fingerprint, state, serverPath, serverFileId, serverEtag, matchedBy, attempts, lastError, assetModificationDate)`. States: `pending → reconciling → matched | queued → uploading → uploaded | failed | skipped`. `matchedBy` ∈ `ownUpload | filesLedger | serverHash | serverTimeSize | serverTimeName | user`. A PhotoKit change observer (`PHPhotoLibraryChangeObserver` + persistent change tokens `PHPersistentChangeToken`) finds new and modified assets incrementally.
 
+Incremental passes (a library of 150 000 photos with 40 000 to upload must not spend a background wake on rereading it):
+- A pass looks only at the assets the persistent change history names since the token taken before the last scan. The whole library is looked at when there is no usable token (none yet, expired history, too many changes, a change of an album the backup is limited to), when the selection (photos/videos, from date, hidden, albums, limited access) or the resource options change, when the user asks ("Back up now", "Try again"), and once a day — then after the pass has uploaded what it already knew of.
+- Of the assets looked at, only those the ledger does not know completely are read (`PHAssetResource` is the expensive part).
+- A resource that is not on the server keeps its description in the ledger (`resource`, JSON) and when the server was last asked about it (`checkedAt`). Later passes upload it from the ledger without reading the library, and without asking the server again for 7 days (layer 5 still checks the destination before each upload); the asset changing, or the user's "Back up now", asks again.
+- The server is asked a batch (≤ 200 resources) at a time, and what that batch did not find is uploaded before the next batch is asked, so uploads start after one request and an interrupted pass goes on where it stopped. Files larger than the system's background uploads take stay at the end of the pass.
+
 #### 7.18.4 Duplicate protection (the core requirement)
 
 An asset is uploaded only if **none** of these layers finds it already on the server:

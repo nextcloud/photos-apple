@@ -118,6 +118,24 @@ public struct BackupLedgerEntry: Codable, FetchableRecord, PersistableRecord, Se
     public var assetCreatedAt: Double?
     public var assetModifiedAt: Double?
     public var updatedAt: Double
+    /// What the library said about the resource (`BackupResource` as JSON) while it is not on the server: later passes
+    /// upload it from here without reading the library again. Nil once it is uploaded or matched.
+    public var resource: String? = nil
+    /// When the server was last asked about the resource and did not have it (SPEC §7.18.4 layer 4).
+    public var checkedAt: Double? = nil
+
+    /// The stored resource, when there is one and it can be read.
+    func storedResource(_ decoder: JSONDecoder) -> BackupResource? {
+        guard let resource else { return nil }
+        return try? decoder.decode(BackupResource.self, from: Data(resource.utf8))
+    }
+}
+
+extension BackupResource {
+    /// The form `BackupLedgerEntry.resource` keeps it in.
+    func json(_ encoder: JSONEncoder) -> String? {
+        (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) }
+    }
 }
 
 /// Camera-roll backup with duplicate protection (SPEC §7.18).
@@ -160,6 +178,12 @@ public actor BackupEngine {
     var missingCheckInterval: TimeInterval = 60
     /// Counts of the upload phase of the running pass.
     private var progress: (done: Int, total: Int, current: String)?
+    /// Uploads of the running pass's earlier rounds (`done`), and resources that later rounds check first (`later`).
+    private var passUploads = (done: 0, later: 0)
+    /// The running pass removed what interrupted uploads left on the server.
+    private var cleanedUp = false
+    /// The running pass looked for uploads the system lost.
+    private var missingChecked = false
     /// Uploads the server refused because their name was taken meanwhile (412): the running pass prepares them again.
     private var retake: [BackupResource] = []
     /// Where the library writes its exports (`PhotoLibrarySource.exportDirectory`); nil: nothing is kept or swept.
@@ -402,6 +426,9 @@ public actor BackupEngine {
         status.blocker = nil
         status.isInterrupted = false
         status.uploadedThisPass = 0
+        passUploads = (0, 0)
+        cleanedUp = false
+        missingChecked = false
         // Logged again for every pass, even when it ends as the last one did.
         loggedPhase = nil
         let kind = (dryRun ? " (dry run: Files does the backup)" : "") + (retryFailed ? ", retrying failed items" : "")
@@ -418,23 +445,27 @@ public actor BackupEngine {
         }
         publish(.scanning)
         do {
-            let toUpload = try await scanAndReconcile(settings, retryFailed: retryFailed)
-            try refreshCounts()
-            if dryRun || toUpload.isEmpty {
-                status.lastRun = now()
-                // "Up to date" is what the ledger says, not what this pass found to do: items that failed earlier and
-                // wait for their next attempt are not in `toUpload`.
-                publish(toUpload.isEmpty ? BackupPolicy.finalPhase(failed: status.failed, pending: status.pending) : .idle)
-                return
+            let work = try scan(settings, retryFailed: retryFailed)
+            var outcome = try await process(work, settings: settings, dryRun: dryRun)
+            if case .done(let held, let toUpload) = outcome, work.fullScanDue {
+                // The daily look at the whole library, after this pass did what it knew of: background time goes to uploads.
+                logger.info("backup: the whole library is looked at again")
+                publish(.scanning)
+                let more = try scan(settings, retryFailed: false, wholeLibrary: true)
+                outcome = try await process(more, settings: settings, dryRun: dryRun, held: held)
+                if case .done(let held, let found) = outcome { outcome = .done(held: held, toUpload: toUpload || found) }
             }
-            await remote.removeStaleUploads()
-            let waiting = try await upload(toUpload, settings: settings)
             status.lastRun = now()
             try refreshCounts()
-            if let waiting {
+            switch outcome {
+            case .stopped(let waiting):
                 pause(waiting.reason, settings: settings, videosOnly: waiting.videosOnly, needsICloud: waiting.needsICloud)
-            } else {
-                publish(BackupPolicy.finalPhase(failed: status.failed, pending: status.pending))
+            case .done(let held?, _):
+                pause(held.reason, settings: settings, videosOnly: held.videosOnly, needsICloud: held.needsICloud)
+            case .done(nil, let toUpload):
+                // "Up to date" is what the ledger says, not what this pass found to do: items that failed earlier and
+                // wait for their next attempt were not part of it.
+                publish(dryRun && toUpload ? .idle : BackupPolicy.finalPhase(failed: status.failed, pending: status.pending))
             }
         } catch  where Task.isCancelled || BackupPolicy.isCancellation(error) {
             // A request that was cancelled in the middle reports it as a network error.
@@ -470,60 +501,221 @@ public actor BackupEngine {
 
     // MARK: Scan
 
-    /// Reads the library, consults the ledger and the server, and returns what has to be uploaded (oldest first).
-    func scanAndReconcile(_ settings: BackupSettings, retryFailed: Bool) async throws -> [BackupResource] {
+    /// What a scan found to do.
+    struct Work {
+        /// Resources to upload without asking the server first: a new edit, "Upload anyway", or the server was asked
+        /// about them recently (`BackupPolicy.serverCheckValidity`). Oldest first.
+        var ready: [BackupResource] = []
+        /// Resources the server is asked about before they are uploaded. Oldest first.
+        var unchecked: [BackupResource] = []
+        /// Only what changed since the last pass was looked at, and the daily look at the whole library is due.
+        var fullScanDue = false
+    }
+
+    /// What the scans remember between passes (`syncState`).
+    struct ScanState: Codable, Equatable {
+        /// The library's change token, taken before the last scan.
+        var token: Data?
+        /// `BackupPolicy.scopeSignature` of the last scan: another selection of assets is a look at everything.
+        var scope: String
+        /// When the whole library was last looked at.
+        var fullScanAt: Double
+    }
+
+    static let scanStateKey = "backup.scanState"
+
+    func loadScanState() -> ScanState? {
+        guard let json = try? database.syncValue(Self.scanStateKey) else { return nil }
+        return try? JSONDecoder().decode(ScanState.self, from: Data(json.utf8))
+    }
+
+    private func saveScanState(_ state: ScanState) throws {
+        try database.setSyncValue(Self.scanStateKey, String(decoding: try JSONEncoder().encode(state), as: UTF8.self))
+    }
+
+    /// Finds what has to be uploaded (SPEC §7.18.3), and records what it learnt in the ledger, so that an interrupted
+    /// pass does not have to learn it again.
+    ///
+    /// Only the assets that changed since the last pass are looked at (the library's persistent change token), unless
+    /// the selection or the options changed, the token is unknown or too old, the user asks (`retryFailed`) or
+    /// `wholeLibrary`; once a day the whole library is looked at (`Work.fullScanDue`). Of the assets looked at, only
+    /// those the ledger does not know completely are read (`BackupPolicy.needsScan`). What waits for its upload is taken
+    /// from the ledger, which keeps the resource (`BackupLedgerEntry.resource`), without reading the library again.
+    func scan(_ settings: BackupSettings, retryFailed: Bool, wholeLibrary: Bool = false) throws -> Work {
         let now = now()
         let ledger = try loadLedger()
         var byAsset: [String: [BackupLedgerEntry]] = [:]
         for entry in ledger.values { byAsset[entry.localIdentifier, default: []].append(entry) }
         // Other options select other resources of an asset, so the "nothing to do" shortcut does not hold then.
         let signature = BackupPolicy.scanSignature(settings)
-        let fullScan = (try? database.syncValue(Self.scanSignatureKey)) != signature
-        let resources = library.scan(settings) { localIdentifier, modifiedAt in
-            if fullScan || retryFailed { return true }
-            return BackupPolicy.needsScan(entries: byAsset[localIdentifier] ?? [], modifiedAt: modifiedAt, now: now)
+        let readEverything = retryFailed || (try? database.syncValue(Self.scanSignatureKey)) != signature
+        let scope = BackupPolicy.scopeSignature(settings, isLimited: library.isLimited)
+        let previous = loadScanState()
+        // Taken before anything is read: what changes from here on is for the next pass.
+        let token = library.changeToken
+        var changed: Set<String>?
+        if !wholeLibrary, !readEverything, let previous, previous.scope == scope, let since = previous.token {
+            changed = library.changedAssets(since: since, settings: settings)
+        }
+        // Entries that lack what an upload needs (written by an earlier version, "Upload anyway") have their asset read.
+        let restriction = changed.map { changed in
+            changed.union(byAsset.compactMap { id, entries in entries.contains { BackupPolicy.needsRead($0, now: now) } ? id : nil })
+        }
+        var seen = Set<String>()
+        var read = Set<String>()
+        let resources = library.scan(settings, assets: restriction) { localIdentifier, modifiedAt in
+            seen.insert(localIdentifier)
+            guard readEverything || BackupPolicy.needsScan(entries: byAsset[localIdentifier] ?? [], modifiedAt: modifiedAt, now: now)
+            else { return false }
+            read.insert(localIdentifier)
+            return true
+        }
+        let stale = try removeStaleEntries(
+            ledger: ledger, checked: restriction, seen: seen, read: read, found: Set(resources.map { LedgerKey($0) }))
+
+        // What was read, and what waits in the ledger for assets that were not read.
+        var candidates: [(resource: BackupResource, entry: BackupLedgerEntry?)] = resources.map { ($0, ledger[LedgerKey($0)]) }
+        let decoder = JSONDecoder()
+        for (key, entry) in ledger
+        where !read.contains(key.localIdentifier) && !stale.contains(key) && !BackupPolicy.isComplete(entry) {
+            if let resource = entry.storedResource(decoder) { candidates.append((resource, entry)) }
         }
         let filesUploaded = settings.filesAppMode == .notUsed ? [] : filesLedger(accountId)
         // Files' record stands for the photo or video itself, not for every resource of the asset.
-        let filesPrimary = filesUploaded.isEmpty ? [] : BackupPolicy.filesAppPrimary(resources)
-        try removeStaleEntries(ledger: ledger, scanned: resources, everythingScanned: fullScan || retryFailed, now: now)
+        var filesPrimary = Set<LedgerKey>()
+        if !filesUploaded.isEmpty {
+            var kinds: [String: [BackupResourceKind]] = [:]
+            for resource in resources { kinds[resource.localIdentifier, default: []].append(resource.kind) }
+            for (id, entries) in byAsset where !read.contains(id) {
+                kinds[id] = entries.compactMap { BackupResourceKind(rawValue: $0.resourceKind) }
+            }
+            filesPrimary = BackupPolicy.filesAppPrimary(kinds: kinds)
+        }
 
-        var order: [LedgerKey: Int] = [:]
-        var work: [BackupResource] = []
-        var direct: [BackupResource] = []
-        var touched: [BackupResource] = []
+        var work = Work()
         var unknown: [BackupResource] = []
-        for (index, resource) in resources.enumerated() {
-            let key = LedgerKey(localIdentifier: resource.localIdentifier, kind: resource.kind.rawValue)
-            order[key] = index
-            let entry = ledger[key]
+        var touched: [BackupResource] = []
+        var refreshed: [(resource: BackupResource, modified: Bool)] = []
+        var reopened: [BackupResource] = []
+        var filesMatched: [BackupResource] = []
+        for (resource, entry) in candidates {
+            let key = LedgerKey(resource)
+            if let entry, !BackupPolicy.isComplete(entry), read.contains(resource.localIdentifier) {
+                // The library's word is newer than the ledger's.
+                refreshed.append((resource, BackupPolicy.isModified(resource.modifiedAt, since: entry.assetModifiedAt)))
+            }
             let action = BackupPolicy.action(
                 for: resource, entry: entry, now: now, retryFailed: retryFailed, retrySkipped: settings.downloadFromICloud)
             switch action {
             case .done, .waiting: continue
             case .touch: touched.append(resource)
-            case .upload: direct.append(resource)
+            case .upload:
+                // A new edit of something that is on the server: it waits now, also when this pass does not get to it.
+                if let entry, BackupPolicy.isComplete(entry) { reopened.append(resource) }
+                work.ready.append(resource)
             case .reconcile:
                 if filesUploaded.contains(resource.localIdentifier), filesPrimary.contains(key) {
-                    try record(resource, state: .matched, matchedBy: .filesLedger)
+                    filesMatched.append(resource)
                     continue
                 }
                 if entry == nil { unknown.append(resource) }
-                work.append(resource)
+                if let entry, !retryFailed, !BackupPolicy.needsServerCheck(entry, modifiedAt: resource.modifiedAt, now: now) {
+                    work.ready.append(resource)
+                } else {
+                    work.unchecked.append(resource)
+                }
             }
         }
+        work.ready.sort(by: BackupPolicy.isOlder)
+        work.unchecked.sort(by: BackupPolicy.isOlder)
         // Everything found gets a ledger entry now: an asset without one for each of its resources is read again next time.
-        try prepareLedger(pending: unknown, touched: touched)
+        try prepareLedger(pending: unknown, touched: touched, refreshed: refreshed, reopened: reopened, filesMatched: filesMatched)
         try database.setSyncValue(Self.scanSignatureKey, signature)
+        try saveScanState(
+            ScanState(
+                token: token, scope: scope, fullScanAt: changed == nil ? now.timeIntervalSince1970 : previous?.fullScanAt ?? 0))
+        if let changed {
+            work.fullScanDue = now.timeIntervalSince1970 - (previous?.fullScanAt ?? 0) >= BackupPolicy.fullScanInterval
+            logger.info(
+                "backup: \(changed.count, privacy: .public) assets changed, \(read.count, privacy: .public) read")
+        } else {
+            logger.info("backup: \(seen.count, privacy: .public) assets looked at, \(read.count, privacy: .public) read")
+        }
         try Task.checkCancellation()
-        let remaining = try await reconcile(work)
-        return (remaining + direct).sorted { order[LedgerKey($0), default: 0] < order[LedgerKey($1), default: 0] }
+        return work
+    }
+
+    // MARK: Rounds
+
+    /// How a pass's work went.
+    enum Outcome {
+        /// Something stops the pass until conditions change (Wi-Fi, Low Power Mode…).
+        case stopped(Waiting)
+        /// Through. `held`: videos or iCloud originals wait for Wi-Fi. `toUpload`: there was something to upload (a
+        /// dry run does not upload it).
+        case done(held: Waiting?, toUpload: Bool)
+    }
+
+    /// How many resources are checked against the server before the uploads of a round start (one SEARCH for up to 200).
+    var serverCheckChunk = 200
+
+    func setServerCheckChunk(_ size: Int) { serverCheckChunk = size }
+
+    /// Checks the work against the server and uploads it, in rounds: what needs no check goes first, then a chunk at a
+    /// time is checked and uploaded, so the uploads start after one request, and an interrupted pass leaves every
+    /// checked resource checked (`BackupLedgerEntry.checkedAt`).
+    ///
+    /// Larger files than the system takes are kept for the end of the pass, as within a round (`BackupPolicy.uploadOrder`).
+    func process(_ work: Work, settings: BackupSettings, dryRun: Bool, held: Waiting? = nil) async throws -> Outcome {
+        var ready = work.ready
+        var unchecked = work.unchecked[...]
+        var held = held
+        var toUpload = false
+        var large: [BackupResource] = []
+        let total = unchecked.count
+        var checked = 0
+        repeat {
+            try Task.checkCancellation()
+            let chunk = dryRun ? unchecked : unchecked.prefix(serverCheckChunk)
+            unchecked = unchecked.dropFirst(chunk.count)
+            let notOnServer = try await reconcile(Array(chunk), checkedBefore: checked, total: total)
+            checked += chunk.count
+            let round = (ready + notOnServer).sorted(by: BackupPolicy.isOlder)
+            ready = []
+            toUpload = toUpload || !round.isEmpty
+            if dryRun { continue }
+            let order = BackupPolicy.uploadOrder(round, backgroundLimit: background?.maxFileSize)
+            large += order.last
+            let isLast = unchecked.isEmpty
+            let batch = isLast ? order.first + large : order.first
+            // The last round waits for what the system still uploads for this pass.
+            guard !batch.isEmpty || (isLast && cleanedUp && (journal?.jobs.count ?? 0) + finishing > 0) else { continue }
+            if !cleanedUp {
+                cleanedUp = true
+                await remote.removeStaleUploads()
+            }
+            passUploads.later = isLast ? 0 : unchecked.count
+            guard let waiting = try await upload(batch, settings: settings, drain: isLast) else { continue }
+            // Videos and iCloud originals that wait for Wi-Fi do not stop the others.
+            guard waiting.videosOnly || waiting.reason == .iCloud else { return .stopped(waiting) }
+            held = Self.merge(held, waiting)
+        } while !unchecked.isEmpty
+        return .done(held: held, toUpload: toUpload)
+    }
+
+    static func merge(_ a: Waiting?, _ b: Waiting) -> Waiting {
+        guard let a else { return b }
+        let needsICloud = a.needsICloud || b.needsICloud
+        if a.videosOnly { return Waiting(reason: a.reason, videosOnly: true, needsICloud: needsICloud) }
+        if b.videosOnly { return Waiting(reason: b.reason, videosOnly: true, needsICloud: needsICloud) }
+        return Waiting(reason: .iCloud, needsICloud: needsICloud)
     }
 
     // MARK: Reconciliation (SPEC §7.18.4 layer 4)
 
-    /// Returns the resources that are not on the server yet; records the matched ones.
-    func reconcile(_ work: [BackupResource]) async throws -> [BackupResource] {
+    /// Returns the resources that are not on the server yet; records the matched ones, and when the server was asked
+    /// about the others, one transaction per batch.
+    func reconcile(_ work: [BackupResource], checkedBefore: Int = 0, total: Int? = nil) async throws -> [BackupResource] {
         // Batches of ≤ 200 resources spanning ≤ 7 days, so each SEARCH stays small.
         var batches: [[BackupResource]] = []
         for resource in work {
@@ -536,26 +728,37 @@ public actor BackupEngine {
             }
         }
         var remaining: [BackupResource] = []
-        var checked = 0
+        var checked = checkedBefore
         for batch in batches {
             try Task.checkCancellation()
             guard let first = batch.first?.createdAt, let last = batch.last?.createdAt else { continue }
             let candidates = try await remote.candidates(from: first.addingTimeInterval(-2), to: last.addingTimeInterval(2))
-            let locals = batch.map(\.local)
+            var index = BackupMatcher.Index(candidates: candidates, locals: batch.map(\.local))
+            var matches: [Match] = []
+            var notFound: [BackupResource] = []
             for resource in batch {
                 // The system reported this upload while the server was asked: it is recorded, and the file the server
                 // just listed is that very upload.
                 if settled.contains(LedgerKey(resource)) { continue }
-                if let (candidate, reason) = BackupMatcher.match(resource.local, candidates: candidates, localSiblings: locals) {
-                    try record(resource, state: .matched, matchedBy: reason, serverPath: candidate.path, serverFileId: candidate.fileId)
+                if let (candidate, reason) = index.match(resource.local) {
+                    matches.append(Match(resource: resource, candidate: candidate, reason: reason))
                 } else {
-                    remaining.append(resource)
+                    notFound.append(resource)
                 }
             }
+            try recordCheck(matches: matches, notFound: notFound)
+            remaining += notFound
             checked += batch.count
-            publish(.reconciling(checked: checked, total: work.count))
+            publish(.reconciling(checked: checked, total: total ?? work.count))
         }
         return remaining
+    }
+
+    /// A resource the reconciliation found on the server.
+    struct Match {
+        var resource: BackupResource
+        var candidate: RemoteCandidate
+        var reason: MatchReason
     }
 
     // MARK: Upload
@@ -569,13 +772,23 @@ public actor BackupEngine {
     /// ahead of what it has finished; the pass ends when the system has reported all of them, or leaves them to it when it
     /// is interrupted. Larger files are sent in chunks by the app itself, as without `background`; they come last
     /// (`BackupPolicy.uploadOrder`), so that a pass that only gets a short time hands everything else over first.
-    func upload(_ work: [BackupResource], settings: BackupSettings) async throws -> Waiting? {
+    ///
+    /// - Parameter drain: wait until the system has reported what it was given; without it the call returns when
+    ///   everything is handed over (a round of the pass that is followed by others).
+    func upload(_ work: [BackupResource], settings: BackupSettings, drain: Bool = true) async throws -> Waiting? {
         backgroundStop = nil
         retake = []
-        await checkForMissingUploads()
-        // What the system reported while the server was asked is done already.
-        progress = (work.count { settled.contains(LedgerKey($0)) }, work.count, "")
-        defer { progress = nil }
+        if !missingChecked {
+            missingChecked = true
+            await checkForMissingUploads()
+        }
+        // What the system reported while the server was asked is done already. Earlier rounds of the pass count too.
+        let base = passUploads
+        progress = (base.done + work.count { settled.contains(LedgerKey($0)) }, base.done + work.count + base.later, "")
+        defer {
+            passUploads.done = progress?.done ?? passUploads.done
+            progress = nil
+        }
         publishProgress()
         var heldVideos: BackupPause?
         var heldForICloud = false
@@ -602,7 +815,7 @@ public actor BackupEngine {
             }
             guard index < queue.count else {
                 // The pass is through when the system is.
-                guard (journal?.jobs.count ?? 0) + finishing > 0 else { break }
+                guard drain, (journal?.jobs.count ?? 0) + finishing > 0 else { break }
                 try await waitForBackgroundUploads()
                 if let reason = pauseReason(settings, isVideo: false) { return Waiting(reason: reason) }
                 if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
@@ -710,7 +923,7 @@ public actor BackupEngine {
     /// (the failure is then recorded and the resource backs off).
     private func uploadFailed(_ resource: BackupResource, error: any Error) -> (any Error)? {
         if BackupPolicy.isCancellation(error) { return CancellationError() }
-        if let error = error as? NetworkError, error.isTransient { return error }
+        if let error = error as? NetworkError, BackupPolicy.endsPass(error) { return error }
         logger.error("backup of \(resource.originalName, privacy: .private) failed: \(error.localizedDescription, privacy: .public)")
         let blocker = BackupPolicy.blocker(for: error)
         // A full quota or a refusal may concern this file only (too big, blocked type): it backs off like any
@@ -955,26 +1168,64 @@ public actor BackupEngine {
         try database.writer.read { db in try BackupLedgerEntry.filter(Column("localIdentifier") == localIdentifier).fetchAll(db) }
     }
 
-    /// Adds `pending` entries for new resources and stores the new modification date of unchanged ones, in one transaction.
-    func prepareLedger(pending: [BackupResource], touched: [BackupResource]) throws {
-        guard !pending.isEmpty || !touched.isEmpty else { return }
+    /// Writes what a scan learnt, in one transaction:
+    /// - `pending`: entries for new resources (with the resource, so later passes need not read it again);
+    /// - `touched`: the new modification date of assets whose resources are all on the server;
+    /// - `refreshed`: the resource of an entry that waits, as the library says it now (`modified`: the server is asked again);
+    /// - `reopened`: a new edit of something on the server, which waits now;
+    /// - `filesMatched`: resources the Files app uploaded.
+    func prepareLedger(
+        pending: [BackupResource], touched: [BackupResource], refreshed: [(resource: BackupResource, modified: Bool)] = [],
+        reopened: [BackupResource] = [], filesMatched: [BackupResource] = []
+    ) throws {
+        guard !pending.isEmpty || !touched.isEmpty || !refreshed.isEmpty || !reopened.isEmpty || !filesMatched.isEmpty else { return }
         let updatedAt = now().timeIntervalSince1970
+        let encoder = JSONEncoder()
         try database.writer.write { db in
             for resource in pending {
                 try db.execute(
                     sql: """
-                        INSERT OR IGNORE INTO backupAsset(localIdentifier, resourceKind, state, attempts, assetCreatedAt, assetModifiedAt, updatedAt)
-                        VALUES (?, ?, ?, 0, ?, ?, ?)
+                        INSERT OR IGNORE INTO backupAsset(localIdentifier, resourceKind, state, attempts, assetCreatedAt, assetModifiedAt, updatedAt, resource)
+                        VALUES (?, ?, ?, 0, ?, ?, ?, ?)
                         """,
                     arguments: [
                         resource.localIdentifier, resource.kind.rawValue, BackupItemState.pending.rawValue,
                         resource.createdAt.timeIntervalSince1970, resource.modifiedAt?.timeIntervalSince1970, updatedAt,
+                        resource.json(encoder),
                     ])
             }
             for resource in touched {
                 try db.execute(
                     sql: "UPDATE backupAsset SET assetModifiedAt = ? WHERE localIdentifier = ? AND resourceKind = ?",
                     arguments: [resource.modifiedAt?.timeIntervalSince1970, resource.localIdentifier, resource.kind.rawValue])
+            }
+            for (resource, modified) in refreshed {
+                try db.execute(
+                    sql: """
+                        UPDATE backupAsset SET resource = ?, assetCreatedAt = ?, assetModifiedAt = ?,
+                            checkedAt = CASE WHEN ? THEN NULL ELSE checkedAt END
+                        WHERE localIdentifier = ? AND resourceKind = ?
+                        """,
+                    arguments: [
+                        resource.json(encoder), resource.createdAt.timeIntervalSince1970, resource.modifiedAt?.timeIntervalSince1970,
+                        modified, resource.localIdentifier, resource.kind.rawValue,
+                    ])
+            }
+            for resource in reopened {
+                // What is known about the copy on the server stays: the new edit replaces it (`BackupPolicy.action`).
+                try db.execute(
+                    sql: """
+                        UPDATE backupAsset SET state = ?, resource = ?, assetCreatedAt = ?, assetModifiedAt = ?, checkedAt = NULL,
+                            attempts = 0, lastError = NULL, updatedAt = ?
+                        WHERE localIdentifier = ? AND resourceKind = ?
+                        """,
+                    arguments: [
+                        BackupItemState.pending.rawValue, resource.json(encoder), resource.createdAt.timeIntervalSince1970,
+                        resource.modifiedAt?.timeIntervalSince1970, updatedAt, resource.localIdentifier, resource.kind.rawValue,
+                    ])
+            }
+            for resource in filesMatched {
+                try Self.record(db, resource, state: .matched, matchedBy: .filesLedger, updatedAt: updatedAt, encoder: encoder)
             }
         }
     }
@@ -986,19 +1237,54 @@ public actor BackupEngine {
     ) throws {
         let updatedAt = now().timeIntervalSince1970
         try database.writer.write { db in
-            let previous = try BackupLedgerEntry.fetchOne(
-                db, key: ["localIdentifier": resource.localIdentifier, "resourceKind": resource.kind.rawValue])
-            // A failure keeps what is known about the copy on the server; a success starts the retry count again.
-            let failed = state == .failed
-            let entry = BackupLedgerEntry(
-                localIdentifier: resource.localIdentifier, resourceKind: resource.kind.rawValue,
-                fingerprint: failed ? previous?.fingerprint : resource.sizeFingerprint, state: state.rawValue,
-                serverPath: serverPath ?? previous?.serverPath, serverFileId: serverFileId ?? previous?.serverFileId, serverEtag: nil,
-                matchedBy: matchedBy?.rawValue ?? previous?.matchedBy, attempts: failed ? (previous?.attempts ?? 0) + 1 : 0,
-                lastError: error, assetCreatedAt: resource.createdAt.timeIntervalSince1970,
-                assetModifiedAt: resource.modifiedAt?.timeIntervalSince1970, updatedAt: updatedAt)
-            try entry.upsert(db)
+            try Self.record(
+                db, resource, state: state, matchedBy: matchedBy, serverPath: serverPath, serverFileId: serverFileId, error: error,
+                updatedAt: updatedAt, encoder: JSONEncoder())
         }
+    }
+
+    /// Writes the result of one reconciliation batch in one transaction: the matches, and for the others that the
+    /// server was asked now (`checkedAt`), so the next passes upload them without asking again.
+    func recordCheck(matches: [Match], notFound: [BackupResource]) throws {
+        guard !matches.isEmpty || !notFound.isEmpty else { return }
+        let updatedAt = now().timeIntervalSince1970
+        let encoder = JSONEncoder()
+        try database.writer.write { db in
+            for match in matches {
+                try Self.record(
+                    db, match.resource, state: .matched, matchedBy: match.reason, serverPath: match.candidate.path,
+                    serverFileId: match.candidate.fileId, updatedAt: updatedAt, encoder: encoder)
+            }
+            for resource in notFound {
+                try db.execute(
+                    sql: "UPDATE backupAsset SET checkedAt = ? WHERE localIdentifier = ? AND resourceKind = ?",
+                    arguments: [updatedAt, resource.localIdentifier, resource.kind.rawValue])
+            }
+        }
+    }
+
+    private static func record(
+        _ db: Database, _ resource: BackupResource, state: BackupItemState, matchedBy: MatchReason? = nil, serverPath: String? = nil,
+        serverFileId: FileID? = nil, error: String? = nil, updatedAt: Double, encoder: JSONEncoder
+    ) throws {
+        let previous = try BackupLedgerEntry.fetchOne(
+            db, key: ["localIdentifier": resource.localIdentifier, "resourceKind": resource.kind.rawValue])
+        // A failure keeps what is known about the copy on the server; a success starts the retry count again.
+        let failed = state == .failed
+        let complete = state == .uploaded || state == .matched
+        var entry = BackupLedgerEntry(
+            localIdentifier: resource.localIdentifier, resourceKind: resource.kind.rawValue,
+            fingerprint: failed ? previous?.fingerprint : resource.sizeFingerprint, state: state.rawValue,
+            serverPath: serverPath ?? previous?.serverPath, serverFileId: serverFileId ?? previous?.serverFileId, serverEtag: nil,
+            matchedBy: matchedBy?.rawValue ?? previous?.matchedBy, attempts: failed ? (previous?.attempts ?? 0) + 1 : 0,
+            lastError: error, assetCreatedAt: resource.createdAt.timeIntervalSince1970,
+            assetModifiedAt: resource.modifiedAt?.timeIntervalSince1970, updatedAt: updatedAt)
+        // What still waits keeps its resource and when the server was asked about it.
+        if !complete {
+            entry.resource = resource.json(encoder)
+            entry.checkedAt = previous?.checkedAt
+        }
+        try entry.upsert(db)
     }
 
     /// The counts of the status are those of the ledger: what failed stays "failed" (and not "up to date") until it is
@@ -1024,32 +1310,33 @@ public actor BackupEngine {
     }
 
     /// Removes entries of resources that are no longer there to upload (the photo was deleted on the device, the options
-    /// no longer select it, an edit was reverted). They were never uploaded, and nothing would ever change them again:
-    /// the backup could not become "up to date".
+    /// no longer select it, an edit was reverted), and returns their keys. They were never uploaded, and nothing would
+    /// ever change them again: the backup could not become "up to date". Entries of what is on the server stay.
     ///
-    /// An asset with a pending entry is always scanned, so a pending entry without a scanned resource is stale. A failed
-    /// one is only scanned again when its waiting time is over, a skipped one only in a scan of everything.
-    func removeStaleEntries(ledger: [LedgerKey: BackupLedgerEntry], scanned: [BackupResource], everythingScanned: Bool, now: Date) throws {
-        let found = Set(scanned.map { LedgerKey($0) })
-        let stale = ledger.filter { key, entry in
-            guard !found.contains(key), journal?.jobs.values.contains(where: { LedgerKey($0.resource) == key }) != true else {
-                return false
-            }
-            switch BackupItemState(rawValue: entry.state) {
-            case .pending: return true
-            case .failed: return everythingScanned || !BackupPolicy.isBackingOff(entry, now: now)
-            case .skipped: return everythingScanned
-            default: return false
-            }
+    /// - Parameters:
+    ///   - checked: the assets the scan looked at; nil: the whole library.
+    ///   - seen: the assets of those that are there and selected.
+    ///   - read: the assets whose resources were read; `found` are their resources.
+    @discardableResult
+    func removeStaleEntries(
+        ledger: [LedgerKey: BackupLedgerEntry], checked: Set<String>?, seen: Set<String>, read: Set<String>, found: Set<LedgerKey>
+    ) throws -> Set<LedgerKey> {
+        let handedOver = Set(journal?.jobs.values.map { LedgerKey($0.resource) } ?? [])
+        var stale = Set<LedgerKey>()
+        for (key, entry) in ledger where !BackupPolicy.isComplete(entry) && !handedOver.contains(key) {
+            let id = key.localIdentifier
+            let gone = !seen.contains(id) && (checked?.contains(id) ?? true)
+            if gone || (read.contains(id) && !found.contains(key)) { stale.insert(key) }
         }
-        guard !stale.isEmpty else { return }
+        guard !stale.isEmpty else { return [] }
         try database.writer.write { db in
-            for key in stale.keys {
+            for key in stale {
                 try db.execute(
                     sql: "DELETE FROM backupAsset WHERE localIdentifier = ? AND resourceKind = ?",
                     arguments: [key.localIdentifier, key.kind])
             }
         }
+        return stale
     }
 
     // MARK: Exported files
@@ -1159,6 +1446,7 @@ public actor BackupEngine {
     public func reset() throws {
         try database.writer.write { db in try db.execute(sql: "DELETE FROM backupAsset") }
         try database.setSyncValue(Self.scanSignatureKey, nil)
+        try database.setSyncValue(Self.scanStateKey, nil)
         cancelBackgroundUploads()
         resume = nil
         status = BackupStatus()

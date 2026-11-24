@@ -19,7 +19,17 @@ protocol BackupLibrary: Sendable {
     ///
     /// `needsScan(localIdentifier, modificationDate)` is asked for every asset before its resources are read; reading them is
     /// the expensive part of a scan, so assets the ledger already knows completely are left out.
-    func scan(_ settings: BackupSettings, needsScan: (String, Date?) -> Bool) -> [BackupResource]
+    ///
+    /// - Parameter assets: only these assets (those that changed); nil: all of them.
+    func scan(_ settings: BackupSettings, assets: Set<String>?, needsScan: (String, Date?) -> Bool) -> [BackupResource]
+
+    /// A mark of the library's current state (a persistent change token), to ask later what changed since. Nil when the
+    /// library cannot tell.
+    var changeToken: Data? { get }
+
+    /// The assets that were added, changed or deleted since `token`, as far as the settings select them. Nil when that
+    /// cannot be told (the token is too old, or what changed concerns the selection itself): then everything is looked at.
+    func changedAssets(since token: Data, settings: BackupSettings) -> Set<String>?
 
     /// Writes the resource into a file in a directory of its own (the engine deletes that directory afterwards).
     ///
@@ -299,6 +309,14 @@ enum BackupPolicy {
             && now.timeIntervalSince1970 < entry.updatedAt + retryDelay(attempts: entry.attempts)
     }
 
+    /// Whether an upload's failure ends the pass instead of only this file's attempt (`blocker` aside): the transient
+    /// errors that every other file would meet as well (no connection, the server is down or busy). A locked file (423)
+    /// is transient too, but it concerns this file only: it is recorded as failed, waits for its next attempt, and the
+    /// pass goes on with the others. (The outbox keeps retrying such a file; that is `NetworkError.isTransient`.)
+    static func endsPass(_ error: NetworkError) -> Bool {
+        error.isTransient && error != .locked
+    }
+
     // MARK: Scan
 
     static func isComplete(_ entry: BackupLedgerEntry) -> Bool {
@@ -319,14 +337,55 @@ enum BackupPolicy {
         }
     }
 
-    /// Whether an asset's resources have to be read: not when every resource the ledger knows is done (or failed and still
-    /// backing off, or skipped) and the asset has not changed since.
+    /// Whether an asset's resources have to be read: not when the asset has not changed since and the ledger has what
+    /// it needs about each of them: done, failed and still backing off, skipped, or waiting with the resource kept
+    /// (`needsRead`).
     static func needsScan(entries: [BackupLedgerEntry], modifiedAt: Date?, now: Date) -> Bool {
         if entries.isEmpty { return true }
         return entries.contains { entry in
             if isModified(modifiedAt, since: entry.assetModifiedAt) { return true }
-            return !(isComplete(entry) || isBackingOff(entry, now: now) || isSkipped(entry))
+            return needsRead(entry, now: now)
         }
+    }
+
+    /// An entry that will be uploaded and does not have its resource (written by an earlier version, or "Upload anyway"
+    /// on something that was matched): its asset has to be read.
+    static func needsRead(_ entry: BackupLedgerEntry, now: Date) -> Bool {
+        !(isComplete(entry) || isBackingOff(entry, now: now) || isSkipped(entry) || entry.resource != nil)
+    }
+
+    /// How long the server's "not there" holds for a resource that waits. Before its upload the destination is looked
+    /// at anyway (layer 5: same name and size counts as uploaded); this is for copies that got onto the server under
+    /// another name meanwhile (the Files app).
+    static let serverCheckValidity: TimeInterval = 7 * 24 * 3600
+
+    /// Whether the server has to be asked about a waiting resource before it is uploaded: it never was, the answer is
+    /// old, or the asset changed since.
+    static func needsServerCheck(_ entry: BackupLedgerEntry, modifiedAt: Date?, now: Date) -> Bool {
+        guard let checkedAt = entry.checkedAt, !isModified(modifiedAt, since: entry.assetModifiedAt) else { return true }
+        return now.timeIntervalSince1970 - checkedAt >= serverCheckValidity
+    }
+
+    /// How often a pass looks at the whole library instead of what changed since the last one.
+    static let fullScanInterval: TimeInterval = 24 * 3600
+
+    /// The settings that decide which assets are backed up, and whether the app may see all of them; when they change,
+    /// the whole library is looked at again (what changed since the last pass says nothing about newly selected assets).
+    static func scopeSignature(_ settings: BackupSettings, isLimited: Bool) -> String {
+        let since = settings.since.map { String($0.timeIntervalSince1970) } ?? "-"
+        let albums = settings.albumIdentifiers.sorted().joined(separator: ",")
+        return "v1|\(settings.photos)|\(settings.videos)|\(since)|\(settings.includeHidden)|\(isLimited)|\(albums)"
+    }
+
+    /// The order of uploads: oldest first; the resources of an asset in the order the library lists them.
+    static func isOlder(_ a: BackupResource, _ b: BackupResource) -> Bool {
+        if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+        if a.localIdentifier != b.localIdentifier { return a.localIdentifier < b.localIdentifier }
+        return kindOrder(a.kind) < kindOrder(b.kind)
+    }
+
+    private static func kindOrder(_ kind: BackupResourceKind) -> Int {
+        BackupResourceKind.allCases.firstIndex(of: kind) ?? 0
     }
 
     /// What a run does with one resource.
@@ -399,6 +458,11 @@ enum BackupPolicy {
     static func filesAppPrimary(_ resources: [BackupResource]) -> Set<BackupEngine.LedgerKey> {
         var byAsset: [String: [BackupResourceKind]] = [:]
         for resource in resources { byAsset[resource.localIdentifier, default: []].append(resource.kind) }
+        return filesAppPrimary(kinds: byAsset)
+    }
+
+    /// The same, from the kinds of resources each asset has.
+    static func filesAppPrimary(kinds byAsset: [String: [BackupResourceKind]]) -> Set<BackupEngine.LedgerKey> {
         var result = Set<BackupEngine.LedgerKey>()
         for (localIdentifier, kinds) in byAsset {
             let primary = kinds.first { $0 == .photo || $0 == .video } ?? kinds.first { $0 == .edited || $0 == .editedVideo }

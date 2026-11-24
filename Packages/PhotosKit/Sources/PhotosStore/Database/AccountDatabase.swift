@@ -299,6 +299,14 @@ public final class AccountDatabase: Sendable {
             // The rows a listing found missing that were not removed yet: the mass-delete guard waits for a second listing.
             try db.create(table: "reconcileSuspect") { t in t.primaryKey("fileId", .integer) }
         }
+        // Incremental backup passes (SPEC §7.18.3): a resource that is not on the server yet keeps what the library said
+        // about it, so a later pass can upload it without reading the library again, and when the server was last asked.
+        migrator.registerMigration("v3-backup-incremental") { db in
+            try db.alter(table: "backupAsset") { t in
+                t.add(column: "resource", .text)
+                t.add(column: "checkedAt", .double)
+            }
+        }
         return migrator
     }
 }
