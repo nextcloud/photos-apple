@@ -595,7 +595,29 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 - ⬜ Not started.
 
 ### §15.3 New platforms: Apple TV and Apple Watch
-- ⬜ Not started.
+- ✅ Package builds for tvOS and watchOS (GRDB supports both); `PhotosCore` runs on tvOS with Spotlight, notification
+  banners and app lock left out (`#if os(tvOS)`). Generic tvOS and watchOS builds in CI (`ci.yml` build matrix).
+- ✅ TV login with Login Flow v2 as a QR code: run in the tvOS 27.2 simulator against the test server — the QR code was
+  decoded from the screenshot and the flow granted with the server's own grant page (as a phone browser would); the TV
+  signed in and showed Home. Certificate-trust and http questions built, not run.
+- ✅ TV Home shelves (memories, favourites, albums, shared albums, recent), memory/album/all-photos grids, Albums tab,
+  Settings: run in the simulator (XCUITest tour with the Siri Remote, `UITestsTV/TVTourTests.swift`, passes).
+- ✅ TV viewer (left/right, info, Play/Pause → slideshow) and slideshows (title over the first photo, drift, pause, skip):
+  run in the simulator. 🟡 Video playback in the system player: built, not run (the test library's videos were not
+  reached in the tour).
+- ✅ Family slideshow (shuffled rounds, resumes, clock): run in the simulator; order logic unit-tested.
+- 🟡 Top Shelf: the app writes the manifest and covers into the App Group (checked in the simulator's container) and the
+  links open memories and play them (run via the debug route); the carousel itself was not seen — it needs the app in
+  the top row of the Home screen, which needs real remote input on the Home screen.
+- 🟡 Watch app (photo of the day, On This Day, Favorites, pager): run in the watchOS 27.2 simulator with a digest the
+  iPhone app built from the test server. Phone → watch in a paired simulator pair: the digest (application context)
+  arrived; the photo files (`transferFile`) were reported sent by the phone but never reached the watch simulator — to be
+  checked on devices.
+- 🟡 Complication (accessory families): built and embedded, not seen on a face (the simulator's face editor needs input).
+- ⬜ Login hand-off from the iPhone app, TV account switcher and search (plan in SPEC §15.3).
+- Needs Nextcloud's team: App IDs `com.nextcloud.photos.tv`, `.tv.topshelf`, `.watchkitapp`, `.watchkitapp.widgets`
+  with the App Group, an App Store record decision for the TV app (separate app or universal purchase), tvOS icon and
+  Top Shelf artwork (README).
 
 ### §15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room
 - ⬜ Not started.

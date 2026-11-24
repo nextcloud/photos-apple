@@ -812,7 +812,93 @@ _To be written._
 
 ### 15.3 New platforms: Apple TV and Apple Watch [tvwatch]
 
-_To be written._
+Two new apps beside the universal app: one for Apple TV (tvOS 27) and one for Apple Watch (watchOS 27). Bundle ids:
+`com.nextcloud.photos.tv` (+ `.tv.topshelf`), `com.nextcloud.photos.watchkitapp` (+ `.watchkitapp.widgets`); the README
+lists what Nextcloud's developer account needs.
+
+**Code layout (decided).** The package builds for tvOS and watchOS too. The TV app links `PhotosCore` (accounts, keychain,
+Login Flow v2, sync engine, store, image pipeline): the same code as the other platforms, so fixes reach the TV. Only
+three things needed `#if os(tvOS)`: Core Spotlight and delivered notifications (unavailable on tvOS: the indexer and the
+notification helpers do nothing there) and LocalAuthentication (no app lock on the TV). The free-space key for
+"important usage" is unavailable on tvOS/watchOS (plain free capacity there). GRDB supports tvOS and watchOS; NextcloudKit is
+no longer a dependency (§4.3). `PhotosAppUI` is not built for tvOS: its grid is a `UICollectionView` with pinch and drag
+selection, its viewer is touch-driven; the TV's screens are their own, made for focus and the Siri Remote, in `App/TV`.
+The watch app links only `PhotosModel`. Logic shared with tests lives in the package (`PhotosModel/CompanionContent.swift`,
+`PhotosDomain/CompanionPlans.swift`, `PhotosCore/CompanionExport.swift`, `CollectionStore.albumMedia`).
+
+#### Apple TV
+
+- **Login without typing a password (TV-1).** The user types only the server address (remote, dictation or the iPhone's
+  keyboard). The TV starts Login Flow v2 and shows the flow's login link as a large QR code with three steps ("open the
+  camera on your iPhone or iPad", "log in to <host> and allow access", "your photos appear here") and polls the flow. The
+  phone's camera opens the link, the user logs in there and grants access; the TV receives its own app password. The full
+  link is printed small under the code for a phone without a camera: stock servers have no shorter link or user code
+  (a typeable code would need a server change, not done). An expired flow (20 minutes) says so; "Use Another Server" goes
+  back. http:// servers and untrusted certificates ask first, like on the other platforms (certificate trust shows the
+  SHA-256 fingerprint). Managed server addresses are filled in. A revoked app password brings the login back with the
+  account's server filled in. *Not built:* hand-off of a login from the iPhone app (plan below).
+- **Home (TV-2).** Tabs Home, Albums, Settings. Home is a column of shelves that scroll sideways, each a focus section:
+  the family slideshow banner (when an album is chosen), Memories (16:9 cards with title and dates, in the order of
+  `TVShelves.memories`: On this day nearest year first, the year in review, trips newest first; context menu "Play
+  Slideshow"), Favorites, Albums, Shared Albums, Recent (photo shelves have "Show All"). Cards use the system's card and
+  poster focus styles (lift, parallax). Reloaded after every sync; albums refreshed from the server on load. Empty and
+  first-sync states have their own text.
+- **Memory, album, all photos (TV-3).** Title, dates or place, "Play Slideshow", for albums "Use for Family Slideshow";
+  a four-column grid of focusable tiles (videos with length, favourites with a heart). Shared albums' items that are not in
+  the user's own index are shown too (`albumMedia`).
+- **Viewer (TV-4).** Full screen, photo shown whole on black (4096 px preview, decoded to at most 3840 px; neighbours
+  prefetched). Siri Remote: swipe/press left and right for the previous and next item, down or click shows date and time,
+  place, caption, file name and "n of m", up hides it; Play/Pause starts a slideshow from this photo; Menu goes back. A
+  video shows a play symbol; click or Play/Pause opens it in the system player (`AVPlayerViewController`: transport bar,
+  scrubbing, info panel with title and date), streamed through the app's HTTP client (§5.5.3) or from the cache.
+- **Slideshows (TV-5).** Photos only (videos would need their own time), cross-fade (`Slideshow.crossfade`) with a slow
+  drift towards a corner (`Slideshow.drift`; none with Reduce Motion), landscape photos fill the screen, others are shown
+  whole over a blurred copy of themselves. A memory's or album's title and dates appear over the first photo. Play/Pause
+  pauses (symbol), left/right skip, click shows place and date, Menu ends. The next photo loads while the current one is
+  shown; photos that fail are skipped. The screen saver is held off while it plays. Time per photo: Settings (2–20 s,
+  default 5). Memory films (§15.1) were not on this branch's base; the TV plays memories with this slideshow and can play
+  films once they are merged.
+- **Family slideshow (TV-6).** One album chosen in Settings or on the album ("Use for Family Slideshow") plays from the
+  Home banner like a picture frame: shuffled, every photo once per round, never the same photo twice in a row across
+  rounds (`FamilySlideshow`, seeded, so it goes on where it stopped after a restart), for as long as it runs, with the place
+  and date and, optionally, the time and date in large type (Settings › Show Time and Date).
+- **Top Shelf (TV-7).** A Top Shelf extension shows the recent memories (at most 8) as a full-screen carousel with
+  "Play" and the system's "more" action. It holds no account and makes no request: after each sync the app writes
+  `TopShelf/manifest.json` and 1920 px covers into the App Group (`CompanionExport.exportTopShelf`, only when something
+  changed, then `topShelfContentDidChange()`); the extension reads them. Its links (`nextcloudphotos://memories/<id>` and
+  `…/play`, `TVRoute`) open the memory or play it. Logging out empties it. The app's static Top Shelf image and icon layers
+  are made from the app icon until there is artwork (§14.5).
+- **Settings (TV-8).** Account, server, sync state, Sync Now; time per photo, family slideshow album, time and date; Log Out
+  (confirmation; revokes the TV's app password and removes everything the app keeps on the TV).
+- Not on the TV: backup, uploads, editing, sharing, deleting, search, people/places, app lock, push. Several accounts are
+  supported by the model but the TV shows only the active one (no account switcher yet).
+
+#### Apple Watch
+
+- **Data path (decided): WatchConnectivity from the iPhone app, no login on the watch.** A watch login would need Login
+  Flow v2 on the watch (a QR code cannot be scanned from the wrist, typing a server address on the watch is poor) and an
+  app password stored on the watch: more to secure for a few photos a day. Instead the iPhone app's `WatchBridge` builds a
+  `WatchDigest` (`CompanionExport.watchDigest`) after each sync, when the app comes to the front and in the background
+  refresh, and sends it as the application context; the photos go as 480 px JPEGs with `transferFile`. Only changed
+  digests are sent; photos the watch already has are not sent again; the watch asks for photos it is missing (re-installed
+  app). With app lock on the watch gets an empty, locked digest and shows nothing; logged out, it asks to open the app.
+  Received file names are checked (`WatchDigest.isValidFileName`), so nothing from the phone is written outside the
+  watch app's folder.
+- **What is sent (`WatchDigestPlan`).** On this day: up to 12 photos spread over all years of today's "On this day",
+  newest first; on a day without any, the newest memory (trip or year in review) fills in under its title. Favourites: up
+  to 12 others. Photo of the day: a favourite of this day if there is one, else one of this day's, else a favourite; the
+  same all day, another the next day.
+- **Watch app.** Vertical pages (Digital Crown): Photo of the Day full size with "n years ago" and the place; On This Day
+  (or "3 years ago" when all are of one year) and Favorites as two-column grids; a tap opens a full-screen pager.
+- **Complication (WidgetKit).** "Photo of the Day" in the accessory families: rectangular (photo, title, years ago,
+  place), circular and corner (the photo, years ago as the label), inline (years ago · place). Reloaded when a digest or
+  photo arrives, and at midnight. Shows a lock symbol while app lock is on.
+
+*Plan for what is not built:* hand-off of the TV login from the iPhone app (the iPhone app scans the TV's QR code with
+its own scanner, shows "Log in Apple TV?" and grants the flow with its session through the server's grant page, so the
+user does not log in again); an account switcher and search on the TV; watch digest refresh at midnight without the
+phone app (needs the background refresh to run, which the system decides).
+
 
 ### 15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room [ambient]
 

@@ -91,3 +91,30 @@ the app in English. They are not part of CI because they need a server and, for 
 
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
+
+### Apple TV and Apple Watch (SPEC §15.3)
+
+`UITestsTV/TVTourTests.swift` tours the TV app with the Siri Remote (`XCUIRemote`): Home, a memory, the viewer, a
+slideshow, Albums, Settings. Same rules as the smoke tests above; screenshots go to `PHOTOS_SHOTS_DIR` when set. Install
+the runtimes once with `xcodebuild -downloadPlatform tvOS` and `… watchOS`.
+
+```sh
+xcrun simctl create tv "Apple TV 4K (3rd generation)" com.apple.CoreSimulator.SimRuntime.tvOS-27-2   # prints <udid>
+xcrun simctl boot <udid>
+TEST_RUNNER_PHOTOS_UITEST_LOGIN='nc://login/server:http://localhost:8089&user:admin&password:admin' \
+TEST_RUNNER_PHOTOS_SHOTS_DIR=/tmp/tv-shots \
+  xcodebuild test -scheme NextcloudPhotosTV -destination 'platform=tvOS Simulator,id=<udid>' \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PHOTOS_DEBUG_ENTITLEMENTS=YES \
+  PHOTOS_BUNDLE_ID=com.example.nextcloudphotos.uitest
+```
+
+Debug helpers: `PHOTOS_DEBUG_TV_SERVER=<address>` starts the TV's Login Flow at once (the QR code); a test can grant it
+with the server's grant page; `PHOTOS_DEBUG_TV_ROUTE=nextcloudphotos://memories/<id>[/play]` (or `…/slideshow`) opens a
+Top Shelf link at launch (`simctl openurl` asks "Open in…?", which needs the remote). The Top Shelf (`TopShelf/` in the
+App Group container) needs `PHOTOS_DEBUG_ENTITLEMENTS=YES`.
+
+The watch app shows what the iPhone app sends. In a paired iPhone + watch simulator pair (`xcrun simctl pair <watch>
+<phone>`; install the iPhone app and `…/Nextcloud Photos.app/Watch/Nextcloud Photos.app` on the watch) the digest
+arrives, photo files did not (watchOS 27.2 simulator). For the watch's screens without a phone,
+`PHOTOS_DEBUG_WATCH_DIGEST=<folder with digest.json and the JPEGs>` loads a digest at launch (the iPhone app keeps the
+last one in `Library/Caches/WatchDigest`), and `PHOTOS_DEBUG_WATCH_PAGE=0|1|2` opens a page.
