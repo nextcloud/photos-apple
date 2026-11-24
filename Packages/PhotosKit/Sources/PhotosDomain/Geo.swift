@@ -31,6 +31,13 @@ public struct GeoCoordinate: Hashable, Sendable, Codable {
         let a = sin(Δφ / 2) * sin(Δφ / 2) + cos(φ1) * cos(φ2) * sin(Δλ / 2) * sin(Δλ / 2)
         return 2 * Self.earthRadius * atan2(sqrt(a), sqrt(max(0, 1 - a)))
     }
+
+    /// The middle of some coordinates (their mean, also across the antimeridian); nil for none.
+    public static func center(of coordinates: [GeoCoordinate]) -> GeoCoordinate? {
+        var centroid = GeoCentroid()
+        for coordinate in coordinates { centroid.add(coordinate) }
+        return centroid.value
+    }
 }
 
 /// The mean of some coordinates, also across the antimeridian (longitudes are unwrapped around the first one).

@@ -139,7 +139,8 @@ import Testing
                 id: id, center: GeoCoordinate(latitude: 1, longitude: 1), placeName: name, countryCode: nil,
                 years: [.init(year: 2000, items: [1]), .init(year: 2001, items: [2])])
         }
-        let result = ThenAndNow.distinctPlaces([spot("a", "Lisbon"), spot("b", "Lisbon"), spot("c", nil), spot("d", nil), spot("e", "Rome")], limit: 3)
+        let result = ThenAndNow.distinctPlaces(
+            [spot("a", "Lisbon"), spot("b", "Lisbon"), spot("c", nil), spot("d", nil), spot("e", "Rome")], limit: 3)
         #expect(result.map(\.id) == ["a", "c", "d"])
     }
 
@@ -283,6 +284,29 @@ import Testing
         #expect(history.countries(in: 2020).map(\.code) == ["DE"])
         #expect(history.places(in: 2023).first?.name == "Berlin")
         #expect(history.stats(in: 2021).items == 0)
+    }
+
+    @Test func legsAreDrawnOncePerPairOfPlaces() throws {
+        // Two trips to Lisbon and one to Lisbon and Porto: home–Lisbon three times, Lisbon–Porto and Porto–home once.
+        var items = library.filter { $0.place == "Berlin" }
+        items.append(item(900, 38.7223, -9.1393, date(2024, 2, 1), place: "Lisbon"))
+        items.append(item(901, 52.52, 13.405, date(2024, 3, 1), place: "Berlin"))
+        items.append(item(902, 38.7223, -9.1393, date(2025, 2, 1), place: "Lisbon"))
+        items.append(item(903, 41.1579, -8.6291, date(2025, 2, 3), place: "Porto"))
+        items.append(item(904, 52.52, 13.405, date(2025, 3, 1), place: "Berlin"))
+        items.append(item(905, 38.7223, -9.1393, date(2026, 2, 1), place: "Lisbon"))
+        let history = TravelHistory(items, calendar: calendar)
+        #expect(history.trips.count == 3)
+        let legs = history.legs()
+        #expect(legs.count == 3)
+        func name(_ place: Int) -> String? { history.places[place].name }
+        let homeLisbon = try #require(legs.first { Set([name($0.from), name($0.to)]) == ["Berlin", "Lisbon"] })
+        #expect(homeLisbon.count == 3)
+        #expect(homeLisbon.latest == date(2026, 2, 1))
+        #expect(legs.last?.id == homeLisbon.id)
+        #expect(history.legs(in: 2025).count == 3)
+        #expect(history.legs(in: 2024).map(\.count) == [1])
+        #expect(history.trips[1].stops.map(name) == ["Berlin", "Lisbon", "Porto", "Berlin"])
     }
 
     @Test func itemsOfPlacesAndTrips() throws {

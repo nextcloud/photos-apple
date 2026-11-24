@@ -104,6 +104,8 @@ public enum TimeLapseVideo {
         try writer.start()
         writer.startSession(atSourceTime: .zero)
 
+        // Scaled to the video once (each frame then only moves and slightly grows them), not once per frame.
+        let frames = frames.map { Frame(image: prepared($0.image, for: size) ?? $0.image, caption: $0.caption) }
         let times = plan.frameTimes(framesPerSecond: framesPerSecond)
         do {
             for (index, time) in times.enumerated() {
@@ -147,7 +149,7 @@ public enum TimeLapseVideo {
         let bounds = CGRect(origin: .zero, size: size)
         context.setFillColor(CGColor(gray: 0, alpha: 1))
         context.fill(bounds)
-        context.interpolationQuality = .high
+        context.interpolationQuality = .medium
         if frames.indices.contains(moment.from) {
             context.setAlpha(1)
             context.draw(frames[moment.from].image, in: filled(frames[moment.from].image, in: bounds, scale: moment.fromScale))
@@ -158,6 +160,22 @@ public enum TimeLapseVideo {
         }
         context.setAlpha(1)
         if frames.indices.contains(moment.captioned) { caption(frames[moment.captioned].caption, in: context, size: size) }
+    }
+
+    /// An image scaled to aspect-fill a video of `size` (nil when it cannot be drawn).
+    static func prepared(_ image: CGImage, for size: CGSize) -> CGImage? {
+        let rect = filled(image, in: CGRect(origin: .zero, size: size), scale: 1)
+        let width = Int(rect.width.rounded())
+        let height = Int(rect.height.rounded())
+        guard width > 0, height > 0,
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 
     /// The rectangle that aspect-fills `bounds` with an image, grown by `scale` around the middle.
@@ -172,7 +190,9 @@ public enum TimeLapseVideo {
     /// The year, large and white with a soft shadow, in the lower left corner.
     static func caption(_ text: String, in context: CGContext, size: CGSize) {
         let fontSize = min(size.width, size.height) * 0.09
-        let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) ?? CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        let font =
+            CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil)
+            ?? CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
         let attributes: [NSAttributedString.Key: Any] = [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 1),

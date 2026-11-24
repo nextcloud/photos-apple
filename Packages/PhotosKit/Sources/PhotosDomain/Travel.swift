@@ -59,6 +59,8 @@ public struct TravelHistory: Sendable, Equatable {
         public var cover: FileID
         /// The places' names in order of the photos taken there, most first ("Lisbon & Porto"); empty when none has one.
         public var placeNames: [String]
+        /// The places along `path` (indexes into `places`): home, the visits' places, home.
+        public var stops: [Int]
     }
 
     public struct Country: Hashable, Sendable, Identifiable {
@@ -135,7 +137,8 @@ public struct TravelHistory: Sendable, Equatable {
             var centroid = GeoCentroid()
             for item in group { centroid.add(item.coordinate) }
             return Visit(
-                id: index, coordinate: centroid.value!, start: group.first!.timestamp, end: group.last!.timestamp, items: group.map(\.fileId),
+                id: index, coordinate: centroid.value!, start: group.first!.timestamp, end: group.last!.timestamp,
+                items: group.map(\.fileId),
                 cover: Self.cover(of: group), placeName: mostFrequent(group.map(\.place)),
                 countryCode: mostFrequent(group.map(\.countryCode)), place: assignment[index])
         }
@@ -255,6 +258,8 @@ public struct TravelHistory: Sendable, Equatable {
         return runs.enumerated().map { index, run in
             let stops = run.map { visits[$0].coordinate }
             let path = homeCoordinate.map { [$0] + stops + [$0] } ?? stops
+            let visitPlaces = run.map { visits[$0].place }
+            let stopPlaces = home.map { [$0] + visitPlaces + [$0] } ?? visitPlaces
             var distance = 0.0
             for (a, b) in zip(path, path.dropFirst()) { distance += a.distance(to: b) }
             var counts: [String: Int] = [:]
@@ -264,7 +269,7 @@ public struct TravelHistory: Sendable, Equatable {
             let largest = run.max { (visits[$0].items.count, -$0) < (visits[$1].items.count, -$1) }!
             return Trip(
                 id: index, start: visits[run.first!].start, end: visits[run.last!].end, visits: run, path: path, distance: distance,
-                itemCount: items, cover: visits[largest].cover, placeNames: names)
+                itemCount: items, cover: visits[largest].cover, placeNames: names, stops: stopPlaces)
         }
     }
 
@@ -294,6 +299,41 @@ public struct TravelHistory: Sendable, Equatable {
     public func places(in year: Int?) -> [Place] {
         let ids = Set(visits(in: year).map(\.place))
         return places.filter { ids.contains($0.id) }.sorted { ($0.itemCount, -$0.id) > ($1.itemCount, -$1.id) }
+    }
+
+    // MARK: Legs
+
+    /// A flight (or drive) between two places, however often it was made: what the globe draws, once per pair.
+    public struct Leg: Hashable, Sendable, Identifiable {
+        /// Indexes into `places`, the smaller first.
+        public var from: Int
+        public var to: Int
+        /// How many trips travelled it (either way; there and back again counts once).
+        public var count: Int
+        /// When it was last travelled (the start of the latest trip with it).
+        public var latest: Date
+        public var id: String { "\(from)-\(to)" }
+    }
+
+    /// The different legs of the trips of a year (all with nil), oldest last use first. Legs within one place (two
+    /// visits of the same place in a row) are left out.
+    public func legs(in year: Int? = nil) -> [Leg] {
+        var legs: [String: Leg] = [:]
+        for trip in trips(in: year) {
+            var seen = Set<String>()
+            for (a, b) in zip(trip.stops, trip.stops.dropFirst()) where a != b {
+                let leg = Leg(from: min(a, b), to: max(a, b), count: 1, latest: trip.start)
+                guard seen.insert(leg.id).inserted else { continue }
+                if var known = legs[leg.id] {
+                    known.count += 1
+                    known.latest = max(known.latest, trip.start)
+                    legs[leg.id] = known
+                } else {
+                    legs[leg.id] = leg
+                }
+            }
+        }
+        return legs.values.sorted { ($0.latest, $0.id) < ($1.latest, $1.id) }
     }
 
     // MARK: Countries
