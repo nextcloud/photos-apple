@@ -239,6 +239,23 @@ public enum SimilarSeries {
         return result.reversed()
     }
 
+    /// The moment a photo was taken in, among the results of a search from it: the results at least `threshold` alike to
+    /// it, taken in a chain of shots no more than `gap` apart that reaches the photo. In time order, the photo included;
+    /// just the photo when it was the only shot.
+    public static func moment(
+        of source: (id: Int64, date: Date), in matches: [(id: Int64, date: Date, similarity: Float)],
+        threshold: Float = Similarity.seriesThreshold, gap: TimeInterval = Similarity.seriesGap
+    ) -> [Int64] {
+        let alike = matches.filter { $0.similarity >= threshold && $0.id != source.id }.map { (id: $0.id, date: $0.date) }
+        let sorted = (alike + [source]).sorted { ($0.date, $0.id) < ($1.date, $1.id) }
+        guard let position = sorted.firstIndex(where: { $0.id == source.id }) else { return [source.id] }
+        var lower = position
+        while lower > 0, sorted[lower].date.timeIntervalSince(sorted[lower - 1].date) <= gap { lower -= 1 }
+        var upper = position
+        while upper < sorted.count - 1, sorted[upper + 1].date.timeIntervalSince(sorted[upper].date) <= gap { upper += 1 }
+        return sorted[lower...upper].map(\.id)
+    }
+
     /// The shot to keep: a favourite, else the best aesthetics score, else the middle one (often the steadiest of a burst).
     public static func best(of members: [Member]) -> Int64? {
         guard !members.isEmpty else { return nil }

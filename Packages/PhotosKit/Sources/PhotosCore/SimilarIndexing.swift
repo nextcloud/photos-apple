@@ -71,14 +71,17 @@ public enum SimilarIndexing {
 
     /// Indexes the cached previews of `services` in small batches while `isWanted` (the Library is on screen) and the
     /// device allows it; returns when everything cached is indexed or the task is cancelled.
-    public static func trickle(_ services: AccountServices) async {
-        guard isEnabled() else { return }
+    @MainActor public static func trickle(_ services: AccountServices) async {
+        // One trickle at a time, however many Library screens are open (iPad sidebar, Mac windows).
+        guard isEnabled(), !isTrickling else { return }
+        isTrickling = true
+        defer { isTrickling = false }
         try? await services.similarity.refresh()
         let indexer = SimilarityIndexer(database: services.database, cache: services.images.cache, index: services.similarity)
         // Starts after the screen has settled; then a batch whenever the conditions allow, with pauses between.
         try? await Task.sleep(for: .seconds(3))
         while !Task.isCancelled {
-            let allowed = await MainActor.run { Conditions.current.allowsForegroundWork && isEnabled() }
+            let allowed = Conditions.current.allowsForegroundWork && isEnabled()
             if allowed {
                 let work = Task.detached(priority: .background) {
                     try await indexer.run(batchSize: 16, pause: .milliseconds(400)) {
@@ -101,6 +104,8 @@ public enum SimilarIndexing {
             }
         }
     }
+
+    @MainActor static var isTrickling = false
 
     /// Indexes the cached previews of the active account until `shouldContinue` says stop (background task).
     @MainActor
@@ -144,7 +149,7 @@ public enum SimilarIndexing {
             let request = BGProcessingTaskRequest(identifier: taskIdentifier)
             request.requiresExternalPower = true
             request.requiresNetworkConnectivity = false
-            try? BGTaskScheduler.shared.submit(request)
+            Task { try? await BGTaskScheduler.shared.submitTaskRequest(request) }
         }
     #elseif os(macOS)
         @MainActor static var activity: NSBackgroundActivityScheduler?

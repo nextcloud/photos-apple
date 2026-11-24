@@ -94,6 +94,8 @@
             BackgroundTasks.schedule()
             // On-device recognition for search, while charging and idle (opt-in).
             ContentLabeling.register { AppHost.model }
+            // On-device feature prints for "Show Similar" and key photos, while charging and idle.
+            SimilarIndexing.register { AppHost.model }
             // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.
             NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
                 Task { @MainActor in

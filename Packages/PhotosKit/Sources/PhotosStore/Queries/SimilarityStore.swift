@@ -159,6 +159,26 @@ public struct SimilarityStore: Sendable {
         }
     }
 
+    /// Aesthetics scores of some photos (the best shot of a series).
+    public func qualities(of fileIds: [FileID]) throws -> [FileID: Float] {
+        guard !fileIds.isEmpty else { return [:] }
+        return try database.writer.read { db in
+            var result: [FileID: Float] = [:]
+            for start in stride(from: 0, to: fileIds.count, by: 500) {
+                let chunk = Array(fileIds[start..<min(start + 500, fileIds.count)])
+                let marks = chunk.map { _ in "?" }.joined(separator: ",")
+                for row in try Row.fetchAll(
+                    db, sql: "SELECT fileId, quality FROM similarity WHERE quality IS NOT NULL AND fileId IN (\(marks))",
+                    arguments: StatementArguments(chunk))
+                {
+                    let quality: Double = row["quality"]
+                    result[row["fileId"]] = Float(quality)
+                }
+            }
+            return result
+        }
+    }
+
     /// How many images are indexed (with or without a print) and how many there are (the Similar screen, Settings).
     public func progress() throws -> (indexed: Int, total: Int) {
         try database.writer.read { db in

@@ -26,17 +26,25 @@ public enum SimilarityAnalysis {
 
     /// The feature print and the aesthetics score of a picture.
     public static func analyze(_ image: CGImage, sketcher: (Int) -> FeatureSketcher) async throws -> SimilarityStore.Analysis {
-        let observation = try await GenerateImageFeaturePrintRequest().perform(on: image)
-        let print: [Float] = observation.data.withUnsafeBytes { raw in
-            guard observation.elementType == .float else { return [] }
-            return Array(raw.bindMemory(to: Float.self))
-        }
-        guard !print.isEmpty else { return .failed }
-        let quality = try? await CalculateImageAestheticsScoresRequest().perform(on: image)
-        return SimilarityStore.Analysis(
-            print: print, sketch: sketcher(print.count).sketch(print), quality: quality?.overallScore,
-            isUtility: quality?.isUtility ?? false)
+        #if targetEnvironment(simulator)
+            // The simulator cannot run these models: on its GPU they fail, on its CPU they return the same print and score
+            // for every picture. Nothing is stored there (UI checks use prints made on the Mac, docs/TESTING.md).
+            throw SimulatorUnsupported()
+        #else
+            let observation = try await GenerateImageFeaturePrintRequest().perform(on: image)
+            let print: [Float] = observation.data.withUnsafeBytes { raw in
+                guard observation.elementType == .float else { return [] }
+                return Array(raw.bindMemory(to: Float.self))
+            }
+            guard !print.isEmpty else { return .failed }
+            let quality = try? await CalculateImageAestheticsScoresRequest().perform(on: image)
+            return SimilarityStore.Analysis(
+                print: print, sketch: sketcher(print.count).sketch(print), quality: quality?.overallScore,
+                isUtility: quality?.isUtility ?? false)
+        #endif
     }
+
+    struct SimulatorUnsupported: Error {}
 }
 
 /// Indexes cached previews (see `SimilarityAnalysis`).
@@ -140,6 +148,12 @@ public actor SimilarityIndex {
         for row in rows { matrix.set(row.fileId, sketch: row.sketch) }
         if let last = rows.last?.indexedAt { loadedUpTo = last }
         if !first { matrix.remove(try store.staleIds()) }
+    }
+
+    /// Forgets what is in memory (the stored index was deleted).
+    public func reset() {
+        matrix = SketchMatrix()
+        loadedUpTo = nil
     }
 
     /// Takes what an indexer run just stored.

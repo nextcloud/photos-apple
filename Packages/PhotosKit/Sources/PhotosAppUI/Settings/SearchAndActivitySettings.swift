@@ -11,6 +11,8 @@ struct SearchAndActivitySettings: View {
     @AppStorage(ContentLabeling.enabledKey) private var contentLabeling = false
     @AppStorage(SharedAlbumNotifications.enabledKey) private var sharedAlbumNotifications = true
     @State private var progress: (labeled: Int, total: Int)?
+    @AppStorage(SimilarIndexing.enabledKey) private var similarPhotos = true
+    @State private var similarProgress: (indexed: Int, total: Int)?
 
     var body: some View {
         if ContentLabeling.isAvailable {
@@ -36,6 +38,7 @@ struct SearchAndActivitySettings: View {
             }
             .task { loadProgress() }
         }
+        similarSection
         Section {
             Toggle(String(localized: "New photos in shared albums", bundle: .module), isOn: $sharedAlbumNotifications)
         } header: {
@@ -45,6 +48,38 @@ struct SearchAndActivitySettings: View {
                 "Checked when the app refreshes in the background, so a notification can come hours later. Instant notifications would need your Nextcloud server to send them.",
                 bundle: .module)
         }
+    }
+
+    /// "Show Similar" and the key photos of the zoom levels (SPEC §15.5): on by default, on this device only.
+    var similarSection: some View {
+        Section {
+            Toggle(String(localized: "Find similar photos", bundle: .module), isOn: $similarPhotos)
+            if similarPhotos, let similarProgress {
+                LabeledContent(
+                    String(localized: "Photos compared", bundle: .module, comment: "Settings: photos indexed for Show Similar."),
+                    value: String(
+                        localized: "\(similarProgress.indexed.formatted()) of \(similarProgress.total.formatted())", bundle: .module,
+                        comment: "Progress of the on-device indexing for Show Similar: photos indexed of all photos"))
+            }
+        } footer: {
+            Text(
+                "Compares the previews this device already has, to show similar photos and pick the best shot of a series and the photo that stands for a year or month. Runs while the device is charging or idle; nothing leaves the device. Turning this off deletes what was worked out.",
+                bundle: .module)
+        }
+        .onChange(of: similarPhotos) { _, enabled in
+            SimilarIndexing.schedule()
+            if !enabled, let services = session.services {
+                try? SimilarityStore(database: services.database).deleteAll()
+                Task { await services.similarity.reset() }
+            }
+            loadSimilarProgress()
+        }
+        .task { loadSimilarProgress() }
+    }
+
+    func loadSimilarProgress() {
+        guard let services = session.services else { return }
+        similarProgress = try? SimilarityStore(database: services.database).progress()
     }
 
     func loadProgress() {
