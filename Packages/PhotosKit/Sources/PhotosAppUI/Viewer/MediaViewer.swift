@@ -216,6 +216,10 @@ struct MediaViewer: View {
             #if os(iOS)
                 .statusBarHidden(chromeHidden)
                 .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
+                // The date in the bar as in Photos, not a large title over the photo; light on the black backdrop also
+                // in light mode (the title was black on black there).
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
             #endif
             .toolbar { toolbar }
             .onChange(of: current) { _, id in

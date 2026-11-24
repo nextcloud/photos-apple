@@ -77,6 +77,9 @@ struct MemoriesStrip: View {
         } label: {
             MemoryCard(memory: memory, compact: true)
                 .frame(width: cardSize.width, height: cardSize.height)
+                // The card has a fixed size: at accessibility text sizes its title would be cut to a word or two. The
+                // whole title is in the VoiceOver label and on the memory's screen.
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         }
         .buttonStyle(.plain)
         .contextMenu {
