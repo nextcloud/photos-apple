@@ -51,6 +51,8 @@
                 if let locator = callbacks?.tileLocator {
                     locator.frame = { [weak self] id in self?.tileFrame(id) }
                     locator.reveal = { [weak self] id in self?.reveal(id) }
+                    locator.place = { [weak self] id, fraction in self?.place(id, fraction: fraction) }
+                    locator.topItem = { [weak self] in self?.anchorItem() }
                 }
             }
         }
@@ -61,7 +63,17 @@
         /// Model, zoom, anchor and layout bookkeeping, shared with the AppKit grid.
         private let core: GridCore
         private var isSelecting = false
-        private var pinchHandled = false
+        /// The pinch in progress: the photo under the fingers and where they are (SPEC §15.5).
+        private var pinch: GridPinch?
+        /// After a pinch changed the zoom step: the photo that stays under the fingers through the relayout.
+        private var pinchAnchor: (id: FileID, y: CGFloat)?
+        /// Haptic ticks at year boundaries while scrolling fast or scrubbing the year index (SPEC §15.5).
+        private var yearTicker = YearBoundaryTicker()
+        private var offsetObservation: NSKeyValueObservation?
+        private var indexScrubbedAt: TimeInterval = 0
+        #if os(iOS)
+            private var tickFeedback: UISelectionFeedbackGenerator?
+        #endif
         private var selected = GridSelectionTracker()
 
         var model: GridModel { core.model }
@@ -102,6 +114,10 @@
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             collectionView.addGestureRecognizer(pinch)
+            offsetObservation = collectionView.observe(\.contentOffset, options: []) { [weak self] _, _ in
+                // UIKit changes the offset on the main thread.
+                MainActor.assumeIsolated { self?.contentOffsetChanged() }
+            }
 
             // Header heights are absolute and follow the text size.
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: PhotoGridController, _: UITraitCollection) in
@@ -179,15 +195,24 @@
             loadViewIfNeeded()
             let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders, squareTiles: squareTiles)
             if plan.relayouts {
-                let anchor = anchorItem()
+                let pinched = plan.layoutChanged ? pinchAnchor : nil
+                pinchAnchor = nil
+                let anchor = pinched?.id ?? anchorItem()
                 core.show(update.model, relayout: true)
+                yearTicker.reset()
                 let relayout: () -> Void = { [self] in
                     if plan.reloads {
                         collectionView.reloadData()
                     } else {
                         collectionView.collectionViewLayout.invalidateLayout()
                     }
-                    restore(anchor)
+                    // A pinch scaled the tiles while the fingers moved: the new layout takes over at full size.
+                    collectionView.transform = .identity
+                    if let pinched {
+                        place(pinched.id, viewY: pinched.y)
+                    } else {
+                        restore(anchor)
+                    }
                 }
                 if plan.layoutChanged, view.window != nil, !UIAccessibility.isReduceMotionEnabled {
                     // Zoom: a short cross-fade between the two layouts.
@@ -354,16 +379,132 @@
             core.noteLayout(width: gridWidth)
         }
 
+        // MARK: Pinch (SPEC §15.5)
+
+        /// The tiles follow the fingers (scaled around them); on release the grid settles on the step the pinch was heading
+        /// for, with the photo under the fingers kept under them. Out of the densest step the Library's days take over.
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
-            case .began: pinchHandled = false
+            case .began:
+                let location = gesture.location(in: collectionView)
+                pinch = GridPinch(fileId: fileId(near: location), location: gesture.location(in: view))
             case .changed:
-                guard !pinchHandled, gesture.scale > 1.35 || gesture.scale < 0.75 else { return }
-                pinchHandled = true
-                let next = GridColumns.step(zoomStep, zoomIn: gesture.scale > 1)
-                if next != zoomStep { callbacks?.columnsChanged(next) }
+                guard let pinch else { return }
+                let stop = LibraryZoomStop.grid(step: zoomStep)
+                let pastEnd: Bool = callbacks?.zoomPastEnd != nil || stop != GridPinch.ladder.densestGrid
+                let canZoomOut = GridPinch.ladder.canZoomOut(from: stop) && pastEnd
+                let scale = LibraryZoomGesture.displayScale(
+                    Double(gesture.scale), canZoomIn: GridPinch.ladder.canZoomIn(from: stop), canZoomOut: canZoomOut)
+                collectionView.transform = pinch.transform(scale: CGFloat(scale), center: CGPoint(x: view.bounds.midX, y: view.bounds.midY))
+            case .ended:
+                guard let pinch else { return }
+                self.pinch = nil
+                let projected = LibraryZoomGesture.projectedScale(scale: Double(gesture.scale), velocity: Double(gesture.velocity))
+                let target = GridPinch.ladder.moved(.grid(step: zoomStep), by: LibraryZoomGesture.steps(projectedScale: projected))
+                switch target {
+                case .grid(let step) where step != zoomStep:
+                    snapFeedback(at: pinch.location)
+                    pinchAnchor = pinch.fileId.map { ($0, pinch.location.y) }
+                    callbacks?.columnsChanged(step)
+                    // Should the zoom not arrive (nothing changed after all), the tiles still go back to their size.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                        self?.pinchAnchor = nil
+                        self?.settleTransform()
+                    }
+                case .grid:
+                    settleTransform()
+                default:
+                    if let zoomPastEnd = callbacks?.zoomPastEnd {
+                        // The level change plays its own tap (`LibraryZoomOverlay`).
+                        let point = UnitPoint(
+                            x: Double(pinch.location.x / max(view.bounds.width, 1)),
+                            y: Double(pinch.location.y / max(view.bounds.height, 1)))
+                        zoomPastEnd(pinch.fileId, point)
+                        // Covered by the days by now; back to its size underneath.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                            self?.collectionView.transform = .identity
+                        }
+                    } else {
+                        settleTransform()
+                    }
+                }
+            case .cancelled, .failed:
+                pinch = nil
+                settleTransform()
             default: break
             }
+        }
+
+        /// Springs the tiles back to their size.
+        private func settleTransform() {
+            guard collectionView.transform != .identity else { return }
+            UIView.animate(
+                withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0, options: [.allowUserInteraction]
+            ) {
+                self.collectionView.transform = .identity
+            }
+        }
+
+        /// The photo under a point of the grid, or the one closest to it (between tiles, under a header).
+        private func fileId(near location: CGPoint) -> FileID? {
+            if let indexPath = collectionView.indexPathForItem(at: location), let id = fileId(at: indexPath) { return id }
+            let visible = collectionView.indexPathsForVisibleItems.compactMap { indexPath -> (FileID, CGFloat)? in
+                guard let id = fileId(at: indexPath), let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else {
+                    return nil
+                }
+                return (id, hypot(frame.midX - location.x, frame.midY - location.y))
+            }
+            return visible.min { $0.1 < $1.1 }?.0 ?? anchorItem()
+        }
+
+        /// A light tap when a pinch snaps to another zoom step or level (iPhone, iPad; the system's haptics setting applies).
+        private func snapFeedback(at location: CGPoint) {
+            #if os(iOS)
+                UIImpactFeedbackGenerator(style: .light, view: view).impactOccurred(at: location)
+            #endif
+        }
+
+        /// Scrolls so that the tile's top is at `fraction` of the visible height (a zoom from the days).
+        func place(_ id: FileID, fraction: Double) {
+            guard isViewLoaded else { return }
+            let visible = collectionView.bounds.height - topInset - collectionView.adjustedContentInset.bottom
+            place(id, viewY: topInset + CGFloat(fraction) * max(visible, 0))
+        }
+
+        /// Scrolls so that the tile's middle is at `viewY` in the controller's view, now and after the layout pass.
+        private func place(_ id: FileID, viewY: CGFloat) {
+            core.restore(id) { [weak self] id in
+                guard let self, let indexPath = self.indexPath(for: id) else { return }
+                self.collectionView.layoutIfNeeded()
+                guard let frame = self.collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+                let contentHeight = max(
+                    self.collectionView.contentSize.height, self.collectionView.collectionViewLayout.collectionViewContentSize.height)
+                let inCollection = viewY - self.collectionView.frame.minY
+                let offset = GridAnchor.offset(
+                    documentY: Double(frame.midY - inCollection + self.topInset), topInset: Double(self.topInset),
+                    contentHeight: Double(contentHeight), bottomInset: Double(self.collectionView.adjustedContentInset.bottom),
+                    viewportHeight: Double(self.collectionView.bounds.height))
+                self.collectionView.setContentOffset(CGPoint(x: self.collectionView.contentOffset.x, y: CGFloat(offset)), animated: false)
+            }
+        }
+
+        // MARK: Year ticks (SPEC §15.5)
+
+        private func contentOffsetChanged() {
+            #if os(iOS)
+                guard headersShown, core.pendingAnchor == nil, view.window != nil else { return }
+                let top = collectionView.contentOffset.y + topInset
+                let probe = CGPoint(x: min(8, collectionView.bounds.width / 2), y: top + CGFloat(headerMetrics.titleHeight) + 24)
+                let year = collectionView.indexPathForItem(at: probe).flatMap { model.sections[safe: $0.section]?.year }
+                let now = ProcessInfo.processInfo.systemUptime
+                let tick = yearTicker.update(
+                    year: year, offset: Double(collectionView.contentOffset.y), time: now,
+                    isUserScrolling: collectionView.isTracking || collectionView.isDecelerating,
+                    isScrubbing: now - indexScrubbedAt < 0.5)
+                guard tick else { return }
+                if tickFeedback == nil { tickFeedback = UISelectionFeedbackGenerator(view: view) }
+                tickFeedback?.selectionChanged()
+            #endif
         }
 
         // MARK: Keyboard
@@ -430,7 +571,8 @@
         }
 
         func collectionView(_ collectionView: UICollectionView, indexPathForIndexTitle title: String, at index: Int) -> IndexPath {
-            IndexPath(item: 0, section: model.yearStarts[safe: index]?.section ?? 0)
+            indexScrubbedAt = ProcessInfo.processInfo.systemUptime
+            return IndexPath(item: 0, section: model.yearStarts[safe: index]?.section ?? 0)
         }
 
         // MARK: Delegate
@@ -925,6 +1067,21 @@
     extension UIFont {
         func withWeight(_ weight: UIFont.Weight) -> UIFont {
             UIFont.systemFont(ofSize: pointSize, weight: weight)
+        }
+    }
+    /// A pinch on the grid: the photo under the fingers and where the fingers are in the grid's view.
+    @MainActor
+    struct GridPinch {
+        static let ladder = LibraryZoomLadder(gridSteps: GridColumns.options)
+
+        var fileId: FileID?
+        var location: CGPoint
+
+        /// Scales the grid by `scale` around the fingers (the view's transform works around its centre).
+        func transform(scale: CGFloat, center: CGPoint) -> CGAffineTransform {
+            let dx = location.x - center.x
+            let dy = location.y - center.y
+            return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale).translatedBy(x: -dx, y: -dy)
         }
     }
 #endif

@@ -36,6 +36,8 @@
         private var positionLabel = ""
         private var hoverFraction: Double?
         private var isDragging = false
+        /// Where the last click or drag was, to notice a year passed under the pointer.
+        private var lastScrubFraction: Double?
         private var hideTimer: Timer?
         private var tracking: NSTrackingArea?
 
@@ -105,6 +107,7 @@
 
         override func mouseUp(with event: NSEvent) {
             isDragging = false
+            lastScrubFraction = nil
             scheduleHide()
         }
 
@@ -112,6 +115,13 @@
             let fraction = fraction(at: convert(event.locationInWindow, from: nil))
             hoverFraction = fraction
             reveal()
+            // Dragged past a year: the trackpad's alignment feedback, as when something snaps to a guide (SPEC §15.5).
+            if let last = lastScrubFraction,
+                ticks.contains(where: { min(last, fraction) < $0.fraction && $0.fraction <= max(last, fraction) })
+            {
+                LibraryZoomHaptics.trackpadAlignment()
+            }
+            lastScrubFraction = fraction
             onScrub?(fraction)
         }
 

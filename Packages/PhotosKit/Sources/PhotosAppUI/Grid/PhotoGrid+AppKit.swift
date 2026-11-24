@@ -40,12 +40,17 @@
             didSet {
                 // "Show in library" scrolls to a tile (the zoom transition the locator serves elsewhere is not the Mac's).
                 callbacks?.tileLocator?.reveal = { [weak self] id in self?.reveal(id) }
+                callbacks?.tileLocator?.place = { [weak self] id, fraction in self?.place(id, fraction: fraction) }
+                callbacks?.tileLocator?.topItem = { [weak self] in self?.anchorItem() }
             }
         }
         let collectionView = GridCollectionView()
         /// Model, zoom, anchor and layout bookkeeping, shared with the UIKit grid.
         private let core: GridCore
         private var pinchAmount: CGFloat = 0
+        /// The photo under the pointer when a trackpad pinch began, and its distance from the top of the visible area: it
+        /// stays there while the pinch changes the zoom step (SPEC §15.5).
+        private var pinchAnchor: (id: FileID, offset: CGFloat)?
         private let scrubber = GridScrubberView()
         private var sectionOffsets: [Double] = []
         private var refreshWork: DispatchWorkItem?
@@ -125,14 +130,19 @@
         func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, showsHeaders: Bool, squareTiles: Bool) {
             let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders, squareTiles: squareTiles)
             if plan.relayouts {
-                let anchor = anchorItem()
+                let pinched = plan.layoutChanged ? pinchAnchor : nil
+                let anchor = pinched?.id ?? anchorItem()
                 core.show(update.model, relayout: true)
                 if plan.reloads {
                     collectionView.reloadData()
                 } else {
                     collectionView.collectionViewLayout?.invalidateLayout()
                 }
-                restore(anchor)
+                if let pinched {
+                    place(pinched.id, offset: pinched.offset)
+                } else {
+                    restore(anchor)
+                }
                 core.noteLayout(width: gridWidth)
                 refreshVisibleTiles()
                 reloadScrubber()
@@ -242,6 +252,27 @@
             }
             guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
             scroll(toDocumentY: frame.minY - CGFloat(headerHeight(section: indexPath.section)))
+        }
+
+        /// Scrolls so that the tile's top is at `fraction` of the visible height (a zoom from the days).
+        func place(_ id: FileID, fraction: Double) {
+            place(id, offset: topInset + CGFloat(fraction) * max(contentView.bounds.height - topInset, 0))
+        }
+
+        /// Scrolls so that the tile's middle is `offset` below the top of the clip view, now and after the layout pass.
+        private func place(_ id: FileID, offset: CGFloat) {
+            core.restore(id) { [weak self] id in
+                guard let self, let indexPath = self.core.indexPath(for: id) else { return }
+                self.collectionView.needsLayout = true
+                self.collectionView.layoutSubtreeIfNeeded()
+                if let height = self.collectionView.collectionViewLayout?.collectionViewContentSize.height,
+                    self.collectionView.frame.height < height
+                {
+                    self.collectionView.setFrameSize(NSSize(width: self.collectionView.frame.width, height: height))
+                }
+                guard let frame = self.collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+                self.scroll(toDocumentY: frame.midY - offset + self.topInset)
+            }
         }
 
         /// Scrolls the tile into the middle of the visible area if it is not wholly visible.
@@ -420,16 +451,35 @@
             callbacks?.open(id)
         }
 
+        /// A trackpad pinch steps through the zoom steps while the fingers move (one step per 0.22 of magnification, so a
+        /// long pinch goes through several), keeping the photo under the pointer where it is; out of the densest step the
+        /// Library's days take over (SPEC §15.5). Each step is a "level change" on a trackpad with haptics.
         @objc func handleMagnify(_ gesture: NSMagnificationGestureRecognizer) {
             switch gesture.state {
-            case .began: pinchAmount = 0
-            case .changed:
-                pinchAmount = gesture.magnification
-                guard abs(pinchAmount) > 0.3 else { return }
-                let zoomIn = pinchAmount > 0
+            case .began:
                 pinchAmount = 0
-                gesture.state = .ended
-                zoom(in: zoomIn)
+                let location = gesture.location(in: contentView)
+                let id = collectionView.indexPathForItem(at: collectionView.convert(location, from: contentView)).flatMap { fileId(at: $0) }
+                pinchAnchor = (id ?? anchorItem()).map { ($0, location.y - contentView.bounds.minY) }
+            case .changed:
+                let delta = gesture.magnification - pinchAmount
+                guard abs(delta) > 0.22 else { return }
+                pinchAmount = gesture.magnification
+                let zoomIn = delta > 0
+                let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
+                if next != zoomStep {
+                    LibraryZoomHaptics.trackpadLevelChange()
+                    callbacks?.columnsChanged(next)
+                } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
+                    LibraryZoomHaptics.trackpadLevelChange()
+                    let height = max(contentView.bounds.height, 1)
+                    let point = UnitPoint(x: 0.5, y: Double((pinchAnchor?.offset ?? 0) / height))
+                    gesture.state = .ended
+                    zoomPastEnd(pinchAnchor?.id, point)
+                }
+            case .ended, .cancelled, .failed:
+                // The relayout of the last step still uses the anchor; it is dropped after that.
+                DispatchQueue.main.async { [weak self] in self?.pinchAnchor = nil }
             default: break
             }
         }
@@ -469,7 +519,12 @@
 
         func zoom(in zoomIn: Bool) {
             let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
-            if next != zoomStep { callbacks?.columnsChanged(next) }
+            if next != zoomStep {
+                callbacks?.columnsChanged(next)
+            } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
+                // ⌘− at the densest step: the Library's days.
+                zoomPastEnd(anchorItem(), .top)
+            }
         }
 
         func menuActions(for id: FileID) -> [GridMenuAction] {
