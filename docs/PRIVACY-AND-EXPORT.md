@@ -20,9 +20,16 @@ need.
 | User defaults | `1C8F.1` (defaults of an App Group of the same developer) | `PhotosBackup/FilesAppLedger`: reads the auto-upload options of the Nextcloud Files app from `group.com.nextcloud.apps`, to avoid uploading its photos twice |
 | File timestamps | `C617.1` (files in the app's containers) | `PhotosMedia`: `PreviewCache` and `ImagePipeline` set and read the modification time of cached files to trim the least recently used |
 | File timestamps | `3B52.1` (files the user gave the app access to) | `PhotosNetworking/Uploader.fingerprint`: size and modification time of a file being uploaded identify an interrupted upload that can be continued |
+| User defaults | `1C8F.1` (App Group of the app) | `PhotosCore/AppLock`, `PhotosAppUI` settings: the app lock setting lives in the app's own App Group, where the widgets and the share extension read it |
+| File timestamps | `C617.1` (files in the app's containers) | `PhotosAppUI/ShareExtension`: the share extension removes its own temporary copies older than an hour |
 | System boot time | `35F9.1` (time between events inside the app) | `PhotosAppUI/Grid/PhotoGrid+AppKit`: `ProcessInfo.systemUptime` as the timestamp of a synthesized key event, macOS only |
+| Disk space | `E174.1` (check for enough space before writing files) | `PhotosBackup/BackupEngine`: `volumeAvailableCapacityForImportantUsage` (and `volumeAvailableCapacity` as fallback) before a photo is exported for upload; backup stops with "free up space" instead of filling the device |
 
-Not used (checked with grep): disk space APIs, active keyboards.
+The disk-space entry is in the app's manifest, in `PhotosBackup`'s, and in every extension's (they link PhotosCore and with
+it PhotosBackup statically, so the API is in their binaries too).
+
+Not used (checked with grep, round 3): active keyboards. `ContinuousClock` (PhotosStore) is a Swift clock, not one of the
+listed boot-time APIs; the diagnostics log rotates by size (`fileSizeKey`), not by date.
 
 **Collected data**
 
