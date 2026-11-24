@@ -12,4 +12,5 @@ IntegrationTests.xcconfig
 Config/Local.xcconfig
 # Written by `xcodegen generate` from the `info:` sections of project.yml, which is the only place to edit them.
 /App/Info.plist
+/App/*/Info.plist
 /Extensions/*/Info.plist

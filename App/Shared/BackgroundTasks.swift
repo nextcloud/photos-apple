@@ -32,6 +32,8 @@
         @MainActor static func runRefresh() async {
             schedule()
             await run()
+            // A new day: the watch gets its photos without the app being opened.
+            await WatchBridge.shared.update()
         }
 
         /// Stops the backup pass because the background time is over. Not while the app is in front: there the pass may go on.
@@ -82,6 +84,8 @@
         {
             // Creates the app model now: a launch in the background shows no window that would do it.
             _ = AppHost.model
+            // Today's photos for the Apple Watch app (SPEC §15.3).
+            WatchBridge.shared.start(app: AppHost.model)
             BGTaskScheduler.shared.register(forTaskWithIdentifier: BackgroundTasks.processing, using: nil) { task in
                 let work = Task { @MainActor in await BackgroundTasks.run() }
                 task.expirationHandler = { work.cancel() }

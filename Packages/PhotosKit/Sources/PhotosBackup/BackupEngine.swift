@@ -290,8 +290,13 @@ public actor BackupEngine {
         while !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)), url.pathComponents.count > 1 {
             url = url.deletingLastPathComponent()
         }
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
-        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        #if os(tvOS) || os(watchOS)
+            // Not on Apple TV and Apple Watch (no backup there, SPEC §15.3): the plain free capacity.
+            let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+        #else
+            let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+            if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        #endif
         return values?.volumeAvailableCapacity.map(Int64.init)
     }
 

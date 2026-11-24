@@ -121,6 +121,9 @@ public enum UserAgent {
             let platform = "visionOS"
         #elseif os(macOS)
             let platform = "macOS"
+        #elseif os(tvOS)
+            // The server lists the TV's login under this name (Settings › Security), apart from the iPhone's.
+            let platform = "tvOS"
         #else
             let platform = "iOS"
         #endif

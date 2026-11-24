@@ -5,6 +5,8 @@ options:
     iOS: "27.0"
     macOS: "27.0"
     visionOS: "27.0"
+    tvOS: "27.0"
+    watchOS: "27.0"
   createIntermediateGroups: true
   developmentLanguage: en
 configFiles:
@@ -42,6 +44,10 @@ targets:
       - target: BackgroundUpload
         embed: true
         destinationFilters: [iOS, macOS]
+      # The Apple Watch app (SPEC §15.3) comes with the iPhone app.
+      - target: NextcloudPhotosWatch
+        embed: true
+        destinationFilters: [iOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID)
@@ -263,6 +269,165 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: com.apple.photos.background-upload
+  # Apple TV (SPEC §15.3): its own app with screens for the Siri Remote, on PhotosCore like the other platforms.
+  NextcloudPhotosTV:
+    type: application
+    platform: tvOS
+    sources:
+      - path: App/TV
+        excludes: ["*.entitlements", "Info.plist"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosCore
+      - target: TopShelf
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).tv
+        PRODUCT_NAME: Nextcloud Photos
+        TARGETED_DEVICE_FAMILY: "3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: App Icon & Top Shelf Image
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # Entitlements: always in Release, in Debug only with PHOTOS_DEBUG_ENTITLEMENTS = YES (Config/Base.xcconfig).
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: App/TV/NextcloudPhotosTV.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: App/TV/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.photography
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Automatic
+        NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
+        # As on the other platforms: self-hosted servers, addresses typed in by the user (docs/PRIVACY-AND-EXPORT.md).
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # The Top Shelf opens memories with nextcloudphotos://memories/<id>[/play].
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PHOTOS_BUNDLE_ID).tv
+            CFBundleURLSchemes: [nextcloudphotos]
+  # The Top Shelf of the TV app: recent memories from what the app leaves in the App Group (no account, no network).
+  TopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: Extensions/TopShelf
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosModel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).tv.topshelf
+        PRODUCT_NAME: TopShelf
+        SKIP_INSTALL: YES
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/TopShelf/TopShelf.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: Extensions/TopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
+  # Apple Watch (SPEC §15.3): today's photos and favourites sent by the iPhone app (WatchConnectivity); no login on the watch.
+  NextcloudPhotosWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: App/Watch
+        excludes: ["*.entitlements", "Info.plist"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosModel
+      - target: WatchWidgets
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).watchkitapp
+        PRODUCT_NAME: Nextcloud Photos
+        TARGETED_DEVICE_FAMILY: "4"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SKIP_INSTALL: YES
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: App/Watch/NextcloudPhotosWatch.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: App/Watch/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: $(PHOTOS_BUNDLE_ID)
+        WKRunsIndependentlyOfCompanionApp: false
+  # The watch face complication: the photo of the day from the watch app's App Group.
+  WatchWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Extensions/WatchWidgets
+        excludes: ["*.entitlements"]
+    dependencies:
+      - package: PhotosKit
+        product: PhotosModel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).watchkitapp.widgets
+        PRODUCT_NAME: WatchWidgets
+        SKIP_INSTALL: YES
+        PHOTOS_ENTITLEMENTS_NO: ""
+        PHOTOS_ENTITLEMENTS_YES: Extensions/WatchWidgets/WatchWidgets.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_$(PHOTOS_DEBUG_ENTITLEMENTS))
+        Release:
+          CODE_SIGN_ENTITLEMENTS: $(PHOTOS_ENTITLEMENTS_YES)
+    info:
+      path: Extensions/WatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Nextcloud Photos
+        PhotosAppGroup: group.$(PHOTOS_BUNDLE_ID)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  # A tour of the Apple TV app with the Siri Remote (XCUIRemote) against a test server; not part of PR CI (docs/TESTING.md).
+  NextcloudPhotosTVUITests:
+    type: bundle.ui-testing
+    platform: tvOS
+    sources:
+      - path: UITestsTV
+    dependencies:
+      - target: NextcloudPhotosTV
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).tv.uitests
+        TEST_TARGET_NAME: NextcloudPhotosTV
+        GENERATE_INFOPLIST_FILE: YES
   # Smoke tests of the running app against a test server; not part of PR CI (docs/TESTING.md).
   NextcloudPhotosUITests:
     type: bundle.ui-testing
@@ -278,6 +443,18 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
 schemes:
+  NextcloudPhotosTV:
+    build:
+      targets:
+        NextcloudPhotosTV: all
+        NextcloudPhotosTVUITests: [test]
+    test:
+      targets:
+        - NextcloudPhotosTVUITests
+  NextcloudPhotosWatch:
+    build:
+      targets:
+        NextcloudPhotosWatch: all
   NextcloudPhotos:
     build:
       targets:

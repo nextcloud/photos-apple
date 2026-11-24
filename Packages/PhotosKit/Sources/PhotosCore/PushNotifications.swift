@@ -242,12 +242,15 @@ public enum PushNotifications {
 
     /// Fills a notification from a presentation and remembers which server notification it is, so a later delete push finds it.
     public static func apply(_ presentation: Presentation, account: AccountID, to content: UNMutableNotificationContent) {
-        content.title = presentation.title
-        content.body = presentation.body
-        content.threadIdentifier = presentation.threadIdentifier
-        content.userInfo[accountKey] = account.rawValue
-        if let id = presentation.notificationId { content.userInfo[notificationIdKey] = id }
-        if let destination = presentation.destination { content.userInfo[destinationKey] = destination }
+        // Apple TV shows no notification banners and keeps none (SPEC §15.3).
+        #if !os(tvOS)
+            content.title = presentation.title
+            content.body = presentation.body
+            content.threadIdentifier = presentation.threadIdentifier
+            content.userInfo[accountKey] = account.rawValue
+            if let id = presentation.notificationId { content.userInfo[notificationIdKey] = id }
+            if let destination = presentation.destination { content.userInfo[destinationKey] = destination }
+        #endif
     }
 
     /// A delivered notification as far as removal is concerned.
@@ -270,15 +273,18 @@ public enum PushNotifications {
 
     /// Removes the notifications a delete push withdraws from Notification Centre.
     public static func removeDelivered(_ action: Action, account: AccountID) async {
-        let center = UNUserNotificationCenter.current()
-        let delivered = await center.deliveredNotifications().map { notification in
-            let userInfo = notification.request.content.userInfo
-            return Delivered(
-                identifier: notification.request.identifier, account: userInfo[accountKey] as? String,
-                notificationId: userInfo[notificationIdKey] as? Int)
-        }
-        let identifiers = identifiersToRemove(action, account: account, delivered: delivered)
-        if !identifiers.isEmpty { center.removeDeliveredNotifications(withIdentifiers: identifiers) }
+        // Apple TV shows no notification banners and keeps none (SPEC §15.3).
+        #if !os(tvOS)
+            let center = UNUserNotificationCenter.current()
+            let delivered = await center.deliveredNotifications().map { notification in
+                let userInfo = notification.request.content.userInfo
+                return Delivered(
+                    identifier: notification.request.identifier, account: userInfo[accountKey] as? String,
+                    notificationId: userInfo[notificationIdKey] as? Int)
+            }
+            let identifiers = identifiersToRemove(action, account: account, delivered: delivered)
+            if !identifiers.isEmpty { center.removeDeliveredNotifications(withIdentifiers: identifiers) }
+        #endif
     }
 
     /// A silent (background) push: delete pushes are handled, everything else is ignored. Returns true when something was removed

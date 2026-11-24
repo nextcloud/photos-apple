@@ -122,14 +122,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        scheme: [NextcloudPhotos]
         destination: ["generic/platform=iOS Simulator", "platform=macOS", "generic/platform=visionOS Simulator"]
+        # Apple TV and Apple Watch (SPEC §15.3); the iOS build above includes the watch app too.
+        include:
+          - scheme: NextcloudPhotosTV
+            destination: "generic/platform=tvOS Simulator"
+          - scheme: NextcloudPhotosWatch
+            destination: "generic/platform=watchOS Simulator"
     steps:
       - uses: actions/checkout@v4
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
       - name: Build
         run: |
-          xcodebuild -project NextcloudPhotos.xcodeproj -scheme NextcloudPhotos -destination '${{ matrix.destination }}' \
+          xcodebuild -project NextcloudPhotos.xcodeproj -scheme '${{ matrix.scheme }}' -destination '${{ matrix.destination }}' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=- build
   release-build:
     # The Release configuration differs from Debug (optimisation, entitlements, no debug-only code): archive it without
