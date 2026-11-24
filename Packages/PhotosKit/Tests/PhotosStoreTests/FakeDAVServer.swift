@@ -22,6 +22,8 @@ final class FakeDAVServer: Sendable {
         var place: String?
         var caption: String?
         var mime = "image/jpeg"
+        /// `nc:mount-type`: empty for the user's own storage, "external", "shared", "group"…
+        var mountType = ""
     }
 
     enum Kind: Sendable, Equatable {
@@ -51,6 +53,11 @@ final class FakeDAVServer: Sendable {
         var requests: [Request] = []
         /// When true, every request fails as if the device were offline.
         var offline = false
+        /// Folders on a storage that is not available right now (an external storage that is not mounted): searches
+        /// leave their files out, and a PROPFIND below them answers 503 like Nextcloud's `StorageNotAvailableException`.
+        var unavailable: Set<String> = []
+        /// Files every search leaves out although they exist (a search that came back short).
+        var hiddenFromSearch: Set<FileID> = []
         var generation = 1
     }
 
@@ -188,6 +195,12 @@ final class FakeDAVServer: Sendable {
     private func respond(to request: Request, headers: [String: String], state: inout State) -> Response {
         switch request.kind {
         case .propfind:
+            if state.unavailable.contains(where: { request.path == $0 || request.path.hasPrefix($0 + "/") }) {
+                return .http(status: 503, body: "")
+            }
+            if let file = state.files.values.first(where: { $0.path == request.path }) {
+                return .http(status: 207, body: Self.multistatus(xml(file)))
+            }
             guard state.folders.contains(request.path) else { return .http(status: 404, body: "") }
             let body =
                 "<d:response><d:href>/remote.php/dav/files/\(user)\(request.path)/</d:href><d:propstat><d:prop><d:getetag>&quot;\(state.rootETag)&quot;</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
@@ -250,6 +263,7 @@ final class FakeDAVServer: Sendable {
         let scopes = request.body.matches(of: /<d:scope><d:href>([^<]*)<\/d:href>/).map { String($0.1.dropFirst("/files/\(user)".count)) }
         var files = state.files.values.filter { file in
             include(file) && scopes.contains { $0.isEmpty || file.path.hasPrefix($0 + "/") }
+                && !state.unavailable.contains { file.path.hasPrefix($0 + "/") } && !state.hiddenFromSearch.contains(file.id)
         }
         files.sort { (order?($0) ?? $0.modified, $0.id) > (order?($1) ?? $1.modified, $1.id) }
         if let limit { files = Array(files.prefix(limit)) }
@@ -261,6 +275,7 @@ final class FakeDAVServer: Sendable {
         props += "<d:getetag>&quot;\(file.etag)&quot;</d:getetag>"
         props += "<d:getlastmodified>\(HTTPDate.format(Date(timeIntervalSince1970: file.modified)))</d:getlastmodified>"
         props += "<oc:favorite>\(file.favorite ? 1 : 0)</oc:favorite><oc:permissions>RGDNVW</oc:permissions>"
+        if !file.mountType.isEmpty { props += "<nc:mount-type>\(file.mountType)</nc:mount-type>" }
         if let uploaded = file.uploaded { props += "<nc:upload_time>\(Int(uploaded))</nc:upload_time>" }
         if let captured = file.captured {
             props += "<nc:metadata-photos-original_date_time>\(Int(captured))</nc:metadata-photos-original_date_time>"

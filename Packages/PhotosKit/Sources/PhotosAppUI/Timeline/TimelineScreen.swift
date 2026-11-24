@@ -107,7 +107,8 @@ struct TimelineScreen: View {
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
         }
-        .refreshable { await session.syncNow(forceReconcile: true) }
+        // Pull to refresh reconciles only when the last walk through the library is a while ago ("Sync now" always does).
+        .refreshable { await session.syncNow(reconcile: .refresh) }
     }
 
     func observe() {

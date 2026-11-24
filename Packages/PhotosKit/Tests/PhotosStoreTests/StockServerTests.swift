@@ -343,6 +343,15 @@ final class RecordedProtocol: URLProtocol, @unchecked Sendable {
         let lisbon = try #require(try collections.albums(.own).first { $0.name == "Lisbon 2025" })
         try await engine.refreshAlbumContent(lisbon)
         #expect(try collections.albumItems(albumId: lisbon.id).count == 10)
+        // Opened again: the album alone is asked for, and its content is not read again while the album says nothing
+        // changed.
+        let albumLine = "PROPFIND /remote.php/dav/photos/admin/albums/Lisbon 2025/"
+        let reads = server.lines.filter { $0 == albumLine }.count
+        try await engine.refreshAlbumContent(lisbon)
+        #expect(server.lines.filter { $0 == albumLine }.count == reads + 1)
+        #expect(try collections.albumItems(albumId: lisbon.id).count == 10)
+        try await engine.refreshAlbumContent(lisbon, force: true)
+        #expect(server.lines.filter { $0 == albumLine }.count == reads + 3)
         try await engine.refreshPlaces()
         #expect(try await database.writer.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM place") } == 36)
 

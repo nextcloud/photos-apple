@@ -5,6 +5,7 @@ import Foundation
 import Testing
 
 @testable import PhotosModel
+@testable import PhotosNetworking
 @testable import PhotosStore
 
 @Suite struct StoreTests {
@@ -63,5 +64,31 @@ import Testing
         }
         #expect(try store.gridItems(.all).isEmpty)
         #expect(try store.gridItems(.archived).count == 1)
+    }
+
+    /// Album content read again writes only what changed (SPEC §5.4; 28): an unchanged album writes its fetch time alone.
+    @Test func albumContentIsWrittenAsADifference() async throws {
+        let database = try AccountDatabase.temporary()
+        let store = LibraryStore(database: database)
+        let collections = CollectionStore(database: database)
+        try store.upsert((1...50).map { item(FileID($0), Double($0)) })
+        try collections.upsertAlbum(Album(kind: .own, name: "Trip"))
+        func children(_ ids: [FileID]) -> [MediaParser.CollectionChild] {
+            ids.map { MediaParser.CollectionChild(item: item($0, Double($0)), childName: "\($0)-x.jpg", origin: "user", ownerPath: nil) }
+        }
+        // 60 entries, ten of them not in the index (kept for the viewer).
+        let all: [FileID] = Array(1...60)
+        try collections.replaceAlbumContent(albumId: "own:Trip", children: children(all))
+        func changes(_ body: () throws -> Void) async throws -> Int {
+            let before = try await database.writer.write { db in db.totalChangesCount }
+            try body()
+            return try await database.writer.write { db in db.totalChangesCount } - before
+        }
+        #expect(try await changes { try collections.replaceAlbumContent(albumId: "own:Trip", children: children(all)) } == 1)
+        // The last one removed, one added (not in the index): its row and its item, the removed row, and the album.
+        let next = Array(all.dropLast()) + [61]
+        #expect(try await changes { try collections.replaceAlbumContent(albumId: "own:Trip", children: children(next)) } == 4)
+        #expect(try collections.albumItems(albumId: "own:Trip").map(\.fileId) == next)
+        #expect(try collections.album(id: "own:Trip")?.itemCount == 60)
     }
 }

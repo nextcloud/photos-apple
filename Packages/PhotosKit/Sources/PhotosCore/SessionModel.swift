@@ -84,6 +84,10 @@ public final class SessionModel {
                     self?.syncStatusChanged(from: previous, to: status)
                 }
             }
+            // Walks through the whole library wait while a backup pass uploads (it changes the root ETag all the time).
+            await services.sync.setReconcileDeferral { [weak self] in
+                await MainActor.run { self?.backup.isPassRunning ?? false }
+            }
             await self?.refreshFeatures()
             await self?.syncNow()
             await services.outbox.kick()
@@ -211,8 +215,14 @@ public final class SessionModel {
     }
 
     public func syncNow(forceReconcile: Bool = false) async {
+        await syncNow(reconcile: forceReconcile ? .now : .ifDue)
+    }
+
+    /// Syncs; `.refresh` is pull-to-refresh (reconciles only if the last reconciliation is a while ago), `.now` is
+    /// "Sync now".
+    public func syncNow(reconcile: ReconcileRequest) async {
         guard let services, !isStopped else { return }
-        await services.sync.sync(forceReconcile: forceReconcile)
+        await services.sync.sync(reconcile: reconcile)
         await services.outbox.kick()
         await refreshFailedOperations()
     }

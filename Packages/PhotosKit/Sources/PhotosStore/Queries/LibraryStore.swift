@@ -828,7 +828,7 @@ public struct LibraryStore: Sendable {
     public func deleteIndex() throws {
         try database.writer.write { db in
             try db.execute(sql: SearchIndex.dropSQL)
-            try db.execute(sql: "DELETE FROM media; DELETE FROM syncState")
+            try db.execute(sql: "DELETE FROM media; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect")
             try db.execute(sql: SearchIndex.createSQL)
             try db.execute(sql: SearchIndex.triggersSQL)
         }
@@ -838,7 +838,10 @@ public struct LibraryStore: Sendable {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.
             try db.execute(sql: SearchIndex.dropSQL)
-            try db.execute(sql: "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState")
+            try db.execute(
+                sql:
+                    "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect"
+            )
             try db.execute(sql: SearchIndex.createSQL)
             try db.execute(sql: SearchIndex.triggersSQL)
         }

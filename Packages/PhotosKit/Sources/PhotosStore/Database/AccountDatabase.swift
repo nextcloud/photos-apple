@@ -274,6 +274,14 @@ public final class AccountDatabase: Sendable {
             // Album content in album order.
             try db.create(index: "albumItem_position", on: "albumItem", columns: ["albumId", "position"])
         }
+        // Resumable reconciliation (`SyncEngine.reconcile`). Tables of their own, so that a walk through the library never
+        // writes `media` (and never wakes the grids) just to remember how far it got.
+        migrator.registerMigration("v3-reconcile-walk") { db in
+            // The rows of the index a running walk has not met on the server yet (a snapshot taken when the walk began).
+            try db.create(table: "reconcileUnseen") { t in t.primaryKey("fileId", .integer) }
+            // The rows a listing found missing that were not removed yet: the mass-delete guard waits for a second listing.
+            try db.create(table: "reconcileSuspect") { t in t.primaryKey("fileId", .integer) }
+        }
         return migrator
     }
 }
