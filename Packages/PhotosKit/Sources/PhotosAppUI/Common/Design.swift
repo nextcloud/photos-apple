@@ -98,11 +98,18 @@ public struct PhotosAppIcon: View {
 
 extension View {
     /// The info panel: a trailing inspector on iOS/iPadOS and macOS, a sheet on visionOS (which has no inspector).
+    ///
+    /// Only the app opens it; the system may only close it (a swipe, a narrower window). On iPad the system restored an
+    /// inspector that had been open when the app was last quit, through the binding: the next launch showed an empty
+    /// "No selection" panel beside the Library, and ⌘I then seemed to do nothing because it closed that panel.
     func infoInspector<Content: View>(isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
+        let isPresented = Binding<Bool>(
+            get: { isPresented.wrappedValue },
+            set: { (shown: Bool) in if !shown { isPresented.wrappedValue = false } })
         #if os(visionOS)
-            sheet(isPresented: isPresented) { NavigationStack { content() } }
+            return sheet(isPresented: isPresented) { NavigationStack { content() } }
         #else
-            inspector(isPresented: isPresented) {
+            return inspector(isPresented: isPresented) {
                 content().inspectorColumnWidth(min: 260, ideal: 320, max: 420)
             }
         #endif

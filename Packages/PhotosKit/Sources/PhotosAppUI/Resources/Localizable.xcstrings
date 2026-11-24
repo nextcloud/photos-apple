@@ -2073,6 +2073,9 @@
     "Hide download" : {
       "comment" : "Sharing screen (Share via Nextcloud…): switch of a public link: visitors can view but get no download button."
     },
+    "Hide info" : {
+      "comment" : "Closes the info panel beside the grid (iPad)."
+    },
     "Hide memories" : {
       "comment" : "Context menu of the memories strip at the top of the library. They can be shown again in Settings."
     },

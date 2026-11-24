@@ -381,6 +381,19 @@ struct MediaGridScreen<Accessory: View>: View {
         // label and tooltip, and the toolbar can move single items to the overflow menu instead of clipping at the window edge.
         ToolbarItemGroup(placement: .primaryAction) {
             accessory()
+            #if os(iOS)
+                // The grid has no Info button of its own (the context menu's "Info" opens the panel): without this, an iPad
+                // without a keyboard (⌘I) could not close the panel again.
+                if showingInfo {
+                    Button {
+                        showingInfo = false
+                    } label: {
+                        Label(
+                            String(localized: "Hide info", bundle: .module, comment: "Closes the info panel beside the grid (iPad)."),
+                            systemImage: "info.circle.fill")
+                    }
+                }
+            #endif
             #if !os(macOS)
                 Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
                     if isSelecting { endSelection() } else { isSelecting = true }
