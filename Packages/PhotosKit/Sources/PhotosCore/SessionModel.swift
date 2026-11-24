@@ -34,6 +34,10 @@ public final class SessionModel {
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
     public private(set) var offline: OfflineManager?
+    /// Smart offline: the photos most likely wanted without network, within a budget (SPEC §15.8.1).
+    public private(set) var smartOffline: SmartOfflineManager?
+    /// Stickers made in the app (SPEC §15.8.2).
+    public private(set) var stickerBook: StickerBook?
     /// A partner's shared photos in this account's timeline (SPEC SH-8).
     public private(set) var partners: PartnerTimelineModel?
     @ObservationIgnored var albumsRefreshedAt: Date?
@@ -41,6 +45,8 @@ public final class SessionModel {
     @ObservationIgnored var spotlightEntries: [SpotlightEntry]?
     /// `afterSync()` runs (`SessionModel+Labels.swift`).
     @ObservationIgnored var afterSyncRunning = false
+    /// When smart offline and the photo of the day last ran (`SessionModel+Extras.swift`).
+    @ObservationIgnored var extrasState = ExtrasState()
     @ObservationIgnored weak var app: AppModel?
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -73,10 +79,17 @@ public final class SessionModel {
             partners = PartnerTimelineModel(services: services)
             let offline = OfflineManager(services: services)
             self.offline = offline
-            // Weak: the offline manager owns the services, whose image pipeline would otherwise own the manager.
-            Task { [weak offline] in
-                await services.images.setLocalOriginalProvider { [weak offline] fileId, etag in
-                    offline?.localFile(fileId: fileId, etag: etag)
+            let smart = SmartOfflineManager(
+                services: services, excludedFolders: { [weak self] in await MainActor.run { self?.excludedFolders ?? [] } })
+            smartOffline = smart
+            stickerBook = StickerBook(directory: services.layout.accountDirectory(account.id).appending(path: "Stickers"))
+            // Weak: the offline managers own the services, whose image pipeline would otherwise own the managers.
+            Task { [weak offline, weak smart] in
+                await services.images.setLocalOriginalProvider { [weak offline, weak smart] fileId, etag in
+                    offline?.localFile(fileId: fileId, etag: etag) ?? smart?.localOriginal(fileId: fileId, etag: etag)
+                }
+                await services.images.setLocalPreviewProvider { [weak smart] fileId, etag, bucket in
+                    smart?.localPreview(fileId: fileId, etag: etag, bucket: bucket)
                 }
             }
         }
@@ -145,6 +158,7 @@ public final class SessionModel {
         tasks = [:]
         await transfers.shutdown()
         await offline?.shutdown()
+        await smartOffline?.shutdown()
         if let services {
             await services.sync.setStatusHandler { _ in }
             await services.shutdown(closeDatabase: closeDatabase)

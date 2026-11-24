@@ -71,6 +71,9 @@ struct InfoPanel: View {
                 row(String(localized: "Size", bundle: .module), Formatters.bytes(item.size))
                 row(String(localized: "Type", bundle: .module), MimeTypes.formatName(mimeType: item.mimeType, fileName: item.name))
                 row(String(localized: "Folder", bundle: .module), item.directory)
+                if OfflineAvailability.isAvailable(item, session: session) {
+                    row(String(localized: "Offline", bundle: .module), String(localized: "Available offline", bundle: .module))
+                }
                 if let owner = item.ownerDisplayName ?? item.ownerId, !item.isOwnStorage {
                     row(String(localized: "Owner", bundle: .module), owner)
                 }

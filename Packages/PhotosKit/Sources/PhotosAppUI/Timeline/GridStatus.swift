@@ -104,7 +104,8 @@ struct GridStatusBanner: View {
                     Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
                 }
             case .offline:
-                pill(String(localized: "Offline – showing saved photos", bundle: .module), systemImage: "wifi.slash")
+                // With what smart offline keeps (SPEC §15.8.1).
+                OfflineAvailabilityBanner()
             case .loading(let count):
                 pill(
                     InitialSyncProgress.text(count: count, total: session.initialSyncTotal), systemImage: "arrow.triangle.2.circlepath")

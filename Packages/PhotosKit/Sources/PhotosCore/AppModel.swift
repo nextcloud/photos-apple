@@ -429,6 +429,8 @@ public final class AppModel {
 
     /// Maps a delivered notification to a destination (On this day for the Photos "onthisday" notification).
     public func handleNotification(userInfo: [AnyHashable: Any]) {
+        // A link with the account (the photo of the day): it opens in that account, or asks to switch.
+        if let link = (userInfo[PhotoOfTheDayNotifications.linkKey] as? String).flatMap(URL.init(string:)), open(link) { return }
         if let destination = userInfo[PushNotifications.destinationKey] as? String { requestedDestination = destination }
     }
 
@@ -477,7 +479,10 @@ struct SystemTraces: Sendable {
     static let none = SystemTraces(removeNotifications: { _ in }, reloadWidgets: {})
 
     static let live = SystemTraces(
-        removeNotifications: { id in await PushNotifications.removeDelivered(.removeAllDelivered, account: id) },
+        removeNotifications: { id in
+            await PushNotifications.removeDelivered(.removeAllDelivered, account: id)
+            await PhotoOfTheDayNotifications.removePending(account: id)
+        },
         reloadWidgets: {
             #if canImport(WidgetKit)
                 WidgetCenter.shared.reloadAllTimelines()

@@ -53,6 +53,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var nextcloudShareMany: PickedItems?
     /// Slideshow of the selection or of the whole grid (SPEC VW-5).
     @State private var slideshow: SlideshowRequest?
+    /// A collage of the selection (SPEC §15.8.3).
+    @State private var collage: CollageRequest?
     /// The tile "Show in library" opened the grid at, marked for a moment (iPhone, iPad, Vision Pro).
     @State private var highlight: TileHighlight?
     /// Haptic triggers (iPhone, iPad).
@@ -119,6 +121,7 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $newAlbumItems) { picked in AlbumEditor(album: nil, items: picked.items) }
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
+            .collageEditor($collage)
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
             .sheet(item: $editedItem) { item in EditorView(item: item) }
@@ -674,6 +677,12 @@ struct MediaGridScreen<Accessory: View>: View {
             GridMenuAction(id: "slideshow", title: SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage) { ids in
                 playSlideshow(ids)
             })
+        if summary.count <= CollageStyle.grid.maxPhotos {
+            actions.append(
+                GridMenuAction(id: "collage", title: CollageRequest.menuTitle, systemImage: "rectangle.3.group") { ids in
+                    withItems(ids) { collage = CollageRequest.selection($0) }
+                })
+        }
         let albumTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album…."),
             other: LocalizedStringResource("Add to album", bundle: .module, comment: "Submenu with the recent albums and New album…."))

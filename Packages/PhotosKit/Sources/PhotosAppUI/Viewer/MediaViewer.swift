@@ -28,6 +28,8 @@ struct MediaViewer: View {
     @State private var extractingText: MediaItem?
     @State private var addingToAlbum: MediaItem?
     @State private var tagging: MediaItem?
+    /// "Make Sticker" (SPEC §15.8.2).
+    @State private var stickerItem: MediaItem?
     /// Nextcloud's own sharing of the photo shown (SPEC SH-7).
     @State private var nextcloudShare: SharingTarget?
     /// Slideshow from the photo shown through the viewer's photos (SPEC VW-5).
@@ -158,6 +160,7 @@ struct MediaViewer: View {
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
             .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
+            .sheet(item: $stickerItem) { item in StickerSheet(item: item) }
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
@@ -569,6 +572,11 @@ struct MediaViewer: View {
                 extractingText = item
             } label: {
                 Label(String(localized: "Extract text", bundle: .module), systemImage: "text.viewfinder")
+            }
+            Button {
+                stickerItem = item
+            } label: {
+                Label(StickerWording.menuTitle, systemImage: "face.smiling")
             }
         }
         if canEditMetadata(item) {
