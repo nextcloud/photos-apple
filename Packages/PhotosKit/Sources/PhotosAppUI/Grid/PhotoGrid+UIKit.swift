@@ -22,8 +22,12 @@
         var squareTiles = true
         /// Moment titles on the day headers (the Library, SPEC §16.1).
         var moments = MomentHeaders.none
+        /// A view that scrolls above the first section (the Library's memories, SPEC §17.2); nil: none.
+        var header: AnyView? = nil
         var services: AccountServices
         var callbacks: GridCallbacks
+        /// A cover with the title above the first row (iPhone, iPad; SPEC §17.4).
+        var hero: GridHero? = nil
 
         func makeUIViewController(context: Context) -> PhotoGridController {
             PhotoGridController(services: services)
@@ -41,6 +45,12 @@
                 update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders,
                 squareTiles: squareTiles)
             controller.setMoments(moments)
+            // The header is hosted inside the collection view, so it scrolls with the photos; it gets this view's
+            // environment (session, navigation) so that its links and buttons work as before.
+            controller.setHeader(header.map { AnyView($0.environment(\.self, context.environment)) })
+            #if os(iOS)
+                controller.setHero(hero)
+            #endif
         }
     }
 
@@ -56,7 +66,10 @@
                     locator.reveal = { [weak self] id in self?.reveal(id) }
                     locator.place = { [weak self] id, fraction in self?.place(id, fraction: fraction) }
                     locator.topItem = { [weak self] in self?.anchorItem() }
+                    locator.coveredChanged = { [weak self] covered in self?.setCovered(covered) }
+                    if isViewLoaded { setCovered(locator.isCovered) }
                 }
+                callbacks?.motion?.favorited = { [weak self] ids in self?.playHeartBursts(ids) }
             }
         }
         private let refreshRunner = GridRefreshRunner()
@@ -89,6 +102,27 @@
         /// Sliding across tiles while selecting, and peeking into videos, Live Photos and stacks (SPEC §16.1).
         private var rangeSelector: GridRangeSelector?
         private var peek: GridPeekPresenter?
+        /// The month (and moment) of the photos at the top, in a glass capsule (SPEC §17.2).
+        private let datePill = GridDatePillView()
+        /// The section the pill was last filled from.
+        private var pillSection: Int?
+        /// A context menu is open: hearts wait until it has closed (the tile is hidden under its preview until then).
+        private var menuShowing = false
+        private var pendingBursts: [FileID] = []
+        /// The view above the first section, and its height in the document.
+        private var headerHost: UIHostingController<AnyView>?
+        private var gridHeaderHeight: CGFloat = 0
+        static let gridHeaderKind = "grid-header"
+        #if os(iOS)
+            /// The hero header above the first row (SPEC §17.4).
+            private let heroHost = GridHeroHost()
+
+            func setHero(_ hero: GridHero?) {
+                guard hero != nil || heroHost.isActive else { return }
+                loadViewIfNeeded()
+                heroHost.update(hero, in: self, collectionView: collectionView)
+            }
+        #endif
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -106,12 +140,19 @@
 
         required init?(coder: NSCoder) { fatalError() }
 
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            // The tab bar minimises while the grid scrolls down, the bars get their scroll edge effect (SPEC §17.3).
+            registerContentScrollView(collectionView)
+        }
+
         override func viewDidLoad() {
             super.viewDidLoad()
             collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: makeLayout())
             collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             collectionView.backgroundColor = .systemBackground
             collectionView.dataSource = self
+            setCovered(callbacks?.tileLocator?.isCovered ?? false)
             collectionView.delegate = self
             collectionView.prefetchDataSource = self
             // iPad: tiles can be dragged into other apps (the default leaves drags off on iPhone).
@@ -127,7 +168,17 @@
             collectionView.register(
                 SectionHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                 withReuseIdentifier: SectionHeader.reuseIdentifier)
+            collectionView.register(
+                GridHeaderSlot.self, forSupplementaryViewOfKind: Self.gridHeaderKind, withReuseIdentifier: GridHeaderSlot.reuseIdentifier)
             view.addSubview(collectionView)
+            // Edge to edge (SPEC §17.2): the photos scroll under the bars, which soften them with the system's blur.
+            collectionView.topEdgeEffect.style = .soft
+            // The date pill floats over the photos; the edge blur reaches down under it.
+            let edgeElements = UIScrollEdgeElementContainerInteraction()
+            edgeElements.scrollView = collectionView
+            edgeElements.edge = .top
+            datePill.addInteraction(edgeElements)
+            view.addSubview(datePill)
             scrubber.isHidden = true
             scrubber.labelAt = { [weak self] fraction in self?.scrubberLabel(at: fraction) ?? "" }
             scrubber.onScrub = { [weak self] fraction in self?.scroll(toFraction: fraction) }
@@ -149,6 +200,8 @@
                 controller.core.headerMetrics = Self.currentHeaderMetrics
                 controller.collectionView.collectionViewLayout.invalidateLayout()
                 controller.reloadScrubber()
+                controller.pillSection = nil
+                controller.updateDatePill(animated: false)
             }
             registerForTraitChanges([UITraitDisplayScale.self]) { (controller: PhotoGridController, _: UITraitCollection) in
                 controller.refreshVisibleTiles()
@@ -161,6 +214,8 @@
         /// New moment titles: the headers on screen show them at once; their heights stay (one line either way).
         func setMoments(_ moments: MomentHeaders) {
             guard core.headerTexts.setMoments(moments), isViewLoaded else { return }
+            pillSection = nil
+            updateDatePill(animated: false)
             let kind = UICollectionView.elementKindSectionHeader
             for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
                 guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? SectionHeader else { continue }
@@ -172,6 +227,69 @@
             guard let section = model.sections[safe: index] else { return }
             header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
             header.openMoment = { [weak self] id in self?.callbacks?.openMoment?(id) }
+        }
+
+        // MARK: Header (the Library's memories)
+
+        func setHeader(_ header: AnyView?) {
+            if let header {
+                if let host = headerHost {
+                    host.rootView = header
+                } else {
+                    let host = UIHostingController(rootView: header)
+                    host.sizingOptions = [.intrinsicContentSize]
+                    host.safeAreaRegions = []
+                    host.view.backgroundColor = .clear
+                    addChild(host)
+                    host.didMove(toParent: self)
+                    headerHost = host
+                }
+            } else if let host = headerHost {
+                host.willMove(toParent: nil)
+                host.view.removeFromSuperview()
+                host.removeFromParent()
+                headerHost = nil
+            }
+            updateGridHeaderHeight()
+        }
+
+        override func preferredContentSizeDidChange(forChildContentContainer container: any UIContentContainer) {
+            super.preferredContentSizeDidChange(forChildContentContainer: container)
+            updateGridHeaderHeight()
+        }
+
+        /// The header's height at the grid's width; a new height lays the grid out again with the photos kept in place.
+        private func updateGridHeaderHeight() {
+            guard isViewLoaded else { return }
+            let width = collectionView.bounds.width > 0 ? collectionView.bounds.width : view.bounds.width
+            var height: CGFloat = 0
+            if let host = headerHost, width > 0 {
+                height = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height.rounded(.up)
+            }
+            guard abs(height - gridHeaderHeight) > 0.5,
+                let layout = collectionView.collectionViewLayout as? UICollectionViewCompositionalLayout
+            else { return }
+            let wasAtTop = collectionView.contentOffset.y <= -topInset + 1
+            let anchor = anchorItem()
+            gridHeaderHeight = height
+            let configuration = UICollectionViewCompositionalLayoutConfiguration()
+            if height > 0 {
+                configuration.boundarySupplementaryItems = [
+                    NSCollectionLayoutBoundarySupplementaryItem(
+                        layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height)),
+                        elementKind: Self.gridHeaderKind, alignment: .top)
+                ]
+            }
+            layout.configuration = configuration
+            if wasAtTop {
+                // At the top it stays at the top: the header comes or goes above what is shown (the collection view would
+                // keep the first tile where it was instead).
+                collectionView.layoutIfNeeded()
+                collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: -topInset), animated: false)
+            } else {
+                restore(anchor)
+            }
+            reloadScrubber()
         }
 
         // MARK: Pull to refresh
@@ -225,9 +343,10 @@
         private func headerHeight(section: Int) -> Double { core.headerHeight(section: section) }
 
         func makeLayout() -> UICollectionViewLayout {
-            UICollectionViewCompositionalLayout { [weak self] sectionIndex, environment in
+            // The headers scroll with their photos: the date pill stays at the top instead (SPEC §17.2).
+            GridCollectionLayout { [weak self] sectionIndex, environment in
                 self?.core.sectionMetrics(sectionIndex, width: Double(environment.container.effectiveContentSize.width), wholePoints: false)
-                    .layoutSection(headerKind: UICollectionView.elementKindSectionHeader)
+                    .layoutSection(headerKind: UICollectionView.elementKindSectionHeader, pinsHeaders: false)
             }
         }
 
@@ -293,6 +412,14 @@
                 collectionView.reloadData()
                 return
             }
+            // Tiles the user just deleted or archived leave in an animated batch, and come back the same way on Undo.
+            if let motion = callbacks?.motion, motion.hasExpectations,
+                let items = GridItemChanges.make(old: core.model, new: model, changes: changes),
+                let style = motion.style(gone: items.gone, back: items.back)
+            {
+                applyAnimated(items, style: style, content: changes.content, model: model)
+                return
+            }
             let anchor = anchorItem()
             // The collection view must know the old sections before the batch (after a reload it may not have asked yet).
             _ = collectionView.numberOfSections
@@ -306,6 +433,51 @@
             }
             restore(anchor)
             if !changes.content.isEmpty { refreshVisibleTiles(only: changes.content) }
+        }
+
+        /// Single tiles leave (and come) with their style while their neighbours flow into the gap, in one spring.
+        private func applyAnimated(_ items: GridItemChanges, style: GridLeaveStyle, content: Set<FileID>, model: GridModel) {
+            _ = collectionView.numberOfSections
+            peek?.end()
+            core.show(model, relayout: true)
+            let layout = collectionView.collectionViewLayout as? GridCollectionLayout
+            layout?.leaveStyle = style
+            UIView.animate(springDuration: 0.45, bounce: 0, options: [.allowUserInteraction]) {
+                self.collectionView.performBatchUpdates {
+                    self.collectionView.deleteSections(items.deletedSections)
+                    self.collectionView.insertSections(items.insertedSections)
+                    self.collectionView.deleteItems(at: items.deletedItems)
+                    self.collectionView.insertItems(at: items.insertedItems)
+                } completion: { _ in
+                    layout?.leaveStyle = nil
+                }
+            }
+            // A day that now starts its month says so.
+            if !items.headerChanges.isEmpty { reconfigureVisibleHeaders() }
+            if !content.isEmpty { refreshVisibleTiles(only: content) }
+            pillSection = nil
+        }
+
+        private func reconfigureVisibleHeaders() {
+            let kind = UICollectionView.elementKindSectionHeader
+            for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+                guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? SectionHeader else { continue }
+                configure(header, section: indexPath.section)
+            }
+        }
+
+        /// A heart springs up over the tiles on screen that were just made favourites.
+        private func playHeartBursts(_ ids: [FileID]) {
+            guard isViewLoaded, view.window != nil else { return }
+            if menuShowing {
+                pendingBursts += ids
+                return
+            }
+            let wanted = Set(ids)
+            for case let cell as PhotoCell in collectionView.visibleCells {
+                guard let id = cell.fileId, wanted.contains(id) else { continue }
+                cell.playHeartBurst()
+            }
         }
 
         private func setSelecting(_ selecting: Bool) {
@@ -357,6 +529,16 @@
         func fileId(at indexPath: IndexPath) -> FileID? { core.fileId(at: indexPath) }
 
         private func indexPath(for id: FileID) -> IndexPath? { core.indexPath(for: id) }
+
+        /// The Library's years, months or days cover the grid (SPEC §17.5): its tiles, headers and scrubber are out of
+        /// VoiceOver's reach meanwhile.
+        private func setCovered(_ covered: Bool) {
+            view.accessibilityElementsHidden = covered
+            collectionView?.accessibilityElementsHidden = covered
+            // A leaf element has no children for any accessibility client: the SwiftUI host lists the grid's cells
+            // even when it is hidden.
+            collectionView?.isAccessibilityElement = covered
+        }
 
         /// The tile's frame in this controller's view, when it is on screen (the zoom transition of the viewer).
         func tileFrame(_ id: FileID) -> CGRect? {
@@ -421,11 +603,16 @@
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
+            #if os(iOS)
+                heroHost.layout(collectionView)
+            #endif
             if core.columnsChanged(width: gridWidth) { restore(core.resizeAnchor) }
             core.resizeAnchor = nil
             if core.sideChanged(width: gridWidth) { refreshVisibleTiles() }
             core.noteLayout(width: gridWidth)
+            if headerHost != nil { updateGridHeaderHeight() }
             layoutScrubber()
+            layoutDatePill()
         }
 
         // MARK: Date scrubber
@@ -454,6 +641,10 @@
 
         private func reloadScrubber() {
             guard isViewLoaded else { return }
+            defer {
+                pillSection = nil
+                updateDatePill(animated: false)
+            }
             let visibleHeight = visibleHeight
             guard headersShown, visibleHeight > 0 else {
                 setScrubberShown(false)
@@ -461,8 +652,11 @@
             }
             let sections = model.sections
             // Placeholder tiles (the first sync's skeleton) count: the scrubber covers the whole library.
+            // The header above the first section (memories) comes first in the document.
+            let headerOffset = Double(gridHeaderHeight)
             sectionOffsets = geometry.sectionOffsets(
-                itemCounts: sections.map(\.tileCount), headerHeights: sections.map { headerMetrics.height(for: $0) })
+                itemCounts: sections.map(\.tileCount), headerHeights: sections.map { headerMetrics.height(for: $0) }
+            ).map { $0 + headerOffset }
             let range = scrollRange
             // Not worth it for a library that fits on two screens.
             guard range > visibleHeight else {
@@ -528,8 +722,12 @@
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            #if os(iOS)
+                heroHost.layout(collectionView)
+            #endif
             // Only the user's scrolling shows the scrubber, not a jump to a photo or a relayout.
             updateScrubberPosition(userInitiated: scrollView.isTracking || scrollView.isDecelerating)
+            updateDatePill(animated: true)
             // A peek belongs to the tile under the pointer; the grid moved away under it.
             if peek?.isPeeking == true, scrollView.isTracking || scrollView.isDecelerating { peek?.end() }
         }
@@ -537,6 +735,49 @@
         func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
             layoutScrubber()
             reloadScrubber()
+            layoutDatePill()
+        }
+
+        // MARK: Date pill (SPEC §17.2)
+
+        /// The pill sits under the bars at the leading edge, clear of the date scrubber.
+        private func layoutDatePill() {
+            guard isViewLoaded else { return }
+            let inset: CGFloat = 16
+            // Clear of the scrubber's handle at the trailing edge (its view is wider: it holds the date bubble too).
+            let maxWidth = max(view.bounds.width - view.safeAreaInsets.left - view.safeAreaInsets.right - 2 * inset - 56, 80)
+            let size = datePill.fittingSize(maxWidth: maxWidth)
+            let rightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+            let x = rightToLeft ? view.bounds.maxX - view.safeAreaInsets.right - inset - size.width : view.safeAreaInsets.left + inset
+            let frame = CGRect(x: x, y: barInset + 8, width: size.width, height: size.height)
+            guard frame != datePill.frame else { return }
+            // Bounds and centre, not the frame: the pill may be scaled while it fades in.
+            datePill.bounds = CGRect(origin: .zero, size: frame.size)
+            datePill.center = CGPoint(x: frame.midX, y: frame.midY)
+        }
+
+        /// The bars' part of the top inset: a hero header (SPEC §17.4) adds its height to the content inset, but the pill
+        /// stays under the bars and names what is just below them.
+        private var barInset: CGFloat { collectionView.adjustedContentInset.top - collectionView.contentInset.top }
+
+        /// The section under the pill names it; the text changes only when the month or the moment does. Cheap per frame:
+        /// a binary search over the section offsets, text only when the section changes.
+        private func updateDatePill(animated: Bool) {
+            guard isViewLoaded, headersShown, sectionOffsets.count > 1 else {
+                pillSection = nil
+                datePill.show(nil, handover: .none)
+                datePill.setShown(false, animated: animated)
+                return
+            }
+            let top = Double(collectionView.contentOffset.y + barInset)
+            let probe = top + 8 + Double(datePill.bounds.height)
+            if let index = GridGeometry.section(at: max(probe, 0), in: sectionOffsets), index != pillSection {
+                let handover = GridDatePill.handover(from: pillSection, to: index)
+                pillSection = index
+                let pill = GridDatePill.make(sections: model.sections, index: index, moments: core.headerTexts.moments)
+                if datePill.show(pill, handover: handover) { layoutDatePill() }
+            }
+            datePill.setShown(top > Double(gridHeaderHeight) + GridDatePill.revealOffset && datePill.pill != nil, animated: animated)
         }
 
         // MARK: Pinch (SPEC §15.5)
@@ -742,6 +983,13 @@
         func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath)
             -> UICollectionReusableView
         {
+            if kind == Self.gridHeaderKind {
+                let slot =
+                    collectionView.dequeueReusableSupplementaryView(
+                        ofKind: kind, withReuseIdentifier: GridHeaderSlot.reuseIdentifier, for: indexPath) as! GridHeaderSlot
+                slot.hold(headerHost?.view)
+                return slot
+            }
             let header =
                 collectionView.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: SectionHeader.reuseIdentifier, for: indexPath)
@@ -822,6 +1070,8 @@
             var preview: UIContextMenuContentPreviewProvider?
             if ids.count == 1, let item = model[ids[0]] {
                 identifier = NSNumber(value: item.fileId)
+                // A Live Photo's badge comes alive while it is held (SPEC §17.2).
+                if item.isLivePhoto { (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.setLiveActive(true) }
                 let services = services
                 let shown = (collectionView.cellForItem(at: indexPaths[0]) as? PhotoCell)?.picture
                 preview = { GridMenuPreviewController(item: item, services: services, placeholder: shown) }
@@ -879,6 +1129,28 @@
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             if action == #selector(copy(_:)) { return callbacks?.copy != nil && !selected.ids.isEmpty }
             return super.canPerformAction(action, withSender: sender)
+        }
+
+        func collectionView(
+            _ collectionView: UICollectionView, willDisplayContextMenu configuration: UIContextMenuConfiguration,
+            animator: (any UIContextMenuInteractionAnimating)?
+        ) {
+            menuShowing = true
+        }
+
+        func collectionView(
+            _ collectionView: UICollectionView, willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
+            animator: (any UIContextMenuInteractionAnimating)?
+        ) {
+            for case let cell as PhotoCell in collectionView.visibleCells { cell.setLiveActive(false) }
+            let finish: () -> Void = { [weak self] in
+                guard let self else { return }
+                self.menuShowing = false
+                let ids = self.pendingBursts
+                self.pendingBursts = []
+                if !ids.isEmpty { self.playHeartBursts(ids) }
+            }
+            if let animator { animator.addCompletion(finish) } else { finish() }
         }
 
         /// A tap on the menu's preview opens the photo.
@@ -965,8 +1237,8 @@
         static let reuseIdentifier = "PhotoCell"
         private let imageView = UIImageView()
         private let placeholderIcon = UIImageView()
-        private let durationLabel = UILabel()
-        private let videoIcon = UIImageView(image: UIImage(systemName: "video.fill"))
+        /// The video's duration in a small glass capsule (SPEC §17.2).
+        private let videoPill = GridVideoPill()
         private let favoriteIcon = UIImageView(image: UIImage(systemName: "heart.fill"))
         private let liveIcon = UIImageView(image: UIImage(systemName: "livephoto"))
         private let stackIcon = UIImageView(image: UIImage(systemName: "square.stack.fill"))
@@ -977,6 +1249,10 @@
         private let cullingBadge = CullingBadgeView()
         private var isDimmed = false
         private var isTileSelected = false
+        /// The photo the selection look was last drawn for: only a change of the same tile animates (not a reused cell).
+        private var selectionShownFor: FileID?
+        /// What the picture is now, for the way the next one arrives (`GridTileArrival`).
+        private var shown = GridTileArrival.Shown.nothing
         /// Loads the preview and says what to draw; shared with the AppKit grid.
         private let tilePicture = GridTilePicture()
         var fileId: FileID? { tilePicture.fileId }
@@ -984,11 +1260,14 @@
         /// Square tile, or the picture whole in the photo's shape (`TileStyle`).
         private var square = true
         private var aspectRatio = 1.0
+        /// "1:05" of a video.
+        private var duration: String?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             imageView.contentMode = .scaleAspectFill
             imageView.clipsToBounds = true
+            imageView.layer.cornerCurve = .continuous
             imageView.backgroundColor = .secondarySystemFill
             contentView.addSubview(imageView)
             placeholderIcon.tintColor = .tertiaryLabel
@@ -996,10 +1275,7 @@
             placeholderIcon.isHidden = true
             contentView.addSubview(placeholderIcon)
             contentView.layer.addSublayer(gradient)
-            durationLabel.font = .monospacedDigitSystemFont(
-                ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold)
-            durationLabel.textColor = .white
-            for icon in [favoriteIcon, liveIcon, videoIcon, partnerIcon] {
+            for icon in [favoriteIcon, liveIcon, partnerIcon] {
                 icon.tintColor = .white
                 icon.contentMode = .scaleAspectFit
             }
@@ -1023,11 +1299,21 @@
             stackIcon.layer.shadowRadius = 1.5
             stackIcon.layer.shadowOffset = .zero
             stackIcon.isHidden = true
-            [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge, checkmark].forEach {
+            // The Live badge stays readable on bright pictures without a shade.
+            liveIcon.layer.shadowColor = UIColor.black.cgColor
+            liveIcon.layer.shadowOpacity = 0.4
+            liveIcon.layer.shadowRadius = 1.5
+            liveIcon.layer.shadowOffset = .zero
+            [videoPill, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge, checkmark].forEach {
                 contentView.addSubview($0)
             }
-            // Pointer (iPad trackpad or mouse) and gaze (Vision Pro): the tile under it is highlighted.
-            hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
+            // Pointer (iPad trackpad or mouse): the tile under it is highlighted. Vision Pro: the tile looked at lifts
+            // towards the eyes with the system's lift effect, drawn by the system outside the app (SPEC §17.7).
+            #if os(visionOS)
+                hoverStyle = UIHoverStyle(effect: .lift, shape: .rect(cornerRadius: GridTile.visionHoverCornerRadius))
+            #else
+                hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect)
+            #endif
             tilePicture.show = { [weak self] display in self?.show(display) }
             isAccessibilityElement = true
             // Double-tap (VoiceOver), Switch Control and Voice Control activate the cell like a tap: it opens the photo.
@@ -1054,16 +1340,13 @@
             checkmark.frame = CGRect(x: bounds.maxX - mark - 4, y: bounds.maxY - mark - 4, width: mark, height: mark)
             let markShown = !checkmark.isHidden
             let trailingBadges = GridTile.showsTrailingBadges(tileSide: Double(bounds.width), checkmarkShown: markShown)
-            durationLabel.alpha = trailingBadges ? 1 : 0
-            videoIcon.alpha = trailingBadges ? 1 : 0
-            durationLabel.sizeToFit()
-            var right = markShown ? checkmark.frame.minX - 4 : bounds.maxX - 4
-            if !durationLabel.isHidden {
-                durationLabel.frame.origin = CGPoint(
-                    x: right - durationLabel.bounds.width, y: bounds.maxY - durationLabel.bounds.height - 3)
-                right = durationLabel.frame.minX - 3
-            }
-            videoIcon.frame = CGRect(x: right - 16, y: bounds.maxY - 16, width: 16, height: 12)
+            let pill = GridVideoPillLayout.layout(tileWidth: Double(bounds.width))
+            videoPill.alpha = trailingBadges && pill != .hidden ? 1 : 0
+            videoPill.show(duration: pill == .duration ? duration : nil)
+            let pillHeight = (GridVideoPill.font.lineHeight + 4).rounded(.up)
+            let pillWidth = videoPill.fittingWidth(height: pillHeight)
+            let right = markShown ? checkmark.frame.minX - 4 : bounds.maxX - 4
+            videoPill.frame = CGRect(x: right - pillWidth, y: bounds.maxY - pillHeight - 4, width: pillWidth, height: pillHeight)
             favoriteIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 16, width: 13, height: 12)
             // The flag and stars take the top leading corner; the Live Photo badge follows them.
             let cullingWidth = cullingBadge.fittingWidth
@@ -1087,8 +1370,11 @@
 
         func updateSelection(editing: Bool, selected: Bool) {
             let wasHidden = checkmark.isHidden
+            // Only a tile on screen whose own state changed animates (not a reused cell, not the first configuration).
+            let animated = window != nil && selectionShownFor == fileId && fileId != nil && selected != isTileSelected
+            selectionShownFor = fileId
             checkmark.isHidden = !(editing || selected)
-            checkmark.image =
+            let image =
                 selected
                 ? UIImage(
                     systemName: "checkmark.circle.fill",
@@ -1096,8 +1382,35 @@
                 : UIImage(systemName: "circle")
             // Selected: a white tick on the accent colour (the view's inherited tint). Not selected: a white ring.
             checkmark.tintColor = selected ? nil : .white
+            let reduceMotion = UIAccessibility.isReduceMotionEnabled
+            if let image {
+                if animated, !wasHidden {
+                    // The tick springs in (SPEC §17.2).
+                    checkmark.setSymbolImage(image, contentTransition: .replace.downUp)
+                    if selected, !reduceMotion { checkmark.addSymbolEffect(.bounce) }
+                } else {
+                    checkmark.image = image
+                }
+            }
             isTileSelected = selected
-            imageView.alpha = (selected ? 0.75 : 1) * (isDimmed ? 0.4 : 1)
+            // Pressed into the page: a selected tile shrinks a little and rounds its corners (no shrink with Reduce
+            // Motion).
+            let side = Double(min(contentView.bounds.width, contentView.bounds.height))
+            let look = { [self] in
+                imageView.alpha = (selected ? GridSelectionLook.selectedAlpha : 1) * (isDimmed ? 0.4 : 1)
+                imageView.layer.cornerRadius = selected ? CGFloat(GridSelectionLook.cornerRadius(tileSide: side)) : 0
+                let scale = selected && !reduceMotion ? CGFloat(GridSelectionLook.scale) : 1
+                contentView.transform = scale == 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
+            }
+            if animated {
+                UIView.animate(
+                    springDuration: 0.3, bounce: reduceMotion ? 0 : 0.2, options: [.allowUserInteraction, .beginFromCurrentState]
+                ) {
+                    look()
+                }
+            } else {
+                look()
+            }
             if selected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
             // The badges make room for the mark.
             if wasHidden != checkmark.isHidden { setNeedsLayout() }
@@ -1116,7 +1429,7 @@
             let culling = CullingTileBadge(owner.culling.mark(item.fileId), tileSide: tileSide)
             cullingBadge.show(culling)
             isDimmed = culling.isDimmed
-            imageView.alpha = (isTileSelected ? 0.75 : 1) * (isDimmed ? 0.4 : 1)
+            imageView.alpha = (isTileSelected ? GridSelectionLook.selectedAlpha : 1) * (isDimmed ? 0.4 : 1)
             if let text = culling.accessibilityText { accessibilityLabel = (accessibilityLabel ?? "") + ", " + text }
             // What the photo shows, written on this device (SPEC §16.2).
             if let text = services.descriptions.text(of: item.fileId) { accessibilityLabel = (accessibilityLabel ?? "") + ", " + text }
@@ -1130,7 +1443,7 @@
         func showPlaceholder() {
             tilePicture.reset()
             square = true
-            let badges: [UIView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge]
+            let badges: [UIView] = [videoPill, favoriteIcon, liveIcon, stackIcon, partnerIcon, cullingBadge]
             for badge in badges { badge.isHidden = true }
             isDimmed = false
             gradient.isHidden = true
@@ -1142,29 +1455,75 @@
         private func show(_ display: GridTilePicture.Display) {
             switch display {
             case .clear:
+                imageView.layer.removeAnimation(forKey: "arrival")
+                imageView.layer.removeAnimation(forKey: "settle")
                 imageView.image = nil
                 placeholderIcon.isHidden = true
+                shown = .nothing
             case .blur(let image):
                 imageView.image = UIImage(cgImage: image)
+                shown = .blur
             case .picture(let image):
+                let arrival = GridTileArrival.transition(
+                    from: shown, isAsync: tilePicture.isDelivering, reduceMotion: UIAccessibility.isReduceMotionEnabled)
                 imageView.image = UIImage(cgImage: image)
                 placeholderIcon.isHidden = true
+                shown = .picture
+                if window != nil { animateArrival(arrival) }
             case .placeholder(let symbol):
                 placeholderIcon.image = UIImage(systemName: symbol)
                 placeholderIcon.isHidden = false
+                shown = .placeholder
+            }
+        }
+
+        /// The preview comes in over the BlurHash: a cross-fade and a tiny settle, both run by Core Animation (nothing
+        /// per frame on the main thread, no layout change).
+        private func animateArrival(_ arrival: GridTileArrival) {
+            guard arrival != .instant else { return }
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = GridTileArrival.fadeDuration
+            imageView.layer.add(fade, forKey: "arrival")
+            guard arrival == .fadeAndSettle else { return }
+            let settle = CABasicAnimation(keyPath: "contentsRect")
+            settle.fromValue = NSValue(cgRect: GridTileArrival.settleContentsRect)
+            settle.toValue = NSValue(cgRect: CGRect(x: 0, y: 0, width: 1, height: 1))
+            settle.duration = GridTileArrival.settleDuration
+            settle.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            imageView.layer.add(settle, forKey: "settle")
+        }
+
+        /// A heart over the tile (favourite).
+        func playHeartBurst() {
+            contentView.playHeartBurst(side: min(contentView.bounds.width, contentView.bounds.height))
+        }
+
+        /// The Live badge plays (layer by layer) while the tile is held, hovered or peeked into.
+        func setLiveActive(_ active: Bool) {
+            guard !liveIcon.isHidden else { return }
+            if active {
+                liveIcon.addSymbolEffect(.variableColor.iterative.reversing, options: .repeating)
+            } else {
+                liveIcon.removeAllSymbolEffects()
             }
         }
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridController) {
             let badges = GridTileBadges(item: item, isPartner: owner.services.partnerPaths.contains(directory: item.directory))
             partnerIcon.isHidden = !badges.showsPartner
-            durationLabel.text = badges.duration
-            durationLabel.isHidden = badges.duration == nil
-            videoIcon.isHidden = !badges.showsVideo
+            duration = badges.duration
+            videoPill.isHidden = !badges.showsVideo
+            if favoriteIcon.isHidden, badges.showsFavorite, fileId == item.fileId, window != nil {
+                // Made a favourite while on screen: the badge bounces in.
+                favoriteIcon.isHidden = false
+                if !UIAccessibility.isReduceMotionEnabled { favoriteIcon.addSymbolEffect(.bounce) }
+            }
             favoriteIcon.isHidden = !badges.showsFavorite
             liveIcon.isHidden = !badges.showsLivePhoto
             stackIcon.isHidden = !badges.showsStack
-            gradient.isHidden = !badges.showsShade
+            // Videos have their glass capsule; the shade is only under the favourite's heart.
+            gradient.isHidden = !badges.showsFavorite
             let increased = UIAccessibility.isDarkerSystemColorsEnabled || UIAccessibility.isReduceTransparencyEnabled
             gradient.colors = [
                 UIColor.clear.cgColor, UIColor.black.withAlphaComponent(GridTile.shadeOpacity(increased: increased)).cgColor,
@@ -1192,6 +1551,10 @@
         override func prepareForReuse() {
             super.prepareForReuse()
             tilePicture.reset()
+            selectionShownFor = nil
+            liveIcon.removeAllSymbolEffects()
+            contentView.transform = .identity
+            imageView.layer.cornerRadius = 0
         }
     }
 
@@ -1237,13 +1600,28 @@
         }
     }
 
+    /// The place of the grid's header in the collection view: it holds the one hosting view.
+    final class GridHeaderSlot: UICollectionReusableView {
+        static let reuseIdentifier = "GridHeaderSlot"
+
+        func hold(_ content: UIView?) {
+            guard let content else { return }
+            if content.superview !== self {
+                content.removeFromSuperview()
+                addSubview(content)
+            }
+            content.frame = bounds
+            content.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        }
+    }
+
     final class SectionHeader: UICollectionReusableView {
         static let reuseIdentifier = "SectionHeader"
-        static var titleFont: UIFont { .preferredFont(forTextStyle: .title2).withWeight(.bold) }
-        static var subtitleFont: UIFont { .preferredFont(forTextStyle: .subheadline).withWeight(.semibold) }
+        // Bold date, light day line (SPEC §17.5).
+        static var titleFont: UIFont { Typography.dateTitleUIFont }
+        static var subtitleFont: UIFont { Typography.dateDetailUIFont }
         private let titleLabel = UILabel()
         private let subtitleLabel = UILabel()
-        private let background = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
         private var metrics = GridHeaderMetrics(titleHeight: 28, subtitleHeight: 20)
         /// The moment's title and the day: a button that opens the moment (SPEC §16.1).
         private let momentButton = UIControl()
@@ -1252,7 +1630,7 @@
 
         override init(frame: CGRect) {
             super.init(frame: frame)
-            addSubview(background)
+            // No band behind the text: the headers scroll with the photos, the date pill stays (SPEC §17.2).
             subtitleLabel.textColor = .secondaryLabel
             titleLabel.accessibilityTraits = .header
             addSubview(titleLabel)
@@ -1271,7 +1649,6 @@
         /// Laid out by hand from the same metrics the layout takes the header height from, so nothing is clipped.
         override func layoutSubviews() {
             super.layoutSubviews()
-            background.frame = bounds
             let area = bounds.inset(by: layoutMargins)
             var y = CGFloat(metrics.top)
             if !titleLabel.isHidden {
@@ -1312,7 +1689,8 @@
 
         /// "Sunday in Lisbon ›  Sun 22 November": the moment in the label colour, the day after it as before.
         static func momentLine(_ title: String, day: String?, font: UIFont) -> NSAttributedString {
-            let line = NSMutableAttributedString(string: title, attributes: [.font: font, .foregroundColor: UIColor.label])
+            let line = NSMutableAttributedString(
+                string: title, attributes: [.font: Typography.dateEmphasisUIFont.withSize(font.pointSize), .foregroundColor: UIColor.label])
             let symbol = UIImage(
                 systemName: "chevron.forward", withConfiguration: UIImage.SymbolConfiguration(font: font.withSize(font.pointSize * 0.75)))
             if let symbol {

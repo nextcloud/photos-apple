@@ -122,14 +122,14 @@ struct SlideshowPlayer: View {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsShown.toggle() }
             }
             .overlay(alignment: .top) { if controlsShown { topBar } }
-            .overlay(alignment: .bottom) { if controlsShown { playbackBar } }
+            .slideshowControls(isShown: controlsShown) { playbackBar }
             #if os(iOS)
                 .statusBarHidden(!controlsShown)
                 .persistentSystemOverlays(controlsShown ? .automatic : .hidden)
             #elseif os(visionOS)
                 .navigationTitle(request.title)
             #endif
-            .focusable()
+            .keyFocusable()
             .focusEffectDisabled()
             .focused($focused)
             .onAppear {
@@ -137,14 +137,13 @@ struct SlideshowPlayer: View {
                 DisplaySleep.prevent(true)
             }
             .onDisappear { DisplaySleep.prevent(false) }
-            .onKeyPress(keys: [.leftArrow, .rightArrow, .space, .escape]) { press in
-                switch press.key {
+            .hardwareKeys([.leftArrow, .rightArrow, .space, .escape]) { key in
+                switch key {
                 case .leftArrow: step(-1)
                 case .rightArrow: step(1)
                 case .space: playing.toggle()
                 default: close(current?.fileId)
                 }
-                return .handled
             }
             .task {
                 playing = Slideshow.startsPlaying(voiceOver: voiceOver)
@@ -350,10 +349,13 @@ struct SlideshowPlayer: View {
                 step(1)
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.45), in: .capsule)
-        .padding(.bottom, 24)
+        #if !os(visionOS)
+            // On Vision Pro the bar is a glass ornament of its own (`slideshowControls`).
+            .padding(.horizontal, 24)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.45), in: .capsule)
+            .padding(.bottom, 24)
+        #endif
     }
 
     func controlButton(_ title: String, systemImage: String, disabled: Bool, large: Bool = false, action: @escaping () -> Void)

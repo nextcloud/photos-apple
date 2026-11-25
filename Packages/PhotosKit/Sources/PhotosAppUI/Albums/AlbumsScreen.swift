@@ -21,6 +21,8 @@ struct AlbumsScreen: View {
     @AppStorage("albumsSortOrder") private var sortOrder: AlbumSortOrder = .recent
     /// "Customize Cover…" or "Show to a Guest…" of an album (SPEC §16.8.2, §16.8.3).
     @State private var cardSheet: AlbumCardSheet?
+    /// The album zooms out of its card (SPEC §17.4).
+    @Environment(\.routeTransitionNamespace) private var transitions
 
     var title: String {
         kind == .shared ? String(localized: "Shared albums", bundle: .module) : String(localized: "Albums", bundle: .module)
@@ -51,6 +53,7 @@ struct AlbumsScreen: View {
                     // By value: the stack's path (MainView) knows which album is open.
                     NavigationLink(value: AppRoute.album(id: album.id)) {
                         AlbumCard(album: album)
+                            .cardTransitionSource(id: AppRoute.album(id: album.id), in: transitions)
                     }
                     .buttonStyle(.plain)
                     .opensAlbumInWindow(album.id) {
@@ -79,6 +82,8 @@ struct AlbumsScreen: View {
                         Button(String(localized: "Create album", bundle: .module)) { creating = true }.buttonStyle(.borderedProminent)
                     }
                 }
+                // On a living wash (SPEC §17.6.1).
+                .livingEmptyBackground()
             } else if !loaded {
                 // The covers' shape while the albums load (SPEC §15.5: no spinners).
                 SkeletonCovers().frame(maxHeight: .infinity, alignment: .top)
@@ -155,35 +160,56 @@ struct AlbumsScreen: View {
     }
 }
 
-/// Cover, title and count of an album.
+/// Cover, title and count of an album: the title and count on a glass plate over the cover (SPEC §17.4), below it at
+/// the accessibility text sizes. An album without a cover photo shows a gradient made from its name.
 struct AlbumCard: View {
     let album: Album
+    @Environment(SessionModel.self) private var session
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// A depth cover draws the title on the photo itself: the plate then only says the count.
+    var showsTitleOnPlate: Bool {
+        guard let services = session.services else { return true }
+        let looks = AlbumLookStore.store(for: services)
+        return !(looks.effect(for: album) == .depth && looks.coverFileId(for: album) != nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // The placeholder stays behind the cover: an album without photos, or whose cover has no preview, is not blank.
+            // The gradient stays behind the cover: an album without photos, or whose cover has no preview, is not blank.
             ZStack {
-                Color.secondary.opacity(0.15)
-                Image(systemName: "photo.on.rectangle").font(.largeTitle).foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                AlbumGradientView(name: album.title)
                 // The chosen cover and effect: still, Live Photo motion or depth (SPEC §16.8.2).
                 LivingAlbumCover(album: album)
             }
+            .scrollParallax()
             .aspectRatio(1, contentMode: .fit)
             .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
+            .overlay(alignment: .bottom) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    CaptionPlate(cornerRadius: Design.coverCornerRadius - 3) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            if showsTitleOnPlate { Text(album.title).font(Typography.cardTitle).lineLimit(1) }
+                            Text(subtitle).font(Typography.cardSubtitle).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .padding(6)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if album.publicLink != nil || !album.collaborators.isEmpty {
                     Image(systemName: album.publicLink != nil ? "link" : "person.2.fill")
                         .font(.caption)
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: .circle)
+                        .frame(width: 26, height: 26)
+                        .modifier(GlassCircle())
                         .padding(6)
                 }
             }
-            // One line in the grid; wrapped at the accessibility text sizes instead of cut off after a few letters.
-            Text(album.title).font(.headline).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
-            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            if dynamicTypeSize.isAccessibilitySize {
+                // Large text does not fit on the cover: below it, wrapped instead of cut off (SPEC §17.4, §17.5).
+                Text(album.title).cardTitleStyle()
+                Text(subtitle).font(Typography.cardSubtitle).foregroundStyle(.secondary).lineLimit(3)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
@@ -265,6 +291,9 @@ struct AlbumRouteScreen: View {
     @State private var missing = false
 
     var body: some View {
+        // From the local index at once when it has the album: an album opened from its card zooms in with its own
+        // screen, not with the placeholder of a lookup (SPEC §17.4).
+        let album: Album? = album ?? (try? session.services?.collections.album(id: albumId))
         Group {
             if let album {
                 AlbumDetailScreen(albumId: albumId, initial: album)
@@ -279,14 +308,14 @@ struct AlbumRouteScreen: View {
         // File ▸ Open in New Window.
         .focusedSceneValue(\.shownAlbum, album == nil ? nil : AlbumWindowValue(account: session.account.id.rawValue, albumId: albumId))
         .task(id: albumId) {
-            guard album == nil else { return }
+            guard self.album == nil else { return }
             if let found = try? session.services?.collections.album(id: albumId) {
-                album = found
+                self.album = found
                 return
             }
             try? await session.refreshAlbums(force: true)
-            album = try? session.services?.collections.album(id: albumId)
-            missing = album == nil
+            self.album = try? session.services?.collections.album(id: albumId)
+            missing = self.album == nil
         }
     }
 }

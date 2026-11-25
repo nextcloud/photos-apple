@@ -118,6 +118,7 @@ struct YearInReviewScreen: View {
     let year: Int
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var model: YearInReviewModel
     @State private var page: YearInReview.Card?
     @State private var slideshow: SlideshowStart?
@@ -198,12 +199,20 @@ struct YearInReviewScreen: View {
     var pageDots: some View {
         HStack(spacing: 7) {
             ForEach(model.cards, id: \.self) { (card: YearInReview.Card) in
-                Circle().fill(.white.opacity(card == page ? 1 : 0.35)).frame(width: 7, height: 7)
+                Circle().fill(
+                    .white.opacity(card == page ? 1 : YearInReviewScreen.otherDotOpacity(increasedContrast: contrast == .increased))
+                )
+                .frame(width: 7, height: 7)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             AccessibilityText.position(index: model.cards.firstIndex(where: { $0 == page }) ?? 0, count: model.cards.count))
+    }
+
+    /// The dots of the other cards; brighter with Increase Contrast, where 35 % white on black is too faint.
+    static func otherDotOpacity(increasedContrast: Bool) -> Double {
+        increasedContrast ? 0.6 : 0.35
     }
 
     func step(_ delta: Int) {

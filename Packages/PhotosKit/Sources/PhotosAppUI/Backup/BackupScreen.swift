@@ -48,6 +48,7 @@ struct BackupStatusView: View {
     /// The device's photos that are not on the server yet; nil until counted.
     @State private var notBackedUp: [NotBackedUpAsset]?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let backup = session.backup
@@ -58,7 +59,7 @@ struct BackupStatusView: View {
                     // The title says what the icon shows.
                     statusIcon(status).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(statusTitle(status)).font(.headline)
+                        Text(statusTitle(status)).font(.headline).rollingNumber(BackupStatusSymbol.progressValue(status.phase))
                         if let blocker = activeBlocker(status) {
                             Text(blockerAdvice(blocker)).font(.subheadline).foregroundStyle(.secondary)
                         } else if case .incomplete = status.phase, let reason = status.lastFailure {
@@ -77,9 +78,22 @@ struct BackupStatusView: View {
                     ProgressView(value: Double(done), total: Double(max(total, 1)))
                         .accessibilityLabel(Text("Backup progress", bundle: .module))
                 }
-                LabeledContent(String(localized: "Uploaded", bundle: .module), value: status.uploaded.formatted())
-                LabeledContent(String(localized: "Already on your Nextcloud", bundle: .module), value: status.matched.formatted())
-                LabeledContent(String(localized: "Waiting", bundle: .module), value: status.pending.formatted())
+                // The counters roll to their new values as the backup goes (SPEC §17.3).
+                LabeledContent {
+                    Text(status.uploaded.formatted()).rollingNumber(status.uploaded)
+                } label: {
+                    Text("Uploaded", bundle: .module)
+                }
+                LabeledContent {
+                    Text(status.matched.formatted()).rollingNumber(status.matched)
+                } label: {
+                    Text("Already on your Nextcloud", bundle: .module)
+                }
+                LabeledContent {
+                    Text(status.pending.formatted()).rollingNumber(status.pending)
+                } label: {
+                    Text("Waiting", bundle: .module)
+                }
                 if status.failed > 0 { BackupFailedRow(failed: status.failed, isRunning: isRunning(status.phase)) }
                 if status.skipped > 0 { BackupSkippedRow(skipped: status.skipped) }
                 if backup.hasLimitedAccess { BackupLimitedAccessRow() }
@@ -213,15 +227,15 @@ struct BackupStatusView: View {
         return statusTitle(status.phase)
     }
 
-    @ViewBuilder func statusIcon(_ phase: BackupStatus.Phase) -> some View {
-        switch phase {
-        case .upToDate: Image(systemName: "checkmark.icloud.fill").foregroundStyle(.green).font(.title)
-        case .failed, .notAuthorized: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.red).font(.title)
-        case .incomplete: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.orange).font(.title)
-        case .paused: Image(systemName: "pause.circle.fill").foregroundStyle(.orange).font(.title)
-        case .idle: Image(systemName: "icloud").font(.title)
-        default: ProgressView()
-        }
+    /// One symbol for every phase, so a change is a symbol replacement: the backup icon breathes while it runs and turns
+    /// into the check mark when it is through (SPEC §17.3; a cross-fade and no breathing with Reduce Motion).
+    func statusIcon(_ phase: BackupStatus.Phase) -> some View {
+        Image(systemName: BackupStatusSymbol.name(phase))
+            .foregroundStyle(BackupStatusSymbol.color(phase))
+            .font(.title)
+            .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
+            .symbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous), isActive: isRunning(phase) && !reduceMotion)
+            .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth, value: BackupStatusSymbol.name(phase))
     }
 
     func statusTitle(_ phase: BackupStatus.Phase) -> String {
@@ -473,5 +487,37 @@ enum BackupWording {
         #else
             String(localized: "The Files app backs up this device. This shows which photos are already on your Nextcloud.", bundle: .module)
         #endif
+    }
+}
+
+/// The backup screen's status symbol for each phase (SPEC §17.3).
+enum BackupStatusSymbol {
+    static func name(_ phase: BackupStatus.Phase) -> String {
+        switch phase {
+        case .upToDate: "checkmark.icloud.fill"
+        case .failed, .notAuthorized, .incomplete: "exclamationmark.icloud.fill"
+        case .paused: "pause.circle.fill"
+        case .idle: "icloud"
+        case .scanning, .reconciling, .uploading: "arrow.triangle.2.circlepath.icloud"
+        }
+    }
+
+    static func color(_ phase: BackupStatus.Phase) -> Color {
+        switch phase {
+        case .upToDate: .green
+        case .failed, .notAuthorized: .red
+        case .incomplete, .paused: .orange
+        case .idle: .primary
+        case .scanning, .reconciling, .uploading: .accentColor
+        }
+    }
+
+    /// The number in the status title that rolls ("Uploading 12 of 400").
+    static func progressValue(_ phase: BackupStatus.Phase) -> Int {
+        switch phase {
+        case .uploading(let done, _, _): done
+        case .reconciling(let checked, _): checked
+        default: 0
+        }
     }
 }

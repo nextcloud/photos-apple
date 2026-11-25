@@ -127,6 +127,13 @@ files and is opt-in: set `TEST_RUNNER_PHOTOS_UITEST_ORGANIZE_FOLDER` to a folder
 and undoes it, renames them with `{date} {place} {counter}` and undoes it, and opens Folder Rules to run them; check
 the server's values while it runs (PROPFIND of `nc:metadata-photos-original_date_time`).
 
+`UITests/GridMotionTourTests.swift` (iPhone) tours SPEC §17.2: the Library edge to edge with its date pill, selecting
+tiles, the viewer's zoom out of a tile and back, an album's grid (`TEST_RUNNER_PHOTOS_UITEST_ALBUM`, default
+"r7-grid-album") and — opt-in, only when the Library has a "Today" section of your own uploaded photos — a favourite's
+heart, a delete and its undo. `TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX` names the screenshots (before/after pairs), and
+`TEST_RUNNER_PHOTOS_UITEST_REDUCE_MOTION=1` / `TEST_RUNNER_PHOTOS_UITEST_REDUCE_TRANSPARENCY=1` launch the app with those
+settings. For motion, record the simulator meanwhile (`xcrun simctl io <udid> recordVideo --codec h264 <file>`).
+
 The app has no accessibility identifiers yet (apart from `librarySummary`, the zoom levels' scroll view); the tests find elements by role and by their English labels, and start
 the app in English. They are not part of CI because they need a server. They have run in the iOS 27.2 simulator (iPhone).
 

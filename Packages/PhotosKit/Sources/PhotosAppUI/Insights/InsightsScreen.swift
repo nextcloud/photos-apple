@@ -168,6 +168,8 @@ private struct InsightsHeader: View {
                     comment: "Insights header. Plural variations in the catalog."
                 )
                 .font(.title3.weight(.semibold))
+                // The numbers roll while the camera data is read (SPEC §17.3).
+                .rollingNumber(snapshot.summary.withCameraData)
                 Spacer()
                 if snapshot.summary.reviewed > 0 {
                     Text(
@@ -175,6 +177,7 @@ private struct InsightsHeader: View {
                         comment: "Insights header: photos picked or rated 3 stars or more. Plural variations in the catalog."
                     )
                     .foregroundStyle(.secondary)
+                    .rollingNumber(snapshot.summary.keepers)
                 }
             }
             if isReading || snapshot.analysed < snapshot.total {
@@ -185,6 +188,7 @@ private struct InsightsHeader: View {
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .rollingNumber(snapshot.analysed)
                 }
             }
             if let error, !isReading {
@@ -252,7 +256,7 @@ private struct RankedRow: View {
         HStack {
             Text(verbatim: title).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 8)
-            Text(count, format: .number).monospacedDigit().foregroundStyle(.secondary)
+            Text(count, format: .number).font(Typography.count).foregroundStyle(.secondary).rollingNumber(count)
             Image(systemName: "chevron.forward").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 5)
@@ -320,7 +324,7 @@ private struct HistogramCard: View {
                 .cornerRadius(3)
                 .annotation(position: .top, spacing: 2) {
                     if hovered == bar.label {
-                        Text(bar.count, format: .number).font(.caption2.weight(.semibold)).monospacedDigit()
+                        Text(bar.count, format: .number).font(Typography.smallCount)
                     }
                 }
         }
@@ -418,7 +422,7 @@ private struct KeeperRow: View {
             Gauge(value: rate.rate) {
                 EmptyView()
             } currentValueLabel: {
-                Text(rate.rate, format: .percent.precision(.fractionLength(0)))
+                Text(rate.rate, format: .percent.precision(.fractionLength(0))).fontDesign(.rounded)
             }
             .gaugeStyle(.accessoryCircularCapacity)
             .tint(Design.accent)

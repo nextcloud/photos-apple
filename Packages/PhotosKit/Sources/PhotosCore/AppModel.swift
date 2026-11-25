@@ -34,6 +34,9 @@ public final class AppModel {
     /// offer while this is true and calls `finishBackupOffer()`.
     public private(set) var offersBackup = false
     @ObservationIgnored private var asksForNotificationsAfterOffer = false
+    /// The first account was just added: the window plays its short welcome into the Library (SPEC §17.6.3), then calls
+    /// `finishWelcome()`. The backup offer waits for it.
+    public private(set) var welcomesFirstLogin = false
     @ObservationIgnored private var deviceToken: Data?
     @ObservationIgnored private var unauthorizedChecks: Set<AccountID> = []
     /// Sessions that were replaced and are still shutting down.
@@ -88,9 +91,11 @@ public final class AppModel {
             {
                 // PHOTOS_DEBUG_OFFER_BACKUP=1 shows the backup offer of a first login (UI tests don't want it).
                 let offer = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_OFFER_BACKUP"] != nil
+                // PHOTOS_DEBUG_WELCOME=transition plays the welcome of a first login (UI tests don't want it either).
+                let welcome = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_WELCOME"] == "transition"
                 Task {
                     do {
-                        try await self.addAccount(credentials, askForNotifications: false, offerBackup: offer)
+                        try await self.addAccount(credentials, askForNotifications: false, offerBackup: offer, welcome: welcome)
                     } catch {
                         self.logger.error("debug login failed: \(error.localizedDescription, privacy: .public)")
                     }
@@ -189,9 +194,10 @@ public final class AppModel {
     /// - Parameter askForNotifications: ask for the notification permission now that there is an account to notify about
     ///   (the system only prompts the first time; nothing is asked at first launch).
     /// - Parameter offerBackup: offer backup first when it is not set up yet (`offersBackup`).
-    public func addAccount(_ credentials: LoginService.Credentials, askForNotifications: Bool = true, offerBackup: Bool = true)
-        async throws
-    {
+    /// - Parameter welcome: play the welcome into the Library when this is the first account (`welcomesFirstLogin`).
+    public func addAccount(
+        _ credentials: LoginService.Credentials, askForNotifications: Bool = true, offerBackup: Bool = true, welcome: Bool = true
+    ) async throws {
         // The organisation's rules (SPEC §5.1.9) are checked again here, whatever way the login came: the app password that
         // was granted for a refused login is revoked.
         if let refusal = managed.loginRefusal(
@@ -217,10 +223,12 @@ public final class AppModel {
             await loginService().revoke(credentials, at: credentials.serverURL)
             throw error
         }
+        let isFirstAccount = registry.accounts.isEmpty
         registry.upsert(account)
         registry.activeAccountID = account.id
         saveRegistry()
         activate(account)
+        if welcome && isFirstAccount { welcomesFirstLogin = true }
         let offer = offerBackup && BackupOffer.shouldOffer(backup: backup, defaults: defaults)
         if offer { offersBackup = true }
         system.reloadWidgets()
@@ -246,6 +254,11 @@ public final class AppModel {
             asksForNotificationsAfterOffer = false
             Task { await PushNotifications.requestAuthorization() }
         }
+    }
+
+    /// The welcome after the first login has played (or was skipped).
+    public func finishWelcome() {
+        welcomesFirstLogin = false
     }
 
     public func switchTo(_ id: AccountID) {

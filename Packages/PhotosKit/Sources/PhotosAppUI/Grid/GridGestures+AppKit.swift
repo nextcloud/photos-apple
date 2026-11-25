@@ -28,6 +28,8 @@
         private var pending: IndexPath?
         private var fraction = 0.0
         private var hoverTask: Task<Void, Never>?
+        /// A peek started (the tile's lift ends, SPEC §17.7).
+        var began: (() -> Void)?
 
         init(host: any GridPeekHost) {
             self.host = host
@@ -87,6 +89,7 @@
         private func begin(_ target: (indexPath: IndexPath, item: GridMedia, kind: GridPeekKind)) {
             guard let host, let attributes = host.collectionView.layoutAttributesForItem(at: target.indexPath) else { return }
             tile = target.indexPath
+            began?()
             let picture = GridTile.pictureFrame(in: attributes.frame, aspectRatio: target.item.aspectRatio, square: host.squareTiles)
             overlay.frame = picture
             overlay.show(kind: target.kind)

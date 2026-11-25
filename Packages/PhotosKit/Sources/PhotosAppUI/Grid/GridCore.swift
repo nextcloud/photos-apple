@@ -86,8 +86,9 @@ struct GridSectionMetrics: Equatable {
         self.headerHeight = headerHeight
     }
 
-    /// Rows of square tiles under a header that stays pinned to the top while its section scrolls.
-    @MainActor func layoutSection(headerKind: String) -> NSCollectionLayoutSection {
+    /// Rows of square tiles under a header that stays pinned to the top while its section scrolls, or scrolls with it
+    /// (`pinsHeaders` false: the iPhone, iPad and Vision Pro grid, where a floating date pill stays instead, SPEC §17.2).
+    @MainActor func layoutSection(headerKind: String, pinsHeaders: Bool = true) -> NSCollectionLayoutSection {
         let side = CGFloat(side)
         let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(side), heightDimension: .absolute(side)))
         let rowSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(side))
@@ -103,7 +104,7 @@ struct GridSectionMetrics: Equatable {
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(CGFloat(headerHeight))),
                 elementKind: headerKind, alignment: .top)
-            header.pinToVisibleBounds = true
+            header.pinToVisibleBounds = pinsHeaders
             section.boundarySupplementaryItems = [header]
         }
         return section
@@ -376,6 +377,8 @@ final class GridTilePicture {
     /// A real picture (not just the BlurHash) is shown.
     private(set) var hasPicture = false
     private(set) var isLoading = false
+    /// True while `show` is called with a picture that was loaded after the tile was configured (it may fade in).
+    private(set) var isDelivering = false
     private var task: Task<Void, Never>?
     /// The tile's drawing.
     var show: (Display) -> Void = { _ in }
@@ -408,7 +411,9 @@ final class GridTilePicture {
             self.isLoading = false
             if let image {
                 self.hasPicture = true
+                self.isDelivering = true
                 self.show(.picture(image))
+                self.isDelivering = false
             } else if !self.hasPicture {
                 self.show(.placeholder(symbol: GridTile.placeholderSymbol(for: item)))
             }

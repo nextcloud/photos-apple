@@ -12,7 +12,34 @@
     import SwiftUI
 
     /// The photo grid on macOS (SPEC §6.4): rubber-band, ⇧/⌘-click selection and arrow keys come from NSCollectionView.
-    struct PhotoGrid: NSViewRepresentable {
+    ///
+    /// It reaches up under the window's toolbar (SPEC §17.7): the photos scroll under the glass toolbar, which blurs and
+    /// fades them with the system's scroll edge effect; the scroll view's automatic insets keep the first row below it.
+    struct PhotoGrid: View {
+        var update: GridFeed.Update
+        var zoomStep: Int
+        var selection: Set<FileID>
+        var isSelecting: Bool
+        var showsHeaders: Bool
+        var squareTiles = true
+        var moments = MomentHeaders.none
+        /// Unused on the Mac: the Library's memories stay above the grid (SPEC §17.2).
+        var header: AnyView? = nil
+        var services: AccountServices
+        var callbacks: GridCallbacks
+        /// Hero headers are not the Mac's (SPEC §17.4).
+        var hero: GridHero? = nil
+
+        var body: some View {
+            PhotoGridHost(
+                update: update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders,
+                squareTiles: squareTiles, moments: moments, header: header, services: services, callbacks: callbacks, hero: hero
+            )
+            .ignoresSafeArea(.container, edges: .top)
+        }
+    }
+
+    struct PhotoGridHost: NSViewRepresentable {
         var update: GridFeed.Update
         /// Zoom step (`GridColumns.options`): sets the target tile size, the columns follow from the width.
         var zoomStep: Int
@@ -23,8 +50,12 @@
         var squareTiles = true
         /// Moment titles on the day headers (the Library, SPEC §16.1).
         var moments = MomentHeaders.none
+        /// Not used on the Mac: the Library keeps its memories above the grid.
+        var header: AnyView? = nil
         var services: AccountServices
         var callbacks: GridCallbacks
+        /// Hero headers are not the Mac's (SPEC §17.4): the title stays in the window's toolbar.
+        var hero: GridHero? = nil
 
         func makeNSView(context: Context) -> PhotoGridScrollView {
             PhotoGridScrollView(services: services)
@@ -45,12 +76,16 @@
                 callbacks?.tileLocator?.reveal = { [weak self] id in self?.reveal(id) }
                 callbacks?.tileLocator?.place = { [weak self] id, fraction in self?.place(id, fraction: fraction) }
                 callbacks?.tileLocator?.topItem = { [weak self] in self?.anchorItem() }
+                callbacks?.motion?.favorited = { [weak self] ids in self?.playHeartBursts(ids) }
+                // The Library's zoom levels morph into and out of the tiles (SPEC §17.5).
+                callbacks?.tileLocator?.frame = { [weak self] id in self?.tileFrame(id) }
+                callbacks?.tileLocator?.coveredChanged = { [weak self] covered in self?.setAccessibilityHidden(covered) }
+                setAccessibilityHidden(callbacks?.tileLocator?.isCovered ?? false)
             }
         }
         let collectionView = GridCollectionView()
         /// Model, zoom, anchor and layout bookkeeping, shared with the UIKit grid.
         private let core: GridCore
-        private var pinchAmount: CGFloat = 0
         /// The photo under the pointer when a trackpad pinch began, and its distance from the top of the visible area: it
         /// stays there while the pinch changes the zoom step (SPEC §15.5).
         private var pinchAnchor: (id: FileID, offset: CGFloat)?
@@ -65,6 +100,13 @@
         private let edits = GridEditObserver()
         /// Scrub to peek with the pointer (SPEC §16.1).
         private var peek: GridPeekHover?
+        /// The tile under the pointer lifts (SPEC §17.7).
+        private var hoverLift: GridHoverLift?
+        /// A trackpad pinch zooms continuously between the steps (SPEC §17.7).
+        private var pinchZoom = GridPinchZoom()
+        private lazy var pinchScaler = GridPinchScaler(clipView: contentView)
+        /// A pinch asked for another step: its relayout cross-fades from the scaled grid.
+        private var pinchStepPending = false
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -109,6 +151,10 @@
             scrubber.onStep = { [weak self] delta in self?.scrollToYear(delta: delta) }
             addSubview(scrubber)
             peek = GridPeekHover(host: self)
+            let lift = GridHoverLift(host: self)
+            hoverLift = lift
+            // A peek takes the tile's place: it is not lifted meanwhile.
+            peek?.began = { [weak lift] in lift?.drop() }
             contentView.postsBoundsChangedNotifications = true
             NotificationCenter.default.addObserver(
                 self, selector: #selector(didScroll(_:)), name: NSView.boundsDidChangeNotification, object: contentView)
@@ -147,6 +193,11 @@
                 let anchor = pinched?.id ?? anchorItem()
                 // The tile a peek is over may be somewhere else now.
                 peek?.end()
+                hoverLift?.drop(animated: false)
+                if pinchStepPending, plan.layoutChanged {
+                    pinchStepPending = false
+                    pinchScaler.crossfadeIntoNewLayout()
+                }
                 core.show(update.model, relayout: true)
                 if plan.reloads {
                     collectionView.reloadData()
@@ -169,7 +220,10 @@
             }
             apply(selection: selection, modelChanged: plan.relayouts || plan.sectionChanges != nil)
             #if DEBUG
-                if !model.isEmpty { GridDebugKeys.runOnce(in: collectionView) }
+                if !model.isEmpty {
+                    GridDebugKeys.runOnce(in: collectionView)
+                    GridDebugPinch.runOnce(in: self)
+                }
             #endif
         }
 
@@ -180,6 +234,30 @@
                 // Not on screen: nothing to animate or keep in place.
                 core.show(model, relayout: true)
                 collectionView.reloadData()
+                reloadScrubber()
+                return
+            }
+            // Tiles the user just deleted or archived fade out while their neighbours move into the gap (and come back
+            // the same way on Undo), SPEC §17.2.
+            if let motion = callbacks?.motion, motion.hasExpectations,
+                let items = GridItemChanges.make(old: core.model, new: model, changes: changes),
+                motion.style(gone: items.gone, back: items.back) != nil
+            {
+                _ = collectionView.numberOfSections
+                peek?.end()
+                core.show(model, relayout: true)
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.15 : 0.3
+                    context.allowsImplicitAnimation = true
+                    collectionView.animator().performBatchUpdates {
+                        collectionView.deleteSections(items.deletedSections)
+                        collectionView.insertSections(items.insertedSections)
+                        collectionView.deleteItems(at: Set(items.deletedItems))
+                        collectionView.insertItems(at: Set(items.insertedItems))
+                    }
+                }
+                if !items.headerChanges.isEmpty { reconfigureVisibleHeaders() }
+                if !changes.content.isEmpty { refreshVisibleTiles(only: changes.content) }
                 reloadScrubber()
                 return
             }
@@ -195,6 +273,16 @@
             restore(anchor)
             if !changes.content.isEmpty { refreshVisibleTiles(only: changes.content) }
             reloadScrubber()
+        }
+
+        /// A heart over the tiles on screen that were just made favourites (SPEC §17.2).
+        private func playHeartBursts(_ ids: [FileID]) {
+            guard window != nil else { return }
+            let wanted = Set(ids)
+            for case let tile as PhotoItem in collectionView.visibleItems() {
+                guard let id = tile.fileId, wanted.contains(id) else { continue }
+                tile.playHeartBurst()
+            }
         }
 
         /// Reconfigures the tiles on screen: badges, and a preview that fits the current tile size. A tile keeps the
@@ -267,6 +355,15 @@
             }
             guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
             scroll(toDocumentY: frame.minY - CGFloat(headerHeight(section: indexPath.section)))
+        }
+
+        /// The tile's frame in this view, top-left origin as SwiftUI measures it; nil when it is not on screen.
+        func tileFrame(_ id: FileID) -> CGRect? {
+            guard let indexPath = core.indexPath(for: id), let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+                contentView.documentVisibleRect.intersects(frame)
+            else { return nil }
+            let local = convert(frame, from: collectionView)
+            return isFlipped ? local : CGRect(x: local.minX, y: bounds.height - local.maxY, width: local.width, height: local.height)
         }
 
         /// Scrolls so that the tile's top is at `fraction` of the visible height (a zoom from the days).
@@ -423,6 +520,7 @@
         @objc private func didScroll(_ notification: Notification) {
             // A peek belongs to the tile under the pointer; the grid moved away under it.
             if peek?.isPeeking == true { peek?.end() }
+            hoverLift?.drop()
             guard !scrubber.isHidden else { return }
             let fraction = scrollFraction
             scrubber.scrolled(to: fraction, label: scrubberLabel(at: fraction))
@@ -463,6 +561,10 @@
         /// New moment titles: the headers on screen show them at once; their heights stay (one line either way).
         func setMoments(_ moments: MomentHeaders) {
             guard core.headerTexts.setMoments(moments) else { return }
+            reconfigureVisibleHeaders()
+        }
+
+        private func reconfigureVisibleHeaders() {
             let kind = NSCollectionView.elementKindSectionHeader
             for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
                 guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? SectionHeaderView else {
@@ -486,36 +588,87 @@
             callbacks?.open(id)
         }
 
-        /// A trackpad pinch steps through the zoom steps while the fingers move (one step per 0.22 of magnification, so a
-        /// long pinch goes through several), keeping the photo under the pointer where it is; out of the densest step the
-        /// Library's days take over (SPEC §15.5). Each step is a "level change" on a trackpad with haptics.
+        /// A trackpad pinch zooms with the fingers (SPEC §15.5, §17.7): between two zoom steps the grid scales smoothly
+        /// about the pointer towards the next step's tile size, and switches to that step (cross-fading into its layout)
+        /// once the fingers have gone far enough — one step per 0.22 of magnification, so a long pinch goes through
+        /// several. The photo under the pointer stays where it is; out of the densest step the Library's days take over.
+        /// Each step is a "level change" on a trackpad with haptics. With Reduce Motion the grid does not scale; the steps
+        /// cross-fade.
         @objc func handleMagnify(_ gesture: NSMagnificationGestureRecognizer) {
-            switch gesture.state {
+            pinch(gesture.state, magnification: Double(gesture.magnification), location: gesture.location(in: contentView)) {
+                gesture.state = .ended
+            }
+        }
+
+        /// One event of a pinch; `location` is in the clip view, `finish` ends the gesture early.
+        func pinch(
+            _ state: NSGestureRecognizer.State, magnification: Double, location: NSPoint, finish: @escaping () -> Void
+        ) {
+            switch state {
             case .began:
-                pinchAmount = 0
-                let location = gesture.location(in: contentView)
+                pinchZoom.begin(at: magnification)
+                pinchStepPending = false
                 let id = collectionView.indexPathForItem(at: collectionView.convert(location, from: contentView)).flatMap { fileId(at: $0) }
                 pinchAnchor = (id ?? anchorItem()).map { ($0, location.y - contentView.bounds.minY) }
+                pinchScaler.begin(at: location)
+                hoverLift?.isSuspended = true
             case .changed:
-                let delta = gesture.magnification - pinchAmount
-                guard abs(delta) > 0.22 else { return }
-                pinchAmount = gesture.magnification
-                let zoomIn = delta > 0
-                let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
-                if next != zoomStep {
-                    LibraryZoomHaptics.trackpadLevelChange()
-                    callbacks?.columnsChanged(next)
-                } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
-                    LibraryZoomHaptics.trackpadLevelChange()
-                    let height = max(contentView.bounds.height, 1)
-                    let point = UnitPoint(x: 0.5, y: Double((pinchAnchor?.offset ?? 0) / height))
-                    gesture.state = .ended
-                    zoomPastEnd(pinchAnchor?.id, point)
+                let outcome = pinchZoom.update(magnification: magnification, sides: pinchSides(), pastEnd: callbacks?.zoomPastEnd != nil)
+                switch outcome {
+                case .scale(let scale):
+                    // Until the new step is laid out, the grid stays at the size it reached.
+                    if !pinchStepPending, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { pinchScaler.show(scale: scale) }
+                case .step(let zoomIn):
+                    pinchStep(zoomIn: zoomIn, finish: finish)
                 }
-            case .ended, .cancelled, .failed:
-                // The relayout of the last step still uses the anchor; it is dropped after that.
-                DispatchQueue.main.async { [weak self] in self?.pinchAnchor = nil }
+            case .ended:
+                if let zoomIn = pinchZoom.end(magnification: magnification, sides: pinchSides()) {
+                    pinchStep(zoomIn: zoomIn, finish: finish)
+                } else {
+                    pinchScaler.settle()
+                }
+                pinchEnded()
+            case .cancelled, .failed:
+                pinchScaler.settle()
+                pinchEnded()
             default: break
+            }
+        }
+
+        #if DEBUG
+            func debugHover(at point: NSPoint) { hoverLift?.debugPointer(at: point) }
+        #endif
+
+        private func pinchEnded() {
+            hoverLift?.isSuspended = false
+            // The relayout of the last step still uses the anchor; it is dropped after that.
+            DispatchQueue.main.async { [weak self] in self?.pinchAnchor = nil }
+        }
+
+        /// Tile sides of the current step and the steps either side of it, for the pinch's scale.
+        private func pinchSides() -> GridPinchZoom.Sides {
+            let width = gridWidth
+            func side(_ step: Int) -> Double? {
+                step == zoomStep ? nil : GridColumns.geometry(width: width, step: step).side
+            }
+            return GridPinchZoom.Sides(
+                current: geometry.side, larger: side(GridColumns.step(zoomStep, zoomIn: true)),
+                smaller: side(GridColumns.step(zoomStep, zoomIn: false)))
+        }
+
+        private func pinchStep(zoomIn: Bool, finish: () -> Void) {
+            let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
+            if next != zoomStep {
+                LibraryZoomHaptics.trackpadLevelChange()
+                pinchStepPending = true
+                callbacks?.columnsChanged(next)
+            } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
+                LibraryZoomHaptics.trackpadLevelChange()
+                pinchScaler.reset()
+                let height = max(contentView.bounds.height, 1)
+                let point = UnitPoint(x: 0.5, y: Double((pinchAnchor?.offset ?? 0) / height))
+                finish()
+                zoomPastEnd(pinchAnchor?.id, point)
             }
         }
 
@@ -823,6 +976,51 @@
         }
     #endif
 
+    #if DEBUG
+        /// UI checks of the continuous pinch without a trackpad: `PHOTOS_DEBUG_GRID_PINCH=0.06,0.12,0.18` pinches at the
+        /// middle of the grid through these magnifications, one every 0.5 s, once the grid has items, and holds the last
+        /// one (for a screenshot) unless the list ends with `end`. `PHOTOS_DEBUG_GRID_HOVER=0.3,0.4` lifts the tile at
+        /// that point of the visible grid as if the pointer rested there.
+        @MainActor
+        enum GridDebugPinch {
+            private static var used = false
+
+            static func runOnce(in grid: PhotoGridScrollView) {
+                guard !used else { return }
+                used = true
+                if let raw = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_GRID_HOVER"] {
+                    let fractions = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                    if fractions.count == 2 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak grid] in
+                            guard let grid else { return }
+                            let clip = grid.contentView.bounds
+                            let point = NSPoint(
+                                x: clip.minX + clip.width * CGFloat(fractions[0]), y: clip.minY + clip.height * CGFloat(fractions[1]))
+                            grid.debugHover(at: grid.collectionView.convert(point, from: grid.contentView))
+                        }
+                    }
+                }
+                guard let raw = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_GRID_PINCH"], !raw.isEmpty else { return }
+                let parts = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                let values = parts.compactMap(Double.init)
+                let ends = parts.last == "end"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak grid] in
+                    guard let grid else { return }
+                    let clip = grid.contentView.bounds
+                    let location = NSPoint(x: clip.midX, y: clip.midY)
+                    grid.pinch(.began, magnification: 0, location: location) {}
+                    for (index, value) in values.enumerated() {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 * Double(index + 1)) { [weak grid] in
+                            grid?.pinch(.changed, magnification: value, location: location) {}
+                            guard ends, index == values.count - 1 else { return }
+                            grid?.pinch(.ended, magnification: value, location: location) {}
+                        }
+                    }
+                }
+            }
+        }
+    #endif
+
     final class MenuActionItem: NSMenuItem {
         let handler: @MainActor () -> Void
 
@@ -917,6 +1115,8 @@
         /// Square tile, or the picture whole in the photo's shape (`TileStyle`).
         private var square = true
         private var aspectRatio = 1.0
+        /// What the picture is now, for the way the next one arrives (`GridTileArrival`).
+        private var shown = GridTileArrival.Shown.nothing
 
         override func loadView() {
             picture.show = { [weak self] display in self?.show(display) }
@@ -1048,17 +1248,78 @@
         private func show(_ display: GridTilePicture.Display) {
             switch display {
             case .clear:
+                photoView.layer?.removeAllAnimations()
                 photoView.layer?.contents = nil
                 placeholderIcon.isHidden = true
+                shown = .nothing
             case .blur(let image):
                 photoView.layer?.contents = image
+                shown = .blur
             case .picture(let image):
+                let arrival = GridTileArrival.transition(
+                    from: shown, isAsync: picture.isDelivering,
+                    reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
                 photoView.layer?.contents = image
                 placeholderIcon.isHidden = true
+                shown = .picture
+                if view.window != nil { animateArrival(arrival) }
             case .placeholder(let symbol):
                 placeholderIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 placeholderIcon.isHidden = false
+                shown = .placeholder
             }
+        }
+
+        /// A heart springs up over the tile and fades (a fade only with Reduce Motion).
+        func playHeartBurst() {
+            guard let host = view.layer,
+                let symbol = NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)?.withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: 48, weight: .regular).applying(.init(paletteColors: [.white])))
+            else { return }
+            let side = min(max(min(view.bounds.width, view.bounds.height) * 0.42, 18), 72)
+            let heart = CALayer()
+            heart.contents = symbol
+            heart.contentsGravity = .resizeAspect
+            heart.frame = CGRect(x: view.bounds.midX - side / 2, y: view.bounds.midY - side / 2, width: side, height: side)
+            heart.shadowColor = NSColor.black.cgColor
+            heart.shadowOpacity = 0.35
+            heart.shadowRadius = 6
+            heart.shadowOffset = .zero
+            heart.opacity = 0
+            host.addSublayer(heart)
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0, 1, 1, 0]
+            fade.keyTimes = [0, 0.25, 0.6, 1]
+            var animations: [CAAnimation] = [fade]
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+                scale.values = [0.4, 1.08, 1, 1.25]
+                scale.keyTimes = [0, 0.3, 0.6, 1]
+                animations.append(scale)
+            }
+            let group = CAAnimationGroup()
+            group.animations = animations
+            group.duration = 0.9
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { heart.removeFromSuperlayer() }
+            heart.add(group, forKey: "burst")
+            CATransaction.commit()
+        }
+
+        /// The preview comes in over the BlurHash: a cross-fade and a tiny settle, run by Core Animation (SPEC §17.2).
+        private func animateArrival(_ arrival: GridTileArrival) {
+            guard arrival != .instant, let layer = photoView.layer else { return }
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = GridTileArrival.fadeDuration
+            layer.add(fade, forKey: "arrival")
+            guard arrival == .fadeAndSettle else { return }
+            let settle = CABasicAnimation(keyPath: "contentsRect")
+            settle.fromValue = NSValue(rect: GridTileArrival.settleContentsRect)
+            settle.toValue = NSValue(rect: CGRect(x: 0, y: 0, width: 1, height: 1))
+            settle.duration = GridTileArrival.settleDuration
+            settle.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            layer.add(settle, forKey: "settle")
         }
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridScrollView) {
@@ -1081,6 +1342,7 @@
 
         override func prepareForReuse() {
             super.prepareForReuse()
+            GridHoverLift.reset(view)
             picture.reset()
         }
     }
@@ -1094,13 +1356,14 @@
         private var moment: MomentHeaders.Entry?
         private var momentLabel: String?
         var openMoment: ((String) -> Void)?
-        static let subtitleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        // Bold date, light day line (SPEC §17.5).
+        static var subtitleFont: NSFont { Typography.dateDetailNSFont }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
             material = .headerView
             blendingMode = .withinWindow
-            titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
+            titleLabel.font = Typography.dateTitleNSFont
             titleLabel.lineBreakMode = .byTruncatingTail
             titleLabel.setAccessibilityRole(.staticText)
             subtitleLabel.font = Self.subtitleFont
@@ -1137,7 +1400,7 @@
         /// "Sunday in Lisbon ›  Sun 22 November": the moment in the label colour, the day after it as before.
         static func momentLine(_ title: String, day: String?) -> NSAttributedString {
             let line = NSMutableAttributedString(
-                string: title, attributes: [.font: subtitleFont, .foregroundColor: NSColor.labelColor])
+                string: title, attributes: [.font: Typography.dateEmphasisNSFont, .foregroundColor: NSColor.labelColor])
             let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
             if let symbol = NSImage(systemSymbolName: "chevron.forward", accessibilityDescription: nil)?.withSymbolConfiguration(
                 configuration)

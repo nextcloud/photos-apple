@@ -132,6 +132,16 @@ public enum MomentTitle: Hashable, Sendable {
         }
     }
 
+    /// The place the title names, if it names one ("Lisbon", "Lisbon & Porto").
+    public var place: String? {
+        switch self {
+        case .dayIn(_, let place), .weekendIn(let place), .daysIn(_, let place): place
+        case .places(let first, let second): "\(first) & \(second)"
+        case .activity(_, let place, _): place
+        case .with: nil
+        }
+    }
+
     static func weekday(_ day: Date, locale: Locale, calendar: Calendar) -> String {
         var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).weekday(.wide)
         style.capitalizationContext = .beginningOfSentence
@@ -483,7 +493,9 @@ public enum LibraryMoments {
         var titles: [Int: MomentHeaders.Entry] = [:]
         for moment in moments {
             guard let title = moment.title else { continue }
-            titles[moment.headerDay] = MomentHeaders.Entry(momentId: moment.id, title: title.text(locale: locale, calendar: calendar))
+            titles[moment.headerDay] = MomentHeaders.Entry(
+                momentId: moment.id, title: title.text(locale: locale, calendar: calendar), oldestDay: moment.days.last,
+                place: title.place)
         }
         return MomentHeaders(entries: titles)
     }
@@ -494,10 +506,16 @@ public struct MomentHeaders: Hashable, Sendable {
     public struct Entry: Hashable, Sendable {
         public var momentId: String
         public var title: String
+        /// Its oldest day (`YYYYMMDD`): the grid's floating date pill names the moment on every day it covers (SPEC §17.2).
+        public var oldestDay: Int?
+        /// Where it was, when its title names a place ("Lisbon", "Lisbon & Porto"): the pill's short form.
+        public var place: String?
 
-        public init(momentId: String, title: String) {
+        public init(momentId: String, title: String, oldestDay: Int? = nil, place: String? = nil) {
             self.momentId = momentId
             self.title = title
+            self.oldestDay = oldestDay
+            self.place = place
         }
     }
 

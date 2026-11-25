@@ -63,7 +63,8 @@ struct YearCard: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.15), palette.0.opacity(0.92)], startPoint: .top, endPoint: .bottom)
             }
         default:
-            LinearGradient(colors: [palette.0, palette.1], startPoint: .topLeading, endPoint: .bottomTrailing)
+            // Moves slowly while the card is the one shown; still in the pictures and with Reduce Motion (SPEC §17.6.1).
+            LivingGradient(palette: .blend(palette.0, palette.1), isActive: animated)
         }
     }
 

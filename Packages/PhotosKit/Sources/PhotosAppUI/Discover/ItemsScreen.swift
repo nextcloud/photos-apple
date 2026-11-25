@@ -13,6 +13,8 @@ struct ItemsScreen<Accessory: View>: View {
     var emptyMessage = ""
     var extraActions: ([MediaItem]) -> [GridMenuAction] = { _ in [] }
     /// Loads the items; items not in the index are stored as collection media so the viewer can show them.
+    /// A cover with the title above the photos (a memory, a person; SPEC §17.4).
+    var hero: GridHero? = nil
     let load: @MainActor (AccountServices) async throws -> [MediaItem]
     @ViewBuilder var accessory: () -> Accessory
 
@@ -32,6 +34,7 @@ struct ItemsScreen<Accessory: View>: View {
                 ? GridEmptyAction(
                     title: error == nil ? String(localized: "Refresh", bundle: .module) : String(localized: "Try again", bundle: .module)
                 ) { Task { await reload() } } : nil,
+            hero: hero,
             accessory: accessory
         )
         .task { await reload() }
@@ -81,6 +84,8 @@ struct CollectionTile: View {
     var circular = false
     /// What the tile is, for VoiceOver ("place", "person", "tag").
     var kind: String?
+    /// The screen the tile opens zooms out of its picture (SPEC §17.4).
+    var transition: Transition?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -97,6 +102,8 @@ struct CollectionTile: View {
             }
             .aspectRatio(1, contentMode: .fit)
             .clipShape(circular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: Design.coverCornerRadius)))
+            .cardTransitionSource(
+                id: transition?.id ?? "", in: transition?.namespace, cornerRadius: circular ? 1000 : Design.coverCornerRadius)
             // One line in the grid; wrapped at the accessibility text sizes instead of cut off after a few letters.
             Text(title).font(.headline).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
             if let subtitle {
@@ -105,6 +112,13 @@ struct CollectionTile: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AccessibilityText.collection(title: title, kind: kind, detail: subtitle))
+    }
+}
+
+extension CollectionTile {
+    struct Transition {
+        var id: String
+        var namespace: Namespace.ID
     }
 }
 

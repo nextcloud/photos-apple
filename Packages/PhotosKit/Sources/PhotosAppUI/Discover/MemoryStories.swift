@@ -89,6 +89,8 @@ struct MemoryStories: View {
     @State private var front: String?
     @State private var width: CGFloat = 0
     @State private var opened: Memory?
+    /// A memory zooms out of its story card (SPEC §17.4).
+    @Namespace private var zoom
 
     var compact: Bool { sizeClass == .compact || width < 500 }
     var height: CGFloat { MemoryStory.height(compact: compact) }
@@ -110,10 +112,12 @@ struct MemoryStories: View {
                 if let seasonalYear {
                     NavigationLink {
                         YearInReviewScreen(year: seasonalYear)
+                            .cardTransitionDestination(id: Self.reviewId, in: zoom)
                     } label: {
                         YearInReviewCard(year: seasonalYear, compact: true)
                             .frame(width: cardWidth, height: height)
                             .clipShape(.rect(cornerRadius: 16))
+                            .cardTransitionSource(id: Self.reviewId, in: zoom, cornerRadius: 16)
                     }
                     .buttonStyle(.plain)
                     .id(Self.reviewId)
@@ -125,6 +129,7 @@ struct MemoryStories: View {
                         finished: { advance(after: memory.id) }, back: { retreat(before: memory.id) }
                     )
                     .frame(width: cardWidth, height: height)
+                    .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 16)
                     .contextMenu { menu(memory) }
                     .id(memory.id)
                 }
@@ -144,7 +149,9 @@ struct MemoryStories: View {
         }
         // Fixed: a horizontal scroll view takes all the height it is offered (see `MemoriesStrip`).
         .frame(height: height + 2 * MemoriesStrip.verticalPadding)
-        .navigationDestination(item: $opened) { memory in MemoryScreen(memory: memory) }
+        .navigationDestination(item: $opened) { memory in
+            MemoryScreen(memory: memory).cardTransitionDestination(id: memory.id, in: zoom)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Memories", bundle: .module))
     }
@@ -238,6 +245,8 @@ struct StoryCard: View {
                 // Pinned to the card: a fill-scaled preview is larger than the card, and its tap area reached the
                 // photos below the band (they could not be tapped).
                 picture
+                    // A little deeper than the card while the cards are swiped (SPEC §17.4).
+                    .scrollParallax(.horizontal)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
                     .contentShape(.rect)

@@ -50,6 +50,8 @@ struct MemoriesStrip: View {
 
     /// Story cards or this strip (SPEC §16.1).
     @AppStorage(MemoriesStyle.key) private var style = MemoriesStyle.stories
+    /// A memory zooms out of its card (SPEC §17.4).
+    @Namespace private var zoom
 
     var body: some View {
         Group {
@@ -106,8 +108,10 @@ struct MemoriesStrip: View {
     func yearInReviewLink(_ year: Int) -> some View {
         NavigationLink {
             YearInReviewScreen(year: year)
+                .cardTransitionDestination(id: "year-\(year)", in: zoom)
         } label: {
             YearInReviewCard(year: year, compact: true).frame(width: cardSize.width, height: cardSize.height)
+                .cardTransitionSource(id: "year-\(year)", in: zoom, cornerRadius: 12)
         }
         .buttonStyle(.plain)
     }
@@ -115,9 +119,11 @@ struct MemoriesStrip: View {
     func card(_ memory: Memory) -> some View {
         NavigationLink {
             MemoryScreen(memory: memory)
+                .cardTransitionDestination(id: memory.id, in: zoom)
         } label: {
             MemoryCard(memory: memory, compact: true)
                 .frame(width: cardSize.width, height: cardSize.height)
+                .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 12)
                 // The card has a fixed size: at accessibility text sizes its title would be cut to a word or two. The
                 // whole title is in the VoiceOver label and on the memory's screen.
                 .dynamicTypeSize(...DynamicTypeSize.xxLarge)
@@ -189,7 +195,7 @@ struct MemoryScreen: View {
     @Environment(SessionModel.self) private var session
 
     var body: some View {
-        ItemsScreen(title: memory.title, sectioned: false) { services in
+        ItemsScreen(title: memory.title, sectioned: false, hero: hero) { services in
             let map = try await services.library.fetchItems(memory.items)
             return memory.items.compactMap { map[$0] }
         } accessory: {
@@ -210,8 +216,18 @@ struct MemoryScreen: View {
         .memorySlideshow($slideshow)
         .memoryActions(actions)
         .albumCardSheets($guestSheet)
-        // A hint of the cover's colour in the header (SPEC §16.8.1).
-        .photoHeaderTint(memory.cover)
+        // A hint of the cover's colour in the header (SPEC §16.8.1); on iPhone and iPad the hero shows the cover itself.
+        .photoHeaderTint(GridHero.isSupported ? nil : memory.cover)
+    }
+
+    /// The memory's cover at the top with its title and dates (iPhone, iPad; SPEC §17.4).
+    var hero: GridHero {
+        let memory = memory
+        return GridHero {
+            HeroHeaderView(title: memory.title, subtitle: Memories.dateLine(for: memory)) {
+                PreviewImage(fileId: memory.cover, etag: "", bucket: 1024)
+            }
+        }
     }
 
     static var playTitle: String {

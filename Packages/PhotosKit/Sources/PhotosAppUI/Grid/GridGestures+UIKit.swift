@@ -226,6 +226,8 @@
         private var tile: IndexPath?
         private var fraction = 0.0
         private var hoverTask: Task<Void, Never>?
+        /// The Live Photo tile under the pointer, whose badge plays.
+        private var hoveredLive: IndexPath?
 
         init(host: any GridGestureHost) {
             self.host = host
@@ -295,6 +297,7 @@
             case .began, .changed:
                 let location = gesture.location(in: host.gestureCollectionView)
                 let target = peekable(at: location)
+                setHoveredLive(target?.kind == .livePhoto ? target?.indexPath : nil)
                 if let tile, target?.indexPath == tile {
                     move(to: location)
                     return
@@ -311,14 +314,27 @@
                     self.move(to: now)
                 }
             default:
+                setHoveredLive(nil)
                 end()
             }
+        }
+
+        /// The Live badge of the tile under the pointer comes alive (SPEC §17.2).
+        private func setHoveredLive(_ indexPath: IndexPath?) {
+            guard indexPath != hoveredLive, let collectionView = host?.gestureCollectionView else { return }
+            if let hoveredLive { (collectionView.cellForItem(at: hoveredLive) as? PhotoCell)?.setLiveActive(false) }
+            hoveredLive = indexPath
+            if let indexPath { (collectionView.cellForItem(at: indexPath) as? PhotoCell)?.setLiveActive(true) }
         }
 
         private func begin(_ target: (indexPath: IndexPath, item: GridMedia, kind: GridPeekKind)) {
             end()
             guard let host, let attributes = host.gestureCollectionView.layoutAttributesForItem(at: target.indexPath) else { return }
             tile = target.indexPath
+            // The Live badge plays along while the motion is scrubbed (SPEC §17.2).
+            if target.kind == .livePhoto {
+                (host.gestureCollectionView.cellForItem(at: target.indexPath) as? PhotoCell)?.setLiveActive(true)
+            }
             let picture = GridTile.pictureFrame(in: attributes.frame, aspectRatio: target.item.aspectRatio, square: host.squareTiles)
             overlay.frame = picture
             overlay.show(kind: target.kind)
@@ -354,6 +370,7 @@
                 cache.store(loader)
             }
             loader = nil
+            if let tile, let host { (host.gestureCollectionView.cellForItem(at: tile) as? PhotoCell)?.setLiveActive(false) }
             tile = nil
             overlay.isHidden = true
             overlay.update(image: nil, fraction: 0, index: 0)

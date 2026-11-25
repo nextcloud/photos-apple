@@ -33,6 +33,10 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Moment titles on the day headers and what a tap on one opens (the Library, SPEC §16.1).
     var moments = MomentHeaders.none
     var openMoment: ((String) -> Void)? = nil
+    /// Scrolls above the photos, in the grid (the Library's memories on iPhone, iPad and Vision Pro, SPEC §17.2).
+    var gridHeader: AnyView? = nil
+    /// A cover with the title above the first row (an album, a memory, a person; iPhone and iPad, SPEC §17.4).
+    var hero: GridHero? = nil
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -90,6 +94,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var tileLocator = GridTileLocator()
     @State private var zoomTile: FileID?
     @State private var zoomFrame: CGRect?
+    /// Heart bursts and the way removed tiles leave and come back (SPEC §17.2).
+    @State private var motion = GridActionMotion()
     @Environment(\.showInFolder) private var showInFolder
     /// Square tiles or the aspect ratio grid (Settings, View ▸ Square Tiles).
     @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
@@ -99,8 +105,13 @@ struct MediaGridScreen<Accessory: View>: View {
     #endif
     /// Years, months and days around this grid (the Library's zoom levels, SPEC §15.5); nil elsewhere.
     @Environment(\.libraryZoom) private var libraryZoom
+    @Environment(\.floatingBottomInset) private var floatingBottomInset
     /// "Show Similar" for this photo (SPEC §15.5).
     @State private var similarTo: MediaItem?
+    /// Select ⇄ Done morphs the toolbars; a fade with Reduce Motion (SPEC §17.3).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The hero's title has gone under the navigation bar: the bar shows the title (SPEC §17.4).
+    @State private var heroCollapsed = false
 
     struct TileHighlight: Equatable {
         let id = UUID()
@@ -124,11 +135,22 @@ struct MediaGridScreen<Accessory: View>: View {
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
+                // The hero shows the title while it is in view; the bar takes it over when the hero has gone.
+                .toolbar(removing: heroShowsTitle ? .title : nil)
+                .animation(.smooth(duration: 0.25), value: heroCollapsed)
                 // iPhone: the selection's actions take the place of the tab bar, as in Photos (else they are under it).
                 .toolbar(isSelecting && sizeClass == .compact ? .hidden : .automatic, for: .tabBar)
             #endif
             .toolbar { toolbar }
+            #if !os(macOS)
+                .toolbar { selectionCountTitle }
+            #endif
+            // Before the selection bar: the notices ("Change undone") stand above it instead of covering its count.
             .overlay(alignment: .bottom) { statusBanner }
+            #if os(iOS)
+                // In place of the tab bar while selecting (SPEC §17.3).
+                .safeAreaBar(edge: .bottom) { selectionActionBar }
+            #endif
             .confirmationDialog(
                 deleteTitle, isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                 titleVisibility: .visible
@@ -136,6 +158,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 Button(String(localized: "Delete", bundle: .module), role: .destructive) {
                     if let items = confirmDelete?.items {
                         deletions += 1
+                        motion.expectLeaving(items.map(\.fileId), style: .collapse)
                         let undoManager = undoManager
                         Task { await session.perform(.delete(items), undoManager: undoManager) }
                     }
@@ -223,6 +246,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 showsHeaders: showsHeaders,
                 squareTiles: squareTiles,
                 moments: moments,
+                header: gridHeader,
                 services: services,
                 callbacks: GridCallbacks(
                     open: { id in openViewer(at: id) },
@@ -243,10 +267,20 @@ struct MediaGridScreen<Accessory: View>: View {
                     cull: cullCallback,
                     compare: { (ids: [FileID]) in compare(ids) },
                     zoomPastEnd: zoomPastEnd,
-                    openMoment: momentOpener
-                )
+                    openMoment: momentOpener,
+                    motion: motion
+                ),
+                hero: gridHero
             )
-            .ignoresSafeArea(edges: .bottom)
+            #if os(macOS)
+                .ignoresSafeArea(edges: .bottom)
+            #else
+                // Edge to edge (SPEC §17.2): the photos scroll under the bars, which blur them softly; a hero's cover
+                // (SPEC §17.4) begins at the top of the screen.
+                .ignoresSafeArea(edges: [.top, .bottom])
+            #endif
+            // The Library's zoom levels morph into the grid's tiles (SPEC §17.5).
+            .libraryZoomGridFrame(libraryZoom, locator: tileLocator)
             .overlay(alignment: .topLeading) {
                 ViewerZoomSourceMark(tile: zoomTile, frame: zoomFrame, namespace: zoomNamespace)
             }
@@ -255,6 +289,9 @@ struct MediaGridScreen<Accessory: View>: View {
             }
         } else if session.isSignedOut {
             SignedOutView()
+        } else if emptyPhase == .loading, let gridHero {
+            // The hero is there from the start (an album zooms in with its cover), the tiles' shapes below it.
+            HeroSkeleton(hero: gridHero, zoomStep: columns)
         } else if emptyPhase == .loading {
             GridSkeleton(zoomStep: columns, showsHeader: showsHeaders, caption: loadingCaption)
         } else if waitsForFirstSync, case .failed(let message, _) = session.syncStatus {
@@ -267,6 +304,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
                     .buttonStyle(.borderedProminent)
             }
+            .livingEmptyBackground()
         } else {
             ContentUnavailableView {
                 Label(emptyTitle, systemImage: "photo.on.rectangle.angled")
@@ -281,7 +319,22 @@ struct MediaGridScreen<Accessory: View>: View {
                     Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
                 }
             }
+            // No photos, no results, offline: on a living wash (SPEC §17.6.1).
+            .livingEmptyBackground()
         }
+    }
+
+    /// The hero as the grid hosts it, telling this screen when its title went under the bar.
+    var gridHero: GridHero? {
+        guard GridHero.isSupported, var hero else { return nil }
+        hero.collapsedChanged = { (collapsed: Bool) in heroCollapsed = collapsed }
+        return hero
+    }
+
+    /// The hero is in view with its title, or about to come with the photos: the bar shows none (while selecting it
+    /// shows the count; an empty grid has no hero and the bar keeps its title).
+    var heroShowsTitle: Bool {
+        gridHero != nil && !heroCollapsed && !isSelecting && (feed.model.hasTiles || !feed.loaded)
     }
 
     /// A tap on a moment's title in a day header (SPEC §16.1).
@@ -356,9 +409,10 @@ struct MediaGridScreen<Accessory: View>: View {
         }
     }
 
-    /// Favourites or unfavourites; undoable.
+    /// Favourites or unfavourites; undoable. New favourites get a heart over their tiles.
     func setFavorite(_ items: [MediaItem], _ value: Bool) {
         favoriteToggles += 1
+        if value { motion.favorite(items.map(\.fileId)) }
         let undoManager = undoManager
         Task { await session.perform(.favorite(items, value: value), undoManager: undoManager) }
     }
@@ -452,11 +506,23 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             #if !os(macOS)
                 Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
-                    if isSelecting { endSelection() } else { isSelecting = true }
+                    if isSelecting {
+                        endSelection()
+                    } else {
+                        // The tab bar morphs into the selection's action bar (SPEC §17.3).
+                        withAnimation(ChromeMotion.morph(reduceMotion: reduceMotion)) { isSelecting = true }
+                    }
                 }
                 .disabled(feed.items.isEmpty)
             #endif
         }
+        #if !os(iOS)
+            selectionGroup
+        #endif
+    }
+
+    /// The selection's actions in the window toolbar (Mac, Vision Pro).
+    @ToolbarContentBuilder var selectionGroup: some ToolbarContent {
         if isSelecting && !selection.isEmpty {
             ToolbarItemGroup(placement: selectionPlacement) {
                 let info: GridSelectionInfo = selectionInfo
@@ -469,6 +535,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     withItems(withStacks(Array(selection))) { setFavorite($0, !allFavorite) }
                 } label: {
                     Label(favoriteTitle(remove: allFavorite), systemImage: allFavorite ? "heart.slash" : "heart")
+                        .favoriteBounce(favoriteToggles)
                 }
                 .help(favoriteTitle(remove: allFavorite))
                 Menu {
@@ -512,6 +579,32 @@ struct MediaGridScreen<Accessory: View>: View {
         }
     }
 
+    #if os(iOS)
+        /// The selection's action bar at the bottom, in place of the tab bar on iPhone, as in Photos (SPEC §17.3).
+        var selectionActionBar: some View {
+            let info: GridSelectionInfo = selectionInfo
+            let allFavorite: Bool = info.summary.allFavorite
+            let hasSelection: Bool = !selection.isEmpty
+            let more: [GridMenuAction] =
+                hasSelection ? menuActions(info).filter { !SelectionBarLayout.ownButtons.contains($0.id) && $0.share == nil } : []
+            return SelectionActionBar(
+                isShown: isSelecting, count: selection.count, title: selectionTitle, shareItems: info.items,
+                allFavorite: allFavorite, favoriteTitle: favoriteTitle(remove: allFavorite), favoriteToggles: favoriteToggles,
+                canDelete: info.summary.deletable > 0, addTo: albumMenuAction(title: addToAlbumTitle), more: more,
+                historyTitle: ChangeWording.historyMenuTitle,
+                toggleFavorite: { withItems(withStacks(Array(selection))) { setFavorite($0, !allFavorite) } },
+                delete: { requestDelete(Array(selection)) },
+                run: { (action: GridMenuAction) in action.handler(Array(selection)) },
+                showHistory: { showingUndoHistory = true })
+        }
+    #endif
+
+    var addToAlbumTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album…."),
+            other: LocalizedStringResource("Add to album", bundle: .module, comment: "Submenu with the recent albums and New album…."))
+    }
+
     func menuButton(_ action: GridMenuAction) -> some View {
         Button(role: action.isDestructive ? .destructive : nil) {
             action.handler(Array(selection))
@@ -523,6 +616,9 @@ struct MediaGridScreen<Accessory: View>: View {
     var selectionPlacement: ToolbarItemPlacement {
         #if os(iOS)
             .bottomBar
+        #elseif os(visionOS)
+            // A glass ornament under the window, as the viewer's actions (SPEC §17.7).
+            .bottomOrnament
         #else
             .automatic
         #endif
@@ -808,8 +904,11 @@ struct MediaGridScreen<Accessory: View>: View {
     }
 
     func endSelection() {
-        isSelecting = false
-        selection = []
+        // The action bar morphs back into the tab bar (SPEC §17.3).
+        withAnimation(ChromeMotion.morph(reduceMotion: reduceMotion)) {
+            isSelecting = false
+            selection = []
+        }
     }
 
     /// The context menu of the grid for `ids` (the selection, or the item that was clicked).
@@ -876,10 +975,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     withItems(ids) { collage = CollageRequest.selection($0) }
                 })
         }
-        let albumTitle: String = PlatformWording.title(
-            mac: LocalizedStringResource("Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album…."),
-            other: LocalizedStringResource("Add to album", bundle: .module, comment: "Submenu with the recent albums and New album…."))
-        actions.append(albumMenuAction(title: albumTitle))
+        actions.append(albumMenuAction(title: addToAlbumTitle))
         if session.features.has(.systemtags) {
             actions.append(
                 GridMenuAction(id: "tags", title: TagWording.menuTitle, systemImage: "tag") { ids in
@@ -934,7 +1030,10 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "archive", title: String(localized: "Archive", bundle: .module), systemImage: "archivebox") { ids in
                     let undoManager = undoManager
-                    withItems(withStacks(ids)) { items in Task { await session.perform(.archive(items), undoManager: undoManager) } }
+                    withItems(withStacks(ids)) { items in
+                        motion.expectLeaving(items.map(\.fileId), style: .slide)
+                        Task { await session.perform(.archive(items), undoManager: undoManager) }
+                    }
                     endSelection()
                 })
         }
@@ -943,7 +1042,10 @@ struct MediaGridScreen<Accessory: View>: View {
                 GridMenuAction(id: "unarchive", title: String(localized: "Unarchive", bundle: .module), systemImage: "tray.and.arrow.up") {
                     ids in
                     let undoManager = undoManager
-                    withItems(withStacks(ids)) { items in Task { await session.perform(.unarchive(items), undoManager: undoManager) } }
+                    withItems(withStacks(ids)) { items in
+                        motion.expectLeaving(items.map(\.fileId), style: .slide)
+                        Task { await session.perform(.unarchive(items), undoManager: undoManager) }
+                    }
                     endSelection()
                 })
         }
@@ -992,7 +1094,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     }, children: children))
         }
         // The screen's own actions (remove from album…) work on the items; a selection too large to load has none.
-        var extras: [GridMenuAction] = info.items.map(extraActions) ?? []
+        var extras: [GridMenuAction] = (info.items.map(extraActions) ?? []).map(slidingAway)
         if !extras.isEmpty { extras[0].startsGroup = true }
         actions += extras
         if summary.deletable > 0 {
@@ -1007,14 +1109,50 @@ struct MediaGridScreen<Accessory: View>: View {
         return actions
     }
 
+    /// "Remove from Album" (the album's own action): its tiles slide away (SPEC §17.2).
+    func slidingAway(_ action: GridMenuAction) -> GridMenuAction {
+        guard action.id == "removeFromAlbum" else { return action }
+        var sliding = action
+        let motion = motion
+        let handler = action.handler
+        sliding.handler = { ids in
+            motion.expectLeaving(withStacks(ids), style: .slide)
+            handler(ids)
+        }
+        return sliding
+    }
+
+    /// "3 selected" in the bar, its number rolling as tiles are selected (SPEC §17.2). The navigation title stays the
+    /// same text for VoiceOver and the back button.
+    @ToolbarContentBuilder var selectionCountTitle: some ToolbarContent {
+        if isSelecting && !keepsTitleWhileSelecting {
+            ToolbarItem(placement: .principal) {
+                Text(selectionTitle)
+                    .font(.headline)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: Double(selection.count)))
+                    .animation(.snappy(duration: 0.25), value: selection.count)
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
+    }
+
     /// The confirmation of the last change ("Archived 3 items · Undo") above the account's status.
     var statusBanner: some View {
         VStack(spacing: 0) {
             ChangeNoticeToast()
             GridStatusBanner(hasItems: feed.model.hasTiles)
         }
+        // Above a control floating at the bottom (the Library's zoom picker).
+        .padding(.bottom, floatingBottomInset)
         .animation(.default, value: session.lastChange?.id)
     }
+}
+
+/// The iPhone and iPad selection bar (SPEC §17.3).
+enum SelectionBarLayout {
+    /// Menu actions that are buttons of the bar and so are not repeated in its More menu.
+    static let ownButtons: Set<String> = ["delete", "favorite", "album"]
 }
 
 /// The selection of a grid as its toolbar and menus need it.

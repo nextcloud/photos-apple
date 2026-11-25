@@ -154,11 +154,13 @@ enum TimelineToolbar {
 /// Shows upload progress; tap for details.
 struct TransfersIndicator: View {
     @Environment(SessionModel.self) private var session
+    /// The tab bar's accessory shows the uploads already (iPhone, SPEC §17.3).
+    @Environment(\.activityAccessoryKinds) private var accessoryKinds
     @State private var showing = false
 
     var body: some View {
         let queue = session.transfers
-        if !queue.transfers.isEmpty {
+        if !queue.transfers.isEmpty && !accessoryKinds.contains(.upload) {
             Button {
                 showing = true
             } label: {

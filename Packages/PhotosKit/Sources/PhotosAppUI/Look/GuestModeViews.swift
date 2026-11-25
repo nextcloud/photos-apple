@@ -444,13 +444,12 @@ private struct GuestViewer: View {
             .keyboardShortcut(.cancelAction)
         }
         .environment(\.isGuestPresentation, true)
-        .focusable()
+        .keyFocusable()
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
-        .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
-            step(press.key == .rightArrow ? 1 : -1)
-            return .handled
+        .hardwareKeys([.leftArrow, .rightArrow]) { key in
+            step(key == .rightArrow ? 1 : -1)
         }
         .accessibilityAction(.escape) { close() }
     }

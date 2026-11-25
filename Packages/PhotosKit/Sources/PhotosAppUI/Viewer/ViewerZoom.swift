@@ -96,9 +96,10 @@ struct ViewerZoomCommand: Equatable {
 
 /// Vertical swipes on a page that is not zoomed (iPhone, iPad): down closes the viewer, up shows the info panel.
 enum ViewerSwipe {
+    /// The finger's travel and speed in window coordinates: the photo follows it both ways while it is dragged down.
     enum Phase: Equatable {
-        case changed(translation: CGFloat)
-        case ended(translation: CGFloat, velocity: CGFloat)
+        case changed(translation: CGSize)
+        case ended(translation: CGSize, velocity: CGVector)
         case cancelled
     }
 

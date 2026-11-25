@@ -1540,6 +1540,9 @@
         }
       }
     },
+    "+%lld more" : {
+      "comment" : "Tab bar accessory: how many other uploads, backups or imports run besides the one shown."
+    },
     "1 minute" : {
       "comment" : "Option of \"Lock after\" in Settings: the app locks after one minute in the background."
     },
@@ -1947,7 +1950,7 @@
       "comment" : "Folder rules (automations that run after each sync): switch: the rule also acts on photos uploaded before it was made."
     },
     "Ambient Glow" : {
-      "comment" : "Viewer background setting: a soft glow of the photo's colours."
+      "comment" : "Viewer background setting: a blurred, enlarged copy of the photo behind it."
     },
     "An earlier import of these files got through %lld of %lld items. It continues where it stopped." : {
       "comment" : "Import: resuming. The values are numbers."
@@ -2162,6 +2165,9 @@
     "Backed-up photos don't appear in your library" : {
       "comment" : "Warning on the Backup screen: the backup folder is not one of the folders the timeline shows."
     },
+    "Backing up" : {
+      "comment" : "Tab bar accessory: the backup is uploading."
+    },
     "Backing up…" : {
       "comment" : "Menu bar panel: a backup pass is running."
     },
@@ -2197,8 +2203,14 @@
     "Backup is turned off" : {
       "comment" : "Backup screen title when device management turned backup off."
     },
+    "Backup needs attention" : {
+      "comment" : "Tab bar accessory: a backup pass ended with problems."
+    },
     "Backup progress" : {
       "comment" : "VoiceOver label of the progress bar on the Backup screen."
+    },
+    "Backup up to date" : {
+      "comment" : "Tab bar accessory: a backup pass has finished."
     },
     "Best of" : {
       "comment" : "Folder rules (automations that run after each sync): example rule and album name for five-star photos."
@@ -2212,11 +2224,11 @@
     "Birthday" : {
       "comment" : "Through the years: the person's birthday."
     },
-    "Black" : {
-      "comment" : "Viewer background setting: plain black."
-    },
     "Black & White" : {
       "comment" : "Memory film style: monochrome pictures, slow dissolves."
+    },
+    "Black or White" : {
+      "comment" : "Viewer background setting: pure black in Dark Mode, pure white in Light Mode."
     },
     "Bounce" : {
       "comment" : "Live Photo effect: the motion plays forward and backward (as in Apple's Photos)."
@@ -3756,6 +3768,9 @@
     "Import library…" : {
       "comment" : "Command palette: opens the import of other services' exports (Google Photos, iCloud…)."
     },
+    "Import needs attention" : {
+      "comment" : "Tab bar accessory: an import ended with problems."
+    },
     "Import stopped. It continues where it stopped when you resume it." : {
       "comment" : "Import window (Import Library): the user stopped the import."
     },
@@ -3818,6 +3833,12 @@
           }
         }
       }
+    },
+    "Importing" : {
+      "comment" : "Tab bar accessory: an import is running."
+    },
+    "Importing from %@" : {
+      "comment" : "Tab bar accessory: an import from a camera or memory card (its name) is running."
     },
     "Importing from %@… %lld %%" : {
       "comment" : "Toolbar help while a card import runs: device name and percent.",
@@ -4981,6 +5002,9 @@
     },
     "Opening in %@…" : {
       "comment" : "Edit With status: the app's name."
+    },
+    "Opens Backup" : {
+      "comment" : "Accessibility hint of the tab bar accessory."
     },
     "Opens the moment" : {
       "comment" : "VoiceOver hint of a moment title on a day header of the library."
@@ -6327,6 +6351,15 @@
     "Shows %@'s age under every photo. Kept on this device." : {
       "comment" : "Through the years: what the birthday is for. The argument is the name."
     },
+    "Shows the import" : {
+      "comment" : "Accessibility hint of the tab bar accessory."
+    },
+    "Shows the info" : {
+      "comment" : "Viewer: hint of the date pill at the top."
+    },
+    "Shows the uploads" : {
+      "comment" : "Accessibility hint of the tab bar accessory."
+    },
     "Shows these photos" : {
       "comment" : "VoiceOver hint of a bar in Insights."
     },
@@ -7443,8 +7476,17 @@
     "Weekly Photo Prompts" : {
       "comment" : "Name of the weekly photo prompts feature."
     },
+    "Welcome" : {
+      "comment" : "Shown for a moment after the first login, before the Library."
+    },
     "Welcome home" : {
       "comment" : "Import summary: headline when the import has finished."
+    },
+    "Welcome to Nextcloud Photos" : {
+      "comment" : "Headline of the login screen at the first launch, above the server address."
+    },
+    "Welcome, %@" : {
+      "comment" : "Shown for a moment after the first login, before the Library. The placeholder is the user's name."
     },
     "When a photo matches" : {
       "comment" : "Folder rules (automations that run after each sync): label of the All/Any/None picker of the rule's conditions."

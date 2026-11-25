@@ -126,9 +126,11 @@ struct TimelineScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsMemoriesStrip && !memories.isEmpty {
-                MemoriesStrip(memories: memories)
-            }
+            #if os(macOS)
+                if showsMemoriesStrip && !memories.isEmpty {
+                    MemoriesStrip(memories: memories)
+                }
+            #endif
             grid
                 .libraryZoomLevels(zoom, feed: feed, isSelecting: gridSelection.isSelecting)
         }
@@ -215,7 +217,8 @@ struct TimelineScreen: View {
             isLibrary: filter == .all,
             deleteRejected: session.features.has(.systemtags) ? { requestDeleteRejected() } : nil,
             moments: showsMomentHeaders ? moments.headers : .none,
-            openMoment: { id in openedMoment = moments.memory(id) }
+            openMoment: { id in openedMoment = moments.memory(id) },
+            gridHeader: memoriesHeader
         ) {
             TransfersIndicator()
             PhotographerStatusItems()
@@ -253,6 +256,16 @@ struct TimelineScreen: View {
                 .pickerStyle(.menu)
             }
         }
+    }
+
+    /// The memories scroll with the photos (edge to edge, SPEC §17.2); the Mac keeps them above its grid.
+    var memoriesHeader: AnyView? {
+        #if os(macOS)
+            return nil
+        #else
+            guard showsMemoriesStrip, !memories.isEmpty else { return nil }
+            return AnyView(MemoriesStrip(memories: memories))
+        #endif
     }
 
     func observe() {

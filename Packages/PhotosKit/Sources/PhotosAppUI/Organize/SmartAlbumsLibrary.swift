@@ -13,6 +13,8 @@ struct SmartAlbumsLibraryScreen: View {
     @State private var editing: EditRequest?
     @State private var deleting: SmartAlbumDefinition?
     @State private var webAlbums: [SmartAlbum] = []
+    /// A smart album zooms out of its card (SPEC §17.4).
+    @Namespace private var zoom
 
     struct EditRequest: Identifiable {
         let id = UUID()
@@ -41,8 +43,10 @@ struct SmartAlbumsLibraryScreen: View {
                     ForEach(albums) { album in
                         NavigationLink {
                             SmartAlbumScreen(albumId: album.id)
+                                .cardTransitionDestination(id: album.id, in: zoom)
                         } label: {
                             SmartAlbumCard(album: album)
+                                .cardTransitionSource(id: album.id, in: zoom)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -138,25 +142,39 @@ struct SmartAlbumCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
-                LinearGradient(
-                    colors: [Design.accent.opacity(0.35), Design.accent.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: "wand.and.stars").font(compact ? .title2 : .largeTitle).foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                // A gradient from the name until the first photo is there (SPEC §17.4).
+                AlbumGradientView(name: album.name)
                 if let cover { AlbumCover(fileId: cover) }
             }
+            .scrollParallax(compact ? .horizontal : .vertical)
             .aspectRatio(1, contentMode: .fit)
             .clipShape(.rect(cornerRadius: Design.coverCornerRadius))
-            .overlay(alignment: .bottomLeading) {
+            .overlay(alignment: .topLeading) {
                 Image(systemName: "wand.and.stars")
                     .font(.caption.weight(.semibold))
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: .circle)
+                    .frame(width: 26, height: 26)
+                    .modifier(GlassCircle())
                     .padding(6)
                     .accessibilityHidden(true)
             }
-            Text(album.name).font(compact ? .subheadline.weight(.semibold) : .headline)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
-            Text(count.map(AccessibilityText.items) ?? " ").font(.caption).foregroundStyle(.secondary)
+            .overlay(alignment: .bottom) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    CaptionPlate(cornerRadius: Design.coverCornerRadius - 3) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(album.name).font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold)).lineLimit(1)
+                            Text(count.map(AccessibilityText.items) ?? " ").font(compact ? .caption2 : .caption).foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(compact ? 4 : 6)
+                    // A narrow card in the strip: the plate keeps to the size its text fits at.
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                }
+            }
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(album.name).font(.headline).lineLimit(3)
+                Text(count.map(AccessibilityText.items) ?? " ").font(.caption).foregroundStyle(.secondary)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
@@ -205,6 +223,8 @@ struct SmartAlbumScreen: View {
 struct SmartAlbumsStrip: View {
     @Environment(SessionModel.self) private var session
     @State private var creating = false
+    /// A smart album zooms out of its card (SPEC §17.4).
+    @Namespace private var zoom
 
     var body: some View {
         let albums: [SmartAlbumDefinition] = (session.organize?.smartAlbums ?? []).sorted {
@@ -226,8 +246,10 @@ struct SmartAlbumsStrip: View {
                         ForEach(albums) { album in
                             NavigationLink {
                                 SmartAlbumScreen(albumId: album.id)
+                                    .cardTransitionDestination(id: album.id, in: zoom)
                             } label: {
                                 SmartAlbumCard(album: album, compact: true).frame(width: 128)
+                                    .cardTransitionSource(id: album.id, in: zoom)
                             }
                             .buttonStyle(.plain)
                         }

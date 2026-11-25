@@ -28,6 +28,7 @@ struct ZoomablePhoto: View {
     @State private var lock = AppLock.shared
     /// No Live Text in Guest Mode: its menu copies, shares and looks things up (SPEC §16.8.3).
     @Environment(\.isGuestPresentation) private var isGuestPresentation
+    @Environment(\.viewerControlsInset) private var controlsInset
 
     var bucket: Int { needsDetail ? 4096 : 1024 }
 
@@ -91,7 +92,7 @@ struct ZoomablePhoto: View {
                     .font(.caption.weight(.semibold))
                     .padding(6)
                     .background(.ultraThinMaterial, in: .capsule)
-                    .padding(.top, 60)
+                    .padding(.top, controlsInset)
                     .padding(.leading, 12)
                     .allowsHitTesting(false)
             }
@@ -147,7 +148,7 @@ struct ZoomablePhoto: View {
         }
         .buttonStyle(.plain)
         .disabled(developing)
-        .padding(.top, 60)
+        .padding(.top, controlsInset)
         .padding(.trailing, 12)
         .help(title)
         .accessibilityLabel(title)

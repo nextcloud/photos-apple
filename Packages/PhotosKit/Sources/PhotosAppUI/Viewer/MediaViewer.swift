@@ -47,8 +47,16 @@ struct MediaViewer: View {
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
     @State private var zoomCommand: ViewerZoomCommand?
     @State private var zoomScale: CGFloat = ViewerZoom.minimumScale
-    /// How far the page is dragged down to close the viewer (iPhone, iPad).
-    @State private var dragTranslation: CGFloat = 0
+    /// Where the page is while it is dragged down to close the viewer and while it lands in its tile (iPhone, iPad).
+    @State private var dismissPose = ViewerDismissPose.rest
+    /// The page fades out instead of flying into its tile (Reduce Motion).
+    @State private var exitOpacity: Double = 1
+    /// The page's frame in global coordinates, to land the photo in its tile.
+    @State private var pageFrame: CGRect = .zero
+    /// Top of the info card in global coordinates while it is a sheet (iPhone): the photo moves up above it.
+    @State private var infoTop: CGFloat?
+    /// The top safe area: the badges on the photo go below the floating controls.
+    @State private var topInset: CGFloat = 0
     /// Counted up to put the current page back in place after a page was taken out.
     @State private var realignments = 0
     /// Save to Photos / Export…, with its progress and result.
@@ -77,6 +85,11 @@ struct MediaViewer: View {
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.showInFolder) private var showInFolder
     @Environment(\.showInTimeline) private var showInTimeline
+    @Environment(\.colorScheme) private var colorScheme
+    #if !os(macOS)
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+    @Environment(\.viewerExit) private var viewerExit
 
     init(
         ids: [FileID], startId: FileID, stacks: [FileID: [FileID]] = [:], fromLibrary: Bool = false,
@@ -169,7 +182,14 @@ struct MediaViewer: View {
         page
             .infoInspector(isPresented: $showingInfo) {
                 // Beside the photo itself: no thumbnail of it on top of the panel.
-                if let item = currentItem { InfoPanel(item: item, inInspector: true, showsPreview: false) }
+                if let item = currentItem {
+                    InfoPanel(item: item, inInspector: true, showsPreview: false)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .global).minY
+                        } action: { top in
+                            infoTop = top
+                        }
+                }
             }
             .focusedSceneValue(\.gridActions, viewerActions)
             .photoEditor($editing)
@@ -210,43 +230,102 @@ struct MediaViewer: View {
             }
     }
 
-    /// The pager with its backdrop, bars, keyboard and focus.
+    /// The stage is dark in Dark Mode and while the controls are hidden, light otherwise; Vision Pro's windows are glass,
+    /// where the viewer stays dark (SPEC §17.1).
+    var stageScheme: ColorScheme {
+        #if os(visionOS)
+            .dark
+        #else
+            ViewerStage.isDark(darkAppearance: colorScheme == .dark, controlsHidden: chromeHidden) ? .dark : .light
+        #endif
+    }
+
+    /// The photo's shape, for where it is on the page.
+    var currentContentSize: CGSize {
+        guard let item = currentItem, let width = item.width, let height = item.height, width > 0, height > 0 else { return pageSize }
+        return CGSize(width: width, height: height)
+    }
+
+    /// The photo's rectangle on the page shown.
+    var currentPhotoRect: CGRect {
+        ViewerDismissal.photoRect(content: currentContentSize, page: pageSize)
+    }
+
+    /// With the info card open as a sheet (iPhone), the photo moves up and shrinks to stay in view above it, as in
+    /// Photos; beside an inspector column (iPad, Mac) it stays where it is.
+    var infoPlacement: (scale: CGFloat, offsetY: CGFloat) {
+        #if os(macOS)
+            let isSheet = false
+        #else
+            let isSheet: Bool = horizontalSizeClass == .compact
+        #endif
+        guard showingInfo, isSheet, let infoTop else { return (1, 0) }
+        let top: CGFloat = topInset + 56 - pageFrame.minY
+        return ViewerStage.infoPlacement(content: currentContentSize, page: pageSize, top: top, bottom: infoTop - pageFrame.minY - 8)
+    }
+
+    /// The pager with its backdrop, controls, keyboard and focus.
     var page: some View {
-        pager
-            // The black backdrop always fills the window; the pages only do so on iPhone. On the Mac and iPad they
-            // stay inside the safe area, so nothing hides under the sidebar, the toolbar or the info inspector.
+        let placement = infoPlacement
+        return
+            pager
+            // Badges on the photo (Live, RAW) go below the floating controls.
+            .environment(\.viewerControlsInset, topInset + 60)
+            // The backdrop always fills the window; the pages do so on iPhone and iPad, where the controls float over
+            // them. On the Mac they stay inside the safe area, so nothing hides under the toolbar or the inspector.
             .modifier(ViewerPageArea())
-            // Dragged down to close: the page follows the finger and shrinks, the backdrop fades to what is behind.
-            .scaleEffect(ViewerSwipe.pageScale(progress: dismissProgress))
-            .offset(y: max(0, dragTranslation))
-            .background(ViewerBackdrop(tint: tint).opacity(1 - dismissProgress).ignoresSafeArea())
+            // Dragged down to close: the photo follows the finger and shrinks, the backdrop fades to the grid behind,
+            // and the photo lands in its tile (`land`).
+            .viewerDismissPose(dismissPose, page: pageSize)
+            .opacity(exitOpacity)
+            .scaleEffect(placement.scale)
+            .offset(y: placement.offsetY)
+            .background {
+                ViewerBackdrop(tint: tint)
+                    .opacity((1 - Double(dismissPose.progress)) * exitOpacity)
+                    .ignoresSafeArea()
+                    // Where the page is on screen, measured here: the page itself is moved and scaled.
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .global)
+                    } action: { frame in
+                        pageFrame = frame
+                    }
+            }
+            .environment(\.colorScheme, stageScheme)
             .modifier(ViewerTintTracking(tint: tint, pages: shownIds.map { fileId(ofPage: $0) }, current: currentFileId))
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.width
             } action: { width in
                 pagerWidth = width
             }
+            #if os(iOS)
+                .overlay { stageControls }
+            #endif
             .onContinuousHover { phase in
                 hoverEdge = Self.edge(under: phase, width: pagerWidth)
             }
-            .overlay { stepButtons }
-            .overlay(alignment: .top) { stackStrip }
-            .focusable()
+            .overlay { stepButtons.viewerChromeDepth() }
+            .overlay(alignment: .top) { stackStrip.viewerChromeDepth() }
+            .keyFocusable()
             .focusEffectDisabled()
             .focused($focused)
             .onAppear { focused = true }
             .onChange(of: showingInfo) { _, showing in
-                if !showing { focused = true }
+                if !showing {
+                    focused = true
+                    infoTop = nil
+                }
             }
             #if os(iOS)
+                // The stage: no bars, the controls float over the photo (`ViewerStageControls`).
                 .statusBarHidden(chromeHidden)
-                .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
-                // The date in the bar as in Photos, not a large title over the photo; light on the black backdrop also
-                // in light mode (the title was black on black there).
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
+                .toolbar(.hidden, for: .navigationBar, .bottomBar)
+                // The navigation stack's own background stays clear: while the photo is dragged down to close, the
+                // grid shows through as the backdrop fades.
+                .containerBackground(.clear, for: .navigation)
+            #else
+                .toolbar { toolbar }
             #endif
-            .toolbar { toolbar }
             .onChange(of: current) { _, id in
                 zoomScale = ViewerZoom.minimumScale
                 if let id { currentChanged?(id) }
@@ -258,12 +337,12 @@ struct MediaViewer: View {
                 } catch {}
             }
             .navigationTitle(currentItem.map { $0.timestamp.formatted(date: .abbreviated, time: .shortened) } ?? "")
-            .onKeyPress(keys: [.leftArrow, .rightArrow, .escape, .space]) { press in
-                guard press.modifiers.isDisjoint(with: [.command, .control, .option]), let key = Self.viewerKey(press.key) else {
-                    return .ignored
+            .hardwareKeys(Self.hardwareKeys) { key in
+                if let key = Self.viewerKey(key) {
+                    perform(key)
+                } else {
+                    cullingKey(key)
                 }
-                perform(key)
-                return .handled
             }
             .viewerCulling(culling, ids: cullingIds, chromeHidden: chromeHidden) { step(1) }
             #if os(macOS)
@@ -406,28 +485,77 @@ struct MediaViewer: View {
         #endif
     }
 
-    var dismissProgress: CGFloat {
-        ViewerSwipe.dismissProgress(translation: dragTranslation, height: pageSize.height)
-    }
-
-    /// Swipe down closes the viewer, swipe up shows the info panel (SPEC VW-1, §7.4).
+    /// Swipe down closes the viewer, swipe up shows the info panel (SPEC VW-1, §7.4). Dragged down, the photo follows
+    /// the finger and shrinks while the grid comes back behind it; let go, it lands in its tile or springs back
+    /// (SPEC §17.1). With the info card open, a swipe down closes the card.
     func handleSwipe(_ phase: ViewerSwipe.Phase) {
         switch phase {
         case .changed(let translation):
-            dragTranslation = translation
+            guard !showingInfo, translation.height > 0 || dismissPose != .rest else { return }
+            if dismissPose == .rest { viewerExit?.setTileHidden(landingTile != nil) }
+            dismissPose = ViewerDismissal.dragPose(
+                translation: CGSize(width: translation.width, height: max(0, translation.height)), page: pageSize,
+                photo: currentPhotoRect)
         case .ended(let translation, let velocity):
-            switch ViewerSwipe.outcome(translation: translation, velocity: velocity) {
+            switch ViewerSwipe.outcome(translation: translation.height, velocity: velocity.dy) {
             case .dismiss:
-                // The page stays where the finger left it; the cover takes it away from there.
-                dismiss()
+                if showingInfo {
+                    toggleInfo()
+                } else {
+                    land(velocity: velocity)
+                }
             case .showInfo:
-                dragTranslation = 0
+                settle(velocity: .zero)
                 if !showingInfo { toggleInfo() }
             case .none:
-                withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { dragTranslation = 0 }
+                settle(velocity: velocity)
             }
         case .cancelled:
-            withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { dragTranslation = 0 }
+            settle(velocity: .zero)
+        }
+    }
+
+    /// The tile of the page shown, when the grid behind has it on screen.
+    var landingTile: CGRect? {
+        guard let current, let tile = viewerExit?.tileFrame(current) else { return nil }
+        let screen: CGRect = pageFrame.isEmpty ? CGRect(origin: .zero, size: pageSize) : pageFrame
+        return ViewerDismissal.isLandable(tile: tile, screen: screen) ? tile : nil
+    }
+
+    /// Lands the photo in its tile with a spring that starts at the finger's speed, then closes at once. Without a tile
+    /// on screen the viewer closes the usual way; with Reduce Motion the photo fades out where it is.
+    func land(velocity: CGVector) {
+        guard let viewerExit, let tile = landingTile else {
+            viewerExit?.setTileHidden(false)
+            dismiss()
+            return
+        }
+        if reduceMotion {
+            withAnimation(.easeOut(duration: 0.2)) {
+                exitOpacity = 0
+            } completion: {
+                viewerExit.closeImmediately()
+            }
+            return
+        }
+        let target: ViewerDismissPose = ViewerDismissal.landingPose(
+            tile: tile, pageOrigin: pageFrame.origin, page: pageSize, photo: currentPhotoRect)
+        let speed: Double = ViewerDismissal.springVelocity(velocity, from: dismissPose.offset, to: target.offset)
+        withAnimation(.interpolatingSpring(duration: 0.38, bounce: 0, initialVelocity: speed)) {
+            dismissPose = target
+        } completion: {
+            viewerExit.closeImmediately()
+        }
+    }
+
+    /// Back to the full stage: a spring from the finger's speed, or at once with Reduce Motion.
+    func settle(velocity: CGVector) {
+        guard dismissPose != .rest else { return }
+        let speed: Double = ViewerDismissal.springVelocity(velocity, from: dismissPose.offset, to: .zero)
+        withAnimation(reduceMotion ? nil : .interpolatingSpring(duration: 0.32, bounce: 0, initialVelocity: speed)) {
+            dismissPose = .rest
+        } completion: {
+            if dismissPose == .rest { viewerExit?.setTileHidden(false) }
         }
     }
 
@@ -465,6 +593,28 @@ struct MediaViewer: View {
             showInfo: { toggleInfo() },
             delete: { if currentItem?.permissions.canDelete == true { confirmDelete = true } },
             zoom: { kind in zoom(kind) })
+    }
+
+    /// The viewer's plain keys. On iPhone and iPad the rating keys are among them: the viewer is not focusable there, so
+    /// the `onKeyPress` of `viewerCulling` does not get them (see `hardwareKeys`).
+    static var hardwareKeys: [KeyEquivalent] {
+        var keys: [KeyEquivalent] = [.leftArrow, .rightArrow, .escape, .space]
+        #if os(iOS)
+            keys += "pxu012345".map { KeyEquivalent($0) }
+        #endif
+        return keys
+    }
+
+    /// A rating or flag key (iPhone and iPad), as `viewerCulling` handles it on the Mac.
+    func cullingKey(_ key: KeyEquivalent) {
+        guard session.features.has(.systemtags), let command = CullingCommand(key: key.character) else { return }
+        culling.apply(command, ids: cullingIds, session: session, undoManager: undoManager)
+        if CullingSettings.autoAdvance {
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                step(1)
+            }
+        }
     }
 
     static func viewerKey(_ key: KeyEquivalent) -> ViewerNavigation.Key? {
@@ -510,16 +660,33 @@ struct MediaViewer: View {
         ViewerNavigation.canStep(in: shownIds, from: current, delta: delta)
     }
 
-    @ToolbarContentBuilder var toolbar: some ToolbarContent {
-        #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Label(String(localized: "Close", bundle: .module), systemImage: "xmark")
-                }
+    #if os(iOS)
+        /// The floating glass controls (SPEC §17.1); a tap on the photo hides and shows them.
+        var stageControls: some View {
+            ViewerStageControls(
+                item: currentItem, isVisible: !chromeHidden, dismissProgress: dismissPose.progress,
+                close: { dismiss() },
+                toggleFavorite: { item in toggleFavorite(item) },
+                toggleInfo: { toggleInfo() },
+                edit: { item in editing = item },
+                delete: { confirmDelete = true },
+                more: { item in moreActions(item) }
+            )
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.safeAreaInsets.top
+            } action: { inset in
+                topInset = inset
             }
-        #endif
+        }
+    #endif
+
+    #if !os(iOS)
+        @ToolbarContentBuilder var toolbar: some ToolbarContent {
+            toolbarItems
+        }
+    #endif
+
+    @ToolbarContentBuilder var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: viewerPlacement) {
             if let item = currentItem {
                 ShareMediaButton(items: [item])
@@ -727,11 +894,15 @@ struct MediaViewer: View {
     }
 
     /// Above a stacked photo: a strip of its copies (RAW, HEIC, JPEG…); the one shown is marked, another one is shown
-    /// with a tap or click.
+    /// with a tap or click. On iPhone and iPad it sits below the floating controls.
     @ViewBuilder var stackStrip: some View {
         if let copies = currentStack, let shown = currentFileId, !chromeHidden {
             StackStrip(copies: copies, shown: shown) { copy in choose(copy: copy) }
-                .padding(.top, 10)
+                #if os(iOS)
+                    .padding(.top, 62)
+                #else
+                    .padding(.top, 10)
+                #endif
         }
     }
 
@@ -752,25 +923,28 @@ struct MediaViewer: View {
     }
 
     var viewerPlacement: ToolbarItemPlacement {
-        #if os(iOS)
-            .bottomBar
+        #if os(visionOS)
+            // A glass ornament under the window, beside the photo rather than over it (SPEC §17.7).
+            .bottomOrnament
         #else
             .primaryAction
         #endif
     }
 }
 
-/// Where the pages are laid out: edge to edge on iPhone (SPEC §7.2), the visible area elsewhere.
+/// Where the pages are laid out: edge to edge on iPhone and iPad, under the floating controls (SPEC §7.2, §17.1), the
+/// visible area elsewhere.
 ///
 /// A scroll view that merely respects the safe area still extends under the sidebar and toolbar with content
-/// insets, which shifts paged content. So the pager is given exactly the safe area as its frame, from outside it.
+/// insets, which shifts paged content. So the pager is given exactly the safe area as its frame, from outside it. On
+/// iPad only the top and bottom are left: the info inspector beside the photo is not covered.
 private struct ViewerPageArea: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
             if UIDevice.current.userInterfaceIdiom == .phone {
                 content.ignoresSafeArea()
             } else {
-                fitted(content)
+                content.ignoresSafeArea(.container, edges: .vertical)
             }
         #else
             fitted(content)
@@ -927,7 +1101,8 @@ struct ViewerPage: View {
                     String(localized: "This item is no longer available", bundle: .module), systemImage: "photo",
                     description: Text("It was deleted or moved on the server.", bundle: .module)
                 )
-                .foregroundStyle(.white)
+                // On the stage's colour (black or white).
+                .foregroundStyle(.primary)
             } else {
                 // Read from the local index in a few milliseconds: nothing to show for that moment.
                 Color.clear

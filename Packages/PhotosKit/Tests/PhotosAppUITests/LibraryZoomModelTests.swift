@@ -93,4 +93,63 @@ import Testing
         #expect(model.level == .days)
         #expect(model.snaps == 5)
     }
+
+    /// Zooming into a year sends its key photo into its month's card, and a day's photo into its grid tile (SPEC §17.5).
+    @Test func thePhotosTravelBetweenTheLevels() async throws {
+        let (model, _) = try model()
+        model.viewport = CGRect(x: 0, y: 0, width: 400, height: 800)
+        model.select(.years, currentStep: 5)
+        let year = try #require(model.summary.years.first { $0.id == 2026 })
+        #expect(year.key.fileId == 1)
+        model.photoFrames.report(year.key, frame: CGRect(x: 10, y: 100, width: 380, height: 285), on: .years)
+        model.move(from: .years, by: 1, bucket: year, at: UnitPoint(x: 0.5, y: 0.2))
+        #expect(model.level == .months)
+        // The months are laid out: November's card shows the same photo.
+        let november = try #require(model.summary.months.first { $0.id == 2026_11 })
+        model.photoFrames.report(november.key, frame: CGRect(x: 10, y: 20, width: 185, height: 185), on: .months)
+        await model.morphLaunched()
+        if LibraryZoomHaptics.reduceMotion {
+            // Reduce Motion: a cross-fade, nothing travels.
+            #expect(model.morph == nil)
+            return
+        }
+        let morph = try #require(model.morph)
+        #expect(morph.flights.count == 1)
+        #expect(morph.flights.first?.source.fileId == 1)
+        #expect(morph.flights.first?.from == CGRect(x: 10, y: 100, width: 380, height: 285))
+        #expect(morph.flights.first?.to == CGRect(x: 10, y: 20, width: 185, height: 185))
+        #expect(morph.gridHoles.isEmpty)
+        #expect(model.hidden == [1])
+        model.finishMorph(morph.id)
+        #expect(model.morph == nil)
+        #expect(model.hidden.isEmpty)
+
+        // A day's photo into the grid: it lands on its tile, which is painted over until then.
+        model.select(.days, currentStep: 5)
+        let day = try #require(model.summary.days.first { $0.id == 2025_05_01 })
+        model.photoFrames.report(model.summary.items[4], frame: CGRect(x: 12, y: 300, width: 250, height: 250), on: .days)
+        let tile = CGRect(x: 80, y: 400, width: 80, height: 80)
+        model.gridTileFrame = { id in id == 5 ? tile : nil }
+        model.move(from: .days, by: 1, bucket: day, photo: 5, at: UnitPoint(x: 0.3, y: 0.4))
+        #expect(model.level == .all)
+        await model.morphLaunched()
+        let intoGrid = try #require(model.morph)
+        #expect(intoGrid.flights.map(\.to) == [tile])
+        #expect(intoGrid.gridHoles == [tile])
+    }
+
+    /// A new level change ends the flights of the last one at once.
+    @Test func aNewLevelChangeEndsTheFlights() async throws {
+        let (model, _) = try model()
+        model.viewport = CGRect(x: 0, y: 0, width: 400, height: 800)
+        model.select(.years, currentStep: 5)
+        let year = try #require(model.summary.years.first)
+        model.photoFrames.report(year.key, frame: CGRect(x: 0, y: 0, width: 300, height: 200), on: .years)
+        model.move(from: .years, by: 1, bucket: year)
+        model.photoFrames.report(year.key, frame: CGRect(x: 0, y: 0, width: 100, height: 100), on: .months)
+        model.select(.all, currentStep: 5)
+        await model.morphLaunched()
+        #expect(model.morph == nil)
+        #expect(model.hidden.isEmpty)
+    }
 }

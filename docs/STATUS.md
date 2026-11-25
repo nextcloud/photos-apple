@@ -1041,6 +1041,217 @@ Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2
   a link ignored, ended with a simulated Face ID match, and the app came back in Guest Mode after a relaunch
   (`look-20…23`). 🟡 The Mac kiosk window was deliberately not run on the owner's Mac (it takes over the screen).
 
+## M8 Elegant motion and glass (SPEC §17) — ⬜
+
+Combined (branch `feat/r7-combined`): where two packages met on one screen —
+- Selection on iPhone: the grid's rolling "N selected" title in the bar and the chrome's glass action bar both stay.
+- Album, memory and person screens: the albums' hero header lies in the grid's content inset, the Library's memories
+  strip is the grid's own header (only one of them on a screen); the grid's date pill sits under the bars, not below
+  the hero, and appears once the hero has scrolled away. On iPhone and iPad the cover colour wash (§16.8.1) is off where
+  a hero shows the cover itself; the Mac keeps the tinted toolbar.
+- Album cards: the caption plate uses the typography tokens (§17.5); at accessibility sizes the title is below the
+  cover with `cardTitleStyle()`. Place section headers keep the chrome's glass capsule.
+- Viewer on Vision Pro: the controls are a bottom ornament (§17.7); iPhone and iPad keep the stage's glass controls.
+- Notices ("Change undone", "Moved 2 items to the trash bin") stand above the selection bar and above the Library's
+  glass zoom picker instead of under them (found in the combined grid tour; `floatingBottomInset`). Under the picker,
+  the notice's Undo could not be tapped: a delete in the Library could not be undone from the notice.
+- ⬜ Crash seen once (iPhone 17 simulator, iOS 27.2, `GridMotionTourTests.testLibraryEdgeToEdge`): a SwiftUI trap in
+  `ResolvedScrollBehavior.updateTarget` from the display link while the Library decelerated after fast swipes. Not
+  reproduced in about ten more Library runs nor in `testLibraryHeaderComesBack` (eight round trips to the memories
+  strip, which is now hosted in the grid). Crash log: `~/aloha-work/photos-tools/r7merge/crash-scrolltarget-193447.ips`.
+
+### §17.1 Viewer as a stage: full-screen photo, glass controls, info glass card, interactive dismissal, viewer colour
+- ✅ Stage (§17.1.1): full-screen photo, glass close button, date pill and action bar (`ViewerStageControls`), tap to
+  fade them and the status bar. Run in the iOS 27.2 simulator, light and dark (UI test `ViewerStageTourTests`,
+  shots in `ios-fix-shots/r7-viewer/`). Mac keeps its toolbar, Vision Pro its toolbar and dark viewer (built, not run).
+- ✅ Viewer colour (§17.1.2): black in Dark Mode, white in Light Mode, black while the controls are hidden; the three
+  backdrop styles in a dark and a light version, Ambient Glow as a blurred copy of the photo. Unit tests
+  (`ViewerStageTests`); simulator shots of all three styles in both modes.
+- ✅ Info as a glass card (§17.1.3): the photo moves up above the half-height card. Simulator (`testInfoCard`).
+- ✅ Interactive dismissal into the tile (§17.1.4): geometry unit-tested (`ViewerStageTests`: the photo lands exactly
+  on the tile); run in the simulator with screen recordings (`dark.mp4`, `light-dismiss.mp4`, frame sheets
+  `dismiss-*-frames.png`): the photo follows the finger, shrinks, lands in its tile and the grid appears with the tile
+  in place; a short drag springs back. ⬜ The grid does not yet show *during* the drag: with the zoom transition UIKit
+  removes the presenting view while the cover is up, so the backdrop fades to the system background (plan: present
+  the viewer over the grid without removing it — a UIKit `overFullScreen` presentation with a custom zoom animator —
+  or show a snapshot of the grid taken when the viewer opens). 🟡 Not seen on a device (120 Hz) or on iPad.
+- ✅ Software keyboard with the viewer's, editor's and film's menus fixed (§17.1.5): `testStageAndMoreMenu` fails before
+  (a keyboard was shown) and passes after; arrow keys page in the simulator (`testKeys`).
+
+### §17.2 Grid: edge to edge, floating date pills, photo arrival, physical selection, action feedback, Live Photo and video tiles
+Run in the iOS 27.2 simulator (iPhone 17) with the UI tour `GridMotionTourTests` (screenshots and recordings in
+`ios-fix-shots/r7-grid/`, before/after pairs); logic in `GridMotionTests` and `GridBatchUpdateTests` (macOS).
+- ✅ Edge to edge: grids under the bars with the soft scroll-edge effect, no header bands; the Library's memories
+  scroll with the photos (hosted in the grid), the grid stays at the top when they come or go (selection mode).
+- ✅ Album/memory cover colour as a wash under the bar instead of a solid band (solid with Reduce Transparency).
+- ✅ Floating date pill with month and moment place, hand-over push, fades in after the first header; scrubber, year
+  ticks and anchors unchanged (offsets include the memories header).
+- ✅ Photo arrival: cross-fade and settle from the BlurHash (Core Animation only), instant for pictures in memory.
+- ✅ Physical selection: shrink to 92 %, rounded corners, tick with symbol transition and bounce, rolling count.
+- ✅ Heart burst on new favourites (iPhone, Mac code path built, not run on the Mac); delete collapse and undo
+  return as an animated item batch, consistency tested with 300 random changes per mode on a real collection view.
+- 🟡 Archive and Remove from Album slide away: same code path as delete, not run in the simulator (the test library is
+  not to be archived).
+- ✅ Video duration in a glass capsule; 🟡 Live badge animation on long press / hover / peek built, not seen in the
+  simulator (the test server has no Live Photos).
+- 🟡 Mac: arrival fade, animated delete batch and heart burst built and compiled, not run (owner's screen).
+
+### §17.3 Chrome: morphing toolbars, minimizing tab bar with progress accessory, animated icons, rolling numbers, edge to edge on the other screens
+Run in the iOS 27.2 simulator (iPhone 17, light and dark) with `ChromeTourTests` (5 UI tests, pass); decisions unit-tested
+in `ChromeMotionTests`. Shots: `~/aloha-work/photos-tools/ios-fix-shots/r7-chrome/`.
+- ✅ Selection bar: Select turns the tab bar into a glass action bar (one "Select items" capsule that splits into Share ·
+  count · Favorite, Add to album, Delete, More with the first selection and melts back); Done returns the tab bar.
+- ✅ Tab bar minimises while scrolling down — SwiftUI lists and, with `registerContentScrollView`, the UIKit photo grid.
+- ✅ Progress accessory above the tab bar (expanded and inline), its finished check mark and the tap to Backup — seen
+  with the made-up activities of `PHOTOS_DEBUG_ACTIVITY`. 🟡 A real upload, backup or import driving it was not run in
+  the simulator (the wiring reads the same models the toolbar gauge and Backup screen read).
+- ✅ Animated symbols (upload, backup, sync, heart) and rolling numbers in the accessory, selection bar and Backup
+  screen. 🟡 The padlock that clicks open (Archive, Recently deleted) is built but not seen: the simulator has no
+  enrolled Face ID/passcode for the test. 🟡 Settings sync row and Insights counters compiled, not looked at.
+- ✅ Edge to edge: Collections, Places, Memories, Map (under the bars, inline title), Search, Settings; Places headers
+  and map panel on glass.
+- 🟡 Mac and Vision Pro: compile only (the Mac keeps its toolbar; the accessory and the minimising tab bar are iPhone
+  and narrow-iPad features). iPad not run.
+
+### §17.4 Albums and transitions: glass caption plates, empty-album gradients, hero headers, parallax, zoom transitions everywhere
+- ✅ Album cards (idea 4): title and count on a glass caption plate over the cover (`CaptionPlate`; solid with Reduce
+  Transparency / Increase Contrast, material on Vision Pro; below the cover at accessibility sizes; count only on depth
+  covers), glass sharing badge, `MeshGradient` from the album's name for albums without a cover (`AlbumGradient`);
+  smart album cards the same. Unit tests (gradient determinism, hue family, mesh edges). Run in the iOS 27.2 simulator,
+  light, dark and Reduce Transparency (`ios-fix-shots/r7-albums/before-albums-10*`, `after3-albums-10*`,
+  `dark-albums-10*`, `rmrt-albums-10*`). Smart album cards: built, not run (no smart albums on the test server). Mac
+  and Vision Pro: built, not run.
+- ✅ Hero headers (idea 14): albums, memories and people on iPhone and iPad (`GridHero`, `GridHeroHost` in the UIKit
+  grid's content inset, `HeroSkeleton` while loading); the bar takes the title over when the hero has scrolled under it;
+  stretches when pulled down (a zoom-opened screen keeps the system's pull-down-to-close instead). Unit tests
+  (`HeroHeaderLayout`: heights, resting frame, stretch, collapse). Run in the simulator, light, dark, Reduce Motion +
+  Reduce Transparency (`after3-albums-25…27*`, `dark-albums-21/25/26*`, `rmrt-albums-*`, `rmrt-hero-pull-stretch.png`,
+  `after2-albums-32*`). People: built, not run (the test servers have no Recognize). Mac and Vision Pro: no hero by
+  design (title in the toolbar, cover tint).
+- ✅ Parallax (idea 15): album, smart album, memory and story cards (`scrollParallax`, a `visualEffect`; off with
+  Reduce Motion). Unit tests (`ScrollParallax.offset`). Seen in the simulator recording (`after*-tour.mp4`).
+- ✅ Zoom transitions (idea 8): album cards and "New in shared albums" rows → album (by value, `routeTransitionNamespace`),
+  memory / story / Year in review cards → memory, person → person page, place tile → place grid, Map button → map,
+  smart album cards → grid; `.crossFade` with Reduce Motion and on Vision Pro, a fade on the Mac (`CardTransition`).
+  Unit tests (style per platform and Reduce Motion, which routes zoom). Run in the simulator, frames from the recordings
+  (`after-zoom-album-open.png`, `after-zoom-album-close.png`, `after-zoom-memory-open.png`, `after-zoom-map-open.png`,
+  `rmrt-albums-20-zoom-in-progress.png`). Person, smart album and Mac fade: built, not run.
+  UI tour `UITests/AlbumsMotionTourTests.swift`.
+
+### §17.5 Zoom levels that morph, typography
+- ✅ Zoom levels that morph (`LibraryZoomMorph`, `LibraryZoomMorphLayer`): years → months → days → grid and back, by
+  tap, picker and pinch; the hero card cross-fades into the card it opens; grid tiles painted over while their copies
+  travel; captions fade in on landing. Unit tests `LibraryZoomMorphTests` (matching, viewport, limit, hero, pinch scale,
+  Reduce Motion) and `LibraryZoomModelTests.thePhotosTravelBetweenTheLevels`. Simulator (iPhone 17, iOS 27.2): UI tour
+  `LevelsTourTests.testLevelsMorph` recorded; frames of every transition in `ios-fix-shots/r7-levels/`.
+- ✅ Reduce Motion: plain cross-fade, no travelling photos (simulator, recorded).
+- ✅ Fix: the grid under years/months/days takes no hits and its tiles are hidden from VoiceOver (a day's photo was not
+  hittable; `FeelTourTests.testZoomLevelsTour` passes again; `LevelsTourTests` checks that no grid cell is reachable
+  under the days and the toolbar still is). 🟡 The Mac side (`accessibilityHidden` on the grid) builds but was not run.
+- ✅ Level picker on Liquid Glass (iPhone, iPad).
+- 🟡 Mac: builds, the AppKit grid reports its tile frames; the morph was not run on the Mac (screen not used).
+- ⬜ A level that follows the pinch with the next level already showing underneath (scrubbing the morph with the
+  fingers). Today the level follows the fingers and the photos continue from there on release. Plan: while a pinch on a
+  summary level passes a factor of 1.05, mount the next level underneath (focus on the card under the fingers) with
+  opacity = pinch progress, interpolate the matched photos by progress, and on release animate to 1 or back to 0.
+- ✅ Typography tokens (`Typography` in `Common/Design.swift`) applied: year cards, counts, days, "+N"; album titles (two
+  lines), memory card titles; Insights counts and gauge; countries count; smart album count; Then and now years; grid
+  date headers (bold date, light day line, semibold moment title, UIKit and AppKit); section headings.
+
+### §17.6 First impressions: living gradients, first launch and login
+- ✅ Living gradients (§17.6.1): `LivingGradient` (wash, hero, blend) behind the grid's empty and failed states (no
+  photos, offline, couldn't load, no results), no albums / no shared albums, the search start screen and "Couldn't
+  search", the backup offer, the login and the welcome; the Year in Review cards' flat gradient replaced by a moving blend.
+  Unit tests: mesh geometry (corners fixed, edges on their edge, seamless loop, < 0.3 % of the size per frame), the
+  pausing clock, when it moves, WCAG contrast of text on every palette colour, Increase Contrast flattening.
+  iPhone 17 simulator (iOS 27.2, UI test `WelcomeTourTests`): empty states light/dark/Increase Contrast
+  (`welcome-20…22*`), Year in Review cards (`welcome-31…34`).
+- ✅ First launch (§17.6.2): drifting wall of generated pictures under the hero blue, "Welcome to Nextcloud Photos", the
+  form on a glass card (solid with Reduce Transparency / Increase Contrast). Unit tests for the wall (tiles, coverage
+  at every shift, directions and speed). Simulator: `welcome-01/02-login` (the wall has moved between the two),
+  `welcome-01-login-dark`, `welcome-01-login-reduce-transparency` (no wall, solid card); before: `before-login`.
+- ✅ Welcome into the Library after the first login and the launch reveal (§17.6.3), `PHOTOS_DEBUG_WELCOME=login|transition`;
+  `AppModel.welcomesFirstLogin` unit-tested (first account only, skippable). UI tour `WelcomeTourTests` (the Library is
+  hittable while the welcome shows); screen recordings `welcome-transition.mp4` and
+  `welcome-transition-reduce-motion.mp4` with frame sheets (the icon grows and fades; with Reduce Motion it only fades).
+  The hold waits until the app is calm (`WelcomeTiming.holdCalmly`): on a busy cold launch the greeting was otherwise
+  gone before it was seen. Screenshots in `~/aloha-work/photos-tools/ios-fix-shots/r7-welcome/` (not in the repo).
+- 🟡 iPad, Mac and Vision Pro: built, not run (the Mac login card is a material panel, Vision Pro uses the window's
+  glass). The search start screen with recent searches is a list and keeps its plain background.
+
+#### Accessibility audit of motion and glass (§17.6, idea 25), on `feat/r7-base`
+The base has no `glassEffect` yet; its glass is system materials (`.regularMaterial`, `.ultraThinMaterial`, `.bar`),
+which follow Reduce Transparency and Increase Contrast by themselves. What does not follow the settings:
+
+Fixed in the welcome surface:
+- Year in Review page dots: 35 % white for the other cards, too faint with Increase Contrast → 60 %
+  (`YearInReviewScreen.otherDotOpacity`).
+- The new gradients, wall, glass card, welcome and launch reveal all follow Reduce Motion / Reduce Transparency /
+  Increase Contrast (§17.6). The existing Year in Review count-up and card stepping, the skeleton pulse and the backup
+  offer already did.
+
+For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in parallel):
+- viewer — `Viewer/ZoomablePhoto.swift:68` (Live Photo playback toggle animated without a Reduce Motion check; fade
+  only, low priority); `Viewer/SlideshowPlayer.swift:355` and `Look/GuestModeViews.swift:438` (black 45 % control
+  backgrounds over photos, not stronger with Increase Contrast — `OverlayLegibility.scrimOpacity` as in
+  `MediaViewer.swift:806`); `Look/GuestModeViews.swift:462` (paging animated with the default animation, movement with
+  Reduce Motion).
+- grid — `Timeline/GridStatus.swift:141/151/211` materials are fine; nothing found besides what §17.2 changes.
+- levels — `Timeline/LibraryZoomLevels.swift:481` (pinch spring-back `.smooth` without a Reduce Motion check).
+- chrome — `Search/CommandPaletteView.swift:95/99` (palette scales in from 96 % without a Reduce Motion check;
+  `Color.black.opacity(0.12)` dimming is fine); `Discover/MemoriesStrip.swift:75` and `Discover/MemoryStories.swift:159`
+  (strip ↔ stories switch with the default animation).
+- albums — nothing found in `Albums/` (only `.ultraThinMaterial` badges).
+- platforms (Mac) — `Culling/LoupeCulling.swift:687/690` (the Mac loupe's zoom toggle animates without the Reduce Motion
+  check the iOS path at :488 has), `:874` (filmstrip scroll animation), `:910` (black 60 % badge).
+- no owner in round 7 (listed for a later round):
+  - `Family/PostcardViews.swift:231/235/348/355/357/374` — the sent postcard flips in 3D, its stamp scales in from 240 %
+    with a bouncy spring, the share bar moves in from the bottom: no Reduce Motion check at all (should cross-fade).
+  - `Discover/TravelScreens.swift:273/416/420` — map camera flights of 1.2–1.5 s without a Reduce Motion check (should
+    jump or use a short fade).
+  - `Discover/ThenAndNowScreens.swift:385/593` — alignment and year changes animated `.smooth` without a check.
+  - `Discover/MemoryStories.swift:173/178` — the next story card slides to the front with `.smooth`, no check.
+  - `Extras/CollageEditor.swift:521/553/561` — theme, shuffle and remove animated with the default animation (tiles
+    move) although the file checks Reduce Motion elsewhere.
+  - `Insights/InsightsScreen.swift:231`, `Discover/MapScreen.swift:112` — expand/collapse animated, no check (minor).
+  - `Organize/BatchFixSheet.swift:193`, `Import/WelcomeHomeView.swift:109/221` — `symbolEffect(.bounce)`: to check in
+    the simulator whether the system tones the bounce down with Reduce Motion; if not, skip it then.
+  - Translucent backgrounds that stay the same with Increase Contrast / Reduce Transparency (should use
+    `OverlayLegibility.scrimOpacity`): `Discover/WatchTogetherViews.swift:123` (50 %),
+    `Discover/ThroughTheYearsScreens.swift:749`, `Discover/MemoryFilmPlayer.swift:350/613`,
+    `Discover/MemoryStories.swift:384/407` (35–45 %), `Backup/BackupDeviceViews.swift:112`,
+    `Import/CardImportSheet.swift:422` (55 % badges).
+
+### §17.7 Mac and Vision Pro polish
+- ✅ Mac, photos under the toolbar: the grid reaches under the unified toolbar and scrolls under it with the system's
+  scroll edge effect; first row and pinned headers stay below it. Run on the Mac (AX scrolling + `screencapture -l`):
+  `ios-fix-shots/r7-platforms/after-mac-photos-top.png`, `after-mac-photos-scrolled.png`, `after-mac-light-scrolled.png`
+  (before: `before-mac-library*.png`). In the Library the memories strip stays above the grid (unchanged).
+- ✅ Mac, tiles lift under the pointer (`GridHoverLift`): run on the Mac with `PHOTOS_DEBUG_GRID_HOVER=x,y` (the pointer
+  cannot be moved for checks): `after-mac-hover-lift.png`. Unit tests (`GridLiftMetrics`). Reduce Motion: shadow only
+  (by code, not run).
+- ✅ Mac, smooth trackpad zoom (`GridPinchZoom`, `GridPinchScaler`): run on the Mac with `PHOTOS_DEBUG_GRID_PINCH=…`
+  (synthetic magnifications through the same code as the gesture): half way in `after-mac-pinch-halfway-in.png`, across
+  a step and on `after-mac-pinch-step-then-hold.png`, half way out `after-mac-pinch-halfway-out.png`. Unit tests (scale
+  maths, steps, snapping, rubber band). A real trackpad pinch and the haptics: not run (no real input on this Mac).
+- ✅ Mac, sidebar and glass toolbar items: the system's own (translucent sidebar material, glass toolbar capsules);
+  checked in Light and Dark Mode, nothing app-made over them.
+- ✅ Mac viewer: opening the viewer hung the app at 100 % CPU (since round 6's ⌘K button): the window read the focused
+  grid's actions (`@FocusedValue(\.gridActions)`, a struct of closures that is never equal) for the toolbar's palette
+  button, so each update of the viewer re-rendered the window, which published new actions again. The button reads the
+  focused value itself now (`FocusedCommandPaletteButton`). Run on the Mac with `PHOTOS_DEBUG_VIEWER`: CPU at 0–1 %
+  with the viewer open, toolbar complete (`~/aloha-work/photos-tools/r7merge/mac-viewer-fixed.png`).
+- ✅ Vision Pro, glass ornaments: the viewer's actions, a grid's selection actions (`.bottomOrnament`) and the
+  slideshow's playback controls (`slideshowControls`) under the window. Run in the visionOS 27.2 simulator by the new
+  UI tour `PlatformsTourTests.testOrnaments` (passes): `ios-fix-shots/r7-platforms/vision/after-vision-selection-ornament.png`,
+  `after-vision-viewer-ornament-more-menu.png`, `after-vision-slideshow-ornament.png` (before: the actions were in the
+  window's top bar, the slideshow bar over the photo).
+- 🟡 Vision Pro, tile lift (`UIHoverStyle(.lift)`, rounded 6 pt) and viewer chrome depth (`offset(z:)` 24 pt): built,
+  not seen — the simulator shows no gaze hover in screenshots, and the previous/next buttons only appear under a
+  pointer.
+- Note: incremental visionOS-simulator builds of the app fail with "Cycle inside NextcloudPhotos" (CodeSign of the app
+  bundle, Xcode 27.2); clean builds (new DerivedData) work.
+
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification
 filtering entitlement, push proxy topic, notification routing in the notifications app, app icon artwork,
