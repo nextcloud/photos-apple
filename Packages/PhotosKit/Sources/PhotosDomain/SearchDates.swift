@@ -159,12 +159,16 @@ public enum SearchDates {
         range(date(year, 1, 1, context.calendar), adding: .year, 1, calendar: context.calendar)
     }
 
+    // In the calendar's time zone: with the device's, the first day of a month could be labelled with the month before.
     static func monthLabel(_ start: Date, context: Context) -> String {
-        start.formatted(Date.FormatStyle(locale: context.locale, calendar: context.calendar).month(.wide).year())
+        start.formatted(
+            Date.FormatStyle(locale: context.locale, calendar: context.calendar, timeZone: context.calendar.timeZone).month(.wide).year())
     }
 
     static func dayLabel(_ start: Date, context: Context) -> String {
-        start.formatted(Date.FormatStyle(locale: context.locale, calendar: context.calendar).day().month(.wide).year())
+        start.formatted(
+            Date.FormatStyle(locale: context.locale, calendar: context.calendar, timeZone: context.calendar.timeZone).day().month(.wide)
+                .year())
     }
 
     // MARK: Parsers (each reads the start of the words)
