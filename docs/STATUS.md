@@ -1236,9 +1236,11 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
   maths, steps, snapping, rubber band). A real trackpad pinch and the haptics: not run (no real input on this Mac).
 - ✅ Mac, sidebar and glass toolbar items: the system's own (translucent sidebar material, glass toolbar capsules);
   checked in Light and Dark Mode, nothing app-made over them.
-- 🟡 Mac viewer toolbar: not looked at — opening the viewer on the Mac hangs the app at 100 % CPU in SwiftUI's toolbar
-  update loop (`AppKitToolbarItem.updateConfiguration`), on `feat/r7-base` already (AX press on a tile, and
-  `PHOTOS_DEBUG_VIEWER`); left to the viewer surface.
+- ✅ Mac viewer: opening the viewer hung the app at 100 % CPU (since round 6's ⌘K button): the window read the focused
+  grid's actions (`@FocusedValue(\.gridActions)`, a struct of closures that is never equal) for the toolbar's palette
+  button, so each update of the viewer re-rendered the window, which published new actions again. The button reads the
+  focused value itself now (`FocusedCommandPaletteButton`). Run on the Mac with `PHOTOS_DEBUG_VIEWER`: CPU at 0–1 %
+  with the viewer open, toolbar complete (`~/aloha-work/photos-tools/r7merge/mac-viewer-fixed.png`).
 - ✅ Vision Pro, glass ornaments: the viewer's actions, a grid's selection actions (`.bottomOrnament`) and the
   slideshow's playback controls (`slideshowControls`) under the window. Run in the visionOS 27.2 simulator by the new
   UI tour `PlatformsTourTests.testOrnaments` (passes): `ios-fix-shots/r7-platforms/vision/after-vision-selection-ornament.png`,

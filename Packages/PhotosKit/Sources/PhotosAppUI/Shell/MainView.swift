@@ -181,7 +181,6 @@ struct MainView: View {
     @Namespace private var routeTransitions
     #if os(macOS)
         /// The grid or viewer with the focus, whose selection the palette's commands act on.
-        @FocusedValue(\.gridActions) private var focusedGrid
     #endif
 
     /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
@@ -438,7 +437,10 @@ struct MainView: View {
             }
             .searchFocused($searchFocused)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) { CommandPaletteButton(grid: focusedGrid) }
+                // The button reads the focused grid itself: read here, every new `GridActions` (a struct of closures,
+                // never equal) re-rendered the whole window, which published new actions again — a loop at 100 % CPU
+                // as soon as the viewer was open.
+                ToolbarItem(placement: .primaryAction) { FocusedCommandPaletteButton() }
             }
             .onSubmit(of: .search) {
                 showSearch()
