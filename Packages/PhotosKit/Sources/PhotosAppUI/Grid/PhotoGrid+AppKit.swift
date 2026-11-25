@@ -21,6 +21,8 @@
         var showsHeaders: Bool
         /// Square tiles, or each picture whole in its tile (`TileStyle`).
         var squareTiles = true
+        /// Moment titles on the day headers (the Library, SPEC §16.1).
+        var moments = MomentHeaders.none
         var services: AccountServices
         var callbacks: GridCallbacks
 
@@ -31,6 +33,7 @@
         func updateNSView(_ view: PhotoGridScrollView, context: Context) {
             view.callbacks = callbacks
             view.update(update, zoomStep: zoomStep, selection: selection, showsHeaders: showsHeaders, squareTiles: squareTiles)
+            view.setMoments(moments)
         }
     }
 
@@ -58,6 +61,10 @@
         private lazy var promiseDelegate = FilePromiseDelegate(services: services)
         /// Ratings and flags shown on the tiles (SPEC §15.2).
         let culling: GridCullingObserver
+        /// Edited photos' tiles are drawn again with their new rendition (SPEC §16.3).
+        private let edits = GridEditObserver()
+        /// Scrub to peek with the pointer (SPEC §16.1).
+        private var peek: GridPeekHover?
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -70,6 +77,7 @@
             culling = GridCullingObserver(services: services)
             super.init(frame: .zero)
             culling.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
+            edits.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
             collectionView.collectionViewLayout = makeLayout()
             collectionView.isSelectable = true
             collectionView.allowsMultipleSelection = true
@@ -100,6 +108,7 @@
             scrubber.onScrub = { [weak self] fraction in self?.scroll(toFraction: fraction) }
             scrubber.onStep = { [weak self] delta in self?.scrollToYear(delta: delta) }
             addSubview(scrubber)
+            peek = GridPeekHover(host: self)
             contentView.postsBoundsChangedNotifications = true
             NotificationCenter.default.addObserver(
                 self, selector: #selector(didScroll(_:)), name: NSView.boundsDidChangeNotification, object: contentView)
@@ -136,6 +145,8 @@
             if plan.relayouts {
                 let pinched = plan.layoutChanged ? pinchAnchor : nil
                 let anchor = pinched?.id ?? anchorItem()
+                // The tile a peek is over may be somewhere else now.
+                peek?.end()
                 core.show(update.model, relayout: true)
                 if plan.reloads {
                     collectionView.reloadData()
@@ -410,6 +421,8 @@
         }
 
         @objc private func didScroll(_ notification: Notification) {
+            // A peek belongs to the tile under the pointer; the grid moved away under it.
+            if peek?.isPeeking == true { peek?.end() }
             guard !scrubber.isHidden else { return }
             let fraction = scrollFraction
             scrubber.scrolled(to: fraction, label: scrubberLabel(at: fraction))
@@ -441,10 +454,28 @@
             let view =
                 collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: SectionHeaderView.identifier, for: indexPath)
                 as! SectionHeaderView
-            if let section = model.sections[safe: indexPath.section] {
-                view.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
-            }
+            configure(view, section: indexPath.section)
             return view
+        }
+
+        // MARK: Moments (SPEC §16.1)
+
+        /// New moment titles: the headers on screen show them at once; their heights stay (one line either way).
+        func setMoments(_ moments: MomentHeaders) {
+            guard core.headerTexts.setMoments(moments) else { return }
+            let kind = NSCollectionView.elementKindSectionHeader
+            for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+                guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? SectionHeaderView else {
+                    continue
+                }
+                configure(header, section: indexPath.section)
+            }
+        }
+
+        private func configure(_ header: SectionHeaderView, section index: Int) {
+            guard let section = model.sections[safe: index] else { return }
+            header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
+            header.openMoment = { [weak self] id in self?.callbacks?.openMoment?(id) }
         }
 
         // MARK: Events
@@ -656,6 +687,9 @@
     }
 
     /// Writes originals for file promises (drag to Finder and other apps).
+    /// Peeks with the pointer (`GridGestures+AppKit`) work on this grid.
+    extension PhotoGridScrollView: GridPeekHost {}
+
     final class FilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate, @unchecked Sendable {
         let services: AccountServices
         let queue: OperationQueue = {
@@ -989,6 +1023,8 @@
             isDimmed = culling.isDimmed
             updateAlpha()
             if let text = culling.accessibilityText { tileView.label += ", " + text }
+            // What the photo shows, written on this device (SPEC §16.2).
+            if let text = services.descriptions.text(of: item.fileId) { tileView.label += ", " + text }
             picture.configure(
                 item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
                 source: GridTilePicture.Source(services: services))
@@ -1054,6 +1090,11 @@
         private let titleLabel = NSTextField(labelWithString: "")
         private let subtitleLabel = NSTextField(labelWithString: "")
         private var metrics = GridHeaderMetrics(titleHeight: 26, subtitleHeight: 16)
+        /// The moment this day starts (SPEC §16.1): its title is a link that opens it.
+        private var moment: MomentHeaders.Entry?
+        private var momentLabel: String?
+        var openMoment: ((String) -> Void)?
+        static let subtitleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -1062,11 +1103,13 @@
             titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
             titleLabel.lineBreakMode = .byTruncatingTail
             titleLabel.setAccessibilityRole(.staticText)
-            subtitleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+            subtitleLabel.font = Self.subtitleFont
             subtitleLabel.textColor = .secondaryLabelColor
             subtitleLabel.lineBreakMode = .byTruncatingTail
             addSubview(titleLabel)
             addSubview(subtitleLabel)
+            let click = NSClickGestureRecognizer(target: self, action: #selector(clicked(_:)))
+            addGestureRecognizer(click)
         }
 
         required init?(coder: NSCoder) { fatalError() }
@@ -1077,9 +1120,67 @@
             self.metrics = metrics
             titleLabel.stringValue = text.title ?? ""
             titleLabel.isHidden = text.title == nil
-            subtitleLabel.stringValue = text.subtitle ?? ""
-            subtitleLabel.isHidden = text.subtitle == nil
+            moment = text.moment
+            momentLabel = text.momentAccessibilityLabel
+            if let moment = text.moment {
+                subtitleLabel.attributedStringValue = Self.momentLine(moment.title, day: text.subtitle)
+                subtitleLabel.setAccessibilityElement(false)
+            } else {
+                subtitleLabel.stringValue = text.subtitle ?? ""
+                subtitleLabel.setAccessibilityElement(true)
+            }
+            subtitleLabel.isHidden = text.subtitle == nil && text.moment == nil
             needsLayout = true
+            window?.invalidateCursorRects(for: self)
+        }
+
+        /// "Sunday in Lisbon ›  Sun 22 November": the moment in the label colour, the day after it as before.
+        static func momentLine(_ title: String, day: String?) -> NSAttributedString {
+            let line = NSMutableAttributedString(
+                string: title, attributes: [.font: subtitleFont, .foregroundColor: NSColor.labelColor])
+            let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            if let symbol = NSImage(systemSymbolName: "chevron.forward", accessibilityDescription: nil)?.withSymbolConfiguration(
+                configuration)
+            {
+                let attachment = NSTextAttachment()
+                attachment.image = symbol
+                line.append(NSAttributedString(string: " "))
+                line.append(NSAttributedString(attachment: attachment))
+            }
+            if let day {
+                line.append(
+                    NSAttributedString(
+                        string: "  " + day, attributes: [.font: subtitleFont, .foregroundColor: NSColor.secondaryLabelColor]))
+            }
+            return line
+        }
+
+        /// Where a click opens the moment: the moment's line, as far as its text goes.
+        private var momentRect: NSRect? {
+            guard moment != nil, !subtitleLabel.isHidden else { return nil }
+            let width = min(subtitleLabel.attributedStringValue.size().width + 8, subtitleLabel.frame.width)
+            return NSRect(
+                x: subtitleLabel.frame.minX - 4, y: subtitleLabel.frame.minY - 3, width: width, height: subtitleLabel.frame.height + 6)
+        }
+
+        @objc private func clicked(_ gesture: NSClickGestureRecognizer) {
+            guard let moment, let rect = momentRect, rect.contains(gesture.location(in: self)) else { return }
+            openMoment?(moment.momentId)
+        }
+
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            if let rect = momentRect { addCursorRect(rect, cursor: .pointingHand) }
+        }
+
+        // VoiceOver: with a moment the header is a button that opens it.
+        override func isAccessibilityElement() -> Bool { moment != nil }
+        override func accessibilityRole() -> NSAccessibility.Role? { moment != nil ? .button : super.accessibilityRole() }
+        override func accessibilityLabel() -> String? { momentLabel }
+        override func accessibilityPerformPress() -> Bool {
+            guard let moment else { return false }
+            openMoment?(moment.momentId)
+            return true
         }
 
         /// Laid out by hand from the same metrics the layout takes the header height from, so nothing is clipped.
@@ -1094,6 +1195,7 @@
             if !subtitleLabel.isHidden {
                 subtitleLabel.frame = NSRect(x: 12, y: y, width: width, height: CGFloat(metrics.subtitleHeight))
             }
+            window?.invalidateCursorRects(for: self)
         }
     }
 #endif

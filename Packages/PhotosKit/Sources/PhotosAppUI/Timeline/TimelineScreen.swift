@@ -32,10 +32,25 @@ struct TimelineScreen: View {
     private var undoManager: UndoManager? { undoBox.manager }
     /// Years, months, days or all photos (SPEC §15.5).
     @State private var zoom = LibraryZoomModel()
+    /// Moments: titles on the day headers (SPEC §16.1).
+    @AppStorage(TimelineDisplay.showsMomentsKey) private var showsMoments = true
+    @State private var moments = LibraryMomentsModel()
+    @State private var openedMoment: Memory?
 
     /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
     var showsMemoriesStrip: Bool {
         filter == .all && mediaKind == .all && cullingFilter == .all && showsMemories && !gridSelection.isSelecting
+    }
+
+    /// Moment titles are on the day headers of the whole library, not of a filtered one.
+    var showsMomentHeaders: Bool {
+        filter == .all && mediaKind == .all && cullingFilter == .all && showsMoments
+    }
+
+    var momentsKey: LibraryMomentsModel.LoadKey {
+        LibraryMomentsModel.LoadKey(
+            memories: MemoriesStrip.loadKey(session.syncStatus, isShown: true),
+            excluded: session.excludedFolders + (session.partners?.hiddenFolders ?? []), isOn: filter == .all && showsMoments)
     }
 
     /// What the grid observes: the media kind, whether copies of a photo are stacked and which partner folders are
@@ -122,11 +137,26 @@ struct TimelineScreen: View {
             guard filter == .all, showsMemories, let services = session.services else { return }
             if let loaded = await MemoriesStrip.load(services) { memories = loaded }
         }
+        .task(id: momentsKey) {
+            guard momentsKey.isOn, let services = session.services else {
+                moments.clear()
+                return
+            }
+            let hidden = session.hiddenPeopleFile.map { HiddenPeople.load(from: $0).names } ?? []
+            await moments.load(services, excludedFolders: momentsKey.excluded, hiddenPeople: hidden)
+        }
+        .onChange(of: showsMomentHeaders ? moments.headers : .none, initial: true) { _, headers in
+            zoom.moments = headers
+        }
+        .navigationDestination(item: $openedMoment) { memory in MemoryScreen(memory: memory) }
         .onPreferenceChange(GridSelectionState.Key.self) { state in
             gridSelection = state
         }
         .task(id: query) { observe() }
-        .onAppear { zoom.setGridStep = { [columns = $columns] step in columns.wrappedValue = step } }
+        .onAppear {
+            zoom.setGridStep = { [columns = $columns] step in columns.wrappedValue = step }
+            zoom.openMoment = { [moments, opened = $openedMoment] id in opened.wrappedValue = moments.memory(id) }
+        }
         .onChange(of: skeleton, initial: true) { _, skeleton in feed.setSkeleton(skeleton) }
         // The photo is looked for among all media (the iPhone's picker may show only videos or favourites).
         .onChange(of: reveal?.pending, initial: true) { _, pending in
@@ -136,6 +166,8 @@ struct TimelineScreen: View {
             session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) })
             return !urls.isEmpty
         }
+        // File ▸ Import from iPhone or iPad (Continuity Camera, Mac; SPEC §16.5.3): into the upload folder.
+        .continuityCameraImport()
         // Pull to refresh reconciles only when the last walk through the library is a while ago ("Sync now" always does).
         .refreshable { await session.syncNow(reconcile: .refresh) }
         .confirmationDialog(
@@ -181,7 +213,9 @@ struct TimelineScreen: View {
             waitsForFirstSync: true,
             reveal: filter == .all ? reveal : nil,
             isLibrary: filter == .all,
-            deleteRejected: session.features.has(.systemtags) ? { requestDeleteRejected() } : nil
+            deleteRejected: session.features.has(.systemtags) ? { requestDeleteRejected() } : nil,
+            moments: showsMomentHeaders ? moments.headers : .none,
+            openMoment: { id in openedMoment = moments.memory(id) }
         ) {
             TransfersIndicator()
             PhotographerStatusItems()

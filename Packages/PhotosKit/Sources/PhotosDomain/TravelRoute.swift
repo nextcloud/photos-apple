@@ -4,7 +4,7 @@
 import Foundation
 
 /// A place on Earth in degrees.
-public struct GeoPoint: Hashable, Sendable {
+public struct GeoPoint: Hashable, Sendable, Codable {
     public var latitude: Double
     public var longitude: Double
 

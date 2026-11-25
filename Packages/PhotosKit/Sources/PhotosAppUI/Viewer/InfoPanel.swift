@@ -31,7 +31,12 @@ struct InfoPanel: View {
                 }
                 row(String(localized: "Name", bundle: .module), item.name)
                 row(String(localized: "Taken", bundle: .module), CaptureTime.format(item.timestamp, offset: captureOffset))
-                if let caption = item.caption { row(String(localized: "Description", bundle: .module), caption) }
+                if let caption = item.caption {
+                    row(String(localized: "Description", bundle: .module), caption)
+                } else if let described = session.services?.descriptions.text(of: item.fileId) {
+                    // Written on this device (SPEC §16.2).
+                    row(String(localized: "Description", bundle: .module), described)
+                }
             }
             if !faces.isEmpty {
                 Section(String(localized: "People", bundle: .module)) {

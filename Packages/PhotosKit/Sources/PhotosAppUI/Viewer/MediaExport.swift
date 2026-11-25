@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import CoreGraphics
 import CoreTransferable
 import Photos
 import PhotosCore
+import PhotosMedia
 import PhotosModel
 import SwiftUI
 import UniformTypeIdentifiers
@@ -19,8 +21,10 @@ enum MediaExport {
     }
 
     /// Downloads the originals and saves them, one after the other; `progress` is told how many are done.
+    /// - Parameter originals: the files as they are, without their edits (SPEC §16.3: edited photos are exported
+    ///   edited unless the original is asked for).
     static func save(
-        _ items: [MediaItem], to destination: Destination, services: AccountServices,
+        _ items: [MediaItem], to destination: Destination, services: AccountServices, originals: Bool = false,
         progress: @MainActor @Sendable (Int) -> Void = { _ in }
     ) async -> MediaSaveResult {
         var result: MediaSaveResult
@@ -31,19 +35,34 @@ enum MediaExport {
                 return MediaSaveResult(total: items.count, failures: [ExportError.notAllowed.localizedDescription])
             }
             result = await MediaSaveRunner.run(items, progress: progress) { item in
-                try await addToPhotoLibrary(item, services: services)
+                try await addToPhotoLibrary(item, services: services, original: originals)
             }
         case .folder(let folder):
             result = await MediaSaveRunner.run(items, progress: progress) { item in
-                try await copyOriginal(of: item, to: folder, services: services)
+                try await copyOriginal(of: item, to: folder, services: services, original: originals)
             }
             result.folder = folder
         }
         return result
     }
 
-    /// Adds the original to the Photos library. Live Photos keep both resources.
-    static func addToPhotoLibrary(_ item: MediaItem, services: AccountServices) async throws {
+    /// Adds the photo to the Photos library: edited when it has an edit (a still, also of a Live Photo), else the
+    /// original. Live Photos keep both resources.
+    static func addToPhotoLibrary(_ item: MediaItem, services: AccountServices, original: Bool = false) async throws {
+        if !original, let edited = try await EditedExport.file(for: item, services: services) {
+            defer { try? FileManager.default.removeItem(at: edited.deletingLastPathComponent()) }
+            try await PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.originalFilename = edited.lastPathComponent
+                request.addResource(with: .photo, fileURL: edited, options: options)
+                request.creationDate = item.capturedAt
+                if let latitude = item.latitude, let longitude = item.longitude {
+                    request.location = CLLocation(latitude: latitude, longitude: longitude)
+                }
+            }
+            return
+        }
         let file = try await services.images.originals.original(
             fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
         var videoFile: URL?
@@ -67,8 +86,14 @@ enum MediaExport {
         }
     }
 
-    /// Copies the original into `folder` under its own name (" 2", " 3"… when that is taken).
-    static func copyOriginal(of item: MediaItem, to folder: URL, services: AccountServices) async throws {
+    /// Copies the original into `folder` under its own name (" 2", " 3"… when that is taken); an edited photo as
+    /// `<name> (edited)` unless `original` is asked for.
+    static func copyOriginal(of item: MediaItem, to folder: URL, services: AccountServices, original: Bool = false) async throws {
+        if !original, let edited = try await EditedExport.file(for: item, services: services) {
+            defer { try? FileManager.default.removeItem(at: edited.deletingLastPathComponent()) }
+            try FileManager.default.copyItem(at: edited, to: MediaFileNaming.freeURL(for: edited.lastPathComponent, in: folder))
+            return
+        }
         let file = try await services.images.originals.original(
             fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
         try Task.checkCancellation()
@@ -86,13 +111,67 @@ enum MediaExport {
     }
 }
 
-/// An original file that is downloaded when shared.
-struct ShareableMedia: Transferable {
+/// Edited photos as files (SPEC §16.3): the recipe rendered on the original at full resolution, for export and sharing.
+enum EditedExport {
+    /// The edited photo in a folder of its own (the caller removes the folder), or nil when the photo has no edit.
+    static func file(for item: MediaItem, services: AccountServices) async throws -> URL? {
+        guard item.kind == .image, let recipe = services.edits.recipe(for: item.fileId), recipe.changesStill else { return nil }
+        let original = try await services.images.originals.original(
+            fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
+        var still: CGImage?
+        if recipe.live?.changesStill == true, item.isLivePhoto {
+            let motion = try await LiveEffectFiles.motion(of: item, services: services)
+            still = try await EditorView.fullStill(recipe, motion: motion)
+        }
+        try Task.checkCancellation()
+        let folder = FileManager.default.temporaryDirectory.appending(path: "Export/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return try EditRendering.renderFile(recipe, original: original, name: item.name, still: still, to: folder)
+    }
+
+    /// A Loop or Bounce as a video or an animated GIF (SPEC §16.3.3), in a folder of its own.
+    static func effect(of item: MediaItem, gif: Bool, services: AccountServices) async throws -> URL {
+        let recipe = services.edits.recipe(for: item.fileId)
+        let effect = recipe?.live?.effect ?? .loop
+        let motion = try await LiveEffectFiles.motion(of: item, services: services)
+        let folder = FileManager.default.temporaryDirectory.appending(path: "Export/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let base = (item.name as NSString).deletingPathExtension + " (\(LiveEffectWording.title(effect)))"
+        let target = folder.appending(path: base + (gif ? ".gif" : ".mp4"))
+        if gif {
+            try await LivePhotoEffects.writeGIF(of: motion, effect: effect, edits: recipe, to: target)
+        } else {
+            // Three rounds: a shared Loop or Bounce plays a while even where videos do not repeat.
+            try await LivePhotoEffects.writeVideo(of: motion, effect: effect, edits: recipe, maxPixelSize: 1920, repeats: 3, to: target)
+        }
+        return target
+    }
+}
+
+/// A Live Photo's Loop or Bounce, made when shared.
+struct ShareableLiveEffect: Transferable {
     let item: MediaItem
+    let gif: Bool
     let services: AccountServices
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(exportedContentType: .item) { media in
+            SentTransferredFile(try await EditedExport.effect(of: media.item, gif: media.gif, services: media.services))
+        }
+    }
+}
+
+/// A photo that is downloaded when shared: edited when it has an edit (SPEC §16.3), unless `original`.
+struct ShareableMedia: Transferable {
+    let item: MediaItem
+    let services: AccountServices
+    var original = false
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .item) { media in
+            if !media.original, let edited = try await EditedExport.file(for: media.item, services: media.services) {
+                return SentTransferredFile(edited)
+            }
             let file = try await media.services.images.originals.original(
                 fileId: media.item.fileId, etag: media.item.etag, url: media.services.originalURL(for: media.item))
             // Give the file its real name for the receiving app.

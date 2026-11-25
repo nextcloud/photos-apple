@@ -51,6 +51,8 @@ struct TVRootView: View {
             if let session = app.session, !app.needsLogin, !session.isSignedOut {
                 TVHomeView(session: session)
                     .environment(session)
+                    // Films shared over SharePlay from a FaceTime call (SPEC §16.6).
+                    .tvWatchTogether(session: session)
                     .id(session.account.id)
             } else {
                 TVLoginView(signedOutAccount: app.session?.isSignedOut == true ? app.session?.account : nil)

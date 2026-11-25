@@ -20,7 +20,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Nextcloud Photos uses the camera to scan a login QR code."
+            "value" : "Nextcloud Photos uses the camera to take photos and scan documents for your Nextcloud, and to scan a login QR code."
           }
         }
       }
@@ -68,7 +68,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup."
+            "value" : "Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup, and keeps copies of an album you choose for the Lock Screen."
           }
         }
       }

@@ -76,12 +76,14 @@ public struct PreviewImage: View {
             }
             .clipped()
         }
-        .task(id: "\(fileId)-\(etag)-\(bucket)") { await load() }
+        // With the photo's edit (SPEC §16.3): a changed edit loads the new rendition.
+        .task(id: "\(fileId)-\(etag)-\(bucket)-\(session.edit(of: fileId)?.renderingDigest ?? "")") { await load() }
     }
 
     func load() async {
         guard let services = session.services else { return }
-        if let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: etag, upTo: bucket) { image = cached }
+        let shownEtag: String = services.images.displayedEtag(fileId: fileId, etag: etag)
+        if let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: shownEtag, upTo: bucket) { image = cached }
         let request = ImagePipeline.Request(
             fileId: fileId, etag: etag, bucket: bucket, hasPreview: hasPreview, mimeType: mimeType,
             originalURL: path.map { services.connection.originalURL(path: $0) })

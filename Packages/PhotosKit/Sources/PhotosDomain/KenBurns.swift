@@ -100,12 +100,16 @@ public enum KenBurns {
     }
 
     /// The move for a picture. `focus` is the region to frame (faces, else the salient part), in picture coordinates;
-    /// `seed` varies the kind of move from picture to picture; `still` (Reduce Motion) keeps the camera still.
-    public static func motion(imageAspect: Double, viewportAspect: Double, focus: FilmCrop?, seed: Int, still: Bool) -> Motion {
+    /// `seed` varies the kind of move from picture to picture; `still` (Reduce Motion) keeps the camera still; `closeness`
+    /// is how far the camera moves in (a film style's, `FilmStyle.zoom`).
+    public static func motion(
+        imageAspect: Double, viewportAspect: Double, focus: FilmCrop?, seed: Int, still: Bool, closeness: Double = zoom
+    ) -> Motion {
         let (base, fits) = base(imageAspect: imageAspect, viewportAspect: viewportAspect)
         guard !still else { return Motion(from: base, to: base, fits: fits) }
         let target = focus.flatMap { valid($0) }
-        let close = window(in: base, zoom: zoom, around: target)
+        let close = window(in: base, zoom: closeness, around: target)
+        let panZoom = min(panZoom, closeness)
         switch abs(seed) % 3 {
         case 0:
             return Motion(from: base, to: close, fits: fits)

@@ -18,13 +18,13 @@ import UniformTypeIdentifiers
 
 // MARK: - Rotate and Copy on a selection (SPEC §6.2: Image ▸ Rotate, Edit ▸ Copy)
 
-/// Image ▸ Rotate Left/Right outside the editor. Saves like the editor's "Overwrite original" (`PhotoEditSaving`): a new
-/// version of the file; photos in read-only shares and formats that can't be written back are left as they are and
-/// reported.
+/// Image ▸ Rotate Left/Right outside the editor: a quarter turn added to each photo's edit (SPEC §16.3), so the
+/// original is not changed, any photo can be turned (also RAW files and photos shared read-only), and the turn is undone
+/// with Edit › Undo or from the undo history.
 enum PhotoRotation {
-    /// The selection can be rotated: at least one photo in it can be changed in place.
+    /// The selection can be rotated: it has a photo (videos are not rotated, as in Photos).
     static func canRotate(_ items: [MediaItem]) -> Bool {
-        items.contains { PhotoEditSaving.overwriteProblem($0) == nil }
+        items.contains { $0.kind == .image }
     }
 
     /// The photos of the selection (videos are not rotated, as in Photos).
@@ -195,21 +195,6 @@ final class PhotoTaskModel {
     @ObservationIgnored private var task: Task<Void, Never>?
 
     var isRunning: Bool { task != nil }
-
-    /// Rotates the photos of `items` a quarter turn, each saved as a new version of its file; then syncs.
-    func rotate(_ items: [MediaItem], clockwise: Bool, session: SessionModel) {
-        guard !isRunning, let services = session.services else { return }
-        let photos = PhotoRotation.photos(items)
-        guard !photos.isEmpty else { return }
-        let edits = PhotoRotation.edits(clockwise: clockwise)
-        start(.rotate, total: photos.count) { progress in
-            let run = await MediaSaveRunner.run(photos, progress: progress) { item in
-                try await PhotoEditSaving.overwrite(item, with: edits, services: services)
-            }
-            if run.saved > 0 { await session.syncNow() }
-            return run
-        }
-    }
 
     /// Downloads the originals of `items` and puts them on the pasteboard once all are there.
     func copy(_ items: [MediaItem], services: AccountServices) {

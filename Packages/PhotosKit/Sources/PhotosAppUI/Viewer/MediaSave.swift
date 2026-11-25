@@ -130,7 +130,8 @@ final class MediaSaveModel {
 
     var isRunning: Bool { task != nil }
 
-    func save(_ items: [MediaItem], services: AccountServices) {
+    /// - Parameter originals: without their edits (SPEC §16.3).
+    func save(_ items: [MediaItem], services: AccountServices, originals: Bool = false) {
         guard !isRunning, !items.isEmpty else { return }
         result = nil
         task = Task { [weak self] in
@@ -145,7 +146,8 @@ final class MediaSaveModel {
             #endif
             self?.progress = Progress(done: 0, total: items.count)
             let total: Int = items.count
-            let result: MediaSaveResult = await MediaExport.save(items, to: destination, services: services) { [weak self] done in
+            let result: MediaSaveResult = await MediaExport.save(items, to: destination, services: services, originals: originals) {
+                [weak self] done in
                 self?.progress = Progress(done: done, total: total)
             }
             self?.result = result

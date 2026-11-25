@@ -1,8 +1,44 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ & %@" : {
+      "comment" : "Title of a moment of the library: two places of a few days away, e.g. Lisbon & Porto.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ & %2$@"
+          }
+        }
+      }
+    },
+    "%@ in %@" : {
+      "comment" : "Title of a moment of the library: a day away from home. Weekday and place, e.g. Sunday in Lisbon.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ in %2$@"
+          }
+        }
+      }
+    },
     "%@ in review" : {
       "comment" : "Title of the year recap memory, e.g. 2025 in review."
+    },
+    "%@ or more" : {
+      "comment" : "A search filter chip: photos rated with at least this many stars, e.g. ★★★ or more."
+    },
+    "%@ with %@" : {
+      "comment" : "Title of a moment of the library: a day with named people, e.g. Sunday with Anna and Ben.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ with %2$@"
+          }
+        }
+      }
     },
     "%@ – %@" : {
       "comment" : "A range of dates: first day – last day.",
@@ -11,6 +47,20 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ – %2$@"
+          }
+        }
+      }
+    },
+    "%@’s birthday" : {
+      "comment" : "Title of a moment of the library: a birthday, with the name of the person seen most, e.g. Anna’s birthday."
+    },
+    "%lld days in %@" : {
+      "comment" : "Title of a moment of the library: several days away, e.g. 3 days in Lisbon. Plural variations in the catalog.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld days in %2$@"
           }
         }
       }
@@ -38,17 +88,467 @@
         }
       }
     },
+    "1 Front.jpg" : {
+      "comment" : "File name of a postcard's front. Keep the number and .jpg."
+    },
+    "2 Back.jpg" : {
+      "comment" : "File name of a postcard's back. Keep the number and .jpg."
+    },
+    "A Small Joy" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "A corner of home you never photograph." : {
+      "comment" : "Hint of the weekly photo prompt Home."
+    },
+    "A first time, a new thing, a fresh start." : {
+      "comment" : "Hint of the weekly photo prompt Something New."
+    },
+    "A meal, a drawing, a repair, a mess." : {
+      "comment" : "Hint of the weekly photo prompt Something You Made."
+    },
+    "A river, a glass, rain on the window." : {
+      "comment" : "Hint of the weekly photo prompt Water."
+    },
+    "After Dark" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Airmail" : {
+      "comment" : "Postcard style: red and blue airmail stripes around the photo."
+    },
+    "An arch, a doorway, branches around the view." : {
+      "comment" : "Hint of the weekly photo prompt Frame in a Frame."
+    },
+    "Animals" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Autumn %@" : {
+      "comment" : "A search for the photos of a season, e.g. Autumn 2019."
+    },
+    "Bark, wool, rust, bread crust." : {
+      "comment" : "Hint of the weekly photo prompt Textures."
+    },
+    "Beach day" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Beach day in %@" : {
+      "comment" : "Title of a moment of the library, e.g. Beach day in Nice."
+    },
+    "Bikes, buses, a pram, a skateboard." : {
+      "comment" : "Hint of the weekly photo prompt Wheels."
+    },
+    "Birthday" : {
+      "comment" : "Title of a moment of the library: a birthday."
+    },
+    "Black and White" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Blossoms, candy, a sunset's last minutes." : {
+      "comment" : "Hint of the weekly photo prompt Pink."
+    },
+    "Books" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Breakfast" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Camping" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Camping near %@" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Ceilings, treetops, sky between buildings." : {
+      "comment" : "Hint of the weekly photo prompt Look Up."
+    },
+    "Christmas" : {
+      "comment" : "A search for the photos of a holiday (24–26 December); the year follows."
+    },
+    "Christmas Eve" : {
+      "comment" : "A search for the photos of a holiday; the year follows."
+    },
+    "Circles" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Classic" : {
+      "comment" : "Postcard style: the photo with a white border."
+    },
+    "Close-Up" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Concert" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Concert in %@" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Contrast" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Curves" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Doors" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Easter" : {
+      "comment" : "A search for the photos of a holiday (Good Friday to Easter Monday); the year follows."
+    },
+    "Edge to Edge" : {
+      "comment" : "Postcard style: the photo fills the whole front of the card."
+    },
+    "Exactly what you see right now." : {
+      "comment" : "Hint of the weekly photo prompt The View From Here."
+    },
     "Favorites" : {
       "comment" : "Search suggestion that limits the search to favorite photos."
+    },
+    "Find the middle and stand in it." : {
+      "comment" : "Hint of the weekly photo prompt Symmetry."
+    },
+    "Flowers" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Frame in a Frame" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "From Above" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Get closer than feels right." : {
+      "comment" : "Hint of the weekly photo prompt Close-Up."
+    },
+    "Golden Hour" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Green" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Greetings from %@" : {
+      "comment" : "Lettering on the front of a postcard; the argument is the place the photo was taken, e.g. Greetings from Lisbon."
+    },
+    "Halloween" : {
+      "comment" : "A search for the photos of a holiday; the year follows."
+    },
+    "Hands" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Hands at work, at rest, holding on." : {
+      "comment" : "Hint of the weekly photo prompt Hands."
+    },
+    "Hike" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Hike near %@" : {
+      "comment" : "Title of a moment of the library, e.g. Hike near Zermatt."
+    },
+    "Hold the camera straight down." : {
+      "comment" : "Hint of the weekly photo prompt From Above."
+    },
+    "Home" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "House numbers, clocks, price tags." : {
+      "comment" : "Hint of the weekly photo prompt Numbers."
+    },
+    "In a vase, a garden, a crack in the pavement." : {
+      "comment" : "Hint of the weekly photo prompt Flowers."
+    },
+    "In the mountains" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Inside looking out, or outside looking in." : {
+      "comment" : "Hint of the weekly photo prompt Through a Window."
+    },
+    "Instruments, headphones, someone singing." : {
+      "comment" : "Hint of the weekly photo prompt Music."
+    },
+    "Lamps, windows, the glow of a screen." : {
+      "comment" : "Hint of the weekly photo prompt After Dark."
+    },
+    "Last 30 days" : {
+      "comment" : "A search date chip: the last 30 days (typed as recently)."
+    },
+    "Last week" : {
+      "comment" : "A search date chip: the week before this one."
+    },
+    "Leading Lines" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Lemons, lines on the road, a raincoat." : {
+      "comment" : "Hint of the weekly photo prompt Yellow."
+    },
+    "Less Is More" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Let the shadow be the subject." : {
+      "comment" : "Hint of the weekly photo prompt Shadows."
+    },
+    "Light against dark, old against new." : {
+      "comment" : "Hint of the weekly photo prompt Contrast."
+    },
+    "Look Up" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Look for light and shape, not colour." : {
+      "comment" : "Hint of the weekly photo prompt Black and White."
+    },
+    "Mirrors, puddles, shop windows, a spoon." : {
+      "comment" : "Hint of the weekly photo prompt Reflections."
+    },
+    "Morning Light" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Moss, a leaf, a traffic light." : {
+      "comment" : "Hint of the weekly photo prompt Green."
+    },
+    "Motion" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Mountains near %@" : {
+      "comment" : "Title of a moment of the library: photos of mountains, e.g. Mountains near Zermatt."
+    },
+    "Music" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "New Year’s Day" : {
+      "comment" : "A search for the photos of a holiday; the year follows."
+    },
+    "New Year’s Eve" : {
+      "comment" : "A search for the photos of a holiday; the year follows."
+    },
+    "Nextcloud: %@" : {
+      "comment" : "Name of the album in the device's Photos library that mirrors a Nextcloud album for the Lock Screen."
+    },
+    "Nothing straight this week." : {
+      "comment" : "Hint of the weekly photo prompt Curves."
+    },
+    "Numbers" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Old, painted, open, closed, your own." : {
+      "comment" : "Hint of the weekly photo prompt Doors."
+    },
+    "On a shelf, in a hand, in a pile." : {
+      "comment" : "Hint of the weekly photo prompt Books."
+    },
+    "One spot of red in a quiet picture." : {
+      "comment" : "Hint of the weekly photo prompt Red."
+    },
+    "One subject, lots of empty space." : {
+      "comment" : "Hint of the weekly photo prompt Less Is More."
+    },
+    "Orange" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "POSTCARD" : {
+      "comment" : "Heading on the back of a postcard, in capitals."
+    },
+    "Patterns" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Pets, birds, a snail on the path." : {
+      "comment" : "Hint of the weekly photo prompt Animals."
+    },
+    "Photos" : {
+      "comment" : "A search filter chip: still photos only, no videos."
+    },
+    "Pink" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Postcard" : {
+      "comment" : "Name of the folder a sent postcard is kept in, after its date."
+    },
+    "Prompt: %@" : {
+      "comment" : "Name of the album the photos of a weekly photo prompt go into; the argument is the theme, e.g. Prompt: Reflections."
+    },
+    "Put the light behind it." : {
+      "comment" : "Hint of the weekly photo prompt Silhouettes."
+    },
+    "Red" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Reflections" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Roads, rails, fences that pull the eye in." : {
+      "comment" : "Hint of the weekly photo prompt Leading Lines."
+    },
+    "Self-Portrait" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Shadows" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Signs and Letters" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Silhouettes" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Since %@" : {
+      "comment" : "A search date chip: from the start of this year until today, e.g. Since 2020."
+    },
+    "Skiing" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Skiing in %@" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Sky" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Sky, jeans, a door, a mug — any blue will do." : {
+      "comment" : "Hint of the weekly photo prompt Something Blue."
+    },
+    "Snow day" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Snow day in %@" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Snow, paper, steam, a quiet wall." : {
+      "comment" : "Hint of the weekly photo prompt White."
+    },
+    "Something Blue" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Something New" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Something Old" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Something You Made" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Something moving — sharp or blurred." : {
+      "comment" : "Hint of the weekly photo prompt Motion."
+    },
+    "Something smaller than your thumb." : {
+      "comment" : "Hint of the weekly photo prompt Tiny Things."
+    },
+    "Spring %@" : {
+      "comment" : "A search for the photos of a season, e.g. Spring 2019."
+    },
+    "Stairs" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Street Life" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Summer %@" : {
+      "comment" : "A search for the photos of a season, e.g. Summer 2019."
+    },
+    "Sunsets, fruit, safety vests." : {
+      "comment" : "Hint of the weekly photo prompt Orange."
+    },
+    "Symmetry" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Textures" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "The View From Here" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "The first hour of the day, low and golden." : {
+      "comment" : "Hint of the weekly photo prompt Morning Light."
+    },
+    "The first meal, before it's gone." : {
+      "comment" : "Hint of the weekly photo prompt Breakfast."
+    },
+    "The hour before sunset." : {
+      "comment" : "Hint of the weekly photo prompt Golden Hour."
+    },
+    "The same sky, twice a day." : {
+      "comment" : "Hint of the weekly photo prompt Sky."
+    },
+    "This week" : {
+      "comment" : "A search date chip: this week."
+    },
+    "Through a Window" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Tiles, leaves, bricks, a crowd." : {
+      "comment" : "Hint of the weekly photo prompt Patterns."
+    },
+    "Tiny Things" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "To:" : {
+      "comment" : "Label before the recipient's name on the back of a postcard."
     },
     "Today" : {
       "comment" : "Header of the group of photos taken today, in the timeline."
     },
+    "Together" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Two or more of anything — or anyone." : {
+      "comment" : "Hint of the weekly photo prompt Together."
+    },
+    "Up, down, spiral, steep." : {
+      "comment" : "Hint of the weekly photo prompt Stairs."
+    },
+    "Valentine’s Day" : {
+      "comment" : "A search for the photos of a holiday; the year follows."
+    },
     "Videos" : {
       "comment" : "Search suggestion that limits the search to videos."
     },
+    "Vintage" : {
+      "comment" : "Postcard style: cream border with scalloped edges and warm, faded colours."
+    },
+    "Water" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Weather" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Wedding" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Wedding in %@" : {
+      "comment" : "Title of a moment of the library."
+    },
+    "Weekend in %@" : {
+      "comment" : "Title of a moment of the library: a weekend away from home, e.g. Weekend in Lisbon."
+    },
+    "Whatever it's doing out there." : {
+      "comment" : "Hint of the weekly photo prompt Weather."
+    },
+    "Whatever made you smile today." : {
+      "comment" : "Hint of the weekly photo prompt A Small Joy."
+    },
+    "Wheels" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Wheels, plates, clocks, the moon." : {
+      "comment" : "Hint of the weekly photo prompt Circles."
+    },
+    "White" : {
+      "comment" : "Weekly photo prompt theme."
+    },
+    "Winter %@" : {
+      "comment" : "A search for the photos of a season, e.g. Winter 2019 (December 2019 to February 2020)."
+    },
+    "Words in the wild." : {
+      "comment" : "Hint of the weekly photo prompt Signs and Letters."
+    },
+    "Worn, faded, loved for years." : {
+      "comment" : "Hint of the weekly photo prompt Something Old."
+    },
+    "Yellow" : {
+      "comment" : "Weekly photo prompt theme."
+    },
     "Yesterday" : {
       "comment" : "Header of the group of photos taken yesterday, in the timeline."
+    },
+    "You, without your face if you like." : {
+      "comment" : "Hint of the weekly photo prompt Self-Portrait."
+    },
+    "Your street, ten minutes, no plan." : {
+      "comment" : "Hint of the weekly photo prompt Street Life."
     }
   },
   "version" : "1.1"

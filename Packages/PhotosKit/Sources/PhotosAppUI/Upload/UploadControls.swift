@@ -50,6 +50,9 @@ struct UploadMenu: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var showingPicker = false
     @State private var importing = false
+    #if os(iOS)
+        @State private var capture: Capture?
+    #endif
 
     var body: some View {
         Menu {
@@ -63,6 +66,26 @@ struct UploadMenu: View {
             } label: {
                 Label(String(localized: "Upload files…", bundle: .module), systemImage: "folder")
             }
+            #if os(iOS)
+                // With the device's own camera, into the same place (SPEC §16.5.3).
+                if DeviceCapture.canTakePhoto || DeviceCapture.canScan {
+                    Divider()
+                }
+                if DeviceCapture.canTakePhoto {
+                    Button {
+                        capture = .photo
+                    } label: {
+                        Label(DeviceCapture.takePhotoTitle, systemImage: "camera")
+                    }
+                }
+                if DeviceCapture.canScan {
+                    Button {
+                        capture = .scan
+                    } label: {
+                        Label(DeviceCapture.scanTitle, systemImage: "doc.viewfinder")
+                    }
+                }
+            #endif
         } label: {
             // Not an arrow out of a box: that is "Share" on Apple platforms, and the Share button sits next to this one.
             Label(String(localized: "Upload", bundle: .module), systemImage: "icloud.and.arrow.up")
@@ -88,7 +111,32 @@ struct UploadMenu: View {
             guard case .success(let urls) = result else { return }
             session.transfers.upload(UploadSources.copies(of: urls), album: album)
         }
+        #if os(iOS)
+            .fullScreenCover(item: $capture) { kind in
+                switch kind {
+                case .photo:
+                    CameraPicker { source in
+                        capture = nil
+                        if let source { session.transfers.upload([source], album: album) }
+                    }
+                    .ignoresSafeArea()
+                case .scan:
+                    DocumentScanner { sources in
+                        capture = nil
+                        if !sources.isEmpty { session.transfers.upload(sources, album: album) }
+                    }
+                    .ignoresSafeArea()
+                }
+            }
+        #endif
     }
+
+    #if os(iOS)
+        enum Capture: String, Identifiable {
+            case photo, scan
+            var id: String { rawValue }
+        }
+    #endif
 }
 
 /// What the timeline toolbar shows on which platform.

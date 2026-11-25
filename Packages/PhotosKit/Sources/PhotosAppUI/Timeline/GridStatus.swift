@@ -176,6 +176,8 @@ enum ChangeNoticeText {
             return trashbin
                 ? String(localized: "Moved \(count) items to the trash bin", bundle: .module)
                 : String(localized: "Deleted \(count) items", bundle: .module)
+        case .addToAlbum, .edit, .rotate, .revertEdit:
+            return ChangeWording.title(notice.change)
         }
     }
 

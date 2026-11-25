@@ -127,6 +127,14 @@ public struct SettingsView: View {
                     Text("These settings are shared with the Photos app on the web.", bundle: .module)
                 }
                 TimelineDisplaySection()
+                #if os(macOS)
+                    // The menu bar extra (SPEC §16.5.4).
+                    MenuBarExtraSection()
+                #endif
+                // Colour from photos, moving covers (SPEC §16.8).
+                LookSettingsSection()
+                // Folder rules, smart albums, GPS track (SPEC §16.4).
+                OrganizeSettingsSection()
             }
 
             if shows(.general) {
@@ -158,6 +166,11 @@ public struct SettingsView: View {
             }
 
             if shows(.general) { PhotoOfTheDaySettingsSection() }
+
+            // Sharing and family (SPEC §16.7).
+            if shows(.general) { WeeklyPromptSettingsSection() }
+            if shows(.general) { FamilyLibrarySettingsSection() }
+            if shows(.general) { LockScreenAlbumSettingsSection() }
 
             if shows(.general) { SearchAndActivitySettings() }
 
@@ -586,31 +599,52 @@ struct ServerFolderList: View {
     /// as tall as that tab's content.
     public struct MacSettingsView: View {
         @Environment(AppModel.self) private var app
+        /// The selected tab; the command palette sets it before it opens the window (SPEC §16.2).
+        @AppStorage(MacSettingsPage.storageKey) private var page = MacSettingsPage.general.rawValue
 
         public init() {}
 
         public var body: some View {
-            // The Settings window is a window of its own: it needs the lock too.
-            AppLockGate { settings }
+            // The Settings window is a window of its own: it needs the lock too, and shows nothing in Guest Mode.
+            AppLockGate {
+                if GuestMode.shared.isActive { GuestModeCover().frame(width: 360, height: 240) } else { settings }
+            }
         }
 
         @ViewBuilder var settings: some View {
             if let session = app.session {
-                TabView {
-                    Tab(String(localized: "General", bundle: .module), systemImage: "gearshape") { SettingsView(page: .general) }
-                    Tab(String(localized: "Accounts", bundle: .module), systemImage: "person.crop.circle") { SettingsView(page: .accounts) }
-                    Tab(String(localized: "Backup", bundle: .module), systemImage: "icloud.and.arrow.up") {
+                TabView(selection: $page) {
+                    Tab(String(localized: "General", bundle: .module), systemImage: "gearshape", value: MacSettingsPage.general.rawValue) {
+                        SettingsView(page: .general)
+                    }
+                    Tab(
+                        String(localized: "Accounts", bundle: .module), systemImage: "person.crop.circle",
+                        value: MacSettingsPage.accounts.rawValue
+                    ) {
+                        SettingsView(page: .accounts)
+                    }
+                    Tab(
+                        String(localized: "Backup", bundle: .module), systemImage: "icloud.and.arrow.up",
+                        value: MacSettingsPage.backup.rawValue
+                    ) {
                         NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
                     }
-                    Tab(String(localized: "Storage", bundle: .module), systemImage: "internaldrive") { SettingsView(page: .storage) }
+                    Tab(
+                        String(localized: "Storage", bundle: .module), systemImage: "internaldrive", value: MacSettingsPage.storage.rawValue
+                    ) {
+                        SettingsView(page: .storage)
+                    }
                     // Desktop pictures from the library (SPEC §15.4).
-                    Tab(String(localized: "Desktop", bundle: .module), systemImage: "menubar.dock.rectangle") {
+                    Tab(
+                        String(localized: "Desktop", bundle: .module), systemImage: "menubar.dock.rectangle",
+                        value: MacSettingsPage.desktop.rawValue
+                    ) {
                         DesktopPictureSettingsPane()
                     }
-                    Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
+                    Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack", value: MacSettingsPage.server.rawValue) {
                         NavigationStack { SettingsView(page: .server) }
                     }
-                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle") {
+                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle", value: MacSettingsPage.about.rawValue) {
                         NavigationStack { SettingsView(page: .about) }
                     }
                 }

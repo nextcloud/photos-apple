@@ -290,6 +290,9 @@ struct PersonScreen: View {
     @State private var reloads = 0
     /// "Make Sticker Pack" (SPEC §15.8.2).
     @State private var makingStickers = false
+    /// "Through the Years" (SPEC §16.6).
+    @State private var years: YearsPerson?
+    @State private var needsName = false
 
     var isHidden: Bool { hidden.names.contains(person.name) }
 
@@ -334,6 +337,9 @@ struct PersonScreen: View {
                 if !person.isUnnamed {
                     Button(StickerWording.packTitle, systemImage: "face.smiling") { makingStickers = true }
                 }
+                Button(YearsText.title, systemImage: "person.crop.rectangle.stack") {
+                    if person.isUnnamed { needsName = true } else { years = YearsPerson(name: person.name) }
+                }
                 Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
@@ -341,6 +347,18 @@ struct PersonScreen: View {
         }
         .id(reloads)
         .sheet(isPresented: $makingStickers) { StickerPackSheet(person: person.name) }
+        .throughTheYears($years)
+        .alert(YearsText.title, isPresented: $needsName) {
+            Button(String(localized: "Add Name…", bundle: .module, comment: "Through the years of an unnamed person: names them first.")) {
+                newName = ""
+                renaming = true
+            }
+            Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+        } message: {
+            Text(
+                "Name this person first: Through the years follows a named person across all their photos.", bundle: .module,
+                comment: "Through the years of a person Recognize has not been given a name for.")
+        }
         .task { if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) } }
         .alert(String(localized: "Name", bundle: .module), isPresented: $renaming) {
             TextField(String(localized: "Name", bundle: .module), text: $newName)
@@ -554,6 +572,8 @@ struct FoldersScreen: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        // File ▸ Import from iPhone or iPad (Continuity Camera, Mac; SPEC §16.5.3): into this folder.
+        .continuityCameraImport(folder: path, isEnabled: path != "/")
         .toolbar {
             if path != "/" {
                 ToolbarItem(placement: .automatic) {

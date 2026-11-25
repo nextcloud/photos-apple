@@ -30,6 +30,9 @@ struct MediaGridScreen<Accessory: View>: View {
     var isLibrary = false
     /// Image ▸ Delete Rejected… (the Library, SPEC §15.2).
     var deleteRejected: (() -> Void)? = nil
+    /// Moment titles on the day headers and what a tap on one opens (the Library, SPEC §16.1).
+    var moments = MomentHeaders.none
+    var openMoment: ((String) -> Void)? = nil
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -50,6 +53,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var tagEditor: PickedItems?
     @State private var sharedLink: SharedLink?
     @State private var metadataItems: PickedItems?
+    /// Batch fixes: date and time, place, names, GPS track (SPEC §16.4).
+    @State private var batchFix: BatchFixRequest?
     @State private var editedItem: MediaItem?
     /// Nextcloud's own sharing of one photo (users, other servers, email, Talk, links with password and expiry).
     @State private var nextcloudShare: SharingTarget?
@@ -68,6 +73,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var saver = MediaSaveModel()
     /// Image ▸ Rotate and Edit ▸ Copy, with their progress and result.
     @State private var photoTasks = PhotoTaskModel()
+    /// The undo history from the selection's More menu (iPhone, iPad; SPEC §16.3.4).
+    @State private var showingUndoHistory = false
     /// Own albums, for the "Add to Album" submenus; the ones used last in this app (`RecentAlbumsStore`) come first.
     @State private var albums: [Album] = []
     @State private var usedAlbums: [String] = []
@@ -76,6 +83,8 @@ struct MediaGridScreen<Accessory: View>: View {
     /// Ratings and flags given here, and the compare view (SPEC §15.2).
     @State private var culling = CullingModel()
     @State private var compareRequest: CompareRequest?
+    /// The culling view with loupe and filmstrip (SPEC §16.5.2).
+    @State private var loupeRequest: LoupeRequest?
     /// The zoom transition into the viewer and back (iPhone, iPad): the tile it starts from and where that tile is.
     @Namespace private var zoomNamespace
     @State private var tileLocator = GridTileLocator()
@@ -140,7 +149,8 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
             .collageEditor($collage)
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
-            .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
+            .sheet(item: $metadataItems) { picked in BatchFixSheet(items: picked.items) }
+            .sheet(item: $batchFix) { request in BatchFixSheet(items: request.items, mode: request.mode) }
             .photoEditor($editedItem)
             .similarPhotosSheet($similarTo)
             .sheet(item: $nextcloudShare) { target in
@@ -178,6 +188,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 .task(id: feed.items.isEmpty) {
                     if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
                     if compareRequest == nil { compareRequest = CompareRequest.debugStart(ids: feed.items.map(\.fileId)) }
+                    if loupeRequest == nil { loupeRequest = LoupeRequest.debugStart(ids: feed.items.map(\.fileId)) }
                     #if os(macOS)
                         ExternalEditCenter.debugStart(ids: feed.items.map(\.fileId), session: session)
                     #endif
@@ -185,9 +196,11 @@ struct MediaGridScreen<Accessory: View>: View {
             #endif
             .mediaViewer($viewerStart, zoom: zoomSource)
             .compareView($compareRequest)
+            .loupeCulling($loupeRequest)
             .cullingFeedback(culling)
             .mediaSaveStatus(saver)
             .photoTaskStatus(photoTasks)
+            .undoHistorySheet(isPresented: $showingUndoHistory)
             .task { await observeAlbums() }
             .task(id: isInitialSync) { if isInitialSync { await session.loadInitialSyncTotal() } }
             .alert(
@@ -209,6 +222,7 @@ struct MediaGridScreen<Accessory: View>: View {
                 isSelecting: isSelecting,
                 showsHeaders: showsHeaders,
                 squareTiles: squareTiles,
+                moments: moments,
                 services: services,
                 callbacks: GridCallbacks(
                     open: { id in openViewer(at: id) },
@@ -228,7 +242,8 @@ struct MediaGridScreen<Accessory: View>: View {
                     copy: { ids in withItems(ids) { copy($0) } },
                     cull: cullCallback,
                     compare: { (ids: [FileID]) in compare(ids) },
-                    zoomPastEnd: zoomPastEnd
+                    zoomPastEnd: zoomPastEnd,
+                    openMoment: momentOpener
                 )
             )
             .ignoresSafeArea(edges: .bottom)
@@ -267,6 +282,13 @@ struct MediaGridScreen<Accessory: View>: View {
                 }
             }
         }
+    }
+
+    /// A tap on a moment's title in a day header (SPEC §16.1).
+    var momentOpener: (@MainActor (String) -> Void)? {
+        guard let openMoment else { return nil }
+        let opener: @MainActor (String) -> Void = { (id: String) in openMoment(id) }
+        return opener
     }
 
     /// Opens the viewer from a tile, which it zooms out of (iPhone, iPad).
@@ -466,6 +488,15 @@ struct MediaGridScreen<Accessory: View>: View {
                             }
                         }
                     }
+                    #if !os(macOS)
+                        // The Mac has it in the Edit menu.
+                        Divider()
+                        Button {
+                            showingUndoHistory = true
+                        } label: {
+                            Label(ChangeWording.historyMenuTitle, systemImage: "clock.arrow.circlepath")
+                        }
+                    #endif
                 } label: {
                     Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
                 }
@@ -576,6 +607,7 @@ struct MediaGridScreen<Accessory: View>: View {
             useAsDesktopPicture: desktopPictureAction(single),
             cull: canCull && summary.count > 0 ? { (command: CullingCommand) in cull(command, Array(selected)) } : nil,
             compare: (2...CompareLayout.maxPhotos).contains(summary.count) ? { () -> Void in compare(Array(selected)) } : nil,
+            loupe: feed.items.isEmpty ? nil : { () -> Void in openLoupe(selected) },
             deleteRejected: deleteRejected,
             editWith: editWithTarget(single)
         )
@@ -599,6 +631,10 @@ struct MediaGridScreen<Accessory: View>: View {
             actions.append(
                 GridMenuAction(id: "compare", title: CompareWording.menuTitle, systemImage: "rectangle.split.2x2") { ids in compare(ids) })
         }
+        actions.append(
+            GridMenuAction(id: "loupe", title: LoupeWording.menuTitle, systemImage: "rectangle.and.text.magnifyingglass") { ids in
+                openLoupe(Set(ids))
+            })
         #if os(macOS)
             if let target = editWithTarget(single) {
                 var apps: [GridMenuAction] = EditWithApps.apps(for: target.item).map { app in
@@ -645,6 +681,11 @@ struct MediaGridScreen<Accessory: View>: View {
         compareRequest = CompareRequest(ids: ordered)
     }
 
+    /// The culling view (SPEC §16.5.2): several selected photos on their own, else the whole grid from the selected one.
+    func openLoupe(_ selected: Set<FileID>) {
+        loupeRequest = LoupeRequest.from(gridIds: feed.model.ids, selected: selected)
+    }
+
     /// Image ▸ Edit With ▸ for one photo in the user's files (Mac).
     func editWithTarget(_ item: MediaItem?) -> EditWithTarget? {
         #if os(macOS)
@@ -687,12 +728,14 @@ struct MediaGridScreen<Accessory: View>: View {
     func add(_ ids: [FileID], to album: Album) {
         RecentAlbumsStore.note(album, account: session.account.id)
         usedAlbums = RecentAlbums.noting(album.id, in: usedAlbums)
-        withItems(ids) { items in Task { await session.addToAlbum(items, album: album) } }
+        let undoManager = undoManager
+        withItems(ids) { items in Task { await session.addToAlbum(items, album: album, undoManager: undoManager) } }
     }
 
-    /// Image ▸ Rotate Left/Right: saved as a new version of each photo that may be changed (SPEC §6.2).
+    /// Image ▸ Rotate Left/Right: a turn added to each photo's edit, undoable (SPEC §6.2, §16.3).
     func rotate(_ ids: [FileID], clockwise: Bool) {
-        withItems(ids) { photoTasks.rotate($0, clockwise: clockwise, session: session) }
+        let undoManager = undoManager
+        withItems(ids) { items in Task { await session.rotate(items, clockwise: clockwise, undoManager: undoManager) } }
     }
 
     /// Edit ▸ Copy: the originals on the pasteboard.
@@ -743,8 +786,9 @@ struct MediaGridScreen<Accessory: View>: View {
             }, children: children)
     }
 
+    /// Servers without metadata editing get the dates and places written into the files (SPEC §16.4).
     func canEditMetadata(_ summary: SelectionSummary) -> Bool {
-        session.features.has(.metadataEdit) && summary.writable > 0
+        summary.writable > 0
     }
 
     func favoriteTitle(remove: Bool) -> String {
@@ -932,12 +976,20 @@ struct MediaGridScreen<Accessory: View>: View {
         }
         if canEditMetadata(summary) {
             let metadataTitle: String = PlatformWording.title(
-                mac: LocalizedStringResource("Edit Date and Location…", bundle: .module),
-                other: LocalizedStringResource("Edit date and location…", bundle: .module))
+                mac: LocalizedStringResource("Adjust", bundle: .module, comment: "Submenu: adjust date, place, names of the selection."),
+                other: LocalizedStringResource("Adjust", bundle: .module, comment: "Submenu: adjust date, place, names of the selection."))
+            // Date and time, place, names, GPS track (SPEC §16.4).
+            let children: [GridMenuAction] = BatchFixMode.allCases.map { mode in
+                GridMenuAction(id: "metadata.\(mode.rawValue)", title: mode.menuTitle, systemImage: mode.systemImage) { ids in
+                    withItems(withStacks(ids)) { batchFix = BatchFixRequest(items: $0.filter(\.permissions.canWrite), mode: mode) }
+                }
+            }
             actions.append(
-                GridMenuAction(id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock") { ids in
-                    withItems(withStacks(ids)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) }
-                })
+                GridMenuAction(
+                    id: "metadata", title: metadataTitle, systemImage: "calendar.badge.clock",
+                    handler: { ids in
+                        withItems(withStacks(ids)) { metadataItems = PickedItems(items: $0.filter(\.permissions.canWrite)) }
+                    }, children: children))
         }
         // The screen's own actions (remove from album…) work on the items; a selection too large to load has none.
         var extras: [GridMenuAction] = info.items.map(extraActions) ?? []

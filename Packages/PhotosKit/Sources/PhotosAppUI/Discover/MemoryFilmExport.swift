@@ -99,10 +99,14 @@ struct MemoryFilmExportSheet: View {
                 "Export video…", bundle: .module, comment: "Memory: makes a video file of the memory's film to share or save."))
     }
 
+    var choice: FilmChoice {
+        _ = storedMusic
+        return FilmChoiceStore.choice(for: start.id)
+    }
+
     var body: some View {
         FilmExportView(
-            title: start.title, job: job, codec: $codec, musicNote: Self.musicNote(SlideshowMusic(stored: storedMusic)),
-            fileName: start.title
+            title: start.title, job: job, codec: $codec, musicNote: Self.note(choice), fileName: start.title
         ) {
             let codec = FilmExporter.Codec(rawValue: codec) ?? .h264
             let still = reduceMotion
@@ -112,7 +116,24 @@ struct MemoryFilmExportSheet: View {
         }
     }
 
-    /// What the export does with the music, said before it starts.
+    /// The style of the video and what happens to the music (SPEC §16.6), said before the export starts.
+    static func note(_ choice: FilmChoice) -> String {
+        let style = String(
+            localized: "Style: \(choice.style.title).", bundle: .module,
+            comment: "Video export of a memory: the film style the video is made in. The argument is the style's name.")
+        let music: String? =
+            switch choice.soundtrack {
+            case .style:
+                String(
+                    localized: "With its own music, made on this device.", bundle: .module,
+                    comment: "Video export of a memory: the film style's music goes into the video.")
+            case .mine: musicNote(SlideshowMusicStore.current())
+            case .none: nil
+            }
+        return [style, music].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// What the export does with the user's own music, said before it starts.
     static func musicNote(_ music: SlideshowMusic?) -> String? {
         guard let music else { return nil }
         if SlideshowMusicStore.readableURL(for: music) == nil {
@@ -131,7 +152,7 @@ struct MemoryFilmExportSheet: View {
         report: @escaping @MainActor (Double, String) -> Void
     ) async throws -> URL {
         guard let services = session.services else { throw CancellationError() }
-        let making = await FilmMaking.prepare(start, services: services)
+        let making = await FilmMaking.prepare(start, services: services, choice: FilmChoiceStore.choice(for: start.id), waitsForScore: true)
         let plan = making.plan
         let size = CGSize(width: 1920, height: 1080)
         var material = FilmMaterial()

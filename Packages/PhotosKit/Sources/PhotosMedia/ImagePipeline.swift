@@ -6,6 +6,7 @@ import Foundation
 import OSLog
 import PhotosModel
 import PhotosNetworking
+import Synchronization
 
 /// Loads previews and originals (SPEC §5.5).
 ///
@@ -30,6 +31,10 @@ public actor ImagePipeline {
     /// Previews kept on the device by smart offline (SPEC §15.8.1): `(fileId, etag, bucket)` to a file at least that large.
     private var localPreview: (@Sendable (FileID, String, Int) -> URL?)?
     private var isShutDown = false
+    /// The edit recipe of a photo (SPEC §16.3): previews of edited photos are rendered on the device and cached.
+    private nonisolated let editProvider = Mutex<(@Sendable (FileID) -> EditRecipe?)?>(nil)
+    /// The still of a Live Photo whose effect changes it (long exposure, another key photo), from its motion.
+    private var liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
 
     /// How many loads may run at once.
     public struct Limits: Sendable, Equatable {
@@ -84,9 +89,43 @@ public actor ImagePipeline {
         localPreview = provider
     }
 
+    /// Where the edits come from (`EditLibrary`). Every request shows the edited photo unless it asks for the original.
+    public nonisolated func setEditProvider(_ provider: @escaping @Sendable (FileID) -> EditRecipe?) {
+        editProvider.withLock { $0 = provider }
+    }
+
+    public func setLiveStillProvider(_ provider: @escaping @Sendable (FileID, EditRecipe, Int) async -> CGImage?) {
+        liveStill = provider
+    }
+
+    /// The edit a preview of `fileId` shows: nil when it shows the photo as it is.
+    public nonisolated func displayedEdit(_ fileId: FileID) -> EditRecipe? {
+        guard let recipe = editProvider.withLock({ $0 })?(fileId), recipe.changesStill else { return nil }
+        return recipe
+    }
+
+    /// The request with the photo's current edit, so that it loads (and caches) the edited version. Requests made
+    /// without it get it in `preview(_:)`; building it in front lets a tile see that its picture changed.
+    public nonisolated func withEdits(_ request: Request) -> Request {
+        guard request.showsEdits, request.edit == nil, let recipe = displayedEdit(request.fileId) else { return request }
+        var edited = request
+        edited.edit = recipe
+        return edited
+    }
+
+    /// The ETag under which the memory and disk caches keep what a preview of the photo shows now (`bestMemoryImage`).
+    public nonisolated func displayedEtag(fileId: FileID, etag: String) -> String {
+        withEdits(Request(fileId: fileId, etag: etag, bucket: 0)).cacheEtag
+    }
+
     /// A preview of this request that is on the device: in the cache or kept by smart offline.
     private func isLocal(_ request: Request) -> Bool {
-        cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
+        if request.edit != nil {
+            // Rendered from the unedited preview, which may be on the device.
+            return cache.hasDiskImage(fileId: request.fileId, etag: request.cacheEtag, bucket: request.bucket)
+                || isLocal(request.unedited)
+        }
+        return cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
             || localPreview?(request.fileId, request.etag, request.bucket) != nil
     }
 
@@ -113,6 +152,10 @@ public actor ImagePipeline {
         /// The preview is decoded no larger than this (long edge in pixels): a grid tile of 400 px needs the 1024 px
         /// bucket from the server, but holding it decoded at 1024 px would cost six times the memory. Nil: the bucket.
         public var maxPixelSize: Int?
+        /// False: the photo as it is, without its edit (SPEC §16.3).
+        public var showsEdits = true
+        /// The edit the preview is rendered with (`ImagePipeline.withEdits`); nil for the photo as it is.
+        public var edit: EditRecipe?
 
         public init(
             fileId: FileID, etag: String, bucket: Int, hasPreview: Bool = true, mimeType: String = "image/jpeg", originalURL: URL? = nil,
@@ -130,14 +173,28 @@ public actor ImagePipeline {
         /// The size the preview is decoded to.
         public var decodeSize: Int { PreviewCache.decodeLimit(maxPixelSize, bucket: bucket) }
 
+        /// The ETag the caches keep the picture under: an edited version has its own, from the edit's digest.
+        public var cacheEtag: String {
+            guard let edit else { return etag }
+            return "\(etag.isEmpty ? "0" : etag)_e\(edit.renderingDigest)"
+        }
+
+        /// The same request for the photo as it is.
+        var unedited: Request {
+            var request = self
+            request.edit = nil
+            request.showsEdits = false
+            return request
+        }
+
         /// Loads of the same preview at different sizes are separate (each waiter gets the size it asked for).
         var key: String {
-            let base = PreviewCache.key(fileId: fileId, etag: etag, bucket: bucket)
+            let base = PreviewCache.key(fileId: fileId, etag: cacheEtag, bucket: bucket)
             return decodeSize < bucket ? "\(base)@\(decodeSize)" : base
         }
 
         func memoryImage(in cache: PreviewCache) -> CGImage? {
-            cache.memoryImage(fileId: fileId, etag: etag, bucket: bucket, minPixelSize: decodeSize)
+            cache.memoryImage(fileId: fileId, etag: cacheEtag, bucket: bucket, minPixelSize: decodeSize)
         }
     }
 
@@ -145,6 +202,7 @@ public actor ImagePipeline {
     ///
     /// Cancelling the calling task gives the load up: it stops unless another task or a prefetch still wants it.
     public func preview(_ request: Request) async -> CGImage? {
+        let request = withEdits(request)
         if let image = request.memoryImage(in: cache) { return image }
         if isShutDown || Task.isCancelled { return nil }
         let key = request.key
@@ -168,7 +226,7 @@ public actor ImagePipeline {
     /// Prefetches previews without waiting. They load after everything that is being waited for.
     public func prefetch(_ requests: [Request]) {
         guard !isShutDown else { return }
-        for request in requests where request.memoryImage(in: cache) == nil {
+        for request in requests.map(withEdits) where request.memoryImage(in: cache) == nil {
             let key = request.key
             if loads[key] != nil {
                 loads[key]?.isPrefetch = true
@@ -191,7 +249,7 @@ public actor ImagePipeline {
 
     /// Takes prefetches back (the items left the prefetch window): loads that nobody waits for are cancelled.
     public func cancelPrefetch(for requests: [Request]) {
-        for request in requests {
+        for request in requests.map(withEdits) {
             let key = request.key
             guard loads[key]?.isPrefetch == true else { continue }
             loads[key]?.isPrefetch = false
@@ -289,7 +347,7 @@ public actor ImagePipeline {
         running[load.lane, default: 0] += 1
         let work = Work(
             api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal,
-            localPreview: localPreview)
+            localPreview: localPreview, liveStill: liveStill)
         let request = load.request
         let id = load.id
         let lane = load.lane
@@ -352,11 +410,13 @@ public actor ImagePipeline {
         let logger: Logger
         let localOriginal: (@Sendable (FileID, String) -> URL?)?
         let localPreview: (@Sendable (FileID, String, Int) -> URL?)?
+        let liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
 
         func load(_ request: Request) async -> Result {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
             dispatchPrecondition(condition: .notOnQueue(.main))
             if Task.isCancelled { return Result() }
+            if let edit = request.edit { return await loadEdited(request, edit: edit) }
             let size = request.maxPixelSize
             if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
                 return Result(image: image)
@@ -406,6 +466,34 @@ public actor ImagePipeline {
             return Result(
                 image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
                 downloaded: true)
+        }
+
+        /// An edited photo (SPEC §16.3): rendered on the device from its unedited preview (or, for a Live Photo effect,
+        /// from its motion) and cached under the edit's own ETag.
+        func loadEdited(_ request: Request, edit: EditRecipe) async -> Result {
+            let etag = request.cacheEtag
+            if let image = cache.diskImage(fileId: request.fileId, etag: etag, bucket: request.bucket, maxPixelSize: request.maxPixelSize) {
+                return Result(image: image)
+            }
+            var base: CGImage?
+            var downloaded = false
+            if edit.live?.changesStill == true, let liveStill {
+                base = await liveStill(request.fileId, edit, request.bucket)
+            }
+            if base == nil {
+                var unedited = request.unedited
+                unedited.maxPixelSize = nil
+                let result = await load(unedited)
+                base = result.image
+                downloaded = result.downloaded
+            }
+            guard let base, !Task.isCancelled,
+                let rendered = EditRendering.rendition(of: base, recipe: edit, maxPixelSize: request.bucket)
+            else { return Result(downloaded: downloaded) }
+            return Result(
+                image: cache.store(
+                    rendered, fileId: request.fileId, etag: etag, bucket: request.bucket, maxPixelSize: request.maxPixelSize),
+                downloaded: downloaded)
         }
     }
 }

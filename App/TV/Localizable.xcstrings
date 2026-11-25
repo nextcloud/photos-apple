@@ -142,6 +142,9 @@
     "None" : {
       "comment" : "TV settings: no album chosen for the family slideshow."
     },
+    "Not shared with you" : {
+      "comment" : "TV SharePlay: in place of a photo not shared with this account."
+    },
     "Not synced yet" : {
       "comment" : "TV settings: no sync has finished yet."
     },
@@ -201,6 +204,9 @@
     "Settings" : {
       "comment" : "TV: tab with the account and slideshow settings."
     },
+    "SharePlay · Play/Pause and the arrows control the film for everyone." : {
+      "comment" : "TV SharePlay banner: the remote controls the shared film for everyone."
+    },
     "Shared Albums" : {
       "comment" : "TV: title of the shelf of albums shared with the user."
     },
@@ -242,6 +248,9 @@
     "The family slideshow plays the chosen album in a shuffled order for as long as you like, like a picture frame. Start it from Home." : {
       "comment" : "TV settings: explanation of the family slideshow."
     },
+    "This film is on %@. Sign in to that Nextcloud on this Apple TV with an account the photos are shared with, then join again." : {
+      "comment" : "TV SharePlay: the film is on a Nextcloud this TV is not signed in to. The argument is the server."
+    },
     "This server asks the app to connect without encryption (http://). Log in with its http:// address if you want to allow that." : {
       "comment" : "TV login: the server redirected an https login to http."
     },
@@ -279,6 +288,9 @@
     },
     "Waiting for your phone…" : {
       "comment" : "TV login: shown while the TV waits for the login on the phone."
+    },
+    "You can see %lld of %lld photos. The others aren't shared with this account on Nextcloud." : {
+      "comment" : "TV SharePlay: how many of the film's photos this TV's account can see. Arguments are numbers."
     },
     "Your memories and albums on the big screen. Log in with your phone: no password is typed on the TV." : {
       "comment" : "TV login: introduction next to the login form."

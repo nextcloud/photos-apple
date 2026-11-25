@@ -23,7 +23,10 @@ public struct AlbumWindowView: View {
 
     public var body: some View {
         Group {
-            if let value, let session = app.session, !app.needsLogin {
+            if GuestMode.shared.isActive {
+                // Nothing but the guest's album or memory (SPEC §16.8.3).
+                GuestModeCover()
+            } else if let value, let session = app.session, !app.needsLogin {
                 if session.account.id.rawValue == value.account {
                     AppLockGate {
                         NavigationStack {
@@ -49,9 +52,11 @@ public struct AlbumWindowView: View {
     }
 }
 
-/// "Open in New Window" for an album: the context menu of its card, and ⌥-click on the Mac.
-struct OpenAlbumInWindow: ViewModifier {
+/// "Open in New Window" for an album: the context menu of its card, and ⌥-click on the Mac. `more` adds the card's other
+/// menu items (cover, Guest Mode) to the same menu.
+struct OpenAlbumInWindow<More: View>: ViewModifier {
     let albumId: String
+    @ViewBuilder var more: () -> More
     @Environment(SessionModel.self) private var session
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
@@ -71,6 +76,7 @@ struct OpenAlbumInWindow: ViewModifier {
                                 other: LocalizedStringResource("Open in new window", bundle: .module)),
                             systemImage: "macwindow.badge.plus")
                     }
+                    more()
                 }
                 #if os(macOS)
                     // ⌥-click (and ⌥-double-click) opens the album in its own window instead of in this one, like a folder
@@ -78,13 +84,17 @@ struct OpenAlbumInWindow: ViewModifier {
                     .highPriorityGesture(TapGesture().modifiers(.option).onEnded { openWindow(id: AlbumWindowValue.sceneId, value: value) })
                 #endif
         } else {
-            content
+            content.contextMenu { more() }
         }
     }
 }
 
 extension View {
     func opensAlbumInWindow(_ albumId: String) -> some View {
-        modifier(OpenAlbumInWindow(albumId: albumId))
+        modifier(OpenAlbumInWindow(albumId: albumId) { EmptyView() })
+    }
+
+    func opensAlbumInWindow(_ albumId: String, @ViewBuilder more: @escaping () -> some View) -> some View {
+        modifier(OpenAlbumInWindow(albumId: albumId, more: more))
     }
 }

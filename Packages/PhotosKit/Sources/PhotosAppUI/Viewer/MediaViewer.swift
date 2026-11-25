@@ -25,6 +25,8 @@ struct MediaViewer: View {
     @State private var confirmDelete = false
     @State private var editing: MediaItem?
     @State private var editingMetadata: MediaItem?
+    /// The undo history from the More menu (iPhone, iPad; SPEC §16.3.4).
+    @State private var showingUndoHistory = false
     @State private var extractingText: MediaItem?
     @State private var addingToAlbum: MediaItem?
     @State private var tagging: MediaItem?
@@ -38,6 +40,8 @@ struct MediaViewer: View {
     @State private var similarTo: MediaItem?
     /// "Then and now" of the place of the photo shown (SPEC §15.6).
     @State private var thenAndNow: ThenAndNowStart?
+    /// "Send as postcard…" for the photo shown (SPEC §16.7.1).
+    @State private var postcard: PostcardStart?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -63,6 +67,8 @@ struct MediaViewer: View {
     @State private var deletions = 0
     /// Ratings and flags given here (SPEC §15.2).
     @State private var culling = CullingModel()
+    /// The backdrop's colour from the photo, following the pager (SPEC §16.8.1).
+    @State private var tint = ViewerTint()
     @Environment(SessionModel.self) private var session
     /// The window's undo manager: favourite, archive and delete made here are undone with Edit › Undo (⌘Z, shake).
     @Environment(\.undoManager) private var undoManager
@@ -139,6 +145,11 @@ struct MediaViewer: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $current)
             .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: Double.self) { geometry in
+                ViewerTint.pagePosition(offset: geometry.contentOffset.x, width: geometry.containerSize.width)
+            } action: { _, position in
+                tint.scrollPosition = position
+            }
             .onGeometryChange(for: CGSize.self) { proxy in
                 proxy.size
             } action: { size in
@@ -162,7 +173,8 @@ struct MediaViewer: View {
             }
             .focusedSceneValue(\.gridActions, viewerActions)
             .photoEditor($editing)
-            .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
+            .sheet(item: $editingMetadata) { item in BatchFixSheet(items: [item]) }
+            .undoHistorySheet(isPresented: $showingUndoHistory)
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
             .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
@@ -173,6 +185,7 @@ struct MediaViewer: View {
             }
             .slideshow($slideshow) { last in showAfterSlideshow(last) }
             .thenAndNowSheet($thenAndNow)
+            .postcardSheet($postcard)
             .mediaSaveStatus(saver)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
@@ -206,7 +219,8 @@ struct MediaViewer: View {
             // Dragged down to close: the page follows the finger and shrinks, the backdrop fades to what is behind.
             .scaleEffect(ViewerSwipe.pageScale(progress: dismissProgress))
             .offset(y: max(0, dragTranslation))
-            .background(Color.black.opacity(1 - dismissProgress).ignoresSafeArea())
+            .background(ViewerBackdrop(tint: tint).opacity(1 - dismissProgress).ignoresSafeArea())
+            .modifier(ViewerTintTracking(tint: tint, pages: shownIds.map { fileId(ofPage: $0) }, current: currentFileId))
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.width
             } action: { width in
@@ -280,7 +294,14 @@ struct MediaViewer: View {
         )
         actions.zoomToFit = isImage && zoomed ? { zoom(.fit) } : nil
         guard let item else { return actions }
-        if isImage { actions.edit = { editing = item } }
+        if isImage {
+            actions.edit = { editing = item }
+            // Image ▸ Rotate: an edit of the photo shown (SPEC §16.3), undoable.
+            actions.rotate = { clockwise in
+                let undoManager = undoManager
+                Task { await session.rotate([item], clockwise: clockwise, undoManager: undoManager) }
+            }
+        }
         if canEditMetadata(item) { actions.editDateAndLocation = { editingMetadata = item } }
         actions.export = { save(item) }
         if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
@@ -304,7 +325,7 @@ struct MediaViewer: View {
     }
 
     func canEditMetadata(_ item: MediaItem) -> Bool {
-        session.features.has(.metadataEdit) && item.permissions.canWrite
+        item.permissions.canWrite && !item.isCollectionChild
     }
 
     /// Saves the original: into a folder the user picks on the Mac (as "Export…" in the grid), to the photo library elsewhere.
@@ -569,6 +590,7 @@ struct MediaViewer: View {
             Label(PhotosCommands.exportTitle, systemImage: "square.and.arrow.down")
         }
         .disabled(saver.isRunning)
+        EditedItemMenuItems(item: item, saver: saver)
         if item.permissions.canShare && session.services != nil {
             Button {
                 nextcloudShare = SharingTarget(item: item)
@@ -576,6 +598,7 @@ struct MediaViewer: View {
                 Label(String(localized: "Share via Nextcloud…", bundle: .module), systemImage: "person.badge.plus")
             }
         }
+        PostcardMenuItem(item: item, start: $postcard)
         Button {
             playSlideshow()
         } label: {
@@ -638,6 +661,14 @@ struct MediaViewer: View {
                 culling.apply(command, ids: cullingIds, session: session, undoManager: undoManager)
             }
         }
+        #if !os(macOS)
+            // The Mac has it in the Edit menu.
+            Button {
+                showingUndoHistory = true
+            } label: {
+                Label(ChangeWording.historyMenuTitle, systemImage: "clock.arrow.circlepath")
+            }
+        #endif
         if item.isOwnStorage && item.permissions.canDelete {
             Divider()
             Button {
@@ -803,6 +834,24 @@ private struct ZoomAccessibilityActions: ViewModifier {
     }
 }
 
+/// Favourite, Info and Delete in the actions menu of assistive technologies.
+private struct ViewerPageActions: ViewModifier {
+    let offered: Bool
+    let favoriteTitle: String
+    let actions: ViewerPage.AccessibilityActions
+
+    func body(content: Content) -> some View {
+        if offered {
+            content
+                .accessibilityAction(named: Text(favoriteTitle)) { actions.toggleFavorite() }
+                .accessibilityAction(named: Text("Info", bundle: .module)) { actions.showInfo() }
+                .accessibilityAction(named: Text("Delete", bundle: .module)) { actions.delete() }
+        } else {
+            content
+        }
+    }
+}
+
 /// One page: zoomable photo, Live Photo or video.
 struct ViewerPage: View {
     /// The viewer's actions, offered to VoiceOver on the page.
@@ -831,6 +880,8 @@ struct ViewerPage: View {
     var actions = AccessibilityActions()
     var zoomCommand: ViewerZoomCommand?
     var events = Events()
+    /// Favourite, Info and Delete for assistive technologies; not in Guest Mode (SPEC §16.8.3).
+    var offersActions = true
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var item: MediaItem?
@@ -882,9 +933,7 @@ struct ViewerPage: View {
                 Color.clear
             }
         }
-        .accessibilityAction(named: Text(favoriteActionTitle)) { actions.toggleFavorite() }
-        .accessibilityAction(named: Text("Info", bundle: .module)) { actions.showInfo() }
-        .accessibilityAction(named: Text("Delete", bundle: .module)) { actions.delete() }
+        .modifier(ViewerPageActions(offered: offersActions, favoriteTitle: favoriteActionTitle, actions: actions))
         .modifier(ZoomAccessibilityActions(isPhoto: item?.kind == .image, zoom: actions.zoom))
         .task(id: fileId) {
             // Observed, so the VoiceOver favourite action and description follow a toggle.
@@ -928,7 +977,9 @@ struct ViewerPage: View {
     func description(of item: MediaItem) -> String {
         AccessibilityText.media(
             isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
-            place: item.place, people: people, isFavorite: item.isFavorite, caption: item.caption)
+            place: item.place, people: people, isFavorite: item.isFavorite,
+            // The server's caption, else the description written on this device (SPEC §16.2).
+            caption: item.caption ?? session.services?.descriptions.text(of: item.fileId))
     }
 }
 

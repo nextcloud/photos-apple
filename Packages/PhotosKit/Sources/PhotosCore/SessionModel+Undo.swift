@@ -3,6 +3,7 @@
 
 import Foundation
 import OSLog
+import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -17,6 +18,15 @@ public enum UndoableChange: Sendable, Equatable {
     /// Moved to the server's trash bin. Undone by taking back the deletes still queued (their `rows` are put back) and
     /// restoring the others from the trash bin. `perform` fills in `rows`.
     case delete([MediaItem], rows: DeletedRows = DeletedRows())
+    /// Added to an album. Undone by taking the photos out again; `perform` leaves out photos that were in it already.
+    case addToAlbum([MediaItem], album: Album)
+    /// Edits of photos (SPEC §16.3): saved in the editor, turned with Rotate, or reverted to the original. Made and
+    /// undone through the edit library, not the outbox.
+    case edit([EditChange], action: EditAction)
+
+    public enum EditAction: String, Sendable {
+        case edit, rotate, revert
+    }
 
     /// A photo in an album, as much of it as removing it and adding it again needs.
     public struct AlbumMember: Sendable, Equatable {
@@ -34,7 +44,7 @@ public enum UndoableChange: Sendable, Equatable {
     }
 
     public enum Kind: String, Sendable {
-        case favorite, unfavorite, archive, unarchive, removeFromAlbum, delete
+        case favorite, unfavorite, archive, unarchive, removeFromAlbum, delete, addToAlbum, edit, rotate, revertEdit
     }
 
     public var kind: Kind {
@@ -44,6 +54,13 @@ public enum UndoableChange: Sendable, Equatable {
         case .unarchive: .unarchive
         case .removeFromAlbum: .removeFromAlbum
         case .delete: .delete
+        case .addToAlbum: .addToAlbum
+        case .edit(_, let action):
+            switch action {
+            case .edit: .edit
+            case .rotate: .rotate
+            case .revert: .revertEdit
+            }
         }
     }
 
@@ -56,6 +73,10 @@ public enum UndoableChange: Sendable, Equatable {
         case .unarchive: String(localized: "Unarchive", bundle: .module)
         case .removeFromAlbum: String(localized: "Remove from Album", bundle: .module)
         case .delete: String(localized: "Delete", bundle: .module)
+        case .addToAlbum: String(localized: "Add to Album", bundle: .module, comment: "Edit › Undo Add to Album.")
+        case .edit: String(localized: "Edit", bundle: .module, comment: "Edit › Undo Edit: a photo edited in the editor.")
+        case .rotate: String(localized: "Rotate", bundle: .module, comment: "Edit › Undo Rotate.")
+        case .revertEdit: String(localized: "Revert to Original", bundle: .module, comment: "Edit › Undo Revert to Original.")
         }
     }
 
@@ -78,6 +99,12 @@ public enum UndoableChange: Sendable, Equatable {
             }
         case .delete(let items, _):
             items.filter(\.permissions.canDelete).map { .delete(fileId: $0.fileId, path: $0.path) }
+        case .addToAlbum(let items, let album):
+            items.filter(\.isOwnStorage).map {
+                .addToAlbum(albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: $0.fileId, path: $0.path)
+            }
+        case .edit:
+            []
         }
     }
 
@@ -98,13 +125,20 @@ public enum UndoableChange: Sendable, Equatable {
                     .addToAlbum(albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: member.fileId, path: $0)
                 }
             }
-        case .delete:
+        case .delete, .addToAlbum, .edit:
+            // A delete is restored from the trash bin; an addition is taken back by the photos' names in the album as
+            // they are when it is undone (`SessionModel.revert`); edits through the edit library.
             []
         }
     }
 
     /// Number of items the change alters.
-    public var count: Int { operations.count }
+    public var count: Int {
+        switch self {
+        case .edit(let changes, _): changes.count
+        default: operations.count
+        }
+    }
 
     /// The photos the change alters, in the order of `operations`.
     public var fileIds: [FileID] {
@@ -114,6 +148,8 @@ public enum UndoableChange: Sendable, Equatable {
         case .unarchive(let items): items.filter(\.isArchived).map(\.fileId)
         case .removeFromAlbum(let members, _): members.map(\.fileId)
         case .delete(let items, _): items.filter(\.permissions.canDelete).map(\.fileId)
+        case .addToAlbum(let items, _): items.filter(\.isOwnStorage).map(\.fileId)
+        case .edit(let changes, _): changes.map(\.fileId)
         }
     }
 
@@ -122,6 +158,8 @@ public enum UndoableChange: Sendable, Equatable {
     public func isUndoable(trashbin: Bool) -> Bool {
         switch self {
         case .delete(let items, _): trashbin && items.contains { $0.permissions.canDelete && Self.goesToOwnTrash($0) }
+        case .addToAlbum(let items, _): items.contains(where: \.isOwnStorage)
+        case .edit(let changes, _): !changes.isEmpty
         default: !inverseOperations.isEmpty
         }
     }
@@ -174,6 +212,37 @@ struct UndoState {
     var consumed: Set<String> = []
     /// The undo that runs (`SessionModel.undo(_:)` waits for it).
     var reverting: Task<Void, Never>?
+    /// Where each change of the history is registered now (its registration moves between the undo and redo stacks).
+    var entryRegistrations: [UUID: EntryRegistration] = [:]
+
+    struct EntryRegistration {
+        weak var manager: UndoManager?
+        var id: String
+    }
+}
+
+/// A change in the undo history (SPEC §16.3.4): what was done, when, and whether it can still be taken back.
+public struct ChangeHistoryEntry: Sendable, Identifiable, Equatable {
+    /// The same as the id of the change's notice.
+    public var id: UUID
+    public var date: Date
+    public var change: UndoableChange
+    /// The change could be undone when it was made (a delete without a trash bin cannot).
+    public var canUndo: Bool
+    public var isReverted = false
+    public var isReverting = false
+    /// Items an undo could not bring back.
+    public var failures = 0
+
+    public init(id: UUID, date: Date = Date(), change: UndoableChange, canUndo: Bool) {
+        self.id = id
+        self.date = date
+        self.change = change
+        self.canUndo = canUndo
+    }
+
+    /// The history keeps this many changes, newest first.
+    public static let limit = 50
 }
 
 /// Undoable changes (SPEC §7.3): every one goes through the outbox, registers its inverse with the undo manager of the
@@ -188,12 +257,15 @@ extension SessionModel {
     public func perform(_ change: UndoableChange, undoManager: UndoManager?) async {
         guard change.count > 0, !isStopped else { return }
         let change = await captured(change)
+        guard change.count > 0 else { return }
         // Queued before Undo is offered: an undo always finds the operations it takes back.
         await apply(change)
         guard !isStopped else { return }
         let undoable = change.isUndoable(trashbin: features.has(.trashbin))
-        let registration = undoable ? undoManager.map { registerUndo(of: change, reverting: true, on: $0) } : nil
-        announce(ChangeNotice(change: change, canUndo: undoable), manager: undoManager, registration: registration)
+        let notice = ChangeNotice(change: change, canUndo: undoable)
+        record(ChangeHistoryEntry(id: notice.id, change: change, canUndo: undoable))
+        let registration = undoable ? undoManager.map { registerUndo(of: change, reverting: true, entry: notice.id, on: $0) } : nil
+        announce(notice, manager: undoManager, registration: registration)
     }
 
     /// Takes back the change of a notice (the banner's Undo button): through the undo manager when the notice's own
@@ -204,6 +276,7 @@ extension SessionModel {
         else { return }
         // At once, before anything is awaited: a second tap finds the notice reverting and does nothing.
         lastChange?.isReverting = true
+        updateEntry(notice.id) { $0.isReverting = true }
         if let manager = undoState.manager, let registration = undoState.registration, manager.canUndo,
             manager.undoActionUserInfoValue(forKey: Self.undoRegistrationKey) as? String == registration
         {
@@ -212,9 +285,69 @@ extension SessionModel {
             // The registration stays in its undo manager (under other actions, or in a window that is gone): it must
             // not take the change back a second time.
             if let registration = undoState.registration { undoState.consumed.insert(registration) }
-            startRevert(notice.change)
+            startRevert(notice.change, entry: notice.id)
         }
         await undoState.reverting?.value
+    }
+
+    /// Takes back a change of the undo history (SPEC §16.3.4), also one that is not the last: through its undo manager
+    /// when it is on top there (Edit › Redo offers it again), directly otherwise.
+    public func revertHistoryEntry(_ id: UUID) async {
+        guard let entry = history.first(where: { $0.id == id }), revertProblem(entry) == nil else { return }
+        updateEntry(id) { $0.isReverting = true }
+        if lastChange?.id == id { lastChange?.isReverting = true }
+        let registration = undoState.entryRegistrations[id]
+        if let registration, let manager = registration.manager, manager.canUndo,
+            manager.undoActionUserInfoValue(forKey: Self.undoRegistrationKey) as? String == registration.id
+        {
+            manager.undo()
+        } else {
+            if let registration { undoState.consumed.insert(registration.id) }
+            undoState.entryRegistrations[id] = nil
+            startRevert(entry.change, entry: id)
+        }
+        await undoState.reverting?.value
+    }
+
+    /// Why a change of the history cannot be taken back (any more); nil when it can.
+    public func revertProblem(_ entry: ChangeHistoryEntry) -> HistoryRevertProblem? {
+        if entry.isReverted { return .reverted }
+        if entry.isReverting { return .reverting }
+        guard entry.canUndo else {
+            if case .delete = entry.change, !features.has(.trashbin) { return .noTrashbin }
+            return .notUndoable
+        }
+        if case .edit(let changes, _) = entry.change, let edits = services?.edits {
+            // Only while the photos still show this change: a later edit (here or on another device) replaced it.
+            _ = editRevision
+            let current = changes.filter { change in
+                Self.sameEdit(edits.recipe(for: change.fileId), change.after)
+            }
+            if current.isEmpty { return .editedLater }
+        }
+        return nil
+    }
+
+    /// The same edit, whenever it was saved.
+    nonisolated static func sameEdit(_ a: EditRecipe?, _ b: EditRecipe?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): true
+        case (let a?, let b?): a.renderingDigest == b.renderingDigest
+        default: false
+        }
+    }
+
+    private func record(_ entry: ChangeHistoryEntry) {
+        history.insert(entry, at: 0)
+        if history.count > ChangeHistoryEntry.limit {
+            for dropped in history[ChangeHistoryEntry.limit...] { undoState.entryRegistrations[dropped.id] = nil }
+            history.removeLast(history.count - ChangeHistoryEntry.limit)
+        }
+    }
+
+    func updateEntry(_ id: UUID, _ update: (inout ChangeHistoryEntry) -> Void) {
+        guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        update(&history[index])
     }
 
     public func dismissNotice(_ id: UUID) {
@@ -226,37 +359,42 @@ extension SessionModel {
         for manager in undoState.managers.allObjects { manager.removeAllActions(withTarget: self) }
         undoState = UndoState()
         lastChange = nil
+        history = []
     }
 
     /// Registers the action that reverts (or, after an undo, repeats) a change. Returns the registration's id.
     @discardableResult
-    func registerUndo(of change: UndoableChange, reverting: Bool, on manager: UndoManager) -> String {
+    func registerUndo(of change: UndoableChange, reverting: Bool, entry: UUID? = nil, on manager: UndoManager) -> String {
         let registration = UUID().uuidString
         undoState.managers.add(manager)
         manager.registerUndo(withTarget: self) { session in
-            session.runRegistered(change, reverting: reverting, registration: registration, on: manager)
+            session.runRegistered(change, reverting: reverting, registration: registration, entry: entry, on: manager)
         }
         manager.setActionName(change.actionName)
         manager.setActionUserInfoValue(registration, forKey: Self.undoRegistrationKey)
+        if let entry { undoState.entryRegistrations[entry] = UndoState.EntryRegistration(manager: manager, id: registration) }
         return registration
     }
 
     /// Runs a registered undo or redo. The opposite action is registered from inside the handler, while the undo manager
     /// is undoing or redoing: that is what puts it on the other stack.
-    private func runRegistered(_ change: UndoableChange, reverting: Bool, registration: String, on manager: UndoManager) {
+    private func runRegistered(
+        _ change: UndoableChange, reverting: Bool, registration: String, entry: UUID?, on manager: UndoManager
+    ) {
         // The session stopped, or the change was taken back already: nothing to do, and nothing to redo.
         guard !isStopped, undoState.consumed.remove(registration) == nil else { return }
-        let opposite = registerUndo(of: change, reverting: !reverting, on: manager)
+        let opposite = registerUndo(of: change, reverting: !reverting, entry: entry, on: manager)
         if reverting {
             if undoState.registration == registration { lastChange?.isReverting = true }
-            startRevert(change)
+            if let entry { updateEntry(entry) { $0.isReverting = true } }
+            startRevert(change, entry: entry)
         } else {
-            Task { await self.redo(change, registration: opposite, on: manager) }
+            Task { await self.redo(change, registration: opposite, entry: entry, on: manager) }
         }
     }
 
-    private func startRevert(_ change: UndoableChange) {
-        undoState.reverting = Task { await self.revert(change) }
+    private func startRevert(_ change: UndoableChange, entry: UUID? = nil) {
+        undoState.reverting = Task { await self.revert(change, entry: entry) }
     }
 
     private func announce(_ notice: ChangeNotice, manager: UndoManager?, registration: String?) {
@@ -267,6 +405,11 @@ extension SessionModel {
 
     /// A delete with what it takes out of the index (rows, album places), for an undo before it ran.
     func captured(_ change: UndoableChange) async -> UndoableChange {
+        if case .addToAlbum(let items, let album) = change, let services {
+            // Photos already in the album stay in it when the addition is undone.
+            let members = Set(((try? services.collections.albumItems(albumId: album.id)) ?? []).map(\.fileId))
+            return .addToAlbum(items.filter { !members.contains($0.fileId) }, album: album)
+        }
         guard case .delete(let items, let rows) = change, rows.isEmpty, let services else { return change }
         let ids = change.fileIds
         let indexed = (try? await services.library.fetchItems(ids)) ?? [:]
@@ -276,27 +419,64 @@ extension SessionModel {
 
     func apply(_ change: UndoableChange) async {
         Self.undoLogger.info("change: \(change.kind.rawValue, privacy: .public) × \(change.count)")
-        await enqueue(change.operations)
+        if case .edit(let changes, _) = change {
+            await applyEdits(changes, reverting: false)
+        } else {
+            await enqueue(change.operations)
+        }
     }
 
-    func redo(_ change: UndoableChange, registration: String, on manager: UndoManager) async {
+    func redo(_ change: UndoableChange, registration: String, entry: UUID? = nil, on manager: UndoManager) async {
         guard !isStopped else { return }
         await apply(change)
         guard !isStopped else { return }
-        announce(ChangeNotice(change: change, canUndo: true), manager: manager, registration: registration)
+        var notice = ChangeNotice(change: change, canUndo: true)
+        if let entry {
+            notice.id = entry
+            updateEntry(entry) {
+                $0.isReverted = false
+                $0.isReverting = false
+                $0.failures = 0
+            }
+        }
+        announce(notice, manager: manager, registration: registration)
     }
 
     /// Takes a change back.
-    func revert(_ change: UndoableChange) async {
+    func revert(_ change: UndoableChange, entry: UUID? = nil) async {
         Self.undoLogger.info("undo: \(change.kind.rawValue, privacy: .public) × \(change.count)")
         var notice = ChangeNotice(change: change, isReverted: true, canUndo: false)
-        if case .delete(let items, let rows) = change {
+        switch change {
+        case .delete(let items, let rows):
             notice.failures = await undoDelete(items.filter(\.permissions.canDelete), rows: rows)
-        } else {
+        case .addToAlbum(let items, let album):
+            await enqueue(albumRemovals(undoing: items, album: album))
+        case .edit(let changes, _):
+            await applyEdits(changes, reverting: true)
+        default:
             await enqueue(change.inverseOperations)
         }
         guard !isStopped else { return }
+        if let entry {
+            let failures = notice.failures
+            updateEntry(entry) {
+                $0.isReverting = false
+                $0.isReverted = true
+                $0.failures = failures
+            }
+        }
         announce(notice, manager: nil, registration: nil)
+    }
+
+    /// Takes photos out of an album again, by their names in it as they are now (the server names an added photo).
+    func albumRemovals(undoing items: [MediaItem], album: Album) -> [PendingOperation] {
+        let infos = (try? services?.collections.albumItems(albumId: album.id)) ?? []
+        let names = Dictionary(infos.map { ($0.fileId, $0.childName) }, uniquingKeysWith: { a, _ in a })
+        return items.filter(\.isOwnStorage).map { item in
+            .removeFromAlbum(
+                albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: item.fileId,
+                childName: names[item.fileId] ?? "\(item.fileId)-\(item.name)")
+        }
     }
 
     /// Takes a delete back. Deletes still queued are taken out of the queue, and their rows come back at once (offline
@@ -355,4 +535,18 @@ extension SessionModel {
             return .addToAlbum(albumId: album.id, albumName: album.name, albumKind: album.kind, fileId: member.fileId, path: path)
         }
     }
+}
+
+/// Why a change of the undo history cannot be taken back.
+public enum HistoryRevertProblem: Sendable, Equatable {
+    /// Taken back already.
+    case reverted
+    /// Being taken back.
+    case reverting
+    /// Deleted for good: the server has no trash bin.
+    case noTrashbin
+    /// Nothing of it can be taken back here (photos shared with the user, a public link album).
+    case notUndoable
+    /// The photos were edited again since (here or on another device).
+    case editedLater
 }

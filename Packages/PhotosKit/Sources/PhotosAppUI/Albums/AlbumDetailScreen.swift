@@ -29,6 +29,8 @@ struct AlbumDetailScreen: View {
     @State private var collage: CollageRequest?
     /// Selection in the grid (reported by `MediaGridScreen`).
     @State private var gridSelection = GridSelectionState()
+    /// "Customize Cover…" or "Show to a Guest…" (SPEC §16.8.2, §16.8.3).
+    @State private var cardSheet: AlbumCardSheet?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(albumId: String, initial: Album) {
@@ -104,6 +106,9 @@ struct AlbumDetailScreen: View {
         }
         .refreshable { try? await session.refreshAlbumContent(album, force: true) }
         .collageEditor($collage)
+        .albumCardSheets($cardSheet)
+        // A hint of the cover's colour in the header (SPEC §16.8.1).
+        .photoHeaderTint(session.services.map { AlbumLookStore.store(for: $0).coverFileId(for: album) } ?? album.displayCoverFileId)
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .addPhotos: PhotoPickerSheet(album: album)
@@ -169,6 +174,8 @@ struct AlbumDetailScreen: View {
             }
             return !files.isEmpty || !items.isEmpty
         }
+        // File ▸ Import from iPhone or iPad (Continuity Camera, Mac; SPEC §16.5.3): uploaded and added to this album.
+        .continuityCameraImport(album: album, isEnabled: isOwn)
     }
 
     var deleteTitle: String {
@@ -275,6 +282,7 @@ struct AlbumDetailScreen: View {
         } label: {
             Label(CollageRequest.menuTitle, systemImage: "rectangle.3.group")
         }
+        AlbumLookMenuItems(album: album, sheet: $cardSheet)
         Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
             Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)
             Text("Newest first", bundle: .module).tag(AlbumPhotosSortOrder.newest)

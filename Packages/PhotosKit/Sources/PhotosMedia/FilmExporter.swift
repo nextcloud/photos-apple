@@ -292,13 +292,16 @@ final class FilmFrameRenderer {
         var image = CIImage(color: .black).cropped(to: frame)
         let layers = plan.layers(at: time)
         let onScreen = Set(layers.map(\.segment))
+        let look = plan.style.look
         for layer in layers {
-            var content = try await layerImage(layer)
+            // The style's colours on the pictures, not on the titles drawn over them (as in the player).
+            var content = FilmLookFilter.graded(try await layerImage(layer).cropped(to: frame), look: look)
             if let overlay = material.overlays[layer.segment] {
                 content = cached("overlay-\(layer.segment)", overlay).composited(over: content)
             }
             image = Self.faded(content.cropped(to: frame), layer.opacity).composited(over: image)
         }
+        if look.vignette > 0 || look.isAnimated { image = FilmLookFilter.frame(image, look: look, time: time, size: size) }
         let brightness = plan.brightness(at: time)
         if brightness < 1 { image = Self.dimmed(image, brightness) }
         context.render(image, to: buffer, bounds: frame, colorSpace: colorSpace)
@@ -347,7 +350,9 @@ final class FilmFrameRenderer {
     }
 
     func motion(_ shot: Int, imageAspect: Double, seed: Int) -> KenBurns.Motion {
-        KenBurns.motion(imageAspect: imageAspect, viewportAspect: aspect, focus: material.focus[shot], seed: seed, still: still)
+        KenBurns.motion(
+            imageAspect: imageAspect, viewportAspect: aspect, focus: material.focus[shot], seed: seed, still: still,
+            closeness: plan.style.zoom)
     }
 
     func picture(_ shot: Int) -> Picture? {

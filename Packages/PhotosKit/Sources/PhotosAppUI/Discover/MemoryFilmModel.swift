@@ -12,7 +12,7 @@ import PhotosStore
 import SwiftUI
 
 /// What a memory film is made of before anything is loaded: the memory's photos as shots, the plan cut to the music,
-/// and the music (SPEC §15.1). Shared by the player and the video export.
+/// and the music (SPEC §15.1, §16.6). Shared by the player and the video export.
 struct FilmMaking {
     var plan: FilmPlan
     /// The items of `plan.shots`, in the same order.
@@ -22,9 +22,16 @@ struct FilmMaking {
     var music: SlideshowMusic?
     /// The music as a file the app can read (nil for none and for Apple Music songs).
     var musicFile: URL?
+    /// Shots whose item is not in this account's library (a film shared by someone else): loaded by file id alone.
+    var remote: Set<Int> = []
 
-    /// Loads the memory's items (archived ones are left out), finds the music's beat on the device and builds the plan.
-    static func prepare(_ start: SlideshowStart, services: AccountServices) async -> FilmMaking {
+    /// Loads the memory's items (archived ones are left out), finds the music's beat on the device and builds the plan in
+    /// the chosen style.
+    /// `waitsForScore`: the style's music is made first (the export needs the file); the player starts at once and the
+    /// music joins when it is made (its tempo is known without it).
+    @MainActor static func prepare(
+        _ start: SlideshowStart, services: AccountServices, choice: FilmChoice, waitsForScore: Bool = false
+    ) async -> FilmMaking {
         let map = (try? await services.library.fetchItems(start.ids)) ?? [:]
         let all = start.ids.compactMap { map[$0] }.filter { !$0.isLivePhotoVideo && !$0.isArchived }
         let peers = all.compactMap(\.livePhotoPeer)
@@ -32,23 +39,82 @@ struct FilmMaking {
         var motions: [FileID: MediaItem] = [:]
         for item in all { if let peer = item.livePhotoPeer, let motion = peerMap[peer] { motions[item.fileId] = motion } }
 
-        let music = start.playsMemoryMusic ? await SlideshowMusicStore.current() : nil
-        var musicFile: URL?
-        if let music { musicFile = await SlideshowMusicStore.readableURL(for: music) }
-        var rhythm = FilmRhythm.steady
-        if let music, let musicFile {
-            rhythm = await FilmRhythmCache.shared.rhythm(for: music, file: musicFile) ?? .steady
-        }
+        let (music, musicFile, rhythm) = await soundtrack(choice, playsMusic: start.playsMemoryMusic, waitsForScore: waitsForScore)
         let shots = all.map { item in
             var shot = FilmShot(item)
             // A Live Photo without its motion file is a still.
             if case .livePhoto = shot.kind, motions[item.fileId] == nil { shot.kind = .photo }
             return shot
         }
-        let plan = FilmPlan(shots: shots, cover: start.cover, rhythm: rhythm, flights: start.isTrip)
+        let plan = FilmPlan(
+            shots: shots, cover: start.cover, rhythm: rhythm, flights: start.isTrip, style: choice.style,
+            keepsOrder: start.kind == .slideshow)
         let byId = Dictionary(all.map { ($0.fileId, $0) }, uniquingKeysWith: { first, _ in first })
         return FilmMaking(
             plan: plan, items: plan.shots.compactMap { byId[$0.fileId] }, motions: motions, music: music, musicFile: musicFile)
+    }
+
+    /// The music of a choice and the rhythm the film is cut to: the style's own score (its tempo is known), the user's
+    /// music (its beat found on the device; the style sets only the pacing), or none (the style's steady rhythm).
+    @MainActor static func soundtrack(_ choice: FilmChoice, playsMusic: Bool, waitsForScore: Bool = false) async -> (
+        SlideshowMusic?, URL?, FilmRhythm
+    ) {
+        guard playsMusic else { return (nil, nil, choice.style.steadyRhythm) }
+        switch choice.soundtrack {
+        case .style:
+            let mood = choice.style.score
+            let file = waitsForScore ? await ScoreSynth.file(for: mood) : ScoreSynth.existingFile(for: mood)
+            if waitsForScore && file == nil { return (nil, nil, choice.style.steadyRhythm) }
+            return (choice.style.scoreMusic, file, FilmScore(mood: mood).rhythm)
+        case .mine:
+            guard let music = SlideshowMusicStore.current() else { return (nil, nil, choice.style.steadyRhythm) }
+            let file = SlideshowMusicStore.readableURL(for: music)
+            var rhythm = choice.style.steadyRhythm
+            if let file { rhythm = await FilmRhythmCache.shared.rhythm(for: music, file: file) ?? rhythm }
+            return (music, file, rhythm)
+        case .none:
+            return (nil, nil, choice.style.steadyRhythm)
+        }
+    }
+
+    /// A film someone shared over SharePlay (SPEC §16.6): their timeline as it is; the pictures from this account's
+    /// library where it has them, else asked for by file id (Nextcloud answers only for files shared with this account).
+    @MainActor static func prepare(shared film: SharedFilm, services: AccountServices) async -> FilmMaking {
+        let ids = film.pictures.map(\.fileId)
+        let local = (try? await services.library.fetchItems(ids)) ?? [:]
+        var items: [MediaItem] = []
+        var remote: Set<Int> = []
+        for (index, picture) in film.pictures.enumerated() {
+            if let item = local[picture.fileId], !item.isArchived {
+                items.append(item)
+            } else {
+                remote.insert(index)
+                items.append(
+                    MediaItem(
+                        fileId: picture.fileId, path: "", name: "\(picture.fileId)", mimeType: picture.mimeType, etag: picture.etag,
+                        hasPreview: picture.hasPreview))
+            }
+        }
+        let peers = items.enumerated().filter { !remote.contains($0.offset) }.compactMap(\.element.livePhotoPeer)
+        let peerMap = peers.isEmpty ? [:] : ((try? await services.library.fetchItems(peers)) ?? [:])
+        var motions: [FileID: MediaItem] = [:]
+        for item in items { if let peer = item.livePhotoPeer, let motion = peerMap[peer] { motions[item.fileId] = motion } }
+        var music: SlideshowMusic?
+        var musicFile: URL?
+        if film.playsScore {
+            music = film.plan.style.scoreMusic
+            musicFile = ScoreSynth.existingFile(for: film.plan.style.score)
+        }
+        return FilmMaking(plan: film.plan, items: items, motions: motions, music: music, musicFile: musicFile, remote: remote)
+    }
+
+    /// The film as something to watch together: the timeline without places, and what the others need to load each
+    /// picture from Nextcloud.
+    func shared(kind: SharedFilm.Kind, title: String, subtitle: String?, server: URL) -> SharedFilm {
+        SharedFilm(
+            kind: kind, title: title, subtitle: subtitle, server: server, plan: plan,
+            pictures: items.map { SharedFilm.Picture(fileId: $0.fileId, etag: $0.etag, mimeType: $0.mimeType, hasPreview: $0.hasPreview) },
+            playsScore: music?.scoreMood != nil)
     }
 }
 
@@ -65,26 +131,42 @@ actor FilmRhythmCache {
     }
 }
 
-/// The player's state (SPEC §15.1): the plan, the pictures loaded around the current time with their focus, the clips,
-/// the map pictures of the flights, the clock and the music.
+/// The player's state (SPEC §15.1, §16.6): the plan in its style, the pictures loaded around the current time (graded
+/// in the style's colours) with their focus, the clips, the map pictures of the flights, the clock and the music; and,
+/// while watched together over SharePlay, the group's timing.
 @MainActor @Observable final class MemoryFilmModel {
-    let start: SlideshowStart
+    private(set) var start: SlideshowStart
     private(set) var making: FilmMaking?
     var plan: FilmPlan? { making?.plan }
     private(set) var loaded = false
+    /// The style and music (SPEC §16.6), remembered per memory.
+    private(set) var choice: FilmChoice
+    /// Watched together: the shared film (this device's own or someone else's).
+    private(set) var shared: SharedFilm?
+    /// The film came from someone else over SharePlay.
+    private(set) var isGuest = false
 
-    /// Pictures by shot index, and a tiny copy of each that is drawn enlarged (a blur for free) behind pictures shown whole.
+    /// Pictures by shot index (in the style's colours), and a tiny copy of each that is drawn enlarged (a blur for free)
+    /// behind pictures shown whole.
     private(set) var stills: [Int: CGImage] = [:]
     private(set) var fills: [Int: CGImage] = [:]
     private(set) var focus: [Int: FilmCrop] = [:]
+    /// Pictures as loaded, before the style's colours: a change of style grades them again.
+    private var originals: [Int: CGImage] = [:]
     /// The camera move of each segment, fixed when it first comes on screen.
     private(set) var motions: [Int: KenBurns.Motion] = [:]
     /// Map pictures of the flights, by segment index.
     private(set) var maps: [Int: FilmMapPicture] = [:]
     /// Clips (videos, Live Photo motion), by shot index.
     private(set) var videos: [Int: PlayableVideo] = [:]
+    /// Pictures this account cannot load (a shared film's photos that are not shared with it), and how many were tried.
+    private(set) var unavailable: Set<Int> = []
+    private(set) var checked = 0
+    /// The grain of the style, drawn over the film.
+    private(set) var grain: CGImage?
 
-    /// The clock: the film's time at `anchorDate` (nil while paused).
+    /// The clock: the film's time at `anchorDate` (nil while paused). A start planned for everyone has its anchor a
+    /// moment in the future; the film waits until then.
     private(set) var anchorTime = 0.0
     private(set) var anchorDate: Date?
     /// The segment on screen (changes a few times a second at most; the frames themselves are drawn from the clock).
@@ -105,15 +187,25 @@ actor FilmRhythmCache {
 
     init(start: SlideshowStart) {
         self.start = start
+        choice = FilmChoiceStore.choice(for: start.id)
+    }
+
+    /// A film someone shared over SharePlay.
+    init(shared film: SharedFilm) {
+        start = SlideshowStart(shared: film)
+        choice = FilmChoice(style: film.plan.style, soundtrack: film.playsScore ? .style : .none)
+        shared = film
+        isGuest = true
     }
 
     var isPlaying: Bool { anchorDate != nil }
     var duration: Double { plan?.duration ?? 0 }
     var hasMusic: Bool { making?.music != nil }
+    var look: FilmLook { plan?.style.look ?? .none }
 
     func time(at date: Date) -> Double {
         guard let anchorDate else { return anchorTime }
-        return min(duration, anchorTime + date.timeIntervalSince(anchorDate))
+        return min(duration, anchorTime + max(0, date.timeIntervalSince(anchorDate)))
     }
 
     var now: Double { time(at: Date()) }
@@ -123,61 +215,182 @@ actor FilmRhythmCache {
     func load(session: SessionModel, autoplay: Bool) async {
         self.session = session
         guard let services = session.services else { return }
-        let making = await FilmMaking.prepare(start, services: services)
+        let making: FilmMaking
+        if let shared, isGuest {
+            making = await FilmMaking.prepare(shared: shared, services: services)
+        } else {
+            making = await FilmMaking.prepare(start, services: services, choice: choice)
+        }
         self.making = making
+        grain = FilmLookFilter.grainTile(making.plan.style.look)
+        makeScoreIfNeeded()
         // The opening pictures before the film starts, so it does not open on grey.
-        if let plan = making.plan as FilmPlan? {
-            let first = plan.upcomingShots(from: 0, within: 6)
-            await withTaskGroup(of: Void.self) { group in
-                for shot in first.prefix(3) { group.addTask { await self.loadStill(shot) } }
-            }
+        let first = making.plan.upcomingShots(from: 0, within: 6)
+        await withTaskGroup(of: Void.self) { group in
+            for shot in first.prefix(3) { group.addTask { await self.loadStill(shot) } }
         }
         loaded = true
         tick()
-        if autoplay && !making.items.isEmpty { play() }
+        if isGuest {
+            checkAvailability()
+            attachToGroup(playing: false)
+        } else if autoplay && !making.items.isEmpty {
+            play()
+        }
+    }
+
+    /// Another style or music (SPEC §16.6): the film is made again in it, from the picture it was at; the choice is
+    /// remembered for this memory.
+    func change(_ newChoice: FilmChoice) async {
+        guard newChoice != choice, !isGuest, let services = session?.services, let old = plan else { return }
+        let wasPlaying = isPlaying
+        let shot = old.segments[safe: segment].flatMap { old.shotIndex(of: $0) }
+        let fileId = shot.flatMap { old.shots[safe: $0]?.fileId }
+        choice = newChoice
+        FilmChoiceStore.save(newChoice, for: start.id)
+        pause()
+        let making = await FilmMaking.prepare(start, services: services, choice: newChoice)
+        // The same pictures in the same order: loaded pictures, focus and clips stay; their colours and moves change.
+        self.making = making
+        music.stop()
+        makeScoreIfNeeded()
+        motions = [:]
+        grain = FilmLookFilter.grainTile(making.plan.style.look)
+        let look = making.plan.style.look
+        for (index, image) in originals { show(image, for: index, look: look, first: true) }
+        var resume = 0.0
+        if let fileId, let index = making.plan.shots.firstIndex(where: { $0.fileId == fileId }),
+            let target = making.plan.segments.first(where: { making.plan.shotIndex(of: $0) == index && $0.content != .title })
+        {
+            resume = target.start
+        }
+        anchorTime = min(resume, duration)
+        ended = false
+        tick()
+        if shared != nil && !isGuest {
+            // Watching together: the others get the film in its new style.
+            await shareAgain()
+        } else if wasPlaying {
+            play()
+        }
+    }
+
+    /// The style's music is made on first use (about a second); the film does not wait for it: the music joins at the
+    /// film's time once it is there.
+    private func makeScoreIfNeeded() {
+        guard let mood = making?.music?.scoreMood, making?.musicFile == nil else { return }
+        Task {
+            guard let file = await ScoreSynth.file(for: mood), making?.music?.scoreMood == mood else { return }
+            making?.musicFile = file
+            music.stop()
+            wasMusicPlaying = false
+            syncSound(seeking: true)
+        }
     }
 
     func loadStill(_ shot: Int) async {
-        guard stills[shot] == nil, !loading.contains(shot), let item = making?.items[safe: shot], let services = session?.services else {
+        guard stills[shot] == nil, !loading.contains(shot), !unavailable.contains(shot), let item = making?.items[safe: shot],
+            let services = session?.services
+        else {
             return
         }
         loading.insert(shot)
         defer { loading.remove(shot) }
+        let remote = making?.remote.contains(shot) == true
         let small = ImagePipeline.Request(
-            fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: item.hasPreview, mimeType: item.mimeType,
-            originalURL: services.originalURL(for: item))
-        if let image = await services.images.preview(small) { show(image, for: shot) }
+            fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: remote || item.hasPreview, mimeType: item.mimeType,
+            originalURL: remote ? nil : services.originalURL(for: item))
+        guard let image = await services.images.preview(small) else {
+            if remote { unavailable.insert(shot) }
+            return
+        }
+        show(image, for: shot, look: look, first: originals[shot] == nil)
         // Sharper on large screens: the 4096 preview, decoded no larger than 2048.
         var large = small
         large.bucket = 4096
         large.maxPixelSize = 2048
-        if let image = await services.images.preview(large) { show(image, for: shot) }
+        if let image = await services.images.preview(large) { show(image, for: shot, look: look, first: false) }
     }
 
-    private func show(_ image: CGImage, for shot: Int) {
-        let first = stills[shot] == nil
-        stills[shot] = image
+    private func show(_ image: CGImage, for shot: Int, look: FilmLook, first: Bool) {
+        let isNew = originals[shot] == nil
+        originals[shot] = image
+        let graded = FilmLookFilter.graded(image, look: look) ?? image
+        stills[shot] = graded
         guard first else { return }
-        fills[shot] = FilmPictures.thumbnail(image, width: 48)
+        fills[shot] = FilmPictures.thumbnail(graded, width: 48)
+        guard isNew else { return }
         Task {
             let found = await Task.detached(priority: .utility) { await FrameFocus.focus(of: image) }.value
             if let found { self.focus[shot] = found }
         }
     }
 
+    /// A shared film: which of its pictures this account can load (small previews of all of them, a few at a time); the
+    /// others are told.
+    private func checkAvailability() {
+        guard let making, let services = session?.services else { return }
+        let remote = making.remote.sorted()
+        checked = making.items.count - remote.count
+        report()
+        Task {
+            for chunk in stride(from: 0, to: remote.count, by: 6).map({ Array(remote[$0..<min($0 + 6, remote.count)]) }) {
+                await withTaskGroup(of: (Int, Bool).self) { group in
+                    for shot in chunk {
+                        let item = making.items[shot]
+                        group.addTask {
+                            let request = ImagePipeline.Request(
+                                fileId: item.fileId, etag: item.etag, bucket: 256, hasPreview: true, mimeType: item.mimeType,
+                                originalURL: nil)
+                            return (shot, await services.images.preview(request) != nil)
+                        }
+                    }
+                    for await (shot, ok) in group where !ok { self.unavailable.insert(shot) }
+                }
+                checked += chunk.count
+                report()
+            }
+        }
+    }
+
+    private func report() {
+        guard isGuest, let making else { return }
+        let total = making.items.count
+        guard checked >= total else { return }
+        WatchTogether.shared.report(
+            SharedFilmReport(visible: total - unavailable.count, total: total, problem: unavailable.isEmpty ? nil : .notShared))
+    }
+
     // MARK: Clock
 
     func play() {
+        if isWatchedTogether {
+            if ended || anchorTime >= duration - 0.05 { WatchTogether.shared.seek(to: 0) }
+            WatchTogether.shared.play()
+            return
+        }
+        startClock(at: ended || anchorTime >= duration - 0.05 ? 0 : anchorTime, delay: 0)
+    }
+
+    private func startClock(at time: Double, delay: Double) {
         guard let plan, !plan.segments.isEmpty else { return }
-        if ended || anchorTime >= duration - 0.05 { anchorTime = 0 }
+        anchorTime = min(max(0, time), duration)
         ended = false
-        anchorDate = Date()
-        syncSound()
+        anchorDate = Date().addingTimeInterval(delay)
+        syncSound(seeking: true)
         tick()
     }
 
     func pause() {
-        anchorTime = now
+        if isWatchedTogether {
+            WatchTogether.shared.pause()
+            return
+        }
+        stopClock()
+    }
+
+    private func stopClock(at time: Double? = nil) {
+        anchorTime = time ?? now
         anchorDate = nil
         syncSound()
         for video in videos.values { video.player.pause() }
@@ -188,6 +401,14 @@ actor FilmRhythmCache {
     }
 
     func seek(to time: Double) {
+        if isWatchedTogether {
+            WatchTogether.shared.seek(to: time)
+            return
+        }
+        moveClock(to: time)
+    }
+
+    private func moveClock(to time: Double) {
         anchorTime = min(max(0, time), duration)
         ended = false
         if anchorDate != nil { anchorDate = Date() }
@@ -207,7 +428,9 @@ actor FilmRhythmCache {
     private func syncSound(seeking: Bool = false) {
         guard let music = making?.music else { return }
         if isPlaying && !muted {
-            self.music.play(music, at: seeking || !wasMusicPlaying ? now : nil)
+            // A start planned for a moment from now: the music begins with the film.
+            let position = max(0, time(at: Date()) - max(0, anchorDate.map { $0.timeIntervalSinceNow } ?? 0))
+            self.music.play(music, at: seeking || !wasMusicPlaying ? position : nil)
             wasMusicPlaying = true
         } else {
             self.music.pause()
@@ -222,6 +445,56 @@ actor FilmRhythmCache {
         music.stop()
         for video in videos.values { video.release() }
         videos = [:]
+        if WatchTogether.shared.isAttached(self) {
+            WatchTogether.shared.detach(self)
+            // A guest who closes the film leaves the session; whoever shared it stays in it for the others.
+            if isGuest { WatchTogether.shared.leave() }
+        }
+    }
+
+    // MARK: SharePlay
+
+    /// In step with the people in the SharePlay session.
+    var isWatchedTogether: Bool { shared != nil && WatchTogether.shared.isAttached(self) }
+
+    /// Shares the film with the people in the call (SPEC §16.6). The user's own music cannot be shared: the film is made
+    /// again with the style's music first.
+    func shareWithGroup() async -> WatchTogether.StartResult {
+        guard let session, making != nil, !isGuest else { return .cancelled }
+        if choice.soundtrack == .mine {
+            await change(FilmChoice(style: choice.style, soundtrack: .style))
+        }
+        guard let current = making else { return .cancelled }
+        let film = current.shared(
+            kind: start.kind == .slideshow ? .slideshow : .memory, title: start.title, subtitle: start.subtitle,
+            server: session.account.serverURL)
+        shared = film
+        let result = await WatchTogether.shared.share(film)
+        if result != .started { shared = nil }
+        return result
+    }
+
+    private func shareAgain() async {
+        guard let session, let making else { return }
+        let film = making.shared(
+            kind: start.kind == .slideshow ? .slideshow : .memory, title: start.title, subtitle: start.subtitle,
+            server: session.account.serverURL)
+        shared = film
+        _ = await WatchTogether.shared.share(film)
+    }
+
+    /// Called by the player when the session's film is this one: joins the group's timing.
+    func attachToGroup(playing: Bool? = nil) {
+        guard let shared, WatchTogether.shared.film?.id == shared.id, loaded else { return }
+        WatchTogether.shared.attach(self, film: shared, position: now, playing: playing ?? isPlaying)
+    }
+
+    /// The session ended or moved on to another film: the film goes on here alone, paused.
+    func leaveGroup() {
+        guard shared != nil else { return }
+        if WatchTogether.shared.isAttached(self) { WatchTogether.shared.detach(self) }
+        if !isGuest { shared = nil }
+        stopClock()
     }
 
     // MARK: Ticks
@@ -245,9 +518,10 @@ actor FilmRhythmCache {
         let keep = Set(plan.upcomingShots(from: max(0, time - 4), within: 14))
         for shot in stills.keys where !keep.contains(shot) {
             stills[shot] = nil
+            originals[shot] = nil
         }
         fixMotions(plan, time: time)
-        loadMaps(plan, time: time)
+        if !isGuest { loadMaps(plan, time: time) }
         syncVideos(plan, time: time)
     }
 
@@ -258,13 +532,16 @@ actor FilmRhythmCache {
             else { continue }
             // Wait briefly for the face detection, but never past the moment the segment appears.
             guard focus[shot] != nil || segment.start <= time + 0.4 else { continue }
-            let aspect = stills[shot].map { Double($0.width) / Double($0.height) } ?? item.aspectRatio
+            let aspect =
+                stills[shot].map { Double($0.width) / Double($0.height) }
+                ?? (plan.shots[shot].aspectRatio > 0 ? plan.shots[shot].aspectRatio : item.aspectRatio)
             if case .shot = segment.content, plan.shots[shot].isVideo {
                 let base = KenBurns.base(imageAspect: aspect, viewportAspect: viewportAspect)
                 motions[index] = KenBurns.Motion(from: base.crop, to: base.crop, fits: base.fits)
             } else {
                 motions[index] = KenBurns.motion(
-                    imageAspect: aspect, viewportAspect: viewportAspect, focus: focus[shot], seed: segment.seed, still: still)
+                    imageAspect: aspect, viewportAspect: viewportAspect, focus: focus[shot], seed: segment.seed, still: still,
+                    closeness: plan.style.zoom)
             }
         }
     }
@@ -298,10 +575,12 @@ actor FilmRhythmCache {
             }
             loadingMaps.insert(index)
             let aspect = viewportAspect
+            let look = plan.style.look
             Task {
                 defer { self.loadingMaps.remove(index) }
                 let size = CGSize(width: 1280, height: 1280 / aspect)
-                if let picture = await FilmPictures.map(from: from, to: to, size: size) {
+                if var picture = await FilmPictures.map(from: from, to: to, size: size) {
+                    if let graded = FilmLookFilter.graded(picture.image, look: look) { picture.image = graded }
                     self.maps[index] = picture
                 } else {
                     self.failedMaps.insert(index)
@@ -316,7 +595,7 @@ actor FilmRhythmCache {
         guard let making, let services = session?.services else { return }
         var wanted: Set<Int> = []
         for segment in plan.segments where segment.end + 1 >= time && segment.start <= time + 5 {
-            guard case .shot(let shot) = segment.content else { continue }
+            guard case .shot(let shot) = segment.content, !unavailable.contains(shot) else { continue }
             switch plan.shots[shot].kind {
             case .video, .livePhoto: wanted.insert(shot)
             case .photo: break
@@ -325,18 +604,25 @@ actor FilmRhythmCache {
         // Load the clips needed soon.
         for shot in wanted where videos[shot] == nil && !loadingVideos.contains(shot) {
             guard let item = making.items[safe: shot] else { continue }
+            let remote = making.remote.contains(shot)
             let source = plan.shots[shot].isVideo ? item : making.motions[item.fileId]
             guard let source else { continue }
             loadingVideos.insert(shot)
+            let look = plan.style.look
             Task {
                 defer { self.loadingVideos.remove(shot) }
                 guard
                     let video = try? await PlayableVideo.load(
-                        fileId: source.fileId, etag: source.etag, name: source.name, mimeType: source.mimeType,
-                        originalURL: services.originalURL(for: source), services: services, offline: session?.offline)
+                        fileId: source.fileId, etag: remote ? nil : source.etag, name: remote ? "clip.mov" : source.name,
+                        mimeType: source.mimeType, originalURL: remote ? nil : services.originalURL(for: source), services: services,
+                        offline: session?.offline)
                 else { return }
                 video.player.isMuted = true
                 video.player.actionAtItemEnd = .pause
+                if let item = video.player.currentItem, let composition = await FilmLookFilter.videoComposition(for: item.asset, look: look)
+                {
+                    item.videoComposition = composition
+                }
                 self.videos[shot] = video
                 self.tick()
             }
@@ -386,6 +672,12 @@ actor FilmRhythmCache {
         if case .livePhoto(let motion) = plan.shots[shot].kind, elapsed > motion { return nil }
         return video.player
     }
+}
+
+extension MemoryFilmModel: WatchTogetherPlayer {
+    func groupPlay(at time: Double, delay: Double) { startClock(at: time, delay: delay) }
+    func groupPause(at time: Double) { stopClock(at: min(max(0, time), duration)) }
+    func groupSeek(to time: Double) { moveClock(to: time) }
 }
 
 /// Pictures the film makes itself: the blur behind pictures shown whole, and the map pictures of flights.

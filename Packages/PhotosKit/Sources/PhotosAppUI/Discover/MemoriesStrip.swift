@@ -48,9 +48,14 @@ struct MemoriesStrip: View {
         #endif
     }
 
+    /// Story cards or this strip (SPEC §16.1).
+    @AppStorage(MemoriesStyle.key) private var style = MemoriesStyle.stories
+
     var body: some View {
         Group {
-            if !memories.isEmpty {
+            if !memories.isEmpty, style == .stories {
+                MemoryStories(memories: shown, seasonalYear: seasonalYear, slideshow: $slideshow)
+            } else if !memories.isEmpty {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 10) {
                         if let seasonalYear { yearInReviewLink(seasonalYear) }
@@ -66,6 +71,11 @@ struct MemoriesStrip: View {
                 // `fixedSize()`: measured at its ideal size the lazy stack could stay empty until it was scrolled.
                 .frame(height: cardSize.height + 2 * Self.verticalPadding)
                 .contextMenu {
+                    Button {
+                        withAnimation { style = .stories }
+                    } label: {
+                        Label(Self.storiesTitle, systemImage: "rectangle.stack")
+                    }
                     Button {
                         showsMemories = false
                     } label: {
@@ -155,6 +165,12 @@ struct MemoriesStrip: View {
         return Array(result.prefix(limit))
     }
 
+    static var storiesTitle: String {
+        PlatformWording.title(
+            mac: LocalizedStringResource("Show as Stories", bundle: .module, comment: "Context menu of the memories strip (Mac)."),
+            other: LocalizedStringResource("Show as stories", bundle: .module, comment: "Context menu of the memories strip."))
+    }
+
     static var hideTitle: String {
         PlatformWording.title(
             mac: LocalizedStringResource("Hide Memories", bundle: .module),
@@ -168,6 +184,9 @@ struct MemoryScreen: View {
     @State private var slideshow: SlideshowStart?
     /// Save as album, share as link, slideshow music (SPEC ME-4).
     @State private var actions = MemoryActionsModel()
+    /// Guest Mode with the memory's photos (SPEC §16.8.3).
+    @State private var guestSheet: AlbumCardSheet?
+    @Environment(SessionModel.self) private var session
 
     var body: some View {
         ItemsScreen(title: memory.title, sectioned: false) { services in
@@ -184,10 +203,15 @@ struct MemoryScreen: View {
                 // The photos around the viewer (SPEC §15.4).
                 MemoryRoomButton(memory: memory)
             #endif
-            MemoryActionsMenu(memory: memory, model: actions)
+            MemoryActionsMenu(memory: memory, model: actions) {
+                guestSheet = .guest(GuestShows.memory(memory, session: session))
+            }
         }
         .memorySlideshow($slideshow)
         .memoryActions(actions)
+        .albumCardSheets($guestSheet)
+        // A hint of the cover's colour in the header (SPEC §16.8.1).
+        .photoHeaderTint(memory.cover)
     }
 
     static var playTitle: String {

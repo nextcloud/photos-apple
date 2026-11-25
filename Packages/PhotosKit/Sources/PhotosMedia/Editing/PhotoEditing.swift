@@ -232,7 +232,14 @@ public enum PhotoEditor {
         _ edits: PhotoEdits, original: URL, name: String, replacingOriginal: Bool = false, to destinationDirectory: URL
     ) throws -> URL {
         guard let input = load(original) else { throw CocoaError(.fileReadCorruptFile) }
-        let output = apply(edits, to: input)
+        return try write(
+            apply(edits, to: input), metadataFrom: original, name: name, replacingOriginal: replacingOriginal, to: destinationDirectory)
+    }
+
+    /// Writes a rendered picture as `render` does, with the metadata of `original`.
+    static func write(
+        _ output: CIImage, metadataFrom original: URL, name: String, replacingOriginal: Bool, to destinationDirectory: URL
+    ) throws -> URL {
         guard let cgImage = context.createCGImage(output, from: output.extent) else { throw CocoaError(.fileWriteUnknown) }
         let ext = (name as NSString).pathExtension.lowercased()
         let base = (name as NSString).deletingPathExtension
