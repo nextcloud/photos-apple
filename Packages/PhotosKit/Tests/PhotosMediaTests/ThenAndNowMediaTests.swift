@@ -43,7 +43,7 @@ import Testing
         #expect(TimeLapseVideo.filled(image, in: bounds, scale: 2).height == 200)
     }
 
-    @Test func writesAShortVideo() async throws {
+    @Test(.disabled(if: TestEnvironment.isSimulator, TestEnvironment.noGPU)) func writesAShortVideo() async throws {
         let frames = [
             TimeLapseVideo.Frame(image: Self.picture(width: 320, height: 240, gray: 0.1, square: .zero), caption: "2014"),
             TimeLapseVideo.Frame(image: Self.picture(width: 320, height: 240, gray: 0.9, square: CGPoint(x: 0.5, y: 0.5)), caption: "2025"),
@@ -65,7 +65,7 @@ import Testing
         await #expect(throws: TimeLapseVideo.Failure.self) { try await TimeLapseVideo.write([], to: url) }
     }
 
-    @Test func drawsTheCrossFade() throws {
+    @Test(.disabled(if: TestEnvironment.isSimulator, TestEnvironment.noGPU)) func drawsTheCrossFade() throws {
         // A frame half-way into the second photo shows its colours more than the first's.
         let dark = Self.picture(width: 64, height: 64, gray: 0, square: CGPoint(x: 2, y: 2))
         let bright = Self.picture(width: 64, height: 64, gray: 1, square: CGPoint(x: 2, y: 2))
