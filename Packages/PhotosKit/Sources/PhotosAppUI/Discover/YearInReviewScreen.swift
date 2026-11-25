@@ -291,9 +291,12 @@ struct YearInReviewCard: View {
             Image(systemName: "sparkles").font(.system(size: compact ? 40 : 70)).foregroundStyle(.white.opacity(0.18))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(compact ? 8 : 14)
             VStack(alignment: .leading, spacing: 0) {
+                // One line: at the card's width the year used to break after its third digit.
                 Text(String(year)).font(.system(size: compact ? 30 : 52, weight: .heavy, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.5)
                 Text("Year in review", bundle: .module, comment: "Under the year on the card that opens the year in review.")
                     .font(compact ? .caption2.bold() : .subheadline.bold())
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(.white)
             .padding(compact ? 8 : 14)
