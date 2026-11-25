@@ -29,7 +29,7 @@ import Testing
     }
 
     /// Only photos whose preview is cached are looked at; nothing is downloaded. Each one is looked at once per version.
-    @Test func labelsOnlyCachedPreviewsOnce() async throws {
+    @Test(.disabled(if: TestEnvironment.isSimulator, TestEnvironment.noVision)) func labelsOnlyCachedPreviewsOnce() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "photos-labeler-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try AccountDatabase.temporary()

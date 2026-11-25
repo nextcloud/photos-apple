@@ -40,17 +40,24 @@
             didSet {
                 // "Show in library" scrolls to a tile (the zoom transition the locator serves elsewhere is not the Mac's).
                 callbacks?.tileLocator?.reveal = { [weak self] id in self?.reveal(id) }
+                callbacks?.tileLocator?.place = { [weak self] id, fraction in self?.place(id, fraction: fraction) }
+                callbacks?.tileLocator?.topItem = { [weak self] in self?.anchorItem() }
             }
         }
         let collectionView = GridCollectionView()
         /// Model, zoom, anchor and layout bookkeeping, shared with the UIKit grid.
         private let core: GridCore
         private var pinchAmount: CGFloat = 0
+        /// The photo under the pointer when a trackpad pinch began, and its distance from the top of the visible area: it
+        /// stays there while the pinch changes the zoom step (SPEC §15.5).
+        private var pinchAnchor: (id: FileID, offset: CGFloat)?
         private let scrubber = GridScrubberView()
         private var sectionOffsets: [Double] = []
         private var refreshWork: DispatchWorkItem?
         private var selected = GridSelectionTracker()
         private lazy var promiseDelegate = FilePromiseDelegate(services: services)
+        /// Ratings and flags shown on the tiles (SPEC §15.2).
+        let culling: GridCullingObserver
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -60,7 +67,9 @@
         init(services: AccountServices) {
             self.services = services
             core = GridCore(services: services, headerMetrics: GridHeaderMetrics(titleHeight: 26, subtitleHeight: 16))
+            culling = GridCullingObserver(services: services)
             super.init(frame: .zero)
+            culling.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
             collectionView.collectionViewLayout = makeLayout()
             collectionView.isSelectable = true
             collectionView.allowsMultipleSelection = true
@@ -125,14 +134,19 @@
         func update(_ update: GridFeed.Update, zoomStep: Int, selection: Set<FileID>, showsHeaders: Bool, squareTiles: Bool) {
             let plan = core.begin(update, zoomStep: zoomStep, showsHeaders: showsHeaders, squareTiles: squareTiles)
             if plan.relayouts {
-                let anchor = anchorItem()
+                let pinched = plan.layoutChanged ? pinchAnchor : nil
+                let anchor = pinched?.id ?? anchorItem()
                 core.show(update.model, relayout: true)
                 if plan.reloads {
                     collectionView.reloadData()
                 } else {
                     collectionView.collectionViewLayout?.invalidateLayout()
                 }
-                restore(anchor)
+                if let pinched {
+                    place(pinched.id, offset: pinched.offset)
+                } else {
+                    restore(anchor)
+                }
                 core.noteLayout(width: gridWidth)
                 refreshVisibleTiles()
                 reloadScrubber()
@@ -242,6 +256,27 @@
             }
             guard let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
             scroll(toDocumentY: frame.minY - CGFloat(headerHeight(section: indexPath.section)))
+        }
+
+        /// Scrolls so that the tile's top is at `fraction` of the visible height (a zoom from the days).
+        func place(_ id: FileID, fraction: Double) {
+            place(id, offset: topInset + CGFloat(fraction) * max(contentView.bounds.height - topInset, 0))
+        }
+
+        /// Scrolls so that the tile's middle is `offset` below the top of the clip view, now and after the layout pass.
+        private func place(_ id: FileID, offset: CGFloat) {
+            core.restore(id) { [weak self] id in
+                guard let self, let indexPath = self.core.indexPath(for: id) else { return }
+                self.collectionView.needsLayout = true
+                self.collectionView.layoutSubtreeIfNeeded()
+                if let height = self.collectionView.collectionViewLayout?.collectionViewContentSize.height,
+                    self.collectionView.frame.height < height
+                {
+                    self.collectionView.setFrameSize(NSSize(width: self.collectionView.frame.width, height: height))
+                }
+                guard let frame = self.collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+                self.scroll(toDocumentY: frame.midY - offset + self.topInset)
+            }
         }
 
         /// Scrolls the tile into the middle of the visible area if it is not wholly visible.
@@ -420,16 +455,35 @@
             callbacks?.open(id)
         }
 
+        /// A trackpad pinch steps through the zoom steps while the fingers move (one step per 0.22 of magnification, so a
+        /// long pinch goes through several), keeping the photo under the pointer where it is; out of the densest step the
+        /// Library's days take over (SPEC §15.5). Each step is a "level change" on a trackpad with haptics.
         @objc func handleMagnify(_ gesture: NSMagnificationGestureRecognizer) {
             switch gesture.state {
-            case .began: pinchAmount = 0
-            case .changed:
-                pinchAmount = gesture.magnification
-                guard abs(pinchAmount) > 0.3 else { return }
-                let zoomIn = pinchAmount > 0
+            case .began:
                 pinchAmount = 0
-                gesture.state = .ended
-                zoom(in: zoomIn)
+                let location = gesture.location(in: contentView)
+                let id = collectionView.indexPathForItem(at: collectionView.convert(location, from: contentView)).flatMap { fileId(at: $0) }
+                pinchAnchor = (id ?? anchorItem()).map { ($0, location.y - contentView.bounds.minY) }
+            case .changed:
+                let delta = gesture.magnification - pinchAmount
+                guard abs(delta) > 0.22 else { return }
+                pinchAmount = gesture.magnification
+                let zoomIn = delta > 0
+                let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
+                if next != zoomStep {
+                    LibraryZoomHaptics.trackpadLevelChange()
+                    callbacks?.columnsChanged(next)
+                } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
+                    LibraryZoomHaptics.trackpadLevelChange()
+                    let height = max(contentView.bounds.height, 1)
+                    let point = UnitPoint(x: 0.5, y: Double((pinchAnchor?.offset ?? 0) / height))
+                    gesture.state = .ended
+                    zoomPastEnd(pinchAnchor?.id, point)
+                }
+            case .ended, .cancelled, .failed:
+                // The relayout of the last step still uses the anchor; it is dropped after that.
+                DispatchQueue.main.async { [weak self] in self?.pinchAnchor = nil }
             default: break
             }
         }
@@ -469,7 +523,40 @@
 
         func zoom(in zoomIn: Bool) {
             let next = GridColumns.step(zoomStep, zoomIn: zoomIn)
-            if next != zoomStep { callbacks?.columnsChanged(next) }
+            if next != zoomStep {
+                callbacks?.columnsChanged(next)
+            } else if !zoomIn, let zoomPastEnd = callbacks?.zoomPastEnd {
+                // ⌘− at the densest step: the Library's days.
+                zoomPastEnd(anchorItem(), .top)
+            }
+        }
+
+        /// P, X, U, 0–5 rate the selection and C compares it (SPEC §15.2); without modifiers only, so ⌘C and the
+        /// like keep their meaning.
+        func handleCullingKey(_ event: NSEvent) -> Bool {
+            guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+                let character = event.charactersIgnoringModifiers?.lowercased().first, !collectionView.selectionIndexPaths.isEmpty
+            else { return false }
+            let ids = collectionView.selectionIndexPaths.sorted().compactMap { fileId(at: $0) }
+            if character == "c", let compare = callbacks?.compare, (2...CompareLayout.maxPhotos).contains(ids.count) {
+                compare(ids)
+                return true
+            }
+            guard let command = CullingCommand(key: character), let cull = callbacks?.cull else { return false }
+            cull(command, ids)
+            if ids.count == 1, CullingSettings.autoAdvance { selectNext() }
+            return true
+        }
+
+        /// Auto-advance: the tile after the selected one becomes the selection.
+        func selectNext() {
+            guard let current = collectionView.selectionIndexPaths.max(),
+                let next = GridNavigation.indexPath(after: current, sectionCount: model.sections.count, itemCount: model.numberOfItems)
+            else { return }
+            collectionView.selectionIndexPaths = [next]
+            selected.reset(Set([fileId(at: next)].compactMap { $0 }))
+            callbacks?.selectionChanged(currentSelection())
+            collectionView.scrollToItems(at: [next], scrollPosition: .nearestHorizontalEdge)
         }
 
         func menuActions(for id: FileID) -> [GridMenuAction] {
@@ -621,6 +708,7 @@
 
         override func keyDown(with event: NSEvent) {
             let command = event.modifierFlags.contains(.command)
+            if let owner, owner.handleCullingKey(event) { return }
             switch event.charactersIgnoringModifiers {
             case "\r", " ": owner?.openSelection()
             case "\u{1b}": owner?.clearSelection()
@@ -687,6 +775,9 @@
                     "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125),
                     "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
                     "return": ("\r", 36), "space": (" ", 49), "escape": ("\u{1b}", 53),
+                    // Culling (SPEC §15.2).
+                    "p": ("p", 35), "x": ("x", 7), "u": ("u", 32), "c": ("c", 8), "0": ("0", 29), "1": ("1", 18), "2": ("2", 19),
+                    "3": ("3", 20), "4": ("4", 21), "5": ("5", 23),
                 ]
                 guard let (characters, code) = table[key] else { return nil }
                 let arrow = (123...126).contains(Int(code))
@@ -782,6 +873,10 @@
         private let partnerIcon = NSImageView(
             image: NSImage(systemSymbolName: GridTileBadges.partnerSymbol, accessibilityDescription: nil)!)
         private let selectionRing = NSView()
+        /// Rating and flag (SPEC §15.2).
+        private let cullingBadge = CullingBadgeView()
+        /// Rejected: the picture is dimmed.
+        private var isDimmed = false
         /// Loads the preview and says what to draw; shared with the UIKit grid.
         private let picture = GridTilePicture()
         var fileId: FileID? { picture.fileId }
@@ -828,7 +923,7 @@
             stackIcon.shadow = stackShadow
             [
                 photoView, placeholderIcon, shade, durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon,
-                selectionRing,
+                cullingBadge, selectionRing,
             ].forEach {
                 container.addSubview($0)
             }
@@ -856,7 +951,10 @@
             }
             videoIcon.frame = CGRect(x: right - 16, y: y + 4, width: 16, height: 12)
             favoriteIcon.frame = CGRect(x: x + 5, y: y + 4, width: 13, height: 12)
-            liveIcon.frame = CGRect(x: x + 4, y: bounds.maxY - 20, width: 16, height: 16)
+            // The flag and stars take the top leading corner; the Live Photo badge follows them.
+            let cullingWidth = cullingBadge.fittingWidth
+            cullingBadge.frame = CGRect(x: x + 5, y: bounds.maxY - 19, width: cullingWidth, height: 15)
+            liveIcon.frame = CGRect(x: x + 4 + (cullingWidth > 0 ? cullingWidth + 4 : 0), y: bounds.maxY - 20, width: 16, height: 16)
             stackIcon.frame = CGRect(x: bounds.maxX - 20, y: bounds.maxY - 20, width: 16, height: 16)
             // Both in the top trailing corner: the partner badge moves left of the stack badge.
             let partnerRight = stackIcon.isHidden ? bounds.maxX - 4 : stackIcon.frame.minX - 3
@@ -866,9 +964,13 @@
         override var isSelected: Bool {
             didSet {
                 selectionRing.isHidden = !isSelected
-                photoView.alphaValue = isSelected ? 0.8 : 1
+                updateAlpha()
                 tileView.isTileSelected = isSelected
             }
+        }
+
+        private func updateAlpha() {
+            photoView.alphaValue = (isSelected ? 0.8 : 1) * (isDimmed ? 0.4 : 1)
         }
 
         /// Shows `item`. Called again for the same item when its badges, the zoom or the screen scale change: the
@@ -882,6 +984,11 @@
             }
             photoView.isHidden = false
             updateBadges(item, owner: owner)
+            let culling = CullingTileBadge(owner.culling.mark(item.fileId), tileSide: tileSide)
+            cullingBadge.show(culling)
+            isDimmed = culling.isDimmed
+            updateAlpha()
+            if let text = culling.accessibilityText { tileView.label += ", " + text }
             picture.configure(
                 item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
                 source: GridTilePicture.Source(services: services))
@@ -891,8 +998,10 @@
         func showPlaceholder() {
             picture.reset()
             square = true
-            let badges: [NSView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, shade]
+            let badges: [NSView] = [durationLabel, videoIcon, favoriteIcon, liveIcon, stackIcon, partnerIcon, shade, cullingBadge]
             for badge in badges { badge.isHidden = true }
+            isDimmed = false
+            updateAlpha()
             tileView.fileId = nil
             tileView.label = String(localized: "Loading…", bundle: .module)
             tileView.onPress = nil

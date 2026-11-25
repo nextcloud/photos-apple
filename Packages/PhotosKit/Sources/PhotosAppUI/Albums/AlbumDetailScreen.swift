@@ -25,6 +25,8 @@ struct AlbumDetailScreen: View {
     @State private var newName = ""
     @State private var renaming = false
     @State private var showingNotes = false
+    /// A collage of the album (SPEC §15.8.3).
+    @State private var collage: CollageRequest?
     /// Selection in the grid (reported by `MediaGridScreen`).
     @State private var gridSelection = GridSelectionState()
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -36,6 +38,8 @@ struct AlbumDetailScreen: View {
 
     enum Sheet: String, Identifiable {
         case addPhotos, share, edit, comments
+        /// The album's photos as rotating desktop pictures (Mac, SPEC §15.4).
+        case desktopPictures
         var id: String { rawValue }
     }
 
@@ -68,6 +72,8 @@ struct AlbumDetailScreen: View {
         .task {
             guard let services = session.services else { return }
             isOffline = await session.offline?.isPinned(OfflineManager.pinId(album: album)) ?? false
+            // Its photos become smart offline candidates for a while (SPEC §15.8.1).
+            session.noteAlbumViewed(albumId)
             // What was new in this album has been seen now ("New in shared albums").
             try? AlbumActivityStore(database: services.database).markSeen(albumId: albumId)
             Task {
@@ -97,12 +103,19 @@ struct AlbumDetailScreen: View {
                 }, flat: true)
         }
         .refreshable { try? await session.refreshAlbumContent(album, force: true) }
+        .collageEditor($collage)
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .addPhotos: PhotoPickerSheet(album: album)
             case .share: CollaboratorsSheet(album: album)
             case .edit: AlbumEditor(album: album)
             case .comments: CommentsSheet(album: album)
+            case .desktopPictures:
+                #if os(macOS)
+                    DesktopPictureSheet(source: .album(id: albumId, title: album.title))
+                #else
+                    EmptyView()
+                #endif
             }
         }
         .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -142,10 +155,19 @@ struct AlbumDetailScreen: View {
         } message: {
             Text(error ?? "")
         }
-        .dropDestination(for: URL.self) { urls, _ in
+        .dropDestination(for: AlbumDrop.self) { drops, _ in
             guard isOwn else { return false }
-            session.transfers.upload(urls.map { UploadSource(file: $0, isTemporary: false) }, album: album)
-            return true
+            // Photos of the library (from a grid in another window) are added as they are; files are uploaded into it.
+            let (fileIds, files) = AlbumDrop.split(drops, account: session.account.id.rawValue)
+            if !files.isEmpty {
+                session.transfers.upload(files.map { UploadSource(file: $0, isTemporary: false) }, album: album)
+            }
+            let items: [MediaItem] = fileIds.compactMap { try? session.services?.library.item($0) }
+            if !items.isEmpty {
+                let album = album
+                Task { await session.addToAlbum(items, album: album) }
+            }
+            return !files.isEmpty || !items.isEmpty
         }
     }
 
@@ -240,6 +262,18 @@ struct AlbumDetailScreen: View {
             } label: {
                 Label(String(localized: "Comments", bundle: .module), systemImage: "bubble.left.and.bubble.right")
             }
+        }
+        #if os(macOS)
+            Button {
+                sheet = .desktopPictures
+            } label: {
+                Label(DesktopPictureAction.rotateTitle, systemImage: DesktopPictureAction.systemImage)
+            }
+        #endif
+        Button {
+            Task { collage = await CollageRequest.album(album, session: session) }
+        } label: {
+            Label(CollageRequest.menuTitle, systemImage: "rectangle.3.group")
         }
         Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {
             Text("Oldest first", bundle: .module).tag(AlbumPhotosSortOrder.oldest)

@@ -28,11 +28,15 @@ struct MediaGridScreen<Accessory: View>: View {
     var reveal: TimelineRevealCenter? = nil
     /// This is the Library: "Show in library" is not offered for its photos.
     var isLibrary = false
+    /// Image ▸ Delete Rejected… (the Library, SPEC §15.2).
+    var deleteRejected: (() -> Void)? = nil
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
-    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone.
-    @Environment(\.undoManager) private var undoManager
+    /// The window's undo manager: Edit › Undo and ⌘Z on the Mac and iPad, shake on iPhone. Not `@Environment`: see
+    /// `UndoManagerBox`.
+    @State private var undoBox = UndoManagerBox()
+    private var undoManager: UndoManager? { undoBox.manager }
     @State private var selection: Set<FileID> = []
     /// What the toolbar and the menus show for the selection, loaded off the main thread when the selection changes.
     @State private var selectionInfo = GridSelectionInfo()
@@ -53,6 +57,8 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var nextcloudShareMany: PickedItems?
     /// Slideshow of the selection or of the whole grid (SPEC VW-5).
     @State private var slideshow: SlideshowRequest?
+    /// A collage of the selection (SPEC §15.8.3).
+    @State private var collage: CollageRequest?
     /// The tile "Show in library" opened the grid at, marked for a moment (iPhone, iPad, Vision Pro).
     @State private var highlight: TileHighlight?
     /// Haptic triggers (iPhone, iPad).
@@ -67,6 +73,9 @@ struct MediaGridScreen<Accessory: View>: View {
     @State private var usedAlbums: [String] = []
     /// "Add to Album ▸ New Album…": a new album with these items.
     @State private var newAlbumItems: PickedItems?
+    /// Ratings and flags given here, and the compare view (SPEC §15.2).
+    @State private var culling = CullingModel()
+    @State private var compareRequest: CompareRequest?
     /// The zoom transition into the viewer and back (iPhone, iPad): the tile it starts from and where that tile is.
     @Namespace private var zoomNamespace
     @State private var tileLocator = GridTileLocator()
@@ -79,6 +88,10 @@ struct MediaGridScreen<Accessory: View>: View {
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
+    /// Years, months and days around this grid (the Library's zoom levels, SPEC §15.5); nil elsewhere.
+    @Environment(\.libraryZoom) private var libraryZoom
+    /// "Show Similar" for this photo (SPEC §15.5).
+    @State private var similarTo: MediaItem?
 
     struct TileHighlight: Equatable {
         let id = UUID()
@@ -97,6 +110,7 @@ struct MediaGridScreen<Accessory: View>: View {
 
     var body: some View {
         content
+            .readsUndoManager(into: undoBox)
             .navigationTitle(isSelecting && !keepsTitleWhileSelecting ? selectionTitle : title)
             .preference(key: GridSelectionState.Key.self, value: GridSelectionState(isSelecting: isSelecting, count: selection.count))
             #if os(iOS)
@@ -124,9 +138,11 @@ struct MediaGridScreen<Accessory: View>: View {
             .sheet(item: $albumPicker) { picked in AlbumPickerSheet(items: picked.items) }
             .sheet(item: $newAlbumItems) { picked in AlbumEditor(album: nil, items: picked.items) }
             .sheet(item: $tagEditor) { picked in TagEditorSheet(items: picked.items) }
+            .collageEditor($collage)
             .sheet(item: $sharedLink) { link in LinkShareSheet(url: link.url) }
             .sheet(item: $metadataItems) { picked in MetadataEditor(items: picked.items) }
-            .sheet(item: $editedItem) { item in EditorView(item: item) }
+            .photoEditor($editedItem)
+            .similarPhotosSheet($similarTo)
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
@@ -149,19 +165,27 @@ struct MediaGridScreen<Accessory: View>: View {
             .task(id: SelectionKey(ids: selection, revision: feed.update.revision)) { await loadSelectionInfo(selection) }
             .focusedSceneValue(\.gridActions, gridActions)
             .selectionHaptic(selection, isActive: isSelecting)
+            .selectionStartHaptic(isSelecting)
             .photosHaptic(.impact(weight: .light), trigger: favoriteToggles)
             .photosHaptic(.impact(weight: .medium), trigger: deletions)
             // Zoomed out, the timeline is cut into months and years instead of days.
             .onChange(of: columns, initial: true) { _, step in
                 feed.setZoom(step: step)
             }
+            .libraryZoomPlacement(libraryZoom, locator: tileLocator)
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
                 .task(id: feed.items.isEmpty) {
                     if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
+                    if compareRequest == nil { compareRequest = CompareRequest.debugStart(ids: feed.items.map(\.fileId)) }
+                    #if os(macOS)
+                        ExternalEditCenter.debugStart(ids: feed.items.map(\.fileId), session: session)
+                    #endif
                 }
             #endif
             .mediaViewer($viewerStart, zoom: zoomSource)
+            .compareView($compareRequest)
+            .cullingFeedback(culling)
             .mediaSaveStatus(saver)
             .photoTaskStatus(photoTasks)
             .task { await observeAlbums() }
@@ -201,7 +225,10 @@ struct MediaGridScreen<Accessory: View>: View {
                     cancelSelection: { endSelection() },
                     beginSelection: { isSelecting = true },
                     tileLocator: tileLocator,
-                    copy: { ids in withItems(ids) { copy($0) } }
+                    copy: { ids in withItems(ids) { copy($0) } },
+                    cull: cullCallback,
+                    compare: { (ids: [FileID]) in compare(ids) },
+                    zoomPastEnd: zoomPastEnd
                 )
             )
             .ignoresSafeArea(edges: .bottom)
@@ -257,6 +284,11 @@ struct MediaGridScreen<Accessory: View>: View {
             tileLocator.reveal(id)
             zoomTile = id
             zoomFrame = tileLocator.frame(id)
+            #if os(macOS)
+                // The grid follows the viewer: back in the grid, the photo seen last is selected and culling goes on there.
+                selection = [id]
+                isSelecting = true
+            #endif
         }
     }
 
@@ -383,6 +415,19 @@ struct MediaGridScreen<Accessory: View>: View {
         // label and tooltip, and the toolbar can move single items to the overflow menu instead of clipping at the window edge.
         ToolbarItemGroup(placement: .primaryAction) {
             accessory()
+            #if os(iOS)
+                // The grid has no Info button of its own (the context menu's "Info" opens the panel): without this, an iPad
+                // without a keyboard (⌘I) could not close the panel again.
+                if showingInfo {
+                    Button {
+                        showingInfo = false
+                    } label: {
+                        Label(
+                            String(localized: "Hide info", bundle: .module, comment: "Closes the info panel beside the grid (iPad)."),
+                            systemImage: "info.circle.fill")
+                    }
+                }
+            #endif
             #if !os(macOS)
                 Button(isSelecting ? String(localized: "Done", bundle: .module) : String(localized: "Select", bundle: .module)) {
                     if isSelecting { endSelection() } else { isSelecting = true }
@@ -513,8 +558,8 @@ struct MediaGridScreen<Accessory: View>: View {
                 showingInfo.toggle()
             },
             addToAlbum: { withItems(withStacks(Array(selected))) { albumPicker = PickedItems(items: $0) } },
-            zoomIn: { columns = GridColumns.step(columns, zoomIn: true) },
-            zoomOut: { columns = GridColumns.step(columns, zoomIn: false) },
+            zoomIn: { zoomStep(zoomIn: true) },
+            zoomOut: { zoomStep(zoomIn: false) },
             open: single.map { item in { openViewer(at: item.fileId) } },
             edit: single.flatMap { item in item.kind == .image ? { editedItem = item } : nil },
             editDateAndLocation: canEditMetadata(summary)
@@ -527,8 +572,104 @@ struct MediaGridScreen<Accessory: View>: View {
             rotate: info.items.map(PhotoRotation.canRotate) == true ? { clockwise in rotate(Array(selected), clockwise: clockwise) } : nil,
             recentAlbums: summary.count == 0 ? [] : recentAlbums,
             addToRecentAlbum: { album in add(withStacks(Array(selected)), to: album) },
-            addToNewAlbum: { withItems(withStacks(Array(selected))) { newAlbumItems = PickedItems(items: $0) } }
+            addToNewAlbum: { withItems(withStacks(Array(selected))) { newAlbumItems = PickedItems(items: $0) } },
+            useAsDesktopPicture: desktopPictureAction(single),
+            cull: canCull && summary.count > 0 ? { (command: CullingCommand) in cull(command, Array(selected)) } : nil,
+            compare: (2...CompareLayout.maxPhotos).contains(summary.count) ? { () -> Void in compare(Array(selected)) } : nil,
+            deleteRejected: deleteRejected,
+            editWith: editWithTarget(single)
         )
+    }
+
+    /// Image ▸ Use as Desktop Picture for one still photo (Mac, SPEC §15.4).
+    func desktopPictureAction(_ item: MediaItem?) -> (() -> Void)? {
+        #if os(macOS)
+            guard let item, DesktopPictureAction.isOffered(item) else { return nil }
+            return { DesktopPictureAction.use(item, session: session) }
+        #else
+            return nil
+        #endif
+    }
+
+    /// Flag ▸, Rating ▸, Compare and Edit With ▸ of the context menu (SPEC §15.2).
+    func cullingMenuActions(summary: SelectionSummary, single: MediaItem?) -> [GridMenuAction] {
+        var actions: [GridMenuAction] = []
+        if canCull { actions.append(contentsOf: CullingMenu.actions { command, ids in cull(command, ids) }) }
+        if (2...CompareLayout.maxPhotos).contains(summary.count) {
+            actions.append(
+                GridMenuAction(id: "compare", title: CompareWording.menuTitle, systemImage: "rectangle.split.2x2") { ids in compare(ids) })
+        }
+        #if os(macOS)
+            if let target = editWithTarget(single) {
+                var apps: [GridMenuAction] = EditWithApps.apps(for: target.item).map { app in
+                    GridMenuAction(id: "editwith.\(app.path)", title: EditWithApps.name(of: app), systemImage: "app") { _ in
+                        target.open(app)
+                    }
+                }
+                apps.append(
+                    GridMenuAction(
+                        id: "editwith.other", title: EditWithWording.otherTitle, systemImage: "ellipsis", startsGroup: !apps.isEmpty
+                    ) {
+                        _ in
+                        if let app = EditWithApps.chooseApp() { target.open(app) }
+                    })
+                actions.append(
+                    GridMenuAction(
+                        id: "editwith", title: EditWithWording.menuTitle, systemImage: "square.and.pencil", handler: { _ in },
+                        children: apps))
+            }
+        #endif
+        return actions
+    }
+
+    /// Ratings and flags need system tags on the server (SPEC §15.2).
+    var canCull: Bool { session.features.has(.systemtags) }
+
+    /// The grid's rating keys; nil when the server has no tags.
+    var cullCallback: (@MainActor (CullingCommand, [FileID]) -> Void)? {
+        guard canCull else { return nil }
+        return { (command: CullingCommand, ids: [FileID]) in cull(command, ids) }
+    }
+
+    /// Rates or flags the tiles `ids` and every copy stacked behind them; undoable.
+    func cull(_ command: CullingCommand, _ ids: [FileID]) {
+        let undoManager = undoManager
+        withItems(withStacks(ids)) { items in culling.apply(command, to: items, session: session, undoManager: undoManager) }
+    }
+
+    /// The compare view with 2–4 photos, in the grid's order.
+    func compare(_ ids: [FileID]) {
+        let chosen = Set(ids)
+        let ordered = feed.model.ids.filter { chosen.contains($0) }
+        guard (2...CompareLayout.maxPhotos).contains(ordered.count) else { return }
+        compareRequest = CompareRequest(ids: ordered)
+    }
+
+    /// Image ▸ Edit With ▸ for one photo in the user's files (Mac).
+    func editWithTarget(_ item: MediaItem?) -> EditWithTarget? {
+        #if os(macOS)
+            guard let item, item.kind == .image, !item.isCollectionChild else { return nil }
+            return EditWithTarget(item: item) { app in ExternalEditCenter.shared.open(item, with: app, session: session) }
+        #else
+            return nil
+        #endif
+    }
+
+    /// Out of the grid's densest step into the Library's days (SPEC §15.5); nil where there are no zoom levels.
+    var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? {
+        guard let libraryZoom else { return nil }
+        let step: Int = columns
+        return { (id: FileID?, point: UnitPoint) in libraryZoom.leaveGrid(from: id, at: point, currentStep: step) }
+    }
+
+    /// ⌘+ and ⌘−: the grid's next step, or the Library's zoom levels beyond its densest step.
+    func zoomStep(zoomIn: Bool) {
+        let next = GridColumns.step(columns, zoomIn: zoomIn)
+        if let libraryZoom, libraryZoom.level != .all || (!zoomIn && next == columns) {
+            libraryZoom.step(zoomIn: zoomIn, currentStep: columns)
+        } else {
+            columns = next
+        }
     }
 
     /// The albums the "Add to Album" submenus list.
@@ -674,11 +815,23 @@ struct MediaGridScreen<Accessory: View>: View {
                         showInTimeline(item)
                     })
             }
+            if SimilarPhotosAction.isOffered(for: item.kind) {
+                actions.append(
+                    GridMenuAction(id: "similar", title: SimilarPhotosAction.title, systemImage: SimilarPhotosAction.systemImage) { _ in
+                        similarTo = item
+                    })
+            }
         }
         actions.append(
             GridMenuAction(id: "slideshow", title: SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage) { ids in
                 playSlideshow(ids)
             })
+        if summary.count <= CollageStyle.grid.maxPhotos {
+            actions.append(
+                GridMenuAction(id: "collage", title: CollageRequest.menuTitle, systemImage: "rectangle.3.group") { ids in
+                    withItems(ids) { collage = CollageRequest.selection($0) }
+                })
+        }
         let albumTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Add to Album", bundle: .module, comment: "Submenu with the recent albums and New Album…."),
             other: LocalizedStringResource("Add to album", bundle: .module, comment: "Submenu with the recent albums and New album…."))
@@ -689,6 +842,7 @@ struct MediaGridScreen<Accessory: View>: View {
                     withItems(withStacks(ids)) { tagEditor = PickedItems(items: $0) }
                 })
         }
+        actions.append(contentsOf: cullingMenuActions(summary: summary, single: single))
         let exportTitle: String = PlatformWording.title(
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
         actions.append(
@@ -755,6 +909,14 @@ struct MediaGridScreen<Accessory: View>: View {
                     editedItem = item
                 })
         }
+        #if os(macOS)
+            if let use = desktopPictureAction(single) {
+                actions.append(
+                    GridMenuAction(id: "desktop", title: DesktopPictureAction.title, systemImage: DesktopPictureAction.systemImage) { _ in
+                        use()
+                    })
+            }
+        #endif
         // Image ▸ Rotate in the context menu as well (iPhone and iPad have no menu bar); only for photos that may be changed.
         if let items = info.items, PhotoRotation.canRotate(items) {
             actions.append(
@@ -866,8 +1028,8 @@ struct GridSkeleton: View {
         .onAppear { dimmed = true }
         .overlay(alignment: .bottom) {
             if let caption {
+                // The skeleton itself shows that something is on its way: no spinner beside the count.
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
                     Text(caption)
                 }
                 .font(.footnote)

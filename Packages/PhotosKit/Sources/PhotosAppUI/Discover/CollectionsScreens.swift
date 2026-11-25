@@ -16,6 +16,8 @@ struct PlacesScreen: View {
     @Environment(SessionModel.self) private var session
     @State private var places: [Place] = []
     @State private var error: String?
+    /// The travel globe's history and stats (SPEC §15.6).
+    @State private var travel = TravelModel()
 
     var grouped: [(country: String, places: [Place])] {
         guard session.features.has(.placeCountry) else { return [("", places)] }
@@ -26,6 +28,12 @@ struct PlacesScreen: View {
 
     var body: some View {
         ScrollView {
+            // Travel and "Then and now" (SPEC §15.6) above the places.
+            VStack(alignment: .leading, spacing: 24) {
+                TravelSummaryCard(model: travel)
+                ThenAndNowRow()
+            }
+            .padding([.horizontal, .top])
             LazyVStack(alignment: .leading, spacing: 24, pinnedViews: .sectionHeaders) {
                 ForEach(grouped, id: \.country) { group in
                     Section {
@@ -68,6 +76,7 @@ struct PlacesScreen: View {
             Task {
                 do { try await services.sync.refreshPlaces() } catch { self.error = error.localizedDescription }
             }
+            Task { await travel.load(services) }
             do {
                 for try await value in services.collections.observePlaces() { places = value }
             } catch {}
@@ -120,7 +129,11 @@ struct PeopleScreen: View {
             .padding()
             if hiddenCount > 0 { hiddenNote }
         }
-        .overlay { if loading && people.isEmpty && error == nil { ProgressView() } }
+        .overlay {
+            if loading && people.isEmpty && error == nil {
+                SkeletonCovers(minimum: 100, circular: true).frame(maxHeight: .infinity, alignment: .top)
+            }
+        }
         .navigationTitle(String(localized: "People", bundle: .module))
         .toolbar {
             NavigationLink {
@@ -275,6 +288,8 @@ struct PersonScreen: View {
     @State private var hidden = HiddenPeople()
     /// Counted up to load the photos again after some were moved away.
     @State private var reloads = 0
+    /// "Make Sticker Pack" (SPEC §15.8.2).
+    @State private var makingStickers = false
 
     var isHidden: Bool { hidden.names.contains(person.name) }
 
@@ -316,12 +331,16 @@ struct PersonScreen: View {
                 }
                 Button(String(localized: "Merge with…", bundle: .module)) { merging = true }
                 Button(isHidden ? PeopleActions.showTitle : PeopleActions.hideTitle) { toggleHidden() }
+                if !person.isUnnamed {
+                    Button(StickerWording.packTitle, systemImage: "face.smiling") { makingStickers = true }
+                }
                 Button(String(localized: "Remove person…", bundle: .module), role: .destructive) { confirmRemove = true }
             } label: {
                 Label(String(localized: "Person", bundle: .module), systemImage: "ellipsis.circle")
             }
         }
         .id(reloads)
+        .sheet(isPresented: $makingStickers) { StickerPackSheet(person: person.name) }
         .task { if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) } }
         .alert(String(localized: "Name", bundle: .module), isPresented: $renaming) {
             TextField(String(localized: "Name", bundle: .module), text: $newName)
@@ -581,7 +600,7 @@ struct FoldersScreen: View {
         if !folders.isEmpty {
             EmptyView()
         } else if !loaded {
-            ProgressView()
+            SkeletonCovers().frame(maxHeight: .infinity, alignment: .top)
         } else if let error {
             ContentUnavailableView {
                 Label(String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle")

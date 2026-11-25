@@ -14,6 +14,8 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     case albums, sharedAlbums, smartAlbums, people, places, tags
     case folders, sharedWithYou, archive, recentlyDeleted, duplicates, freeSpace
     case search, backup, settings
+    /// The sticker book (SPEC §15.8.2).
+    case stickers
     /// The tab that lists the places without a tab of their own (iPhone, narrow iPad windows; SPEC §6.2).
     case collections
 
@@ -44,6 +46,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .backup: LocalizedStringResource("Backup", bundle: .module)
         case .settings: LocalizedStringResource("Settings", bundle: .module)
         case .collections: LocalizedStringResource("Collections", bundle: .module)
+        case .stickers: LocalizedStringResource("Stickers", bundle: .module, comment: "The sticker book in the sidebar.")
         }
     }
 
@@ -72,6 +75,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .backup: "icloud.and.arrow.up"
         case .settings: "gearshape"
         case .collections: "square.stack"
+        case .stickers: "face.smiling"
         }
     }
 
@@ -92,7 +96,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         switch self {
         case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup, .collections: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
-        case .recentlyDeleted, .duplicates, .freeSpace: nil
+        case .recentlyDeleted, .duplicates, .freeSpace, .stickers: nil
         }
     }
 }
@@ -101,7 +105,9 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
 /// row of its own; it stays a destination for notifications, widgets and links.
 enum SidebarLayout {
     static let primary: [AppDestination] = [.library, .photos, .videos, .favorites, .memories, .map]
-    static let collections: [AppDestination] = [.albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou]
+    static let collections: [AppDestination] = [
+        .albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou, .stickers,
+    ]
     static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace]
 
     /// The row that is highlighted while `destination` is shown.
@@ -153,8 +159,10 @@ struct MainView: View {
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
-    /// File › Import from Google Takeout… (Mac).
-    @State private var importingTakeout = false
+    /// File › Import Library… (SPEC §15.7).
+    @State private var importingLibrary = false
+    /// File › Import from Camera or Card… (SPEC §15.2).
+    @State private var importingCard = false
     /// "Show in library": the photo the Library timeline scrolls to and highlights.
     @State private var timelineReveal = TimelineRevealCenter()
 
@@ -207,13 +215,17 @@ struct MainView: View {
                     upload: { importingFiles = true },
                     openPublicLink: { openingLink = true },
                     syncNow: { Task { await session.syncNow(forceReconcile: true) } },
-                    importTakeout: { importingTakeout = true }
+                    importLibrary: { importingLibrary = true },
+                    importCard: CardImportAvailability.isAvailable ? { importingCard = true } : nil
                 )
             )
             .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
             .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
-            #if os(macOS)
-                .sheet(isPresented: $importingTakeout) { TakeoutImportSheet() }
+            .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
+            .sheet(isPresented: $importingCard) { CardImportSheet() }
+            #if DEBUG
+                // Screenshots and UI checks: `PHOTOS_DEBUG_CARD_IMPORT=1` opens the import sheet at launch.
+                .task { if ProcessInfo.processInfo.environment["PHOTOS_DEBUG_CARD_IMPORT"] != nil { importingCard = true } }
             #endif
             // A link for another account, an unknown account or a public album asks first (not while locked).
             .linkPrompts(isLocked: lock.requiresUnlock)
@@ -309,6 +321,7 @@ struct MainView: View {
     func restoreOnce() {
         guard !restored else { return }
         restored = true
+        if ImportLibrarySheet.debugExport != nil { importingLibrary = true }
         if let destination = Self.debugDestination {
             selection = destination
         } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),
@@ -453,6 +466,7 @@ struct MainView: View {
                     } header: {
                         Text("Browse", bundle: .module)
                     }
+                    .customizationID("section.browse")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
@@ -462,6 +476,7 @@ struct MainView: View {
                     } header: {
                         Text("Collections", bundle: .module)
                     }
+                    .customizationID("section.collections")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
@@ -471,6 +486,7 @@ struct MainView: View {
                     } header: {
                         Text("Utilities", bundle: .module)
                     }
+                    .customizationID("section.utilities")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     Tab(value: AppDestination.backup) {
@@ -478,6 +494,7 @@ struct MainView: View {
                     } label: {
                         Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
                     }
+                    .customizationID(AppDestination.backup.rawValue)
                     .defaultVisibility(.hidden, for: .tabBar)
                 }
 
@@ -486,10 +503,14 @@ struct MainView: View {
                 } label: {
                     Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
                 }
+                .customizationID(AppDestination.settings.rawValue)
             }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewCustomization($customization)
-            .tabViewSidebarHeader { AccountHeader() }
+            // The models are handed over explicitly: when the sidebar first appears during a rotation (portrait → landscape),
+            // UIKit sizes the header before SwiftUI has given it the environment, and the app crashed ("No Observable object
+            // of type AppModel found").
+            .tabViewSidebarHeader { AccountHeader().environment(app).environment(session) }
             .onChange(of: selection, initial: true) { _, destination in
                 if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
             }
@@ -623,6 +644,7 @@ struct DestinationView: View {
         case .duplicates: DuplicatesScreen()
         case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
+        case .stickers: StickerBookScreen()
         case .collections:
             #if os(macOS)
                 // The Mac has the sidebar; nothing leads here.

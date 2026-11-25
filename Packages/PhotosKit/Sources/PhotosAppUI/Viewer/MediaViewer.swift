@@ -28,10 +28,16 @@ struct MediaViewer: View {
     @State private var extractingText: MediaItem?
     @State private var addingToAlbum: MediaItem?
     @State private var tagging: MediaItem?
+    /// "Make Sticker" (SPEC §15.8.2).
+    @State private var stickerItem: MediaItem?
     /// Nextcloud's own sharing of the photo shown (SPEC SH-7).
     @State private var nextcloudShare: SharingTarget?
     /// Slideshow from the photo shown through the viewer's photos (SPEC VW-5).
     @State private var slideshow: SlideshowRequest?
+    /// "Show Similar" for the photo shown (SPEC §15.5).
+    @State private var similarTo: MediaItem?
+    /// "Then and now" of the place of the photo shown (SPEC §15.6).
+    @State private var thenAndNow: ThenAndNowStart?
     /// Photos that left the context while the viewer is open (deleted, archived): their pages are gone.
     @State private var removed: Set<FileID> = []
     /// Zoom In / Zoom Out / Zoom to Fit from the menu bar, carried out by the page shown; and that page's scale.
@@ -55,6 +61,8 @@ struct MediaViewer: View {
     /// Haptic triggers (iPhone, iPad).
     @State private var favoriteToggles = 0
     @State private var deletions = 0
+    /// Ratings and flags given here (SPEC §15.2).
+    @State private var culling = CullingModel()
     @Environment(SessionModel.self) private var session
     /// The window's undo manager: favourite, archive and delete made here are undone with Edit › Undo (⌘Z, shake).
     @Environment(\.undoManager) private var undoManager
@@ -153,15 +161,18 @@ struct MediaViewer: View {
                 if let item = currentItem { InfoPanel(item: item, inInspector: true, showsPreview: false) }
             }
             .focusedSceneValue(\.gridActions, viewerActions)
-            .sheet(item: $editing) { item in EditorView(item: item) }
+            .photoEditor($editing)
             .sheet(item: $editingMetadata) { item in MetadataEditor(items: [item]) }
             .sheet(item: $extractingText) { item in ExtractTextSheet(item: item) }
             .sheet(item: $addingToAlbum) { item in AlbumPickerSheet(items: [item]) }
             .sheet(item: $tagging) { item in TagEditorSheet(items: [item]) }
+            .similarPhotosSheet($similarTo)
+            .sheet(item: $stickerItem) { item in StickerSheet(item: item) }
             .sheet(item: $nextcloudShare) { target in
                 if let services = session.services { FileSharingSheet(target: target, api: services.api.sharing) }
             }
             .slideshow($slideshow) { last in showAfterSlideshow(last) }
+            .thenAndNowSheet($thenAndNow)
             .mediaSaveStatus(saver)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
@@ -240,6 +251,7 @@ struct MediaViewer: View {
                 perform(key)
                 return .handled
             }
+            .viewerCulling(culling, ids: cullingIds, chromeHidden: chromeHidden) { step(1) }
             #if os(macOS)
                 // Escape also has to work while the info inspector (or anything else in the window) has the focus.
                 .background {
@@ -274,6 +286,16 @@ struct MediaViewer: View {
         if let services = session.services { actions.shareItems = [ShareableMedia(item: item, services: services)] }
         actions.shareTitle = item.name
         actions.slideshow = { playSlideshow() }
+        if session.features.has(.systemtags) {
+            let ids = cullingIds
+            actions.cull = { command in culling.apply(command, ids: ids, session: session, undoManager: undoManager) }
+        }
+        #if os(macOS)
+            if isImage, !item.isCollectionChild {
+                actions.editWith = EditWithTarget(item: item) { app in ExternalEditCenter.shared.open(item, with: app, session: session) }
+            }
+            if DesktopPictureAction.isOffered(item) { actions.useAsDesktopPicture = { DesktopPictureAction.use(item, session: session) } }
+        #endif
         return actions
     }
 
@@ -398,6 +420,12 @@ struct MediaViewer: View {
         favoriteToggles += 1
         let undoManager = undoManager
         Task { await session.perform(.favorite([item], value: !item.isFavorite), undoManager: undoManager) }
+    }
+
+    /// The files a rating or flag goes to: the photo shown, or every copy of a stacked tile (as in the grid).
+    var cullingIds: [FileID] {
+        if let current, let members = stacks[current], members.count > 1 { return members.filter { !removed.contains($0) } }
+        return currentFileId.map { [$0] } ?? []
     }
 
     func toggleInfo() {
@@ -553,6 +581,16 @@ struct MediaViewer: View {
         } label: {
             Label(SlideshowRequest.menuTitle, systemImage: SlideshowRequest.systemImage)
         }
+        #if os(macOS)
+            if DesktopPictureAction.isOffered(item) {
+                Button {
+                    DesktopPictureAction.use(item, session: session)
+                } label: {
+                    Label(DesktopPictureAction.title, systemImage: DesktopPictureAction.systemImage)
+                }
+            }
+        #endif
+        ThenAndNowMenuItem(item: item, start: $thenAndNow)
         if showInFolder != nil {
             Button {
                 showFolder(item)
@@ -567,6 +605,13 @@ struct MediaViewer: View {
                 Label(ShowInTimelineAction.title, systemImage: ShowInTimelineAction.systemImage)
             }
         }
+        if SimilarPhotosAction.isOffered(for: item.kind) {
+            Button {
+                similarTo = item
+            } label: {
+                Label(SimilarPhotosAction.title, systemImage: SimilarPhotosAction.systemImage)
+            }
+        }
         Divider()
         if item.kind == .image {
             Button {
@@ -574,12 +619,23 @@ struct MediaViewer: View {
             } label: {
                 Label(String(localized: "Extract text", bundle: .module), systemImage: "text.viewfinder")
             }
+            Button {
+                stickerItem = item
+            } label: {
+                Label(StickerWording.menuTitle, systemImage: "face.smiling")
+            }
         }
         if canEditMetadata(item) {
             Button {
                 editingMetadata = item
             } label: {
                 Label(String(localized: "Edit date and location", bundle: .module), systemImage: "calendar.badge.clock")
+            }
+        }
+        if session.features.has(.systemtags) {
+            Divider()
+            CullingMenuItems { command in
+                culling.apply(command, ids: cullingIds, session: session, undoManager: undoManager)
             }
         }
         if item.isOwnStorage && item.permissions.canDelete {
@@ -822,7 +878,8 @@ struct ViewerPage: View {
                 )
                 .foregroundStyle(.white)
             } else {
-                ProgressView().tint(.white)
+                // Read from the local index in a few milliseconds: nothing to show for that moment.
+                Color.clear
             }
         }
         .accessibilityAction(named: Text(favoriteActionTitle)) { actions.toggleFavorite() }

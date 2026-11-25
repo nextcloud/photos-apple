@@ -1,0 +1,58 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld years ago" : {
+      "comment" : "Watch: how long ago the photo of the day was taken; plural variations.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld year ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld years ago"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Favorites" : {
+      "comment" : "Watch: title of the favourites page."
+    },
+    "Nextcloud Photos is locked on your iPhone." : {
+      "comment" : "Watch: app lock is on in the iPhone app; nothing is shown."
+    },
+    "On This Day" : {
+      "comment" : "Watch: title of the page with photos of this day in earlier years."
+    },
+    "Open Nextcloud Photos on your iPhone: today's photos appear here." : {
+      "comment" : "Watch: shown before the iPhone has sent any photos."
+    },
+    "Photo of the Day" : {
+      "comment" : "Watch: caption of the photo chosen for today."
+    },
+    "Photo, %@" : {
+      "comment" : "Watch: VoiceOver label of a photo; the placeholder is its date."
+    },
+    "Photo, %@, %@" : {
+      "comment" : "Watch: VoiceOver label of a photo; placeholders: date, place.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Photo, %1$@, %2$@"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.1"
+}

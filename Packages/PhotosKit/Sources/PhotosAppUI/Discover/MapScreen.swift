@@ -98,7 +98,10 @@ struct MapScreen: View {
                     }
                 }
             }
-            .frame(minWidth: 600, minHeight: 500)
+            #if os(macOS)
+                // A sheet on the Mac has no size of its own; elsewhere the sheet fills the screen.
+                .frame(minWidth: 600, minHeight: 500)
+            #endif
         }
         .task { await loadOverview() }
         .task(id: QueryKey(region: RegionKey(region), period: period)) { await loadCells() }
@@ -119,6 +122,15 @@ struct MapScreen: View {
                 Label(String(localized: "Photos in this area", bundle: .module), systemImage: "square.grid.2x2")
             }
             .help(String(localized: "Photos in this area", bundle: .module))
+        }
+        // The trips on a globe (SPEC §15.6): also where the server has no Places.
+        ToolbarItem {
+            NavigationLink {
+                TravelGlobeScreen()
+            } label: {
+                Label(TravelWording.title, systemImage: "globe.europe.africa")
+            }
+            .help(TravelWording.title)
         }
     }
 

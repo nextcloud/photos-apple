@@ -502,6 +502,26 @@ final class StatusLog: Sendable {
         #expect(await eventually { remote.uploads.count == 3 && status.phase == .upToDate })
     }
 
+    /// The Live Activity and the backup widget say how much is left (SPEC §15.4).
+    @Test func pausedPassReportsTheSizeLeft() async throws {
+        addPhotos(["0001", "0002", "0003"])
+        var wifiOnly = settings
+        wifiOnly.wifiOnly = true
+        let engine = engine
+        remote.beforeUpload.withLock {
+            $0 = { name in if name == "IMG_0001.heic" { await engine.setNetwork(BackupNetwork(isExpensive: true)) } }
+        }
+        await engine.run(wifiOnly)
+        #expect(status.pending == 2)
+        // Two photos of 10 bytes each wait.
+        #expect(status.pendingBytes == 20)
+
+        remote.beforeUpload.withLock { $0 = nil }
+        await engine.setNetwork(BackupNetwork())
+        #expect(await eventually { status.phase == .upToDate })
+        #expect(status.pendingBytes == 0)
+    }
+
     @Test func lowPowerModePausesAndResumes() async throws {
         addPhotos(["0001"])
         await engine.setLowPower(true)

@@ -287,7 +287,8 @@ struct VideoPage: View {
     @ViewBuilder var status: some View {
         switch phase {
         case .loading:
-            ProgressView().controlSize(.large).tint(.white)
+            // The poster is shown already; a spinner only if the video takes long to start.
+            DelayedSpinner(tint: .white, large: true)
                 .accessibilityLabel(Text("Loading video…", bundle: .module))
         case .preparing:
             VStack(spacing: 10) {

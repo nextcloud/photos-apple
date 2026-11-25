@@ -17,6 +17,8 @@ struct MemoriesScreen: View {
     @State private var onThisDay: [Memory] = []
     @State private var trips: [Memory] = []
     @State private var recap: Memory?
+    /// Years with enough photos for a year in review, newest first.
+    @State private var years: [Int] = []
     @State private var loaded = false
 
     var body: some View {
@@ -27,10 +29,16 @@ struct MemoriesScreen: View {
                     section(onlyOnThisDay ? nil : String(localized: "On this day", bundle: .module), onThisDay)
                 }
                 if !onlyOnThisDay {
-                    if let recap { section(String(localized: "Year in review", bundle: .module), [recap]) }
+                    if !years.isEmpty {
+                        yearsSection
+                    } else if let recap {
+                        section(String(localized: "Year in review", bundle: .module), [recap])
+                    }
                     if !trips.isEmpty { section(String(localized: "Trips", bundle: .module), trips) }
+                    // Places photographed in several years (SPEC §15.6); shows nothing when there are none.
+                    ThenAndNowRow()
                 }
-                if loaded && onThisDay.isEmpty && (onlyOnThisDay || (trips.isEmpty && recap == nil)) {
+                if loaded && onThisDay.isEmpty && (onlyOnThisDay || (trips.isEmpty && recap == nil && years.isEmpty)) {
                     ContentUnavailableView(
                         onlyOnThisDay
                             ? String(localized: "Nothing on this day", bundle: .module)
@@ -50,7 +58,28 @@ struct MemoriesScreen: View {
             onThisDay = memories.onThisDay
             trips = memories.trips
             recap = memories.recap
+            if !onlyOnThisDay { years = (try? await services.library.reviewYears()) ?? [] }
             loaded = true
+        }
+    }
+
+    /// The year in review of every year with enough photos (SPEC §15.1); each also plays the year's film.
+    var yearsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Year in review", bundle: .module).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 12) {
+                    ForEach(years, id: \.self) { (year: Int) in
+                        NavigationLink {
+                            YearInReviewScreen(year: year)
+                        } label: {
+                            YearInReviewCard(year: year).frame(width: 150, height: 200)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
         }
     }
 

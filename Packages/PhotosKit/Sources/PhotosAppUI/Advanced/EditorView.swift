@@ -97,7 +97,11 @@ struct EditorView: View {
                 Text(error ?? "")
             }
         }
-        .frame(minWidth: 700, minHeight: 640)
+        #if os(macOS)
+            // The sheet's smallest size on the Mac. Elsewhere the presentation has the size: on iPad this made the editor
+            // wider than its sheet, which cut off the picture's sides and the lower tools.
+            .frame(minWidth: 700, minHeight: 640)
+        #endif
         .task { await loadOriginal() }
         .onChange(of: edits) { old, _ in
             if history.last != old { history.append(old) }
@@ -140,7 +144,9 @@ struct EditorView: View {
                     showOriginal = $0
                 }
         } else {
-            ProgressView().tint(.white)
+            // The preview the grid and viewer already have (or its BlurHash) until the original is decoded.
+            PreviewImage(item: item, bucket: 1024, contentMode: .fit)
+                .accessibilityHidden(true)
         }
     }
 
@@ -431,5 +437,21 @@ struct MetadataEditor: View {
                 items, capturedAt: capturedAt, latitude: latitude, longitude: longitude, removeLocation: clearsLocation)
             dismiss()
         }
+    }
+}
+
+extension View {
+    /// Shows the photo editor for `item`: full screen on iPad, as in Photos (a form sheet left the picture a few
+    /// centimetres wide), a sheet elsewhere.
+    @ViewBuilder func photoEditor(_ item: Binding<MediaItem?>) -> some View {
+        #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                fullScreenCover(item: item) { (item: MediaItem) in EditorView(item: item) }
+            } else {
+                sheet(item: item) { (item: MediaItem) in EditorView(item: item) }
+            }
+        #else
+            sheet(item: item) { (item: MediaItem) in EditorView(item: item) }
+        #endif
     }
 }

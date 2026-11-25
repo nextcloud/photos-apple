@@ -146,11 +146,14 @@ public enum Memories {
         return DateRangeLabel.string(from: start, to: end, locale: locale)
     }
 
-    /// Year recap: the newest year with ≥ 30 photos; 60 highlights, favourites first, then evenly per month.
-    public static func yearRecap<Item: MemoryCandidate>(_ items: [Item], calendar: Calendar = .current) -> Memory? {
+    /// Year recap: the newest year with ≥ 30 photos (or `year`, when it has that many); 60 highlights, favourites first,
+    /// then evenly per month.
+    public static func yearRecap<Item: MemoryCandidate>(_ items: [Item], year wanted: Int? = nil, calendar: Calendar = .current) -> Memory?
+    {
         var byYear: [Int: [Item]] = [:]
         for item in items { byYear[calendar.component(.year, from: item.timestamp), default: []].append(item) }
-        guard let year = byYear.keys.sorted(by: >).first(where: { byYear[$0]!.count >= recapMinimum }) else { return nil }
+        let years = wanted.map { [$0] } ?? byYear.keys.sorted(by: >)
+        guard let year = years.first(where: { (byYear[$0]?.count ?? 0) >= recapMinimum }) else { return nil }
         let photos = byYear[year]!.sorted { $0.timestamp < $1.timestamp }
         var chosen: [Item] = Array(photos.filter(\.isFavorite).prefix(recapHighlights))
         var chosenIds = Set(chosen.map(\.fileId))

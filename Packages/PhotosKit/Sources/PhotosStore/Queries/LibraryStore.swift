@@ -337,7 +337,9 @@ public struct LibraryStore: Sendable {
     static let displayOrder = "ORDER BY \(timestamp) DESC, media.fileId DESC"
 
     /// SQL for a filter; visible items exclude Live Photo videos and (unless asked) archived items.
-    static func sql(for filter: MediaFilter, excludedPrefixes: [String], columns: String = gridColumns) -> (String, StatementArguments) {
+    static func sql(
+        for filter: MediaFilter, excludedPrefixes: [String], columns: String = gridColumns, culling: CullingFilter = .all
+    ) -> (String, StatementArguments) {
         var conditions = ["media.isLivePhotoVideo = 0"]
         var arguments: StatementArguments = []
         switch filter {
@@ -366,6 +368,11 @@ public struct LibraryStore: Sendable {
         for prefix in excludedPrefixes {
             conditions.append("media.path NOT LIKE ? ESCAPE '\\'")
             arguments += [Self.likePrefix(prefix)]
+        }
+        // Ratings and flags (SPEC §15.2).
+        if let (condition, values) = CullingStore.condition(for: culling) {
+            conditions.append(condition)
+            arguments += values
         }
         let sql = "SELECT \(columns) FROM media WHERE \(conditions.joined(separator: " AND ")) \(displayOrder)"
         return (sql, arguments)
@@ -413,10 +420,10 @@ public struct LibraryStore: Sendable {
     /// - Parameter interval: with `.zero` every committed change of the tables involved refetches at once. With an
     ///   interval, a change after a quiet period still refetches at once, but during a burst of writes (a sync that
     ///   stores page after page) there is at most one refetch per interval, and the last state is always delivered.
-    public func observeGrid(_ filter: MediaFilter, excludedFolders: [String] = [], coalescing interval: Duration = .zero)
-        -> AsyncThrowingStream<[GridMedia], any Error>
-    {
-        let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders)
+    public func observeGrid(
+        _ filter: MediaFilter, excludedFolders: [String] = [], culling: CullingFilter = .all, coalescing interval: Duration = .zero
+    ) -> AsyncThrowingStream<[GridMedia], any Error> {
+        let (sql, arguments) = Self.sql(for: filter, excludedPrefixes: excludedFolders, culling: culling)
         if interval > .zero {
             return observeCoalesced(sql: sql, arguments: arguments, interval: interval) { db in
                 try Self.fetchGrid(db, sql: sql, arguments: arguments)

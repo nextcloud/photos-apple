@@ -19,6 +19,8 @@ public struct SettingsView: View {
     @State private var cacheSize: Int64 = 0
     @State private var pins: [OfflineManager.Pin] = []
     @State private var reviewedCertificate: CertificateProblem?
+    /// Import Library… (iPhone, iPad, Vision Pro; the Mac has it in the File menu).
+    @State private var importingLibrary = false
     /// In the App Group: the widgets and the share extension follow it.
     @AppStorage(AppLockSettings.enabledKey, store: AppLockSettings.defaults) private var appLock = false
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
@@ -107,6 +109,18 @@ public struct SettingsView: View {
                 PartnerSharingSection()
                 Section {
                     LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
+                    #if !os(macOS)
+                        Button {
+                            importingLibrary = true
+                        } label: {
+                            Label(
+                                String(
+                                    localized: "Import from Other Services…", bundle: .module,
+                                    comment: "Settings row that opens the import of Google Photos, iCloud, Facebook and Instagram exports."),
+                                systemImage: "square.and.arrow.down.on.square")
+                        }
+                        .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
+                    #endif
                 } header: {
                     Text("Library", bundle: .module)
                 } footer: {
@@ -143,6 +157,8 @@ public struct SettingsView: View {
                 }
             }
 
+            if shows(.general) { PhotoOfTheDaySettingsSection() }
+
             if shows(.general) { SearchAndActivitySettings() }
 
             if shows(.general) {
@@ -156,6 +172,8 @@ public struct SettingsView: View {
                             app.reloadWidgets()
                             // Nothing in Spotlight while app lock is on; indexed again when it is turned off.
                             Task { await session.updateSpotlight(force: true) }
+                            // The photo of the day shows no photo while app lock is on.
+                            Task { await session.photoOfTheDaySettingsChanged() }
                         }
                     if appLock {
                         Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
@@ -185,6 +203,8 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            if shows(.storage) { SmartOfflineSettingsSection() }
 
             if shows(.storage) {
                 Section(String(localized: "Available offline", bundle: .module)) {
@@ -510,7 +530,7 @@ struct ServerFolderList: View {
         }
         .overlay {
             if !loaded {
-                ProgressView()
+                SkeletonRows(count: 6, thumbnail: 24).frame(maxHeight: .infinity, alignment: .top)
             } else if let error {
                 ContentUnavailableView(
                     String(localized: "Couldn't load folders", bundle: .module), systemImage: "exclamationmark.triangle",
@@ -583,6 +603,10 @@ struct ServerFolderList: View {
                         NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
                     }
                     Tab(String(localized: "Storage", bundle: .module), systemImage: "internaldrive") { SettingsView(page: .storage) }
+                    // Desktop pictures from the library (SPEC §15.4).
+                    Tab(String(localized: "Desktop", bundle: .module), systemImage: "menubar.dock.rectangle") {
+                        DesktopPictureSettingsPane()
+                    }
                     Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack") {
                         NavigationStack { SettingsView(page: .server) }
                     }

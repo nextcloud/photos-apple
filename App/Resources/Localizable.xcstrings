@@ -11,6 +11,9 @@
     "Albums" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: the user's albums."
     },
+    "Back Up Now" : {
+      "comment" : "Shortcuts/Control Center: title of the action that starts a photo backup."
+    },
     "Back up now" : {
       "comment" : "Short title of the App Shortcut that starts a backup of the device's photos, shown in Shortcuts and Spotlight."
     },
@@ -41,6 +44,9 @@
     "On this day" : {
       "comment" : "Photos taken on today's date in earlier years: name of a view that Siri and Shortcuts can open, and short title of the App Shortcut that opens it."
     },
+    "Open Nextcloud Photos" : {
+      "comment" : "Title of the action of the Control Center control that opens the app."
+    },
     "Open album" : {
       "comment" : "Title of the App Intent (and short title of the App Shortcut) that opens one of the user's albums."
     },
@@ -49,6 +55,9 @@
     },
     "Opens a view of Nextcloud Photos, such as On this day or the map." : {
       "comment" : "Description of the \"Open in Nextcloud Photos\" action in Shortcuts."
+    },
+    "Pause Backup" : {
+      "comment" : "Title of the action behind the Pause button of the backup's Live Activity."
     },
     "People" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: people recognized in photos."
@@ -77,6 +86,9 @@
     "Searches your photos in Nextcloud Photos for places, people, dates and more." : {
       "comment" : "Description of the search App Intent, shown in Shortcuts."
     },
+    "Set up backup in Nextcloud Photos first." : {
+      "comment" : "Spoken or shown when the Control Center backup switch is turned on before backup was set up; the app opens."
+    },
     "Show photos of a person" : {
       "comment" : "Title of the App Intent that shows the photos of a person."
     },
@@ -85,6 +97,15 @@
     },
     "Shows the photos of a person in Nextcloud Photos." : {
       "comment" : "Description of the App Intent that shows the photos of a person, shown in Shortcuts."
+    },
+    "Turn Backup On or Off" : {
+      "comment" : "Shortcuts action and Control Center switch: turns the photo backup on or off."
+    },
+    "Turn on backup in Nextcloud Photos first." : {
+      "comment" : "Shown when \"Back Up Now\" runs from a control while backup is off; the app opens."
+    },
+    "Turns the backup of this device's photos to your Nextcloud on or off." : {
+      "comment" : "Description of the Shortcuts action \"Turn Backup On or Off\"."
     },
     "Uploads new photos of this device to your Nextcloud." : {
       "comment" : "Description of the \"Back up now\" action in Shortcuts."

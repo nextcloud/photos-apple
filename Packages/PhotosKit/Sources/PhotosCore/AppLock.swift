@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
-import LocalAuthentication
 import Observation
+
+#if !os(tvOS)
+    import LocalAuthentication
+#endif
 
 /// The app lock setting (SPEC §8). It lives in the App Group's defaults, so the widgets and the share extension follow it.
 public enum AppLockSettings {
@@ -132,8 +135,13 @@ public final class AppLock {
         guard !isAuthenticating else { return false }
         isAuthenticating = true
         defer { isAuthenticating = false }
-        let context = LAContext()
-        let granted = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) == true
+        #if !os(tvOS)
+            let context = LAContext()
+            let granted = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) == true
+        #else
+            // Apple TV has no device owner authentication; its app has no lock (SPEC §15.3).
+            let granted = true
+        #endif
         if granted {
             isLocked = false
             awaySince = nil

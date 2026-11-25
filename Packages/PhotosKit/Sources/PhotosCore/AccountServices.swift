@@ -25,6 +25,8 @@ public final class AccountServices: Sendable {
     public let layout: StorageLayout
     /// The partner folders whose photos the timeline shows with a badge (`PartnerTimelineModel`).
     public let partnerPaths = PartnerPaths()
+    /// Feature prints of the library in memory, for "Show Similar" (SPEC §15.5); loaded on first use.
+    public let similarity: SimilarityIndex
 
     public init(
         account: Account,
@@ -50,6 +52,7 @@ public final class AccountServices: Sendable {
         self.database = try AccountDatabase(url: layout.database(account.id))
         self.library = LibraryStore(database: database)
         self.collections = CollectionStore(database: database)
+        self.similarity = SimilarityIndex(database: database)
         let sync = SyncEngine(api: api, database: database, features: features)
         self.sync = sync
         partnerPaths.set(PartnerSettings.load(database).folders.map(\.path))

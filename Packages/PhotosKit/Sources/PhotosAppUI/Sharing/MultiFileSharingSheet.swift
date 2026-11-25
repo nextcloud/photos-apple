@@ -132,7 +132,7 @@ struct MultiFileSharingSheet: View {
             .formStyle(.grouped)
             .disabled(running || creatingLink)
             .overlay {
-                if !loaded { ProgressView() }
+                if !loaded { SkeletonRows(count: 4, thumbnail: 32, circular: true).frame(maxHeight: .infinity, alignment: .top) }
             }
             .navigationTitle(String(localized: "Share \(items.count) photos", bundle: .module))
             .toolbar {

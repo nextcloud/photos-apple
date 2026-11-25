@@ -1,4 +1,4 @@
-# Nextcloud Photos for iOS, iPadOS, macOS and visionOS
+# Nextcloud Photos for iOS, iPadOS, macOS, visionOS, tvOS and watchOS
 
 A native Apple app for the photos and videos in your Nextcloud: timeline, albums, sharing, places, people, memories, backup and more.
 It works with the [Photos](https://github.com/nextcloud/photos) app on Nextcloud 33 and later.
@@ -32,7 +32,11 @@ Command-line builds without signing:
 ```sh
 xcodebuild -scheme NextcloudPhotos -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme NextcloudPhotos -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
+xcodebuild -scheme NextcloudPhotosTV -destination 'generic/platform=tvOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme NextcloudPhotosWatch -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
+
+The watch app is also built and embedded by the iOS build of `NextcloudPhotos`.
 
 ### Signing with your own Apple ID
 
@@ -60,14 +64,18 @@ Release builds are signed with the entitlement files (`App/NextcloudPhotos.entit
 | What | Value | Needed by |
 |---|---|---|
 | App IDs | `com.nextcloud.photos`, `.share`, `.notification-service`, `.widgets`, `.background-upload` | app and extensions |
-| App Group | `group.com.nextcloud.photos`, enabled on all five App IDs | accounts, databases and caches shared with the extensions; the share extension's uploads that the app finishes |
+| App IDs (Apple TV) | `com.nextcloud.photos.tv`, `com.nextcloud.photos.tv.topshelf` | the Apple TV app and its Top Shelf (SPEC §15.3). A separate App Store app; for universal purchase with the iPhone app the TV target would use `com.nextcloud.photos` itself (decision for Nextcloud) |
+| App IDs (Apple Watch) | `com.nextcloud.photos.watchkitapp`, `com.nextcloud.photos.watchkitapp.widgets` | the watch app (shipped inside the iPhone app) and its complication |
+| App Group | `group.com.nextcloud.photos`, enabled on all five App IDs and on the four TV and watch App IDs | accounts, databases and caches shared with the extensions; the share extension's uploads that the app finishes; on the TV and the watch (separate devices, same group name) what their Top Shelf and complication show |
 | App Groups of the Files app | `group.com.nextcloud.apps`, `group.it.twsweb.Crypto-Cloud`, enabled on the app's App ID | backup: reading what the Files app already uploaded |
 | Keychain Sharing | group `$(AppIdentifierPrefix)com.nextcloud.photos` (needs no registration; all five targets must be signed by the same team) | app passwords and push keys for the extensions |
+| Keychain (Apple TV) | group `$(AppIdentifierPrefix)com.nextcloud.photos.tv` (no registration) | the TV's app password |
 | PhotoKit background uploads | `com.apple.photos.background-upload` on `com.nextcloud.photos.background-upload` (iOS and macOS). The extension point requires it (`EXRequiredEntitlements` of `com.apple.photos.background-upload` on macOS 27.3); it is in `Extensions/BackgroundUpload/BackgroundUpload.entitlements`. **Has to be enabled for Nextcloud's App ID** (check in the developer portal whether Apple grants it on request, as for the Files app's extension). Without it the system never starts the extension and the backup uses the app's own background session only | backup (SPEC §7.18.6) |
 | Push Notifications | capability on `com.nextcloud.photos`, and an APNs key or certificate for it | push |
 | Push proxy | `push-notifications.nextcloud.com` must accept the topic `com.nextcloud.photos` (server side, not in the developer portal) | push |
 | Notification filtering | `com.apple.developer.usernotifications.filtering` on the notification service extension. **Apple grants it on request only.** It is not in the entitlement file yet: add it to `Extensions/NotificationService/NotificationService.entitlements` once granted. Without it the extension cannot hide notifications of the server that are not about photos | push |
-| Provisioning profiles | one per App ID and platform (iOS, macOS, visionOS), or automatic signing with an App Store Connect API key | all |
+| Provisioning profiles | one per App ID and platform (iOS, macOS, visionOS, tvOS, watchOS), or automatic signing with an App Store Connect API key | all |
+| Apple TV artwork | layered app icon (400×240, 1280×768) and Top Shelf images (1920×720, 2320×720); `App/TV/Assets.xcassets` has placeholders made from the app icon | App Store |
 
 The entitlement files say `aps-environment = development` (macOS: `com.apple.developer.aps-environment`); exporting an
 archive for TestFlight or the App Store switches it to `production`. Version and build number are `MARKETING_VERSION`
@@ -82,6 +90,9 @@ needs from a designer in [docs/APP-ICON.md](docs/APP-ICON.md).
 ## Code layout
 
 All code lives in the local Swift package `Packages/PhotosKit`; the app target only contains the entry point and resources.
+The exceptions are the Apple TV app (`App/TV`, Top Shelf in `Extensions/TopShelf`) and the Apple Watch app (`App/Watch`,
+complication in `Extensions/WatchWidgets`): their screens are made for the Siri Remote and the watch and share no UI
+with `PhotosAppUI`; their logic is in the package (SPEC §15.3).
 
 | Module | Contents |
 |---|---|

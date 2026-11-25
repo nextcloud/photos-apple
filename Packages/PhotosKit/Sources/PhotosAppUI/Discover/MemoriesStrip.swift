@@ -14,7 +14,10 @@ struct MemoriesStrip: View {
     /// Loaded by the library screen (`load`), so the strip can come and go (selection) without loading again.
     let memories: [Memory]
     @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
+    @Environment(SessionModel.self) private var session
     @State private var slideshow: SlideshowStart?
+    /// Around New Year the year in review leads the strip (December: the year ending; January: the one just ended).
+    @State private var seasonalYear: Int?
 
     /// At most this many cards: the strip is a way in, the Memories screen has them all.
     static let limit = 12
@@ -50,7 +53,8 @@ struct MemoriesStrip: View {
             if !memories.isEmpty {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 10) {
-                        ForEach(memories) { memory in card(memory) }
+                        if let seasonalYear { yearInReviewLink(seasonalYear) }
+                        ForEach(shown) { memory in card(memory) }
                         allMemoriesLink
                     }
                     .padding(.horizontal, 12)
@@ -73,6 +77,29 @@ struct MemoriesStrip: View {
             }
         }
         .memorySlideshow($slideshow)
+        .task(id: Calendar.current.startOfDay(for: Date())) {
+            guard let year = YearInReview.seasonalYear(), let services = session.services else {
+                seasonalYear = nil
+                return
+            }
+            let years = (try? await services.library.reviewYears()) ?? []
+            seasonalYear = years.contains(year) ? year : nil
+        }
+    }
+
+    /// The memories after the year in review card: its year's recap is in the review (Play Film).
+    var shown: [Memory] {
+        guard let seasonalYear else { return memories }
+        return memories.filter { $0.kind != .yearRecap(seasonalYear) }
+    }
+
+    func yearInReviewLink(_ year: Int) -> some View {
+        NavigationLink {
+            YearInReviewScreen(year: year)
+        } label: {
+            YearInReviewCard(year: year, compact: true).frame(width: cardSize.width, height: cardSize.height)
+        }
+        .buttonStyle(.plain)
     }
 
     func card(_ memory: Memory) -> some View {
@@ -153,6 +180,10 @@ struct MemoryScreen: View {
                 Label(Self.playTitle, systemImage: "play.rectangle")
             }
             .help(Self.playTitle)
+            #if os(visionOS)
+                // The photos around the viewer (SPEC §15.4).
+                MemoryRoomButton(memory: memory)
+            #endif
             MemoryActionsMenu(memory: memory, model: actions)
         }
         .memorySlideshow($slideshow)

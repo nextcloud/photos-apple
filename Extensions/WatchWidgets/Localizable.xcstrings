@@ -1,0 +1,35 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld years ago" : {
+      "comment" : "Complication: how long ago the photo was taken; plural variations.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld year ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld years ago"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "A photo from this day in earlier years or one of your favourites." : {
+      "comment" : "Complication: description in the face editor."
+    },
+    "Photo of the Day" : {
+      "comment" : "Complication: name in the face editor.\nComplication: title."
+    }
+  },
+  "version" : "1.1"
+}

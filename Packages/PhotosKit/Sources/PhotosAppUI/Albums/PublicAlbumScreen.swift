@@ -196,7 +196,7 @@ struct PublicFullImage: View {
             if let image {
                 Image(decorative: image, scale: 1).resizable().scaledToFit()
             } else {
-                ProgressView().tint(.white)
+                DelayedSpinner(tint: .white)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

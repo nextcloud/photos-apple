@@ -32,6 +32,8 @@
         @MainActor static func runRefresh() async {
             schedule()
             await run()
+            // A new day: the watch gets its photos without the app being opened.
+            await WatchBridge.shared.update()
         }
 
         /// Stops the backup pass because the background time is over. Not while the app is in front: there the pass may go on.
@@ -82,6 +84,8 @@
         {
             // Creates the app model now: a launch in the background shows no window that would do it.
             _ = AppHost.model
+            // Today's photos for the Apple Watch app (SPEC §15.3).
+            WatchBridge.shared.start(app: AppHost.model)
             BGTaskScheduler.shared.register(forTaskWithIdentifier: BackgroundTasks.processing, using: nil) { task in
                 let work = Task { @MainActor in await BackgroundTasks.run() }
                 task.expirationHandler = { work.cancel() }
@@ -94,6 +98,10 @@
             BackgroundTasks.schedule()
             // On-device recognition for search, while charging and idle (opt-in).
             ContentLabeling.register { AppHost.model }
+            // On-device feature prints for "Show Similar" and key photos, while charging and idle.
+            SimilarIndexing.register { AppHost.model }
+            // Smart offline fills up while charging on Wi-Fi (SPEC §15.8.1).
+            SmartOfflineScheduling.register { AppHost.model }
             // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.
             NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
                 Task { @MainActor in

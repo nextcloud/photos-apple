@@ -14,8 +14,10 @@ public struct MainActions {
     var upload: () -> Void
     var openPublicLink: () -> Void
     var syncNow: () -> Void
-    /// Import from Google Takeout (Mac only).
-    var importTakeout: (() -> Void)? = nil
+    /// Import Library…: other services' exports (SPEC §15.7).
+    var importLibrary: (() -> Void)? = nil
+    /// Import from a camera, memory card or folder (Mac, iPad; SPEC §15.2).
+    var importCard: (() -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -49,6 +51,16 @@ public struct GridActions {
     var addToRecentAlbum: ((Album) -> Void)? = nil
     /// "Add to Album ▸ New Album…" with the selection.
     var addToNewAlbum: (() -> Void)? = nil
+    /// Image ▸ Use as Desktop Picture (Mac, one still photo; SPEC §15.4).
+    var useAsDesktopPicture: (() -> Void)? = nil
+    /// Image ▸ Flag / Rating with the selection (SPEC §15.2); nil when it cannot be rated.
+    var cull: ((CullingCommand) -> Void)? = nil
+    /// Image ▸ Compare (2–4 selected).
+    var compare: (() -> Void)? = nil
+    /// Image ▸ Delete Rejected… (the Library).
+    var deleteRejected: (() -> Void)? = nil
+    /// Image ▸ Edit With ▸ (Mac): the photo to open in another app.
+    var editWith: EditWithTarget? = nil
 }
 
 /// An album opened in a window of its own (File ▸ Open in New Window, the album's context menu, ⌥-click; SPEC §6.2).
@@ -121,10 +133,18 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Upload Photos…", bundle: .module)) { main?.upload() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(main == nil)
-            #if os(macOS)
-                Button(String(localized: "Import from Google Takeout…", bundle: .module)) { main?.importTakeout?() }
-                    .disabled(main?.importTakeout == nil)
-            #endif
+            Button(
+                String(
+                    localized: "Import Library…", bundle: .module,
+                    comment: "File menu item that opens the import of other services' exports (Google Photos, iCloud, Facebook…).")
+            ) {
+                main?.importLibrary?()
+            }
+            .disabled(main?.importLibrary == nil)
+            // ⇧⌘I, as Import… in Photos.
+            Button(CardImportAvailability.menuTitle) { main?.importCard?() }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(main?.importCard == nil)
             Button(Self.exportTitle) { grid?.export?() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(grid?.export == nil || selectionCount == 0)
@@ -181,6 +201,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Rotate Right", bundle: .module)) { grid?.rotate?(true) }
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(grid?.rotate == nil)
+            #if os(macOS)
+                Button(DesktopPictureAction.title) { grid?.useAsDesktopPicture?() }
+                    .disabled(grid?.useAsDesktopPicture == nil)
+            #endif
             Divider()
             Button(
                 grid?.allFavorite == true
@@ -205,6 +229,7 @@ public struct PhotosCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .control])
             }
             .disabled(selectionCount == 0)
+            CullingCommands(grid: grid)
             Divider()
             Button(String(localized: "Delete…", bundle: .module)) { grid?.delete() }
                 .keyboardShortcut(.delete)

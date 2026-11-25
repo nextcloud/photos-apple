@@ -27,6 +27,8 @@ public actor ImagePipeline {
     private let publicToken: String?
     /// Local originals of offline albums, used when the preview can't be loaded.
     private var localOriginal: (@Sendable (FileID, String) -> URL?)?
+    /// Previews kept on the device by smart offline (SPEC §15.8.1): `(fileId, etag, bucket)` to a file at least that large.
+    private var localPreview: (@Sendable (FileID, String, Int) -> URL?)?
     private var isShutDown = false
 
     /// How many loads may run at once.
@@ -76,6 +78,16 @@ public actor ImagePipeline {
 
     public func setLocalOriginalProvider(_ provider: @escaping @Sendable (FileID, String) -> URL?) {
         localOriginal = provider
+    }
+
+    public func setLocalPreviewProvider(_ provider: @escaping @Sendable (FileID, String, Int) -> URL?) {
+        localPreview = provider
+    }
+
+    /// A preview of this request that is on the device: in the cache or kept by smart offline.
+    private func isLocal(_ request: Request) -> Bool {
+        cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
+            || localPreview?(request.fileId, request.etag, request.bucket) != nil
     }
 
     public init(
@@ -163,7 +175,7 @@ public actor ImagePipeline {
                 continue
             }
             // Prefetching exists to get previews from the server onto the disk; what is there already loads fast enough.
-            if cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket) { continue }
+            if isLocal(request) { continue }
             nextId += 1
             var load = Load(id: nextId, request: request, lane: .network)
             load.isPrefetch = true
@@ -218,7 +230,7 @@ public actor ImagePipeline {
     private func wait(for request: Request, key: String, waiter: UInt64, continuation: CheckedContinuation<CGImage?, Never>) {
         if loads[key] == nil {
             nextId += 1
-            let onDisk = cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
+            let onDisk = isLocal(request)
             loads[key] = Load(id: nextId, request: request, lane: onDisk ? .local : .network)
             queued[onDisk ? .local : .network, default: []].append(key)
         } else if loads[key]?.task == nil, let index = queuedPrefetches.firstIndex(of: key) {
@@ -276,7 +288,8 @@ public actor ImagePipeline {
     private func start(_ load: Load, key: String) {
         running[load.lane, default: 0] += 1
         let work = Work(
-            api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal)
+            api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal,
+            localPreview: localPreview)
         let request = load.request
         let id = load.id
         let lane = load.lane
@@ -338,6 +351,7 @@ public actor ImagePipeline {
         let publicToken: String?
         let logger: Logger
         let localOriginal: (@Sendable (FileID, String) -> URL?)?
+        let localPreview: (@Sendable (FileID, String, Int) -> URL?)?
 
         func load(_ request: Request) async -> Result {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
@@ -348,6 +362,16 @@ public actor ImagePipeline {
                 return Result(image: image)
             }
             if Task.isCancelled { return Result() }
+            // Smart offline: a kept preview at least as large as the bucket, decoded to the size asked for. It is not copied
+            // into the cache (it is on the device already); only the decoded image is remembered.
+            if let file = localPreview?(request.fileId, request.etag, request.bucket),
+                let image = ImageDecoding.decode(url: file, maxPixelSize: request.decodeSize)
+            {
+                cache.remember(
+                    image, key: PreviewCache.key(fileId: request.fileId, etag: request.etag, bucket: request.bucket),
+                    maxPixelSize: request.decodeSize)
+                return Result(image: image)
+            }
             // Offline albums: thumbnail the downloaded original instead of hitting the network.
             if let file = localOriginal?(request.fileId, request.etag),
                 let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)

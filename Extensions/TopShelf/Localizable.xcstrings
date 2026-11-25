@@ -1,0 +1,9 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Memories" : {
+      "comment" : "Top Shelf: small title above a memory in the carousel."
+    }
+  },
+  "version" : "1.1"
+}

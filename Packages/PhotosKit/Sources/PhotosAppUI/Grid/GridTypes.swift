@@ -78,6 +78,13 @@ struct GridCallbacks {
     var tileLocator: GridTileLocator?
     /// Edit ▸ Copy (⌘C) with the selection; nil: the grid does not copy.
     var copy: (@MainActor ([FileID]) -> Void)? = nil
+    /// A rating or flag key (P, X, U, 0–5) with the selection (SPEC §15.2); nil: the grid does not rate.
+    var cull: (@MainActor (CullingCommand, [FileID]) -> Void)? = nil
+    /// C with 2–4 selected: the compare view (SPEC §15.2); nil: the grid does not compare.
+    var compare: (@MainActor ([FileID]) -> Void)? = nil
+    /// A pinch (or ⌘−) zoomed out past the densest step, on the photo under the fingers at a point of the grid (0…1):
+    /// the Library's days take over (SPEC §15.5). Nil: the grid just stops at its densest step.
+    var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
@@ -88,6 +95,10 @@ final class GridTileLocator {
     var frame: (FileID) -> CGRect? = { _ in nil }
     /// Scrolls the grid so the tile is on screen (without animation), so the viewer can zoom back into it.
     var reveal: (FileID) -> Void = { _ in }
+    /// Scrolls the grid so the tile's top is at a fraction of the grid's height (a zoom from the days, SPEC §15.5).
+    var place: (FileID, Double) -> Void = { _, _ in }
+    /// The first tile below the pinned header at the top, nil at the very top.
+    var topItem: () -> FileID? = { nil }
 }
 
 /// Whether a grid screen is selecting and how many items; screens around `MediaGridScreen` read it as a preference
@@ -339,10 +350,18 @@ enum GridDrag {
         let call: (URL?, Bool, (any Error)?) -> Void
     }
 
-    /// The original of `item` as a file that is only downloaded when it is dropped somewhere.
+    /// The original of `item` as a file that is only downloaded when it is dropped somewhere; inside the app also the
+    /// photo itself (`LibraryItemReference`), so an album window adds it instead of uploading a copy.
     static func itemProvider(for item: GridMedia, services: AccountServices) -> NSItemProvider {
         let provider = NSItemProvider()
         provider.suggestedName = item.name
+        if let reference = try? LibraryItemReference(account: services.account.id.rawValue, fileId: item.fileId).encoded() {
+            provider.registerDataRepresentation(forTypeIdentifier: LibraryItemReference.contentType.identifier, visibility: .ownProcess) {
+                completion in
+                completion(reference, nil)
+                return nil
+            }
+        }
         let type = UTType(mimeType: item.mimeType) ?? .data
         let fileId = item.fileId
         let name = item.name
@@ -370,6 +389,50 @@ enum GridDrag {
             return progress
         }
         return provider
+    }
+}
+
+/// A photo of the library dragged inside the app (iPad: from a grid into an album window): its account and file id. Only
+/// this process sees it (`NSItemProvider` visibility `.ownProcess`); other apps get the original file.
+struct LibraryItemReference: Codable, Hashable, Sendable {
+    var account: String
+    var fileId: FileID
+
+    /// Declared in the app's Info.plist (`UTExportedTypeDeclarations`).
+    static let contentType = UTType(exportedAs: "com.nextcloud.photos.library-item", conformingTo: .data)
+
+    func encoded() throws -> Data { try JSONEncoder().encode(self) }
+
+    static func decoded(_ data: Data) throws -> LibraryItemReference { try JSONDecoder().decode(LibraryItemReference.self, from: data) }
+}
+
+/// What can be dropped on an album: photos of the library dragged from a grid of this app, which are added to the album
+/// (the same file, not a copy), or files from other apps and the Finder, which are uploaded into it.
+enum AlbumDrop: Transferable {
+    case library(LibraryItemReference)
+    case file(URL)
+
+    static var transferRepresentation: some TransferRepresentation {
+        // First: a drag from the app's own grid also carries the original file, which must not be uploaded again.
+        DataRepresentation(importedContentType: LibraryItemReference.contentType) { (data: Data) in
+            AlbumDrop.library(try LibraryItemReference.decoded(data))
+        }
+        ProxyRepresentation(importing: { (url: URL) in AlbumDrop.file(url) })
+    }
+
+    /// The file ids of `drops` that belong to `account` (a photo of another account cannot be put in this one's albums)
+    /// and the dropped files, in the order they came.
+    static func split(_ drops: [AlbumDrop], account: String) -> (fileIds: [FileID], files: [URL]) {
+        var fileIds: [FileID] = []
+        var files: [URL] = []
+        for drop in drops {
+            switch drop {
+            case .library(let reference):
+                if reference.account == account, !fileIds.contains(reference.fileId) { fileIds.append(reference.fileId) }
+            case .file(let url): files.append(url)
+            }
+        }
+        return (fileIds, files)
     }
 }
 

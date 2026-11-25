@@ -72,6 +72,18 @@ photos; the first photo opens in the viewer and closes again; the Albums screen 
   The debug login only signs in when the app has no account yet, so with the official bundle id the tests would drive
   whatever account that installation has; they refuse to run in that case.
 - On a Mac the tests take over keyboard and pointer while they run.
+- `UITests/IPadTourTests.swift` (iPad simulators only) turns the device (`XCUIDevice.shared.orientation`; `simctl`
+  cannot rotate), walks every sidebar row, the tab bar in portrait, the viewer and its inspector, the grid's inspector,
+  selection, context menus, "Open in new window", the editor and the share sheet, and types the menu commands' keyboard
+  shortcuts on the simulated hardware keyboard. With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<directory>` it writes a
+  screenshot and the accessibility tree of every step there (landscape screenshots are stored rotated, as the screen
+  is). The `testWindows…` tests run only with `TEST_RUNNER_PHOTOS_UITEST_WINDOWS=1`, one at a time on a fresh installation
+  (`xcrun simctl uninstall`): they open album windows, which the system restores at every later launch in front of the
+  library, and switch the simulator to "Windowed Apps" (Settings › Multitasking & Gestures) and back, to make a window
+  narrow and to put two windows side by side.
+  `testWindowsDragPhotoIntoAlbumWindow` changes the server: it runs only with `TEST_RUNNER_PHOTOS_UITEST_DND_ALBUM=1` and an
+  empty own album `r4-ipad-dnd`, and the photo it adds has to be removed again. The system's passcode sheet (Archive)
+  belongs to SpringBoard: `XCUIApplication(bundleIdentifier: "com.apple.springboard")`.
 
 ```sh
 xcodegen generate
@@ -85,8 +97,35 @@ TEST_RUNNER_PHOTOS_UITEST_LOGIN='nc://login/server:http://127.0.0.1:8089&user:ad
   PHOTOS_BUNDLE_ID=com.example.nextcloudphotos.uitest
 ```
 
-The app has no accessibility identifiers yet; the tests find elements by role and by their English labels, and start
+`UITests/FeelTourTests.swift` (iPhone and iPad) tours the Library's zoom levels (picker, taps, pinches in and out of
+the grid) and "Show Similar" (context menu, screen, viewer menu), SPEC §15.5. With `TEST_RUNNER_PHOTOS_UITEST_SHOTS`
+set to a folder it also saves a screenshot of every step there; `-only-testing:NextcloudPhotosUITests/FeelTourTests`
+runs it alone. The simulator cannot run Vision's models, so the app analyses nothing there: to see "Show Similar"
+with results, compute prints of the simulator's cached previews on the Mac (Vision's `GenerateImageFeaturePrintRequest`
+and `FeatureSketcher` from PhotosDomain) and write them into the `similarity` table of the simulator's account database.
+
+The app has no accessibility identifiers yet (apart from `librarySummary`, the zoom levels' scroll view); the tests find elements by role and by their English labels, and start
 the app in English. They are not part of CI because they need a server. They have run in the iOS 27.2 simulator (iPhone).
+
+`UITests/AmbientUITests.swift` (SPEC §15.4) drives the system around the app, so it only makes sense in a simulator of
+its own: `testBackupLiveActivity` and `testControlActions` (iPhone) need backup set up for the test account and new
+photos in the simulator's library (`xcrun simctl addmedia`); `testControls` and `testPhotoFrameWidget` add the controls
+and widgets through Control Center's and the Home Screen's galleries, as a user would; `testMemoryRoom` (Vision Pro)
+opens a memory's room, with `PHOTOS_DEBUG_MEMORY_ROOM_FOCUS=1` bringing the first frame close (XCUITest cannot look and
+pinch). With `PHOTOS_UITEST_SHOTS=<folder>` (`TEST_RUNNER_…`) the iPhone tests write their screenshots there; on Vision Pro
+`XCUIScreen` captures nothing, take them with `xcrun simctl io <udid> screenshot` while the test runs.
+
+`UITests/MemoryFilmTourTests.swift` (iPhone and iPad) plays a memory as a film (title card, scrubbing, skip, landscape),
+exports it as a video, plays a trip and swipes through the year in review; `PHOTOS_UITEST_SHOTS=<directory>` writes a
+screenshot and the accessibility tree of each step there, `PHOTOS_UITEST_TRIP=<part of a trip's title>` picks the trip
+(one with stops more than 30 km apart shows the map flights). Run in the iOS 27.2 simulator.
+
+`UITests/ExtrasTourTests.swift` (iPhone simulator) walks through the round-5 extras (SPEC §15.8): Settings › Smart
+offline, Make Sticker, a collage of a selection, the sticker book, and a photo of the day notification (the Debug build
+schedules one 25 seconds ahead when started with `PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN=25`; the test accepts the permission
+alert). With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` the screenshots are also written there. Subject lifting (stickers)
+does not work in the simulator; `PhotosMediaTests/StickerSampleTests` lifts real photos on the Mac when run with
+`TEST_RUNNER_PHOTOS_STICKER_SAMPLES=<folder of JPEGs>` and writes every sticker style next to them.
 
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
@@ -95,6 +134,33 @@ For other UI work, Debug builds also sign in without a browser when started with
 viewer, Collections, Settings, Search, a memory, and every screen a link leads to). It runs only on an iPhone simulator,
 needs the same login variable, and attaches a screenshot of every step; with `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<directory>`
 it also writes the screenshots and the accessibility tree of each step there.
+
+### Apple TV and Apple Watch (SPEC §15.3)
+
+`UITestsTV/TVTourTests.swift` tours the TV app with the Siri Remote (`XCUIRemote`): Home, a memory, the viewer, a
+slideshow, Albums, Settings. Same rules as the smoke tests above; screenshots go to `PHOTOS_SHOTS_DIR` when set. Install
+the runtimes once with `xcodebuild -downloadPlatform tvOS` and `… watchOS`.
+
+```sh
+xcrun simctl create tv "Apple TV 4K (3rd generation)" com.apple.CoreSimulator.SimRuntime.tvOS-27-2   # prints <udid>
+xcrun simctl boot <udid>
+TEST_RUNNER_PHOTOS_UITEST_LOGIN='nc://login/server:http://localhost:8089&user:admin&password:admin' \
+TEST_RUNNER_PHOTOS_SHOTS_DIR=/tmp/tv-shots \
+  xcodebuild test -scheme NextcloudPhotosTV -destination 'platform=tvOS Simulator,id=<udid>' \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PHOTOS_DEBUG_ENTITLEMENTS=YES \
+  PHOTOS_BUNDLE_ID=com.example.nextcloudphotos.uitest
+```
+
+Debug helpers: `PHOTOS_DEBUG_TV_SERVER=<address>` starts the TV's Login Flow at once (the QR code); a test can grant it
+with the server's grant page; `PHOTOS_DEBUG_TV_ROUTE=nextcloudphotos://memories/<id>[/play]` (or `…/slideshow`) opens a
+Top Shelf link at launch (`simctl openurl` asks "Open in…?", which needs the remote). The Top Shelf (`TopShelf/` in the
+App Group container) needs `PHOTOS_DEBUG_ENTITLEMENTS=YES`.
+
+The watch app shows what the iPhone app sends. In a paired iPhone + watch simulator pair (`xcrun simctl pair <watch>
+<phone>`; install the iPhone app and `…/Nextcloud Photos.app/Watch/Nextcloud Photos.app` on the watch) the digest
+arrives, photo files did not (watchOS 27.2 simulator). For the watch's screens without a phone,
+`PHOTOS_DEBUG_WATCH_DIGEST=<folder with digest.json and the JPEGs>` loads a digest at launch (the iPhone app keeps the
+last one in `Library/Caches/WatchDigest`), and `PHOTOS_DEBUG_WATCH_PAGE=0|1|2` opens a page.
 
 ## Running the app in the iOS simulator
 

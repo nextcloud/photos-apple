@@ -156,6 +156,10 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the context menu of a photo shows a large preview (a tap opens it), tiles can be dragged into other apps on iPad (the original
   is downloaded on drop), selection mark in the bottom trailing corner, hover effect under the pointer. The logic behind them
   (single-flight refresh, what a drag carries, mark and preview sizes) ✅ unit-tested.
+  iPad drag and drop ✅ run in the iOS 27.2 simulator (windowed apps, two windows side by side): a photo dragged from the
+  library into an album window is added to that album — the same file, not an uploaded copy (`AlbumDrop`; it was ignored
+  before, the album only took file URLs); a photo dropped back on its own grid uploads nothing. Dragging into other apps
+  🟡 (XCUITest cannot drive another app's window).
 - Date scrubber on macOS ✅ (year labels along the scroller, month label while scrolling or hovering, click/drag; hover and drag
   were only exercised through accessibility, not with a real pointer).
 - Date scrubber on iPhone, iPad and Vision Pro ✅ run in the iOS 27.2 simulator (iPhone): replaces UIKit's section index, which
@@ -250,7 +254,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   Library does not show: the tile closest in time) and marks it — selected on the Mac, a short ring elsewhere. Target ✅
   unit-tested (`TimelineReveal`); the Mac grid got a `reveal` for it. 🟡 Not driven in the app (the screen locked).
 - Viewer on the Mac/iPad: pages fit the visible area (sidebar, toolbar, info inspector), arrow keys / Space / Escape, previous/next
-  buttons under the pointer ✅. Video and Live Photo motion play from the local copy when there is one, else through the app's
+  buttons under the pointer ✅ (iPad: inspector beside the photo in both orientations, → pages, run in the iOS 27.2 simulator;
+  the pointer was not). The grid's info inspector on iPad ✅ (simulator): opened from the context menu, closed with "Hide
+  info" in the toolbar, not brought back empty by the system at the next launch. Video and Live Photo motion play from the local copy when there is one, else through the app's
   HTTP client 🟡 (not exercised against a server with a user-trusted or client certificate).
 - Performance budgets (§10) 🟡: the store side is measured with a synthetic 100 000-item index
   (`LargeLibraryPerformanceTests`, tag `performance`; skip with `PHOTOS_SKIP_PERFORMANCE=1`). On an Apple-silicon Mac, release
@@ -296,8 +302,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
 ## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
 - Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
   search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
-  iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping 🟡 (compiled for iOS, not run).
-- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`, not run): tabs Library,
+  iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping; iPad ✅ run in the iOS 27.2
+  simulator on the iPad Pro 13-inch and the iPad mini (`IPadTourTests`: every sidebar row in landscape, the tab bar in
+  portrait shows Library, Settings and Search, turning the device keeps the app running), Vision Pro 🟡. Fixed on the way: Photos/Videos/Favorites hung at 100 % CPU (undo manager,
+  `UndoManagerBox`), the sidebar's sections and Backup were tabs of the portrait tab bar, rotating to landscape crashed (the
+  sidebar header had no app model).
+- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`; a narrow iPad window ✅ run in
+  the iOS 27.2 simulator on the iPad Pro 13-inch and the iPad mini with "Windowed Apps": the tab bar with Collections and its
+  list, `testWindowsNarrowWindowIsCompact`): tabs Library,
   Collections, Search, Settings. The Collections tab lists every place that is a sidebar row elsewhere (server features
   respected) and Backup with its state, and pushes it in its own stack; the navigation state stays the selected destination
   and its path, so deep links, state restoration and a change between tab bar and sidebar keep working.
@@ -318,7 +330,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   unlock while the app is locked.
 - Menu bar: File (New Window, New Album…, Open Public Album Link…, Upload Photos…, Export…, Share…), View (Zoom In/Out, Sync Now),
   Image (Open, Get Info, Edit…, Edit Date and Location…, favourite, Add to Album…, Delete…), Go (the sidebar's destinations) ✅
-  structure read from the running app; the same commands are the keyboard shortcuts on iPadOS 🟡.
+  structure read from the running app; the same commands are the keyboard shortcuts on iPadOS: ⌘1…⌘9 (Go), ⇧⌘N, ⌘F, ⌥⌘S and
+  ⌘. ✅ typed in the iOS 27.2 simulator; ⌘I (Get Info) and ⌘−/⌘+ (Zoom) are in the iPad's menu but did not reach their
+  action there (open; ⌘I in the viewer, a button's own shortcut, works).
   🟡 Image ▸ Rotate Left ⌘R / Rotate Right ⌥⌘R on the selection (as in Photos; Sync Now moved to ⇧⌘R), also in the grid's
   context menu: saved like the editor's "Overwrite original" — a new version of each file, only replacing the version the app
   knows (`If-Match`), read-only shares/videos/RAW-GIF-WebP left alone and reported; save path ✅ run against the 8089 server
@@ -330,7 +344,9 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the most recently changed, All Albums… 🟡 (Image menu structure ✅ read from the app). Share… in the grid's context menu (the
   system Share menu on the Mac, share sheet on iPhone/iPad, originals downloaded on demand) 🟡. Albums open in their own window
   (`WindowGroup(for: AlbumWindowValue)`): File ▸ Open in New Window, the album card's context menu, ⌥-click 🟡 (built for
-  macOS/iOS/visionOS, not run: Mac locked). ⬜ View ▸ Square Tiles (timeline area).
+  macOS/iOS/visionOS, not run on the Mac: Mac locked). iPad ✅ run in the iOS 27.2 simulator: "Open in new window" in the
+  album card's context menu opens the album in a window of its own, which is restored at the next launch (it never appeared
+  before: the multiple-scenes key was outside the scene manifest). ⬜ View ▸ Square Tiles (timeline area).
 - Mac: "Export…" saves the originals of the selection into a folder 🟡 (the panel was not driven by hand).
 
 ## M2 Albums, sharing, upload, offline — ✅
@@ -431,7 +447,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   Classification ✅ unit-tested; UI compiled, not looked at.
 - 🟡 §7.18.9 mirror device albums into Nextcloud albums (iOS, opt-in, picked albums): mirror logic ✅ unit-tested with a fake
   library and server; PhotoKit album reading and the Backup › Albums screen compiled for iOS, **not run on a device**.
-- 🟡 §7.18.10 Google Takeout import (Mac): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
+- 🟡 §7.18.10 Google Takeout import (now part of Import Library…, §15.7, on every platform): ZIP reader (deflate, stored, ZIP64, checksum), sidecar matching, plan, importer
   (duplicates, albums, comments, journal, stop/resume) ✅ unit-tested and ✅ end-to-end against 8089, 8091 and 8093 (dates
   as mtime, album, second import uploads nothing); the import window 🟡 compiled, not looked at (screen locked).
 - ✅ Most compatible (round 4): HEVC videos become H.264 (QuickTime, metadata kept; Live Photo motion parts too), next
@@ -605,28 +621,205 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
 ## M6 Delight (SPEC §15) — ⬜
 
 ### §15.1 Memory films and Year in Review
-- ⬜ Not started.
+- Memory films (MF-1) 🟡: memories play as films — title card, Ken Burns moves towards faces/salient regions (Vision, on
+  the device), cuts on the music's beat (on-device beat detection; steady 3.2 s rhythm without music, without a clear
+  beat and for Apple Music songs), dissolves at new days/stops, Live Photo motion and videos inline, map flights between a
+  trip's stops (MapKit satellite snapshot; standard map, then a night-blue grid as fallbacks), Previous/Play/Next,
+  scrubber, Mute, ← → Space M Esc, end card. Plan, camera, beat detection (click tracks at 75/100/128 BPM, noise,
+  silence), stops/km and map-flight geometry ✅ unit-tested (`MemoryFilmTests`, `YearInReviewTests`). ✅ run in the iOS
+  27.2 simulator (`UITests/MemoryFilmTourTests`: title card, cross-fades, faces framed, scrubbing, skip, landscape, a trip
+  Lisbon → Porto → Madrid with two flights; there MapKit cannot draw snapshots, so the grid fallback shows;
+  `ios-fix-shots/r5-memories/12…17`, `50-trip-*`). ✅ run on the Mac (AX only): film beside the sidebar, satellite map
+  flights with the route (`r5-memories/mac/61…64`). 🟡 Not run: music playback with beat cuts in the app (no audio file
+  chosen in the test containers), inline videos and Live Photos on screen (the test library has none; the export test
+  renders a clip), Vision Pro.
+- Export as video (MF-2) 🟡: 1080p H.264/HEVC with the music file or the clips' sound, progress and Cancel, Share…, Save to
+  Nextcloud…, Save to Mac…; temporary folders removed. Rendering, music mix, clips, map flights, cancel clean-up ✅
+  unit-tested (`FilmExporterTests`, real AVFoundation files; a 1080p 16 s film renders in about 2 s on this Mac). ✅
+  exported in the iOS simulator (51 s film, `18…20`) and on the Mac (51 s trip film in 15 s, 1920 × 1080 H.264, the
+  satellite flight in the video, `mac/65…67`); the temporary folder was empty after Done. 🟡 Share sheet targets and the
+  upload to Nextcloud not completed in a test.
+- Year in Review (MF-3) 🟡: swipeable cards (intro, busiest day, top month, streak, on the move, people, pet, first
+  snow/beach, favorites, best of), share as images or video, Play film; in Memories and in the strip in Dec/Jan. Numbers,
+  card choice, hidden/unnamed people, labels and the store queries ✅ unit-tested (`YearInReviewTests`,
+  `YearReviewStoreTests`). ✅ run in the iOS simulator (`30…42`: intro, busiest day, top month, streak, on the move with
+  9 places and km, best of, Play film) and on the Mac (`mac/68`). 🟡 People/pet/snow/beach cards not seen (no Recognize
+  and no on-device labels on the test server); the strip's seasonal card only shows in December/January.
 
 ### §15.2 Photographer's Mac: import, culling, compare, external editors
-- ⬜ Not started.
+- ✅ Culling (ratings 1–5, Pick/Reject as collaborative system tags, outbox, Undo, P/X/U/0–5 keys in grid and viewer,
+  auto-advance, tile badges, dimmed rejected, Image ▸ Flag/Rating, Library filter, Delete Rejected…). Unit tests (model,
+  store filter vs. marks for every filter). Run on the Mac against the 8089 test server (keys through `PHOTOS_DEBUG_GRID_KEYS`,
+  tags created and assigned on the server, badges live, filter "Picks", Delete Rejected confirmation) and in the iPad
+  simulator (iOS 27.2: badges of the server's tags on a fresh device). iPad hardware-keyboard keys built, not run.
+- ✅ Compare view (2-up/4-up, synchronised zoom/pan, 100 %, keep one). Run on the Mac (`PHOTOS_DEBUG_COMPARE=2`, 100 % via the
+  toolbar). Pinch/drag/keys not driven (no real input).
+- 🟡 Import from camera or card. Engine unit-tested (pairing, patterns, ledger, matching, verification, delete only
+  verified, stop). Run on the Mac with a folder card: new-only (4 of 6 found on the server), upload into the date folder,
+  checksum verified, deleted from the card, toolbar summary; iPad simulator: the sheet with the same card folder. Not run:
+  a real USB camera or card reader (ImageCaptureCore paths are built for Mac and iPad, untested), eject, the Dock bar
+  (drawn, not seen), and reading a mounted card in the sandbox (the TCC/sandbox refusal path was seen and explains itself).
+- 🟡 Edit With (Mac). Run on the Mac with `PHOTOS_DEBUG_EDIT_WITH`/`_NO_OPEN` (another app is not brought to the front in
+  checks): download, a save changed the file on the server (new ETag), a server-side change in between gave
+  `IMG_8001 (edited).JPG`, Done removed the local copy. Not run: opening a real editor (Pixelmator, Photoshop…) and its
+  saving; apps that save by replacing the file through a sandboxed save panel may not reach the watched file.
+- ⬜ Not done: thumbnails grid for a camera's RAW-only shots on iPad (ImageCaptureCore thumbnails untested), tethered
+  shooting, import into an album, keywords/XMP sidecars, a Lightroom-style loupe with filmstrip.
 
 ### §15.3 New platforms: Apple TV and Apple Watch
-- ⬜ Not started.
+- ✅ Package builds for tvOS and watchOS (GRDB supports both); `PhotosCore` runs on tvOS with Spotlight, notification
+  banners and app lock left out (`#if os(tvOS)`). Generic tvOS and watchOS builds in CI (`ci.yml` build matrix).
+- ✅ TV login with Login Flow v2 as a QR code: run in the tvOS 27.2 simulator against the test server — the QR code was
+  decoded from the screenshot and the flow granted with the server's own grant page (as a phone browser would); the TV
+  signed in and showed Home. Certificate-trust and http questions built, not run.
+- ✅ TV Home shelves (memories, favourites, albums, shared albums, recent), memory/album/all-photos grids, Albums tab,
+  Settings: run in the simulator (XCUITest tour with the Siri Remote, `UITestsTV/TVTourTests.swift`, passes).
+- ✅ TV viewer (left/right, info, Play/Pause → slideshow) and slideshows (title over the first photo, drift, pause, skip,
+  cross-dissolve measured frame by frame): run in the simulator. 🟡 Video playback in the system player: built, not run (the test library's videos were not
+  reached in the tour).
+- ✅ Family slideshow (shuffled rounds, resumes, clock): run in the simulator; order logic unit-tested.
+- ✅ Top Shelf: run in the tvOS 27.2 simulator — with the app in the Home screen's top row and focused, the Top Shelf
+  showed the cover of the first memory ("2 years ago") from the manifest the app wrote into the App Group; the memory
+  links open the memory or play it (run via the debug route). The full-screen carousel itself (swipe up) was not
+  opened.
+- 🟡 Watch app (photo of the day, On This Day, Favorites, pager): run in the watchOS 27.2 simulator with a digest the
+  iPhone app built from the test server. Phone → watch in a paired simulator pair: the digest (application context)
+  arrived; the photo files (`transferFile`) were reported sent by the phone but never reached the watch simulator — to be
+  checked on devices.
+- 🟡 Complication (accessory families): built and embedded, not seen on a face (the simulator's face editor needs input).
+- ⬜ Login hand-off from the iPhone app, TV account switcher and search (plan in SPEC §15.3).
+- Needs Nextcloud's team: App IDs `com.nextcloud.photos.tv`, `.tv.topshelf`, `.watchkitapp`, `.watchkitapp.widgets`
+  with the App Group, an App Store record decision for the TV app (separate app or universal purchase), tvOS icon and
+  Top Shelf artwork (README).
 
 ### §15.4 Ambient: wallpaper, StandBy, Live Activity, Controls, Vision Pro memory room
-- ⬜ Not started.
+Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the repository).
+- ✅ Live Activity of the backup (iPhone, iPad): run in the iOS 27.2 simulator (`AmbientUITests.testBackupLiveActivity`,
+  15 new photos): starts while many photos are compared with the server, Dynamic Island (compact, paused state), Lock
+  Screen banner "14 left · 21.8 MB left · Pause", then "Backed up · 14 uploaded". Start/update/end rules unit-tested
+  (`BackupActivityTests`); remaining size from `BackupStatus.pendingBytes` (engine test). Found and fixed in the
+  simulator: the activity first only started once the uploads began, by then the user had often left the app and the
+  system refused ("Target is not foreground"); it now starts during the server check and only while the app is in front
+  (or from the intent). Not seen: the expanded Dynamic Island, the stale state, the Pause button's effect, a real device.
+- ✅ Controls (iOS 18+ ControlWidget): "Backup" switch, "Back Up Now", "Nextcloud Photos" — added through Control
+  Center's gallery in the simulator (`testControls`); the switch turned backup off and on in the app's process while the
+  app was in the background, "Back Up Now" started a backup with its Live Activity from the background
+  (`testControlActions`, log: "turned off/on", "Live Activity started"). Lock Screen and Action button placement not
+  tried (same controls). Not on the Mac or Vision Pro (decided, SPEC §15.4).
+- ✅ Photo frame widget and backup widget: added to the Home Screen through the widget gallery in the simulator
+  (`testPhotoFrameWidget`): the frame shows a favourite with place and day, the backup widget "Backed up · Last backup …".
+  Rotation and sources unit-tested (`AmbientRotationTests`, `AmbientPhotosTests`). 🟡 Not seen: StandBy and its night mode
+  (the simulator has no StandBy), Lock Screen accessory families, the tinted Home Screen, the album picker of the frame's
+  settings, the Mac desktop and Vision Pro widgets; on visionOS the frame builds with paper texture and mounting styles.
+- 🟡 Mac desktop pictures: "Use as Desktop Picture" (grid context menu, viewer More menu, Image menu), rotation in
+  Settings ▸ Desktop and from an album's menu; plan/schedule/persistence/file clean-up unit-tested (`DesktopPictureTests`).
+  Seen in the Mac app (accessibility API, screenshots): Image ▸ Use as Desktop Picture, Settings ▸ Desktop, the album
+  menu's "Use as Desktop Pictures…" sheet preset to the album. Not run against the real desktop: starting it would
+  change the owner's wallpaper on this Mac.
+- ✅ Vision Pro memory room: run in the visionOS 27.2 simulator (`AmbientUITests.testMemoryRoom`): "Memory Room" in a
+  memory's toolbar opens the immersive space, the memory's photos hang framed around the viewer with the title in front,
+  the button becomes "Leave Memory Room"; a frame brought close (debug switch for the pinch) comes in front at eye height.
+  Layout unit-tested (`MemoryRoomLayoutTests`). Found in the simulator and changed: frames right in front covered the
+  window, and the frame brought close filled the view — the front 60° stay free now and the close frame sits 1.5 m away.
+  🟡 Not seen: a real look-and-pinch, the hover glow, a spatial photo shown with depth (no spatial photo in the test
+  library), VoiceOver in the room.
+- Found on the way and fixed (shared, `project.yml`): the app embedded the share and notification-service extensions on
+  visionOS, where these extension points do not exist, so it did not install in the visionOS simulator; and
+  `UIApplicationSupportsMultipleScenes` was not inside `UIApplicationSceneManifest`, so visionOS refused every immersive
+  space (also the round-4 panorama) and iPadOS may have kept the app to one window.
 
 ### §15.5 Feel and craft: zoom levels, haptics, no spinners, similar photos
-- ⬜ Not started.
+- ✅ Zoom levels Years › Months › Days › All Photos (all four Library filters): cards with key photos and date overlays,
+  day mosaics, pinch that follows the fingers with momentum and settles on the stop it was heading for (anchored on the
+  photo or card under the fingers), taps zoom in, segmented picker (bottom on iPhone/iPad/Vision Pro, toolbar on the
+  Mac), ⌘+/⌘− along the same ladder, Mac trackpad pinch through the grid steps into the days. Unit tests
+  (`LibraryZoomTests`, `KeyPhotoTests`, `LibrarySummaryTests`, `LibraryZoomModelTests`; 100 000 items: 80–190 ms, budget
+  800 ms); run in the iOS 27.2 simulator with the UI tour
+  `FeelTourTests` (years → tap → months → pinch → days → pinch out → months → tap a day's photo → All Photos at it; grid
+  pinch steps). Not verified by the tour: the pinch out of the densest grid into the days (XCUITest's synthesized pinch
+  starts UIKit's two-finger selection there; the grid now refuses that selection while a pinch runs, and the move
+  itself is unit-tested). Mac: built, not verified (the display was asleep, no window could be captured); visionOS
+  compiled, not run.
+- ✅ Haptics: year ticks while scrolling fast or scrubbing the year index, zoom snaps, selection start (iPhone, iPad);
+  trackpad level change and alignment feedback on the Mac. Logic unit-tested (`YearBoundaryTickerTests`); the
+  simulator cannot play haptics, so the feel itself is unverified on a device.
+- 🟡 No spinners: skeletons instead of spinners on albums, people, folders, tags, album picker, sharing sheets, partner
+  sharing, links; cached preview in the editor; delayed spinners (0.9 s) where nothing better exists. Remaining
+  spinners listed in SPEC §15.5. Built for all platforms; the screens were not looked at one by one in the simulator.
+- ✅ Show Similar (viewer More menu, grid context menu) with best shot of a series and "Keep Best…"; on-device feature
+  prints from cached previews, migration `v5-similarity`, incremental background indexing (BGProcessingTask with power,
+  Mac background activity, battery-aware trickle while the Library is shown), in-memory sketches searched in
+  milliseconds. Unit tests with real Vision on the Mac (`SimilarityIndexTests`, `SimilarityMathTests`,
+  `SimilarityStoreTests`; search over 100 000 sketches 40 ms); menu and screen run in the iOS simulator with prints made
+  on the Mac (the simulator cannot run Vision's models).
+- ⬜ Not done: a "Similar shots" section in Duplicates (series across the whole library) — the series logic
+  (`SimilarSeries.series`) is there and tested, the screen is not; a live cross-fade between grid steps in the middle of
+  an iPhone pinch (the grid scales with the fingers and changes step on release).
 
 ### §15.6 Then and now, travel globe
-- ⬜ Not started.
+- ✅ Then and now spots (TN-1): 100 m spots over ≥ 2 years, ranking, titles; unit tests (`PlacesDelightTests`,
+  `TravelQueryTests`); run in the iOS 27.2 simulator against the test library (Places row, "See all", spot screen).
+- ✅ Same view (TN-2): Vision feature prints of 256 px previews choose each year's photo; unit tests with a fake distance
+  and with real feature prints of generated pictures (`ThenAndNowMediaTests`); ran in the simulator. Compass heading not
+  used (not in the index) — decision in SPEC.
+- ✅ Side by side, viewer More menu, time-lapse player and video export (TN-3, TN-4): run in the iOS 27.2 simulator
+  (`UITests/PlacesTourTests`, screenshots in `ios-fix-shots/r5-places`); the MP4 writer has a unit test that reads the
+  video back. Mac: the Places row seen in the running app (AX API, `mac-01-places.png`); visionOS: build only.
+- ✅ Travel model (TG-1, `TravelHistory`): unit tests; reusable for Year in Review (`stats(in:)`).
+- ✅ Travel globe (TG-2): MapKit hybrid realistic globe with legs, place markers, year filter, trips; run in the iOS
+  27.2 simulator. Mac: the screen and its panel seen in the running app, the map imagery not (it does not draw in a
+  window that is never brought to the front); visionOS: build only.
+- 🟡 Countries and scratch map (TG-3): run in the simulator. The index only has the server's country where the
+  extended Photos API is detected (`mediaIndexExtended` requests `nc:metadata-photos-place-country`), so on stock
+  servers countries come from the opt-in Apple Maps lookup; requesting that property on every server is a sync change
+  outside this package (left for the sync owner).
 
 ### §15.7 Bring everything home: imports
-- ⬜ Not started.
+- ✅ General importer (`ImportPlanner`, `LibraryImporter`) with adapters for Google Takeout, Apple's iCloud Photos data
+  export, Facebook and Instagram JSON exports (2018–2026 layouts), plain photos: unit-tested with fixtures written from
+  documented real exports; ✅ end-to-end against 8089, 8091 and 8093 (Apple + Facebook: capture time written into the Facebook photo and
+  read by the server, favourite, hidden photo in `/.archive`, album, second import uploads nothing; Google Takeout as in
+  round 3).
+- ✅ Duplicates across exports and against the server (`ImportMatcher`: name+size, Apple minutes, reduced copies),
+  metadata write-back (`ImportMetadataWriter`), parallel uploads, free-space stop, journal/resume, summary and report:
+  unit-tested.
+- ✅ iPhone (iOS 27.2 simulator): start screen, review, progress with the photos sliding by, Welcome home (light, dark,
+  XXL text) against 8089 with a 4-service demo export (16 items: 14 uploaded, 2 found on the server, 4 albums, 1 hidden
+  photo archived, report uploaded). Screenshots: `ios-fix-shots/r5-import/`. The continued processing task is not
+  available in the simulator (the import ran in the app, as designed when the system declines); 🟡 on a device.
+- ✅ Mac: review, progress and Welcome home run (driven through the accessibility API). 🟡 Photos Library source:
+  the import of its items (export one at a time, archive, favourite, album) ✅ unit-tested with an injected export; reading
+  the library through PhotoKit not run (it needs the Photos permission prompt). 🟡 Picking
+  files with the file picker and resuming via bookmarks after a relaunch not run (needs real input); the Mac needs
+  `com.apple.security.files.bookmarks.app-scope` (added to the entitlements) for that.
+- ⬜ iPad and Vision Pro layouts not looked at (same sheet).
 
 ### §15.8 Smart offline and fun extras: stickers, collages, photo of the day
-- ⬜ Not started.
+Unit tests: `SmartOfflinePolicyTests`, `ExtrasTests` (photo of the day, collage layouts and picker, sticker subjects),
+`ExtrasStoreTests`, `ExtrasCoreTests` (smart offline passes against a stubbed server, notification texts and dates, sticker
+book), `ExtrasMediaTests` (pipeline uses kept previews, sticker styles, PNG/HEIC alpha). UI: `UITests/ExtrasTourTests`
+in the iOS 27.2 simulator against the 504-photo test server; screenshots in `ios-fix-shots/r5-extras/`.
+- ✅ Smart offline (§15.8.1): run in the iOS 27.2 simulator against the test server — the first foreground passes kept 135
+  previews (62.6 MB) of the recent photos, favourites and the coming days' memories, and Settings shows that. Policy,
+  eviction (LRU, stale, budget change, Off), Wi-Fi/Low Power rules and originals mode unit-tested. 🟡 The background task
+  (charging) and the Mac's background activity were not seen to run; offline browsing was not tried in the simulator
+  (the pipeline's use of kept previews is unit-tested). ⬜ No badge on grid tiles (decided against, see SPEC).
+- 🟡 Stickers (§15.8.2): lifting and all four styles verified on the Mac with real photos of the test library
+  (`StickerSampleTests`, outputs in `ios-fix-shots/r5-extras/mac-stickers/`). In the simulator Vision's segmentation is not
+  available, so the sheet shows its explanation; the sticker book was shown with stickers made on the Mac (copied into
+  the simulator's book). Not verified:
+  the system's "Add Sticker" in VisionKit's menu (needs a device), a person's sticker pack (the test server has no
+  Recognize), the Mac and Vision Pro sheets running.
+- 🟡 Collage and card (§15.8.3): layouts, crop and picker unit-tested; the editor run in the iOS 27.2 simulator with six
+  photos of the test library (mosaic, magazine, prints, grid, picking a photo to swap). Not verified: the PDF and image
+  export through the share sheet, "Save to Nextcloud" (it uses the same uploader as "Save as copy"), the album and memory
+  entry points, the Mac and Vision Pro.
+- ✅ Photo of the day (§15.8.4): run in the iOS 27.2 simulator — turning it on asks for permission and schedules the
+  coming days with their photos attached (the system log shows the attachments copied), the debug one arrived ("On this
+  day 13 years ago · Dubai") and tapping it opened the photo in the viewer. Choice, texts (also with app lock) and dates
+  unit-tested. Tapping any notification crashed the app before (UIKit asserted on the async delegate method finishing off
+  the main thread); the router now uses the completion-handler form on the main queue. 🟡 The attached photo was not seen
+  as a thumbnail or expanded in the simulator; the app-lock text and the Mac were not seen on screen.
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

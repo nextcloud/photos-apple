@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+  SPDX-License-Identifier: MIT
+
+  Privacy manifest of the Apple TV Top Shelf extension (SPEC §15.3). It links only PhotosModel, reads files of its App Group and uses
+  none of the APIs that need a reason. Keep it in step with the code (docs/PRIVACY-AND-EXPORT.md).
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>

@@ -63,6 +63,14 @@ public final class AppModel {
         Diagnostics.removeExports()
         // Uploads of shares whose extension has ended go on in the app (SPEC §7.24).
         if Bundle.main.bundleURL.pathExtension == "app" { ShareUploads.resumeAbandoned(layout: layout, keychain: keychain) }
+        // The backup widget, the Control Center controls and the Live Activity follow the backup; the Mac's desktop
+        // pictures go on rotating (SPEC §15.4).
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            BackupPresence.shared.start(backup)
+            #if os(macOS)
+                DesktopPictures.shared.attach(self)
+            #endif
+        }
         // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
         // background, `RootView`), so a crash loses at most the last few minutes.
         Task { [weak self] in
@@ -446,6 +454,8 @@ public final class AppModel {
 
     /// Maps a delivered notification to a destination (On this day for the Photos "onthisday" notification).
     public func handleNotification(userInfo: [AnyHashable: Any]) {
+        // A link with the account (the photo of the day): it opens in that account, or asks to switch.
+        if let link = (userInfo[PhotoOfTheDayNotifications.linkKey] as? String).flatMap(URL.init(string:)), open(link) { return }
         if let destination = userInfo[PushNotifications.destinationKey] as? String { requestedDestination = destination }
     }
 
@@ -494,7 +504,10 @@ struct SystemTraces: Sendable {
     static let none = SystemTraces(removeNotifications: { _ in }, reloadWidgets: {})
 
     static let live = SystemTraces(
-        removeNotifications: { id in await PushNotifications.removeDelivered(.removeAllDelivered, account: id) },
+        removeNotifications: { id in
+            await PushNotifications.removeDelivered(.removeAllDelivered, account: id)
+            await PhotoOfTheDayNotifications.removePending(account: id)
+        },
         reloadWidgets: {
             #if canImport(WidgetKit)
                 WidgetCenter.shared.reloadAllTimelines()
