@@ -11,7 +11,8 @@ import Testing
 @testable import PhotosModel
 
 /// The time-lapse video and the view matching of "Then and now" (SPEC §15.6).
-@Suite struct ThenAndNowMediaTests {
+// A video writer that never gets its frames waits for ever: fail instead of hanging the test run.
+@Suite(.timeLimit(.minutes(2))) struct ThenAndNowMediaTests {
     /// A test picture: a coloured background with a white square at a position (the "view").
     static func picture(width: Int, height: Int, gray: CGFloat, square: CGPoint) -> CGImage {
         let context = CGContext(
@@ -89,7 +90,7 @@ import Testing
         #expect(aligned == spot)
     }
 
-    @Test func alignPrefersTheSameView() async throws {
+    @Test(.disabled(if: TestEnvironment.isSimulator, TestEnvironment.noVision)) func alignPrefersTheSameView() async throws {
         // 2025's photo shows the square top right; of 2015's, photo 2 shows the same, photo 1 something else.
         let pictures: [FileID: CGImage] = [
             1: Self.picture(width: 256, height: 256, gray: 0.2, square: CGPoint(x: 0.05, y: 0.05)),

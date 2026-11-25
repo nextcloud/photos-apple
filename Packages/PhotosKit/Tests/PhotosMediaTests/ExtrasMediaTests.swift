@@ -70,7 +70,7 @@ enum StickerTestImages {
     }
 }
 
-@Suite struct StickerStyleTests {
+@Suite(.timeLimit(.minutes(2))) struct StickerStyleTests {
     @Test(arguments: StickerStyle.allCases) func everyStyleKeepsTheBackgroundTransparent(style: StickerStyle) throws {
         let styled = try #require(StickerMaker.styled(StickerTestImages.cutout(), style: style))
         #expect(StickerTestImages.pixel(styled, x: 0, y: 0).a == 0)
@@ -131,7 +131,7 @@ enum StickerTestImages {
 /// Lifts the subjects of real photos with Vision (needs a Mac or device with the Neural Engine; not the simulator). Runs only
 /// with `PHOTOS_STICKER_SAMPLES=<folder of JPEGs>`; writes every style as `<name>-<style>.png` and a collage focus report
 /// into `PHOTOS_STICKER_OUTPUT` (default: the same folder).
-@Suite struct StickerSampleTests {
+@Suite(.timeLimit(.minutes(2))) struct StickerSampleTests {
     @Test func liftsTheSubjectsOfSamplePhotos() throws {
         let environment = ProcessInfo.processInfo.environment
         guard let folder = environment["PHOTOS_STICKER_SAMPLES"], !folder.isEmpty else { return }

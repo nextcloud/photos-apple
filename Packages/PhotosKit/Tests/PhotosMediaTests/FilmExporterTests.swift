@@ -11,7 +11,8 @@ import Testing
 @testable import PhotosModel
 
 /// Memory film export and the music's beat on the device (SPEC §15.1), with generated pictures and sound.
-@Suite(.serialized) struct FilmExporterTests {
+// A video writer that never gets its frames waits for ever: fail instead of hanging the test run.
+@Suite(.serialized, .timeLimit(.minutes(3))) struct FilmExporterTests {
     let size = CGSize(width: 320, height: 180)
 
     func picture(width: Int, height: Int, red: CGFloat) -> CGImage {

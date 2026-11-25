@@ -81,6 +81,8 @@ jobs:
   test-ios:
     # The same tests in an iOS 27 simulator: the iOS code paths (UIKit, background sessions) only compile and run there.
     runs-on: xcode-27
+    # A hanging test must not hold a runner for GitHub's six hours (it happened once in the media tests).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Find an iOS 27 simulator

@@ -11,7 +11,7 @@ import Testing
 @testable import PhotosStore
 
 /// "Show Similar": cached previews are indexed with Vision, once per version, and searched (SPEC §15.5).
-@Suite struct SimilarityIndexTests {
+@Suite(.disabled(if: TestEnvironment.isSimulator, TestEnvironment.noVision)) struct SimilarityIndexTests {
     /// A picture with a few shapes; `variant` shifts them a little (another shot of the same scene), `seed` makes
     /// another scene.
     static func image(seed: Int, variant: Int = 0) -> CGImage {
