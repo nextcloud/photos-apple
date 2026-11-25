@@ -14,6 +14,13 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
     case text(String)
     case favorites
     case videos
+    /// Still photos only, no videos (SPEC §16.2).
+    case photos
+    /// Something the photo shows ("beach", "dog"): searched in everything the index knows of a photo, including what
+    /// this device recognised in it and its description (SPEC §16.2). The word as it was typed.
+    case label(String)
+    /// At least this many stars (1–5; the ratings of SPEC §15.2).
+    case rating(atLeast: Int)
 
     public var id: String {
         switch self {
@@ -25,6 +32,9 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
         case .text(let text): "text:\(text)"
         case .favorites: "favorites"
         case .videos: "videos"
+        case .photos: "photos"
+        case .label(let word): "label:\(word.lowercased())"
+        case .rating(let stars): "rating:\(stars)"
         }
     }
 
@@ -36,7 +46,21 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
         case .dateRange(_, _, let label): label
         case .favorites: String(localized: "Favorites", bundle: .module)
         case .videos: String(localized: "Videos", bundle: .module)
+        case .photos: String(localized: "Photos", bundle: .module, comment: "A search filter chip: still photos only, no videos.")
+        case .label(let word): word
+        case .rating(let stars):
+            stars >= CullingTags.maxRating
+                ? CullingTags.ratingName(stars)
+                : String(
+                    localized: "\(CullingTags.ratingName(stars)) or more", bundle: .module,
+                    comment: "A search filter chip: photos rated with at least this many stars, e.g. ★★★ or more.")
         }
+    }
+
+    /// Whether it narrows the search by what the photos are (not free text).
+    public var isStructured: Bool {
+        if case .text = self { return false }
+        return true
     }
 }
 

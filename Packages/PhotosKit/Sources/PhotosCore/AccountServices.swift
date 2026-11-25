@@ -27,6 +27,10 @@ public final class AccountServices: Sendable {
     public let partnerPaths = PartnerPaths()
     /// Feature prints of the library in memory, for "Show Similar" (SPEC §15.5); loaded on first use.
     public let similarity: SimilarityIndex
+    /// Non-destructive edits, synced through the user's Nextcloud (SPEC §16.3).
+    public let edits: EditLibrary
+    /// Photo descriptions written on this device, as VoiceOver reads them (SPEC §16.2).
+    public let descriptions: PhotoDescriptionLookup
 
     public init(
         account: Account,
@@ -53,6 +57,8 @@ public final class AccountServices: Sendable {
         self.library = LibraryStore(database: database)
         self.collections = CollectionStore(database: database)
         self.similarity = SimilarityIndex(database: database)
+        self.descriptions = PhotoDescriptionLookup(database: database)
+        descriptions.isEnabled = PhotoDescriptions.isEnabled()
         let sync = SyncEngine(api: api, database: database, features: features)
         self.sync = sync
         partnerPaths.set(PartnerSettings.load(database).folders.map(\.path))
@@ -63,6 +69,16 @@ public final class AccountServices: Sendable {
         let images = ImagePipeline(
             api: api, cache: cache, originals: originals, pinnedFileIds: { [database] in Self.pinnedFileIds(database) })
         self.images = images
+        let edits = EditLibrary(dav: dav, file: layout.accountDirectory(account.id).appending(path: "Edits/recipes.json"))
+        self.edits = edits
+        images.setEditProvider { [edits] fileId in edits.recipe(for: fileId) }
+        let library = library
+        Task { [weak images] in
+            await images?.setLiveStillProvider { [library, originals, connection] fileId, recipe, bucket in
+                await LiveStills.still(
+                    fileId: fileId, recipe: recipe, maxPixelSize: bucket, library: library, originals: originals, connection: connection)
+            }
+        }
         // Launch: bring the caches below their limits (SPEC §5.5) before this session adds to them.
         Task.detached(priority: .utility) { await images.trimCaches() }
         // Keep the query planner's statistics current (indexes added by a migration, a library grown by a large sync);

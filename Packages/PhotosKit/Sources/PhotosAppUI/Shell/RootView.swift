@@ -12,6 +12,8 @@ public struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// The window's place (`NavigationSnapshot`, used by `MainView`). Kept here, where it outlives the account it belongs to.
     @SceneStorage("navigation") private var storedNavigation = ""
+    /// Guest Mode shows one album or memory instead of the app (SPEC §16.8.3).
+    @State private var guest = GuestMode.shared
 
     public init() {}
 
@@ -21,9 +23,16 @@ public struct RootView: View {
                 LoginView()
             } else if let session = app.session {
                 AppLockGate {
-                    MainView(storedNavigation: $storedNavigation)
-                        .environment(session)
-                        .id(session.account.id)
+                    if guest.isActive {
+                        // No SharePlay for a guest: only the content shown to them.
+                        GuestModeContent()
+                    } else {
+                        MainView(storedNavigation: $storedNavigation)
+                            // Films shared over SharePlay (SPEC §16.6), behind the app lock.
+                            .watchTogether()
+                            .environment(session)
+                            .id(session.account.id)
+                    }
                 }
                 #if os(iOS)
                     // After the first login: backup is offered before anything else is asked (round-3 item 33).

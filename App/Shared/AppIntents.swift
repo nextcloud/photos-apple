@@ -205,5 +205,9 @@ struct PhotosShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: BackUpNowIntent(), phrases: ["Back up my photos with \(.applicationName)"], shortTitle: "Back up now",
             systemImageName: "icloud.and.arrow.up")
+        // SPEC §16.4: the other organising actions are in Shortcuts without a phrase of their own (`OrganizeIntents`).
+        AppShortcut(
+            intent: CreateAlbumFromSearchIntent(), phrases: ["Make an album from a search in \(.applicationName)"],
+            shortTitle: "Album from search", systemImageName: "rectangle.stack.badge.plus")
     }
 }

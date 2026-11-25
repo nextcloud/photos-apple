@@ -334,8 +334,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   ⌘. ✅ typed in the iOS 27.2 simulator; ⌘I (Get Info) and ⌘−/⌘+ (Zoom) are in the iPad's menu but did not reach their
   action there (open; ⌘I in the viewer, a button's own shortcut, works).
   🟡 Image ▸ Rotate Left ⌘R / Rotate Right ⌥⌘R on the selection (as in Photos; Sync Now moved to ⇧⌘R), also in the grid's
-  context menu: saved like the editor's "Overwrite original" — a new version of each file, only replacing the version the app
-  knows (`If-Match`), read-only shares/videos/RAW-GIF-WebP left alone and reported; save path ✅ run against the 8089 server
+  context menu: since §16.3 a quarter turn added to each photo's edit recipe (the file is not changed; undoable; videos are
+  left alone). The former save path — the editor's "Overwrite Original…" — ✅ run against the 8089 server
   (`PhotoEditSavingIntegrationTests`: 1920×1280 → 1280×1920, stale ETag → 412, nothing overwritten), menu items ✅ read from
   the running app (key equivalents), run from the menu 🟡 (Mac locked, menus need a focused window). Edit ▸ Copy (⌘C, and
   "Copy" in the context menu) downloads the originals (≤ 100) and puts image data + file URLs (Mac) / item providers (iPad) on
@@ -820,6 +820,226 @@ in the iOS 27.2 simulator against the 504-photo test server; screenshots in `ios
   unit-tested. Tapping any notification crashed the app before (UIKit asserted on the async delegate method finishing off
   the main thread); the router now uses the completion-handler form on the main queue. 🟡 The attached photo was not seen
   as a thumbnail or expanded in the simulator; the app-lock text and the Mac were not seen on screen.
+
+## M7 Elegant and powerful (SPEC §16) — 🟡
+
+Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), combined in one branch. Open after combining:
+- ⬜ Camera data is read twice: Insights (`photoExif`, §16.5.1) and the organising rules (`cameraDetails`, §16.4) each read
+  the server's EXIF into their own table. Plan: one table and one reader, then a camera chip in the search (§16.2).
+- 🟡 In the iOS simulator a software keyboard appears while some menus are open (the viewer's and editor's More menu, the
+  film's Style menu). Making the viewer's keyboard focus conditional did not change it; to be checked on a device.
+- ⬜ Strings of the round-5 import screens (`ImportLibrarySheet`, `WelcomeHomeView`) are not in the PhotosAppUI catalog yet.
+- 🟡 The Memories "On this day" carousel's touch area reaches about 80 pt above its cards (worked around with `zIndex` for
+  the family card, §16.7).
+
+### §16.1 Library: moments, scrub to peek, range select, story cards
+- ✅ Moments: grouping and titles (`LibraryMoments`, `MomentTitle`), the store query (`momentItems`), the worded-title
+  store (`momentTitle`, migration `v6-library-moment-titles`) and the checks on the language model's answers
+  (`MomentTitleWording`) unit-tested (`LibraryMomentsTests`, `MomentStoreTests`, `MomentTitleWordingTests`; 100 000
+  items in 0.22 s in a debug build). Run in the iOS 27.2 simulator against the test server (UI tour
+  `LibraryTourTests.testStoryCardsAndMoments`): 196 moments, 32 titled, of 513 items; "Weekend in Lisbon", "Monday in
+  Sintra", "3 days in Kópavogur" on the day headers of All Photos and above the days of the Days level; a tap opens the
+  moment's screen. The language model could not be tried: the simulator refuses it (SensitiveContentAnalysisML error
+  15; the rule titles stay, as designed) and the Mac's screen was not used; 🟡 for the worded titles. Mac headers
+  (pointer cursor, click, VoiceOver button) built, not verified on the Mac.
+- 🟡 Scrub to peek: shared logic (`GridPeek`, `GridPeekLoader`, `GridPeekCache`, `GridPeekKind`) unit-tested, frames
+  of a streamed video through `StreamingAssetLoader` unit-tested on the Mac (`PeekFramesTests`). iPhone ✅ run in the
+  simulator with a video uploaded for the purpose (no server preview): hold and slide on its tile shows the video's
+  frames in place with the bar under the finger, nothing opens, and a finger held still still brings the context menu
+  (`testScrubToPeekAndContextMenu`, frames captured with `simctl io` during the hold; the context menu first won the
+  race, so the menu and a tile's drag now wait until the scrub has decided, at most 0.6 s). Live Photos and stacks
+  (none in the test library), iPad pointer hover and the Mac hover: built, not run (no pointer in XCUITest, Mac screen
+  not used).
+- ✅ Range selection on iPhone (one finger sliding sideways in the selection mode; `GridRangeSelection`, `GridAutoscroll`
+  unit-tested): run in the simulator, a drag from one tile three tiles on and two rows down selected the 14 tiles between
+  (`testRangeSelection`). Autoscroll at the edges and the two-finger drag (UIKit's, unchanged) not exercised by
+  XCUITest. Mac: ⇧-click and the selection rectangle are NSCollectionView's, as before.
+- ✅ Story cards: run in the simulator (On this day cards play with their bars, a tap on the right goes on, the context
+  menu switches to the strip; band of fixed height, no empty band). Photo choice and tap rules unit-tested
+  (`LibraryDelightTests`). Settings › On this device › Memories (Stories/Strip) and Name moments. iPad, Mac and Vision Pro
+  layouts built, not run.
+
+### §16.2 Search: command palette, natural-language search with chips, photo descriptions
+- ✅ **Command palette (Quick Actions, ⌘K)**: destinations, Mac Settings pages, albums, people, places, tags, years,
+  commands on the focused grid's/viewer's selection, "add to <album>" and "rate N" intents, typed searches as one entry,
+  fuzzy matching, keyboard navigation, recent entries per account. Unit tests (`FuzzyMatchTests`,
+  `CommandPaletteTests`, `SearchPaletteTests`). Run on the Mac (opened with the toolbar button through the AX API,
+  "Lisbon 2025" → album first, "Lisbon · 2025" search → chips and 11 results; "settings descriptions" → General
+  Settings opened the Settings window on that tab) and in the iOS 27.2 simulator (`UITests/SearchTourTests`
+  `testCommandPalette`: "lisbn" finds Lisbon, Return opens it). ⌘K itself and ↑/↓/Return/Escape not pressed (no
+  real keyboard input allowed); iPad not run.
+- ✅ **Natural-language search with chips**: deterministic parser (`NaturalSearch`, `SearchDates`: dates in many
+  forms, people/places/tags/albums from the index, labels, ratings, media kinds, favourites), editable chips with
+  menus on all platforms, results live. Unit tests (`NaturalSearchTests`, 11 tests, ~40 date forms;
+  `PhotoDescriptionStoreTests` for the new chip kinds in the index). Run in the iOS 27.2 simulator
+  (`testSearchInWords`: "favourite photos from Lisbon in 2025" → Favorites · Lisbon · 2025, chip menu → 2024).
+  🟡 The Foundation Models refinement (`NaturalSearchModel`) is built and its validation unit-tested, but has not run:
+  the Mac's model is "not ready" (Apple Intelligence not downloaded) and the simulator has none.
+- ✅ **Photo descriptions**: Vision facts + composer (English) or the on-device language model (user's language, from the
+  picture), table `photoDescription` (migration `v6-search-descriptions`), full-text index, VoiceOver labels of tiles,
+  viewer and info panel, background task / Mac activity / charging trickle, Settings › Search › Describe photos (off
+  deletes). Unit tests (`PhotoDescriptionTests`, `PhotoDescriptionStoreTests`, `PhotoDescriberTests` — real Vision on
+  the Mac only). Run on the Mac: 65 cached previews described with the composer ("A person with a child", "A tower",
+  "A fountain"), tile VoiceOver labels read through the AX API (ios-fix-shots/r6-search/mac-tile-voiceover-labels.txt),
+  Settings shows "Photos described 65 of 512". 🟡 Language-model descriptions not run (model not ready on this Mac);
+  nothing is described in the simulator (no Vision).
+- ⬜ **Camera chip**: the index has no camera make/model. Plan: ask for `nc:metadata-photos-ifd0` (Make/Model) in the
+  sync's SEARCH (or read it lazily with the photographer stats of §16.5), store it in `media`, add a `.camera` chip.
+
+### §16.3 Editing: non-destructive edits, RAW, Live Photo effects, visual undo history
+- 🟡 Non-destructive edits (§16.3.1): recipes in `/.nextcloud-photos/edits/<fileId>.json`, format, ETag-safe sync,
+  newest-edit-wins conflicts, offline queue, persistence and newer-format handling unit-tested against an in-memory
+  WebDAV server (`EditLibraryTests`, `EditRecipeTests`); renditions (turn, crop, size) and "Save as Copy" rendering
+  tested on the Mac (`EditRenditionTests`, disabled in the simulator). Editor Done/Save as Copy/Overwrite Original…/Revert,
+  edited tiles, viewer, export and share: built for all platforms, not yet run against a server in the app.
+- 🟡 Image ▸ Rotate is now an edit (undoable, works on read-only shares and RAW): unit-tested through the session
+  (`UndoHistoryTests`); menu/context menu not run in the app.
+- 🟡 RAW (§16.3.2): `CIRAWFilter` development in the editor (RAW tool) and the viewer's RAW button, RAW+JPEG pairs saved
+  for both files. Built; not run (no RAW files in the test library were tried).
+- 🟡 Live Photo effects (§16.3.3): frame averaging and Loop/Bounce frame order unit-tested; long exposure, key photo,
+  Loop/Bounce playback and video/GIF export built, not run (AVFoundation is not exercised by the unit tests).
+- 🟡 Undo history (§16.3.4): history, undo of an older entry, edits replaced later, bounded size unit-tested
+  (`UndoHistoryTests`); panel, Edit ▸ Undo History… (⌥⌘Z) and the More menu items built, not run in the app.
+- ⬜ Orphaned recipes of photos deleted for good are not cleaned up (plan: on a full reconcile, remove recipes whose file
+  id is neither in the files nor in the trash bin, after the trash retention).
+- ⬜ Aspect-ratio grid tiles keep the original's shape for cropped photos (plan: store the rendition's aspect with the
+  recipe and let `GridMedia` use it).
+
+### §16.4 Organising: smart album builder, batch time/place/rename, GPX geotagging, folder rules, Shortcuts
+- ✅ Smart album builder (rules with All/Any/None, negation, groups; person, place, tag, album, rating, flag, media
+  type, favourite, dates, recent/older, folder, name, text, camera, lens, focal length, aperture, ISO), live count and
+  first photos, sort and limit: rule model, JSON, evaluation and the builder's draft unit-tested (`OrganizeTests`,
+  `RuleDraftTests`, `OrganizeStoreTests`); ✅ run in the iOS 27.2 simulator against 8089: built, counted (513 photos
+  live), saved, listed with the albums, opened, deleted (`OrganizeTourTests`, shots `ios-fix-shots/r6-organize/01–08`).
+- ✅ Shared between devices through `.nextcloud-photos/smart-albums.json` with ETag-safe merge: merge rules unit-tested;
+  conditional writes against 8089 (`AppDataFilesIntegrationTests`, `PHOTOS_IT_SERVER`); the file the simulator wrote
+  was read on the server (album, then its tombstone after deleting). 🟡 Two real devices at once not tried (the merge
+  and the conditional write are what makes it safe).
+- ✅ Camera details: bulk SEARCH of `nc:metadata-photos-exif` checked against 8089 (200 files in 0.25 s), stored per
+  ETag, unit-tested; 🟡 the background read of a large library (100 000 photos ≈ 1 100 requests) not timed.
+- ✅ Batch fixes: date shift / first-photo date / time zone, place (map + search), rename patterns, with preview and
+  undo; logic unit-tested; ✅ in the simulator on own test photos in `/Photos/r6-organize-test` on 8089 (opt-in UI test
+  `testApplyAndUndoInOwnFolder`): +1 h applied (server capture times +3600 s) and undone (original values back);
+  rename `{date} {place} {counter}` applied (`2024-06-14 001.jpg` …) and undone. Sheets seen on iPhone: shots 09–14, 19–20.
+  File-level writing for servers before Nextcloud 35: `MetadataRewriter` unit-tested, the server's re-reading of
+  EXIF date, offset and GPS after an overwrite checked by hand on 8093; 🟡 the whole path not run against an NC 33/34
+  server (none available; 8089/8091/8093 are all ≥ 35, so the app takes the PROPPATCH path there).
+- ✅ GPS track geotagging: GPX/KML reading, matching with interpolation and tolerance, suggested clock correction
+  unit-tested; ✅ sheet seen in the simulator; 🟡 picking a file in the simulator and applying not run (the file picker
+  needs real input); ⬜ recording a track in the app — decided against (SPEC §16.4.3).
+- ✅ Folder rules: planner, lease, state and log unit-tested; ✅ in the simulator against 8089: a rule written into
+  `.nextcloud-photos/folder-rules.json` from outside (favourite everything in `/Photos/r6-organize-test`) was picked
+  up after the next sync and ran by itself; log shown. 🟡 Two devices competing for the lease not tried live.
+- ✅ Shortcuts: 13 App Intents with `PhotoEntity`/`MemoryEntity`, one App Shortcut; compiled for iOS, macOS,
+  visionOS; 🟡 not run in the Shortcuts app (needs real input).
+- 🟡 Mac and iPad layouts compiled, not looked at (Mac screen locked); Vision Pro compiled only.
+
+### §16.5 Photographer: stats, loupe and filmstrip culling, Continuity Camera, Mac menu bar extra
+- ✅ Insights (cameras, lenses, focal lengths, apertures, ISO, shutter speeds, time of day, keeper rate by lens, tap-through
+  to the photos). Model, scales, filters, summary, `photoExif` store (migration `v6-pro-exif`) and the background reader
+  unit-tested (filters checked against SQL for every bar kind; reader against a stub server: by id, paging, stop). The
+  SEARCH with `nc:metadata-photos-exif`/`-ifd0` checked by hand against the stock (8093) and extended (8089) test
+  servers. Run on the Mac (8089: all 512 photos read in the background, 421 with camera data, every card; a camera bar
+  opened its 14 photos through the AX API) and in the iPad simulator (iOS 27.2, while reading). Keeper rates not seen with
+  real ratings (the test library has none); lens names not seen (the test library's EXIF has no `LensModel`).
+- 🟡 Culling view (loupe, filmstrip, focus peaking, clipping, histogram, keys with auto-advance; Mac window full screen,
+  iPad cover). Pixel analysis and loupe geometry unit-tested (Core Graphics adapter tests on the Mac only). Run in the
+  iPad simulator (`PHOTOS_DEBUG_LOUPE`, keys through `PHOTOS_DEBUG_LOUPE_KEYS`): filmstrip, peaking, clipping, histogram
+  with clipped share, Z to 100 % with the original. Not run: the Mac window (the owner was using the Mac), click/hold
+  with a pointer, rating keys (not to change tags on the shared server; they use the tested culling code of §15.2).
+- 🟡 Continuity Camera (Mac: File ▸ Import from iPhone or iPad into Library, own album, folder) and Take Photo / Scan
+  Documents (iPhone, iPad). Not run: needs a nearby iPhone or a device camera.
+- 🟡 Menu bar extra (Mac; Settings › General › Show in Menu Bar). Not run.
+- ⬜ Not done: peaking/clipping computed on the visible crop of the original at 100 % (now from a 2048 px version), a
+  second-display "loupe on the other screen" mode, tethered shooting, Insights over time (per year) and per album.
+
+### §16.6 Films: through the years, film styles, SharePlay
+- Through the years (FS-1) 🟡: one named person's face across the years — Recognize's photos of them, one per month /
+  season / year (best face; the period's next photos when a face is turned away), eyes found with Vision face landmarks
+  and lined up (level, same place, same size) over a blurred fill, dissolving with the date and (with a birthday kept on
+  the device) the age; Slow/Normal/Fast, calm music, scrubber, export as 1080p video. Entry in the person's menu and a row
+  in Memories; explains when Recognize is missing, the person is unnamed or there are too few photos. Selection, alignment
+  geometry, timing and ages ✅ unit-tested (`ThroughTheYearsTests`); the Core Image alignment ✅ on the Mac with a
+  synthetic face, and with Vision on the portraits of the test library's People folder (`FaceTimeLapseTests`,
+  `TEST_RUNNER_PHOTOS_FACE_SAMPLES`): eyes on the guides, profiles skipped
+  (`ios-fix-shots/r6-films/01-through-the-years-alignment-sheet.png`). The Memories row's "needs Recognize" note ✅ in the
+  iOS 27.2 simulator (`20-memories-through-the-years`). 🟡 The film itself not run end to end: no test server has Recognize
+  with named people, and Vision does not run in the simulator.
+- Film styles (FS-2) ✅/🟡: Cinematic, Upbeat, Black & White, Super 8, Calm in the film's style menu — pacing,
+  transitions, camera, Core Image look (colour matrix, vignette, grain, gate jitter, flicker; same numbers in player and
+  export) and a score per style composed and synthesised on the device (or the user's own music: pacing only; or no
+  music); remembered per memory; applied to the export. ✅ unit-tested (`FilmStyleTests`, `FilmChoiceTests`,
+  `FilmScoreSynthTests`); Core Image grade = model and a Black & White export ✅ on the Mac (`FilmLookFilterTests`). ✅ run
+  in the iOS 27.2 simulator (`UITests/FilmsTourTests`): every style, the menu, the remembered choice, the export's style
+  note (`ios-fix-shots/r6-films/21…28`). Found and fixed there: the film waited for its score to be made (it now starts at
+  once, the music joins), the style menu closed when the controls faded, Super 8 grain was too coarse on the phone. 🟡
+  The music was not listened to (levels, loop seam and determinism are tested), clips' look not seen (no videos in the test
+  library). Open: in the simulator a software keyboard appears while the style menu is open (no text field involved; not
+  seen with other menus' screenshots; not reproduced on a device).
+- SharePlay (FS-3) 🟡: GroupActivities activity with only the film's description (no photos, no preview, no places, no
+  music), playback in step through `AVDelegatingPlaybackCoordinator`, per-participant reports of what they can see,
+  explanations for "not shared with you", "other account" and "not signed in", slideshow shared as a film; iPhone, iPad,
+  Mac (own window), Vision Pro and Apple TV (`TVSharedFilmView`). Payload, server matching, audience and clock maths ✅
+  unit-tested (`SharedFilmTests`); "SharePlay isn't available" without a call ✅ in the simulator
+  (`27-shareplay-without-call`). 🟡 Not run with real participants: needs two devices in a FaceTime call and the Group
+  Activities capability in the provisioning profiles (entitlement `com.apple.developer.group-session` added for the app
+  and the TV app).
+- ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`), syncing styles/birthdays between devices (`.nextcloud-photos/`),
+  inline clips on Apple TV, a spatial SharePlay template on Vision Pro.
+
+### §16.7 Sharing and family: postcards, family library, weekly prompts, Lock Screen shuffle album
+Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2 simulator, test server 8089).
+- ✅ **Postcards** (§16.7.1): composer with four frame styles, lettering, message/To/postmark place, live re-render, 3D
+  flip, send, "SENT" stamp, copy link, share sheet. Run in the iOS 27.2 simulator (`UITests/FamilyTourTests.testPostcard`,
+  shots 01–06): the card was uploaded as `/Postcards/2026-11-25 el Raval/{1 Front,2 Back}.jpg` with `.nomedia`, a public
+  link labelled "Postcard to Grandma" with the message as note; the link was opened anonymously and served both sides
+  (08/09). Rendering unit-tested on the Mac (`PostcardRendererTests`, all styles, portrait, long messages; renders with a
+  real photo in `render-*.jpg`); sending unit-tested against a stub server (numbered folder name, link, cleanup of a half
+  upload). 🟡 The share sheet itself (Messages/Mail) and the Mac/Vision Pro composer were not seen on screen.
+- ✅ **Family library** (§16.7.2): shared-folder detection (own shared folders, received shares, Team folders),
+  members, move/copy, suggestions by family members (month) and by shared day/place, card in Memories, Review, dismiss,
+  remembered decisions. Run in the simulator (`testFamilyLibrary`, shots 20–24): the folder `r6-family-Family` shared by
+  a second user was found, chosen, "11 photos from el Raval on December 29" was suggested from a photo of that day in
+  the family folder, and Review listed them. Moving was unit-tested (stub server: motion part along, decisions recorded), not done on the test
+  server (the suggested photos are in `Photos/Test library`). 🟡 Suggestions by family members need Recognize, which no
+  test server has (unit-tested only).
+- ✅ **Weekly photo prompts** (§16.7.3): invitation, card, adding this week's photos to "Prompt: Numbers", Past Prompts,
+  settings and reminder. Run in the simulator (`testWeeklyPrompt`, shots 10–14); themes, weeks (also across a DST change),
+  history and reminder dates unit-tested. 🟡 The reminder notification itself was not seen firing.
+- ✅ **Lock Screen album** (§16.7.4, iPhone/iPad): run in the simulator (`testLockScreenAlbum`, shots 30–33): the album
+  `r6-family-lockscreen` was copied (3 photos) into the simulator's Photos library (32b), and turning it off showed the
+  system's "Allow … to delete N photos?" (33; XCUITest cannot press that alert, so the copies waited and Settings listed
+  "N removed photos are still on this device"). Plan, hidden
+  people, edits, declined/confirmed deletion and turning off unit-tested with a fake library. 🟡 Photo Shuffle on a real
+  Lock Screen needs a device.
+- ⬜ Family settings and dismissed suggestions are per device; syncing them through `.nextcloud-photos/` is left for
+  later (plan: a `family.json` with the folder, members and dismissed file ids, merged as a union).
+- ⬜ The Lock Screen album syncs only while the app runs (after syncs); a background refresh task would keep it current
+  while the app is closed.
+
+### §16.8 Look and access: colour from the photo, living album covers, guest mode
+- ✅ Colour from the photo (§16.8.1): dominant colour from the BlurHash or an in-memory preview (`PhotoPalette`,
+  `PhotoColors`), toned per role with a ≥ 7:1 contrast guarantee (`PhotoTintRole`, `AmbientField`; grey photos keep
+  the dark backdrop near black); viewer backdrop Black / Photo Color / Ambient Glow, blended between pages by the
+  scroll position; album and memory header washes (inline title, the bar hides a large one) and memory card scrims; off
+  with Increase Contrast, solid with Reduce Transparency; Settings ▸ Appearance. Unit tests (palette, tones, ambient
+  field, header washes, pager blend). Run in the iOS 27.2 simulator, dark and light mode: tinted and ambient viewer,
+  album header, guest viewer (`ios-fix-shots/r6-look/01…04`, `look-14*`, `look-22`). Mac and Vision Pro: built, not run.
+- ✅ Living album covers (§16.8.2): Live Photo covers play once per session (muted, in view, not with Reduce Motion, Low
+  Power Mode, video autoplay off or the setting off); depth covers with an on-device Vision subject mask cached next to
+  the previews; "Customize Cover…" sheet (card menu and album menu); choices synced in
+  `/.nextcloud-photos/album-covers.json` with ETag merge (`AlbumLookStore`), follow renames, own albums on extended
+  servers also set the server cover. Unit tests (book merge/decode/rename, depth layout, mask round trip and cache, store
+  sync against a fake server, Vision "no subject" on the Mac). Simulator (UI test `LookTourTests.testCovers`): card menu,
+  sheet with photo choices, depth preview with the title in front (no Vision in the simulator). Vision masks checked on
+  the Mac with two library photos (`mac-vision-mask-*.png`); the Mac app itself was not run. 🟡 Live Photo playback not
+  seen (the test library has no Live Photos).
+- ✅ Guest Mode (§16.8.3): "Show to a Guest…" for albums and memories; every window shows only its photos (grid, viewer,
+  slideshow) until Face ID / Touch ID / passcode; survives a relaunch; links, notifications and Spotlight do nothing,
+  no banners; Mac presentation window with Dock, menu bar and app switching hidden and ⌘Q refused. Unit tests for
+  `GuestMode`. Simulator (UI test `LookTourTests.testGuestMode`): start sheet, guest grid and viewer without Delete/Info,
+  a link ignored, ended with a simulated Face ID match, and the app came back in Guest Mode after a relaunch
+  (`look-20…23`). 🟡 The Mac kiosk window was deliberately not run on the owner's Mac (it takes over the screen).
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

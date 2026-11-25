@@ -19,6 +19,8 @@ struct AlbumsScreen: View {
     @State private var openingLink = false
     @State private var error: String?
     @AppStorage("albumsSortOrder") private var sortOrder: AlbumSortOrder = .recent
+    /// "Customize Cover…" or "Show to a Guest…" of an album (SPEC §16.8.2, §16.8.3).
+    @State private var cardSheet: AlbumCardSheet?
 
     var title: String {
         kind == .shared ? String(localized: "Shared albums", bundle: .module) : String(localized: "Albums", bundle: .module)
@@ -42,6 +44,8 @@ struct AlbumsScreen: View {
     var body: some View {
         ScrollView {
             AlbumActivityBanner()
+            // Smart albums appear with the other albums (SPEC §16.4).
+            if kind == .own { SmartAlbumsStrip() }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
                 ForEach(sorted) { album in
                     // By value: the stack's path (MainView) knows which album is open.
@@ -49,7 +53,10 @@ struct AlbumsScreen: View {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
-                    .opensAlbumInWindow(album.id)
+                    .opensAlbumInWindow(album.id) {
+                        // Cover and Guest Mode (SPEC §16.8.2, §16.8.3).
+                        AlbumLookMenuItems(album: album, sheet: $cardSheet)
+                    }
                 }
             }
             .padding()
@@ -117,6 +124,8 @@ struct AlbumsScreen: View {
         .task {
             guard let services = session.services else { return }
             Task { await refresh(force: false) }
+            // The covers chosen on the user's other devices.
+            Task { await AlbumLookStore.store(for: services).refresh() }
             do {
                 for try await value in services.collections.observeAlbums(kind) {
                     albums = value
@@ -126,6 +135,7 @@ struct AlbumsScreen: View {
         }
         .sheet(isPresented: $creating) { AlbumEditor(album: nil) }
         .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
+        .albumCardSheets($cardSheet)
         .alert(
             String(localized: "Couldn't load albums", bundle: .module),
             isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
@@ -157,9 +167,8 @@ struct AlbumCard: View {
                 Color.secondary.opacity(0.15)
                 Image(systemName: "photo.on.rectangle").font(.largeTitle).foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                if let cover = album.displayCoverFileId {
-                    AlbumCover(fileId: cover)
-                }
+                // The chosen cover and effect: still, Live Photo motion or depth (SPEC §16.8.2).
+                LivingAlbumCover(album: album)
             }
             .aspectRatio(1, contentMode: .fit)
             .clipShape(.rect(cornerRadius: Design.coverCornerRadius))

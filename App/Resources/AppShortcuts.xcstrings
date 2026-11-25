@@ -15,6 +15,20 @@
         }
       }
     },
+    "Make an album from a search in ${applicationName}" : {
+      "comment" : "Phrase the user says to Siri to make an album from a search. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Make an album from a search in ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
     "On this day in ${applicationName}" : {
       "comment" : "Phrase the user says to Siri to see photos taken on today's date in earlier years. ${applicationName} is replaced by the app's name and must stay in the phrase unchanged.",
       "extractionState" : "extracted_with_value",

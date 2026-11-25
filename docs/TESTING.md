@@ -104,8 +104,36 @@ runs it alone. The simulator cannot run Vision's models, so the app analyses not
 with results, compute prints of the simulator's cached previews on the Mac (Vision's `GenerateImageFeaturePrintRequest`
 and `FeatureSketcher` from PhotosDomain) and write them into the `similarity` table of the simulator's account database.
 
+`UITests/LookTourTests.swift` (iPhone and iPad, SPEC §16.8) opens the album `PHOTOS_UITEST_ALBUM` (default "Lisbon
+2025"): its card menu, "Customize Cover…" (cancelled, nothing is saved), the tinted header, Guest Mode from start to end,
+and Settings ▸ Appearance. Ending Guest Mode asks for Face ID: enrol it once
+(`xcrun simctl spawn <udid> notifyutil -s com.apple.BiometricKit.enrollmentChanged 1` and `-p` the same name) and post
+`notifyutil -p com.apple.BiometricKit_Sim.pearl.match` while the test waits. A run that stops in Guest Mode leaves the
+app in it (it survives relaunches); the tests end it first.
+`UITests/LibraryTourTests.swift` (iPhone and iPad) tours SPEC §16.1: story cards (tap to the next photo, context menu to
+the strip), moment titles in the Days level and on the day headers of All Photos (the test library's places give
+"Weekend in Lisbon" and others) and the moment screen they open, scrub to peek on a video tile (the library needs a
+video: upload one for the test and remove it afterwards) with the context menu still coming when the finger is held
+still, and range selection with one finger in the selection mode. XCUITest cannot take a screenshot while a finger is
+down: capture the peek from outside, `xcrun simctl io <udid> screenshot` in a loop, during the test's four-second hold.
+Playing story cards keep the app from being idle, which slows XCUITest's queries a lot; the tour switches them to the
+strip (`-memoriesStyle strip`) for everything but the story test. The simulator refuses the on-device language model,
+so it shows the rule titles of moments only.
+`UITests/OrganizeTourTests.swift` (iPhone) tours SPEC §16.4: the smart album builder (saves and deletes a smart album
+named "UI test smart album", which leaves a tombstone in `/.nextcloud-photos/smart-albums.json`), the batch fixes
+sheet of a selection (nothing applied) and Settings › Organize › Folder Rules. `testApplyAndUndoInOwnFolder` changes
+files and is opt-in: set `TEST_RUNNER_PHOTOS_UITEST_ORGANIZE_FOLDER` to a folder of your own test photos (e.g.
+`Photos/r6-organize-test` with three JPEGs; never the shared test library). It shifts their capture times by an hour
+and undoes it, renames them with `{date} {place} {counter}` and undoes it, and opens Folder Rules to run them; check
+the server's values while it runs (PROPFIND of `nc:metadata-photos-original_date_time`).
+
 The app has no accessibility identifiers yet (apart from `librarySummary`, the zoom levels' scroll view); the tests find elements by role and by their English labels, and start
 the app in English. They are not part of CI because they need a server. They have run in the iOS 27.2 simulator (iPhone).
+
+`UITests/SearchTourTests.swift` (SPEC §16.2) types a search in words and changes a chip, and finds a place in the
+command palette by a typo; like the other tours it needs `PHOTOS_UITEST_LOGIN` and a library with favourite photos taken
+in Lisbon in 2025 (the local test server on port 8089 has them). Debug builds open the palette at launch with `PHOTOS_DEBUG_PALETTE=<typed words>` and describe the
+cached previews once with `PHOTOS_DEBUG_DESCRIBE_NOW=1` (Mac; Vision does not run in the simulator).
 
 `UITests/AmbientUITests.swift` (SPEC §15.4) drives the system around the app, so it only makes sense in a simulator of
 its own: `testBackupLiveActivity` and `testControlActions` (iPhone) need backup set up for the test account and new
@@ -120,12 +148,28 @@ exports it as a video, plays a trip and swipes through the year in review; `PHOT
 screenshot and the accessibility tree of each step there, `PHOTOS_UITEST_TRIP=<part of a trip's title>` picks the trip
 (one with stops more than 30 km apart shows the map flights). Run in the iOS 27.2 simulator.
 
+`UITests/FilmsTourTests.swift` (iPhone simulator) plays a memory film in every style (SPEC §16.6), tries SharePlay without
+a FaceTime call (the explanation), opens the export sheet (its style note) and shows the "Through the years" row of
+Memories. The faces of "through the years" need Vision and are checked on the Mac instead: with
+`TEST_RUNNER_PHOTOS_FACE_SAMPLES=<folder of portraits>` (and optionally `TEST_RUNNER_PHOTOS_FACE_OUTPUT=<folder>`)
+`FaceTimeLapseTests.realFacesAreLinedUp` lines up real faces and writes the aligned frames.
+
 `UITests/ExtrasTourTests.swift` (iPhone simulator) walks through the round-5 extras (SPEC §15.8): Settings › Smart
 offline, Make Sticker, a collage of a selection, the sticker book, and a photo of the day notification (the Debug build
 schedules one 25 seconds ahead when started with `PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN=25`; the test accepts the permission
 alert). With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` the screenshots are also written there. Subject lifting (stickers)
 does not work in the simulator; `PhotosMediaTests/StickerSampleTests` lifts real photos on the Mac when run with
 `TEST_RUNNER_PHOTOS_STICKER_SAMPLES=<folder of JPEGs>` and writes every sticker style next to them.
+
+`UITests/FamilyTourTests.swift` (iPhone simulator) tours sharing and family (SPEC §16.7): a postcard (styles, back,
+sending, the sent state), the weekly prompt (invitation, adding this week's photos, history), the family library
+(choosing a shared folder, the suggestion card, Review — nothing is moved) and the Lock Screen album (mirroring into the
+simulator's Photos library, then turning it off and accepting the system's deletion alert). It needs test data: a folder
+`r6-family-Family` shared with the test user with write permission and an album `r6-family-lockscreen`; the postcard
+photo is `PHOTOS_UITEST_POSTCARD_PHOTO` (a file id). Grant Photos access first (`xcrun simctl privacy <udid> grant
+photos <bundle id>`). The postcard and prompt tests leave a `/Postcards/…` folder with a public link and a
+"Prompt: …" album on the server. `PhotosMediaTests/PostcardRendererTests` writes every style drawn with a real photo
+when run with `TEST_RUNNER_PHOTOS_POSTCARD_PHOTO=<jpeg>` and `TEST_RUNNER_PHOTOS_POSTCARD_PREVIEWS=<folder>`.
 
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.

@@ -11,7 +11,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, @unc
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions
     {
-        [.banner, .list]
+        // Guest Mode (SPEC §16.8.3): no banner over the guest's photos; it waits in Notification Centre.
+        GuestMode.isActiveNow ? [.list] : [.banner, .list]
     }
 
     /// The completion-handler form, called back on the main thread: UIKit asserts that the handler runs there (the async
@@ -57,12 +58,21 @@ struct NotificationCompletion: @unchecked Sendable {
             ContentLabeling.register { AppHost.model }
             // On-device feature prints for "Show Similar" and key photos, while the Mac is idle.
             SimilarIndexing.register { AppHost.model }
+            // Descriptions of photos for VoiceOver and search, while charging and idle (SPEC §16.2).
+            PhotoDescriptions.register { AppHost.model }
             // Smart offline fills up while the Mac is idle (SPEC §15.8.1).
             SmartOfflineScheduling.register { AppHost.model }
         }
 
         func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
             AppHost.model.didRegisterForPush(deviceToken: deviceToken)
+        }
+
+        /// ⌘Q does not end Guest Mode (SPEC §16.8.3): only Touch ID or the password does. Logging out, shutting down and
+        /// Force Quit still end the app (it comes back in Guest Mode).
+        func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+            guard GuestMode.isActiveNow, let event = NSApplication.shared.currentEvent, event.type == .keyDown else { return .terminateNow }
+            return .terminateCancel
         }
 
         /// Silent pushes withdraw notifications that were read or dismissed elsewhere (SPEC §7.21).

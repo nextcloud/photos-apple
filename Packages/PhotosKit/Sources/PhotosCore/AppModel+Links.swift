@@ -32,6 +32,9 @@ extension AppModel {
     /// account, for an account that is not logged in, or a public album waits in `linkPrompt` for the user.
     @discardableResult
     public func open(_ url: URL) -> Bool {
+        // Guest Mode (SPEC §16.8.3): no link leads out of the album or memory shown. Answered as handled, so nothing
+        // else tries to show it either.
+        if GuestMode.shared.isActive { return true }
         guard let incoming = IncomingLink.resolve(url, accounts: accounts, active: activeAccount?.id) else { return false }
         switch incoming {
         case .open(let link):

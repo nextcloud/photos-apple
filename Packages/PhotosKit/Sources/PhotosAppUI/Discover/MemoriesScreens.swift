@@ -24,6 +24,12 @@ struct MemoriesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                if !onlyOnThisDay {
+                    // This week's photo prompt and the family library's suggestion (SPEC §16.7); nothing when off.
+                    // Above the carousels below, whose touch area reaches up beyond what they show.
+                    WeeklyPromptCard().zIndex(1)
+                    FamilySuggestionCard().zIndex(1)
+                }
                 if !onThisDay.isEmpty {
                     // The On this day screen is titled so already: no heading that repeats the title.
                     section(onlyOnThisDay ? nil : String(localized: "On this day", bundle: .module), onThisDay)
@@ -37,6 +43,8 @@ struct MemoriesScreen: View {
                     if !trips.isEmpty { section(String(localized: "Trips", bundle: .module), trips) }
                     // Places photographed in several years (SPEC §15.6); shows nothing when there are none.
                     ThenAndNowRow()
+                    // Named people's faces across the years (SPEC §16.6).
+                    ThroughTheYearsRow()
                 }
                 if loaded && onThisDay.isEmpty && (onlyOnThisDay || (trips.isEmpty && recap == nil && years.isEmpty)) {
                     ContentUnavailableView(
@@ -112,6 +120,7 @@ struct MemoryCard: View {
     let memory: Memory
     /// Small, for the strip at the top of the library: smaller titles, always on the picture, which fills the card.
     var compact = false
+    @Environment(SessionModel.self) private var session
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -138,7 +147,7 @@ struct MemoryCard: View {
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
-                                LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                                LinearGradient(colors: [.clear, scrimColor.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
                     }
                     .clipShape(.rect(cornerRadius: 14))
             }
@@ -165,7 +174,7 @@ struct MemoryCard: View {
                 .shadow(radius: 3)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                .background(LinearGradient(colors: [.clear, scrimColor.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
             }
             .clipShape(.rect(cornerRadius: 12))
     }
@@ -175,6 +184,12 @@ struct MemoryCard: View {
             Text(memory.title).font(.title3.bold())
             if let dateLine { Text(dateLine).font(.caption) }
         }
+    }
+
+    /// A deep shade of the cover's colour (SPEC §16.8.1); black with Increase Contrast or Reduce Transparency.
+    var scrimColor: Color {
+        MemoryScrimColor.color(
+            cover: memory.cover, services: session.services, contrast: contrast, reduceTransparency: reduceTransparency)
     }
 
     /// Stronger with Increase Contrast or Reduce Transparency, so the white titles stay readable on bright photos.

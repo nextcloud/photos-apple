@@ -85,6 +85,8 @@ struct GridCallbacks {
     /// A pinch (or ⌘−) zoomed out past the densest step, on the photo under the fingers at a point of the grid (0…1):
     /// the Library's days take over (SPEC §15.5). Nil: the grid just stops at its densest step.
     var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? = nil
+    /// A moment's title on a day header was tapped or clicked (SPEC §16.1): open the moment with this id.
+    var openMoment: (@MainActor (String) -> Void)? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
@@ -192,6 +194,14 @@ struct GridHeaderText: Equatable {
     var title: String?
     /// Day, small.
     var subtitle: String?
+    /// The title of the moment this day starts (SPEC §16.1): shown before the day on the same line, opens the moment.
+    var moment: MomentHeaders.Entry? = nil
+
+    /// What VoiceOver reads for the day line: the moment and the day.
+    var momentAccessibilityLabel: String? {
+        guard let moment else { return nil }
+        return [moment.title, subtitle].compactMap { $0 }.joined(separator: ", ")
+    }
 }
 
 /// Header texts, formatted on demand (only for headers that are shown) and remembered per section.
@@ -199,6 +209,8 @@ struct GridHeaderText: Equatable {
 final class GridHeaderTexts {
     private var cache: [Int: GridHeaderText] = [:]
     private var day = 0
+    /// Moment titles of day headers (the Library, SPEC §16.1).
+    private(set) var moments = MomentHeaders.none
 
     func text(for section: GridSection, now: Date = Date()) -> GridHeaderText {
         // "Today" and "Yesterday" go stale at midnight.
@@ -208,9 +220,18 @@ final class GridHeaderTexts {
             cache.removeAll(keepingCapacity: true)
         }
         if let cached = cache[section.id] { return cached }
-        let text = Self.format(section, now: now)
+        var text = Self.format(section, now: now)
+        if section.kind == .day { text.moment = moments[section.id] }
         cache[section.id] = text
         return text
+    }
+
+    /// New moment titles; true when they differ (the headers on screen are configured again, nothing is laid out).
+    func setMoments(_ moments: MomentHeaders) -> Bool {
+        guard moments != self.moments else { return false }
+        self.moments = moments
+        cache.removeAll(keepingCapacity: true)
+        return true
     }
 
     func reset() { cache.removeAll(keepingCapacity: true) }
@@ -446,20 +467,23 @@ extension AccountServices {
     func previewRequest(for item: GridMedia, tileSide: Double, scale: Double, square: Bool = true) -> ImagePipeline.Request {
         let pixels = PreviewSizing.neededPixels(tileSide: tileSide, scale: scale, aspectRatio: square ? item.aspectRatio : 1)
         let bucket = PreviewSizing.bucket(forPixels: pixels, buckets: PhotosAPI.previewBuckets)
-        return ImagePipeline.Request(
-            fileId: item.fileId, etag: item.etag, bucket: bucket,
-            hasPreview: item.hasPreview,
-            mimeType: item.mimeType,
-            originalURL: originalURL(of: item),
-            // Decoded at the size the tile shows, not at the size of the bucket (memory stays bounded at any zoom).
-            maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
+        // With the photo's edit (SPEC §16.3): a tile whose edit changed sees a new request and loads the new rendition.
+        return images.withEdits(
+            ImagePipeline.Request(
+                fileId: item.fileId, etag: item.etag, bucket: bucket,
+                hasPreview: item.hasPreview,
+                mimeType: item.mimeType,
+                originalURL: originalURL(of: item),
+                // Decoded at the size the tile shows, not at the size of the bucket (memory stays bounded at any zoom).
+                maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket)))
     }
 
     /// The preview a context menu shows above its actions: the 1024 px bucket, whatever the tile size.
     func menuPreviewRequest(for item: GridMedia) -> ImagePipeline.Request {
-        ImagePipeline.Request(
-            fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: item.hasPreview, mimeType: item.mimeType,
-            originalURL: originalURL(of: item))
+        images.withEdits(
+            ImagePipeline.Request(
+                fileId: item.fileId, etag: item.etag, bucket: 1024, hasPreview: item.hasPreview, mimeType: item.mimeType,
+                originalURL: originalURL(of: item)))
     }
 
     /// The original of a grid item, for a file without a server preview. A file of someone else's shared album has no path

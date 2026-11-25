@@ -80,6 +80,8 @@ import UniformTypeIdentifiers
 struct MemoryActionsMenu: View {
     let memory: Memory
     let model: MemoryActionsModel
+    /// "Show to a Guest…" (SPEC §16.8.3).
+    var showToGuest: (() -> Void)?
     @Environment(SessionModel.self) private var session
     @AppStorage(SlideshowMusicStore.key) private var storedMusic = ""
 
@@ -104,6 +106,11 @@ struct MemoryActionsMenu: View {
                 Task { model.collage = await CollageRequest.memory(memory, session: session) }
             } label: {
                 Label(CollageRequest.cardTitle, systemImage: "rectangle.3.group")
+            }
+            if let showToGuest {
+                Button(action: showToGuest) {
+                    Label(GuestWording.menuTitle, systemImage: GuestWording.systemImage)
+                }
             }
             Divider()
             musicMenu

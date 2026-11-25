@@ -317,6 +317,17 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v5-similarity") { db in try SimilarityStore.migrate(db) }
         // Smart offline (SPEC §15.8.1): the files it keeps and when albums were opened.
         migrator.registerMigration("v5-smart-offline") { db in try SmartOfflineStore.migrate(db) }
+        // Camera data of the photos for Insights (SPEC §16.5.1), read lazily from the server's EXIF.
+        migrator.registerMigration("v6-pro-exif") { db in try InsightsStore.migrate(db) }
+        // Descriptions of photos written on this device, in the search index (SPEC §16.2).
+        migrator.registerMigration("v6-search-descriptions") { db in try SearchDescriptions.migrate(db) }
+        // Moment titles worded by the on-device language model (SPEC §16.1).
+        migrator.registerMigration("v6-library-moment-titles") { db in try MomentTitleStore.migrate(db) }
+        // Camera details for smart album and folder rules (SPEC §16.4).
+        migrator.registerMigration("v6-organize-camera") { db in try OrganizeStore.migrate(db) }
+        // Family library decisions and the Lock Screen album's copies on the device (SPEC §16.7).
+        migrator.registerMigration("v6-family-decisions") { db in try FamilyStore.migrateDecisions(db) }
+        migrator.registerMigration("v6-family-device-mirror") { db in try FamilyStore.migrateDeviceMirror(db) }
         return migrator
     }
 }

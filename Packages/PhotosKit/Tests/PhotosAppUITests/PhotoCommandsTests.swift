@@ -23,7 +23,10 @@ import UniformTypeIdentifiers
         #expect(PhotoEditSaving.overwriteProblem(item(3, "a.dng")) == .unsupportedFormat)
         #expect(PhotoEditSaving.overwriteProblem(item(4, "a.mov", kind: .video)) == .unsupportedFormat)
         #expect(PhotoRotation.canRotate([item(2, "a.jpg", permissions: "RGS"), item(1, "b.heic")]))
-        #expect(!PhotoRotation.canRotate([item(2, "a.jpg", permissions: "RGS"), item(4, "a.mov", kind: .video)]))
+        // A turn is an edit (SPEC §16.3): photos shared read-only and RAW files can be turned too; videos not.
+        #expect(PhotoRotation.canRotate([item(2, "a.jpg", permissions: "RGS"), item(4, "a.mov", kind: .video)]))
+        #expect(PhotoRotation.canRotate([item(3, "a.dng")]))
+        #expect(!PhotoRotation.canRotate([item(4, "a.mov", kind: .video)]))
         #expect(PhotoRotation.photos([item(1, "a.jpg"), item(4, "a.mov", kind: .video)]).map(\.fileId) == [1])
         #expect(PhotoRotation.edits(clockwise: true).rotation == 1)
         #expect(PhotoRotation.edits(clockwise: false).rotation == 3)

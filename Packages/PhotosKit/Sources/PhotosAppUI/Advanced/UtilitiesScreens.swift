@@ -258,7 +258,7 @@ extension View {
                 Button(ServerDeleteWording.keepInAlbumsButton(count: items.count, trashbin: trashbin), role: .destructive) {
                     guard let request = pending.wrappedValue else { return }
                     Task {
-                        for album in note.albums { await session.addToAlbum([note.kept], album: album) }
+                        for album in note.albums { await session.add([note.kept], to: album) }
                         await session.delete(request.items)
                         request.done()
                     }

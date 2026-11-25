@@ -48,6 +48,9 @@ final class LibraryZoomModel {
     @ObservationIgnored var gridTopItem: @MainActor () -> FileID? = { nil }
     /// Changes the grid's zoom step (set by the timeline screen).
     @ObservationIgnored var setGridStep: @MainActor (Int) -> Void = { _ in }
+    /// Moment titles of the days (SPEC §16.1) and what a tap on one opens (set by the timeline screen).
+    var moments = MomentHeaders.none
+    @ObservationIgnored var openMoment: @MainActor (String) -> Void = { _ in }
     /// When the last pinch on a summary level ended; taps right after it are the fingers lifting, not taps.
     @ObservationIgnored var pinchEnded: ContinuousClock.Instant?
     var acceptsTaps: Bool { pinchEnded.map { ContinuousClock.now - $0 > .milliseconds(500) } ?? true }
@@ -262,6 +265,11 @@ struct LibraryZoomOverlay: ViewModifier {
                 guard let services = session.services else { return }
                 await SimilarIndexing.trickle(services)
             }
+            // And described for VoiceOver and search, while charging (SPEC §16.2).
+            .task(id: session.account.id) {
+                guard let services = session.services else { return }
+                await PhotoDescriptions.trickle(services)
+            }
     }
 
     /// Zooming in, the new level grows out of where the fingers were and the old one grows past them; out, both shrink.
@@ -425,7 +433,7 @@ struct LibrarySummaryView: View {
                 tap(bucket, at: anchor(of: bucket))
             }
         default:
-            DayMosaic(bucket: bucket) { photo in
+            DayMosaic(bucket: bucket, moment: model.moments[bucket.id], openMoment: model.openMoment) { photo in
                 tap(bucket, photo: photo, at: anchor(of: bucket))
             }
         }
@@ -533,6 +541,9 @@ struct SummaryCard: View {
 /// A day: its date, how many photos it has, and its best photos (up to three, the last one saying how many more).
 struct DayMosaic: View {
     let bucket: LibrarySummary.Bucket
+    /// The moment this day starts (SPEC §16.1): its title above the day opens it.
+    var moment: MomentHeaders.Entry? = nil
+    var openMoment: (String) -> Void = { _ in }
     /// A photo (or the day, nil) was tapped.
     let open: (FileID?) -> Void
 
@@ -540,6 +551,20 @@ struct DayMosaic: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let moment {
+                Button {
+                    openMoment(moment.momentId)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(moment.title).font(.title3.weight(.bold)).lineLimit(1)
+                        Image(systemName: "chevron.forward").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, -4)
+                .accessibilityHint(Text("Opens the moment", bundle: .module))
+            }
             Button {
                 open(nil)
             } label: {

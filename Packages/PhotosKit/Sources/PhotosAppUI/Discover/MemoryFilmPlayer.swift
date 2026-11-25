@@ -20,8 +20,10 @@ struct SlideshowStart: Identifiable, Hashable {
     var cover: FileID?
     /// Trips fly over the map between their stops.
     var isTrip = false
-    /// Plays the music chosen for memories (`memorySlideshowMusic`).
+    /// Plays the music chosen for memories (`memorySlideshowMusic`) or the style's own.
     var playsMemoryMusic = false
+    /// A memory, or a slideshow played as a film to be watched together (SPEC §16.6).
+    var kind = SharedFilm.Kind.memory
 
     init(memory: Memory) {
         id = memory.id
@@ -32,6 +34,30 @@ struct SlideshowStart: Identifiable, Hashable {
         isTrip = memory.kind == .trip
         playsMemoryMusic = true
     }
+
+    /// A slideshow's photos as a film, to watch together over SharePlay: in the slideshow's order, with the style's music.
+    init(slideshow title: String, ids: [FileID]) {
+        id = "slideshow-\(UUID().uuidString)"
+        self.title = title
+        self.ids = Array(ids.prefix(SharedFilm.pictureLimit))
+        playsMemoryMusic = true
+        kind = .slideshow
+    }
+
+    /// A film someone shared.
+    init(shared film: SharedFilm) {
+        id = "shared-\(film.id)"
+        title = film.title
+        subtitle = film.subtitle
+        ids = film.pictures.map(\.fileId)
+        kind = film.kind
+    }
+}
+
+/// The film players open in this window: a film shared over SharePlay opens by itself only when none is (an open player
+/// takes over the shared film instead).
+@MainActor enum FilmPlayers {
+    static var open = 0
 }
 
 extension View {
@@ -62,9 +88,9 @@ private struct FilmPresenter: ViewModifier {
 /// A memory played as a film (SPEC §15.1): a title card, slow camera moves that frame the faces, cuts on the music's
 /// beat, Live Photos and videos playing inline, and for trips a flight over the map between the stops. Pause, scrub,
 /// skip and mute; Export makes a video of it. With Reduce Motion the camera stays still; with VoiceOver the film starts
-/// paused.
+/// paused. Round 6 (SPEC §16.6): the style menu remixes the film (Cinematic, Upbeat, Black & White, Super 8, Calm), and
+/// SharePlay plays it in step on everyone's screen.
 struct MemoryFilmPlayer: View {
-    let start: SlideshowStart
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -77,11 +103,22 @@ struct MemoryFilmPlayer: View {
     @State private var resumeAfterScrub = false
     @State private var exporting = false
     @State private var lastInteraction = Date()
+    @State private var watch = WatchTogether.shared
+    @State private var shareProblem: WatchTogether.StartResult?
     @FocusState private var focused: Bool
+    /// Called instead of `dismiss` when the player is in a window of its own (a film shared over SharePlay on the Mac).
+    var close: (() -> Void)?
+
+    var start: SlideshowStart { model.start }
 
     init(start: SlideshowStart) {
-        self.start = start
         _model = State(initialValue: MemoryFilmModel(start: start))
+    }
+
+    /// A film someone shared over SharePlay.
+    init(shared film: SharedFilm, close: (() -> Void)? = nil) {
+        _model = State(initialValue: MemoryFilmModel(shared: film))
+        self.close = close
     }
 
     var body: some View {
@@ -112,7 +149,16 @@ struct MemoryFilmPlayer: View {
         #endif
         .contentShape(.rect)
         .onTapGesture { toggleControls() }
-        .overlay(alignment: .top) { if controlsShown { topBar } }
+        .overlay(alignment: .top) {
+            // Faded rather than removed: an open menu (Style) stays open when the controls hide.
+            VStack(spacing: 8) {
+                topBar
+                if model.shared != nil { WatchTogetherBanner(model: model) }
+            }
+            .opacity(controlsShown ? 1 : 0)
+            .allowsHitTesting(controlsShown)
+            .accessibilityHidden(!controlsShown)
+        }
         .overlay(alignment: .bottom) {
             if controlsShown && model.loaded && !model.ended {
                 FilmControls(model: model, scrubbing: $scrubbing, resume: $resumeAfterScrub)
@@ -130,6 +176,7 @@ struct MemoryFilmPlayer: View {
         .onAppear {
             focused = true
             model.still = reduceMotion
+            FilmPlayers.open += 1
         }
         .onKeyPress(keys: [.leftArrow, .rightArrow, .space, .escape, "m"]) { press in
             switch press.key {
@@ -137,12 +184,13 @@ struct MemoryFilmPlayer: View {
             case .rightArrow: model.skip(true)
             case .space: model.togglePlaying()
             case "m": model.muted.toggle()
-            default: dismiss()
+            default: finish()
             }
             lastInteraction = Date()
             return .handled
         }
-        .task {
+        .task(id: ObjectIdentifier(model)) {
+            model.still = reduceMotion
             await model.load(session: session, autoplay: Slideshow.startsPlaying(voiceOver: voiceOver))
         }
         .task(id: model.loaded) {
@@ -153,15 +201,51 @@ struct MemoryFilmPlayer: View {
                 try? await Task.sleep(for: .milliseconds(120))
             }
         }
+        // SharePlay: the session's film joins the group's timing here, another film takes this one's place, and the end
+        // of the session leaves the film here, paused.
+        .onChange(of: watch.film?.id, initial: true) { _, id in followSharePlay(id) }
+        .onChange(of: model.loaded) { _, loaded in if loaded { followSharePlay(watch.film?.id) } }
         .onChange(of: model.isPlaying) { _, playing in DisplaySleep.prevent(playing) }
-        .onChange(of: scenePhase) { _, phase in if phase != .active && model.isPlaying { model.pause() } }
+        .onChange(of: scenePhase) { _, phase in
+            // Watching together, the film goes on with the others while the app is away for a moment.
+            if phase != .active && model.isPlaying && !model.isWatchedTogether { model.pause() }
+        }
         .onDisappear {
             model.stop()
             DisplaySleep.prevent(false)
+            FilmPlayers.open -= 1
         }
         .sheet(isPresented: $exporting) {
             MemoryFilmExportSheet(start: start)
         }
+        .alert(
+            String(localized: "SharePlay isn't available", bundle: .module, comment: "Memory film: SharePlay could not start."),
+            isPresented: Binding(get: { shareProblem == .unavailable }, set: { if !$0 { shareProblem = nil } })
+        ) {
+        } message: {
+            Text(WatchTogetherText.howToStart)
+        }
+    }
+
+    /// Follows the SharePlay session: joins it with this film, or gives way to the film someone else shared.
+    func followSharePlay(_ id: String?) {
+        guard model.loaded else { return }
+        guard let film = watch.film, let id else {
+            model.leaveGroup()
+            return
+        }
+        if model.shared?.id == id {
+            model.attachToGroup()
+        } else {
+            // Someone shared another film: it takes this player's place.
+            model.leaveGroup()
+            model.stop()
+            model = MemoryFilmModel(shared: film)
+        }
+    }
+
+    func finish() {
+        if let close { close() } else { dismiss() }
     }
 
     var frameDescription: String {
@@ -174,6 +258,7 @@ struct MemoryFilmPlayer: View {
         case .card:
             return start.title
         case .shot(let shot):
+            if model.unavailable.contains(shot) { return WatchTogetherText.notShared }
             guard let item = model.making?.items[safe: shot] else { return start.title }
             return AccessibilityText.media(
                 isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
@@ -202,17 +287,31 @@ struct MemoryFilmPlayer: View {
 
     var topBar: some View {
         HStack(spacing: 12) {
-            FilmButton(title: String(localized: "Close", bundle: .module), systemImage: "xmark") { dismiss() }
+            FilmButton(title: model.isGuest ? WatchTogetherText.leave : String(localized: "Close", bundle: .module), systemImage: "xmark") {
+                finish()
+            }
             Spacer(minLength: 0)
             FilmButton(title: muteTitle, systemImage: model.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
                 lastInteraction = Date()
                 model.muted.toggle()
             }
-            FilmButton(title: MemoryFilmExportSheet.menuTitle, systemImage: "square.and.arrow.up") {
-                model.pause()
-                exporting = true
+            if !model.isGuest {
+                FilmStyleMenu(choice: model.choice, ownMusic: SlideshowMusicStore.current(), shared: model.shared != nil) { choice in
+                    lastInteraction = Date()
+                    Task { await model.change(choice) }
+                }
+                .disabled(!model.loaded)
+                FilmButton(title: WatchTogetherText.shareTitle, systemImage: "shareplay") {
+                    lastInteraction = Date()
+                    Task { shareProblem = await model.shareWithGroup() }
+                }
+                .disabled(!model.loaded || model.plan?.segments.isEmpty != false || model.shared != nil)
+                FilmButton(title: MemoryFilmExportSheet.menuTitle, systemImage: "square.and.arrow.up") {
+                    model.pause()
+                    exporting = true
+                }
+                .disabled(!model.loaded || model.plan?.segments.isEmpty != false)
             }
-            .disabled(!model.loaded || model.plan?.segments.isEmpty != false)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -235,10 +334,12 @@ struct MemoryFilmPlayer: View {
                         String(localized: "Play Again", bundle: .module, comment: "Memory film: plays the film again from the start."),
                         systemImage: "arrow.counterclockwise")
                 }
-                Button {
-                    exporting = true
-                } label: {
-                    Label(MemoryFilmExportSheet.menuTitle, systemImage: "square.and.arrow.up")
+                if !model.isGuest {
+                    Button {
+                        exporting = true
+                    } label: {
+                        Label(MemoryFilmExportSheet.menuTitle, systemImage: "square.and.arrow.up")
+                    }
                 }
             }
             .buttonStyle(.bordered)
@@ -259,11 +360,20 @@ private struct FilmFrame: View {
     let size: CGSize
 
     var body: some View {
+        let look = plan.style.look
+        let jitter = look.jitterOffset(at: time)
         ZStack(alignment: .topLeading) {
             Color.black
-            ForEach(plan.layers(at: time), id: \.segment) { (layer: FilmLayer) in
-                layerView(layer).opacity(layer.opacity)
+            ZStack(alignment: .topLeading) {
+                ForEach(plan.layers(at: time), id: \.segment) { (layer: FilmLayer) in
+                    layerView(layer).opacity(layer.opacity)
+                }
             }
+            .frame(width: size.width, height: size.height)
+            // The home movie's gate: drawn a little larger, so its jumps never show an edge.
+            .scaleEffect(look.overscan)
+            .offset(x: jitter.x * size.height, y: jitter.y * size.height)
+            FilmLookOverlay(look: look, time: time, size: size, grain: model.grain)
             Color.black.opacity(1 - plan.brightness(at: time)).allowsHitTesting(false)
         }
         .frame(width: size.width, height: size.height)
@@ -281,7 +391,11 @@ private struct FilmFrame: View {
                     height: FilmTitleOverlay.textScale(size))
             }
         case .shot(let shot):
-            shotView(shot, layer: layer, showsClip: true)
+            if model.unavailable.contains(shot) {
+                NotSharedCard(height: FilmTitleOverlay.textScale(size))
+            } else {
+                shotView(shot, layer: layer, showsClip: true)
+            }
         case .flight(_, _, let from, let to):
             ZStack {
                 FlightView(map: model.maps[layer.segment], progress: layer.progress, still: model.still, size: size)
@@ -458,9 +572,24 @@ struct FilmFlightCaption: View {
     }
 }
 
+/// What the film controls drive: a memory film or a time-lapse of faces.
+@MainActor protocol FilmPlayback: AnyObject, Observable {
+    var isPlaying: Bool { get }
+    var duration: Double { get }
+    var now: Double { get }
+    func time(at date: Date) -> Double
+    func play()
+    func pause()
+    func togglePlaying()
+    func seek(to time: Double)
+    func skip(_ forward: Bool)
+}
+
+extension MemoryFilmModel: FilmPlayback {}
+
 /// Play/pause, skip, the scrubber and the time.
-private struct FilmControls: View {
-    let model: MemoryFilmModel
+struct FilmControls<Model: FilmPlayback>: View {
+    let model: Model
     @Binding var scrubbing: Double?
     @Binding var resume: Bool
 
@@ -525,7 +654,7 @@ private struct FilmControls: View {
 }
 
 /// A round control of the film (44 points: easy to hit).
-private struct FilmButton: View {
+struct FilmButton: View {
     let title: String
     let systemImage: String
     var large = false

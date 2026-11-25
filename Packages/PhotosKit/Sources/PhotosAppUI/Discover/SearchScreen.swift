@@ -112,6 +112,7 @@ enum SearchEvaluator {
 /// The search tab (iPhone, iPad, Vision Pro) with its own search field. On the Mac the field is in the window toolbar.
 struct SearchTab: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.commandPalette) private var palette
     @State private var query = ""
     @State private var filters: [SearchFilter] = []
     @State private var submissions = 0
@@ -128,6 +129,16 @@ struct SearchTab: View {
                 query = text
                 filters = []
             }
+            // A search chosen in the command palette (SPEC §16.2).
+            .onChange(of: palette?.pendingSearch, initial: true) { _, pending in
+                guard let pending else { return }
+                palette?.pendingSearch = nil
+                query = ""
+                filters = pending
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { CommandPaletteButton() }
+            }
     }
 }
 
@@ -142,6 +153,9 @@ extension SearchFilter {
         case .text: "textformat"
         case .favorites: "heart"
         case .videos: "video"
+        case .photos: "photo"
+        case .label: "eye"
+        case .rating: "star"
         }
     }
 }
@@ -172,6 +186,13 @@ struct SearchScreen: View {
     /// Counts "Try again", so the same filters are evaluated once more.
     @State private var searchAttempt = 0
     @State private var recents = RecentSearches()
+    /// What the typed words say as chips (SPEC §16.2): read on the device at once, then refined by the language model
+    /// where there is one.
+    @State private var understood: NaturalSearch.Interpretation?
+    /// Whether the language model added to `understood`.
+    @State private var understoodByModel = false
+    /// Words photos are known to show (on-device labels), for reading searches.
+    @State private var labels: [String] = []
 
     var suggestions: [SearchFilter] { matches.filter { !filters.contains($0) } }
 
@@ -186,21 +207,56 @@ struct SearchScreen: View {
         let typed = query
         if typed.isEmpty {
             matches = []
+            understood = nil
             return
         }
         // The first suggestions come at once; while they are on screen, further typing is debounced.
         if !matches.isEmpty { try? await Task.sleep(for: Self.typingPause) }
         guard !Task.isCancelled else { return }
         let result = await Self.suggestions(for: typed, vocabulary: vocabulary)
+        let parsed = await Self.interpret(typed, vocabulary: naturalVocabulary)
         guard !Task.isCancelled else { return }
         matches = result
+        understood = parsed
+        understoodByModel = false
+        await refineWithModel(typed, parsed: parsed)
+    }
+
+    var naturalVocabulary: NaturalSearch.Vocabulary { NaturalSearch.Vocabulary(vocabulary, labels: labels) }
+
+    nonisolated static func interpret(_ query: String, vocabulary: NaturalSearch.Vocabulary) async -> NaturalSearch.Interpretation {
+        NaturalSearch.interpret(query, vocabulary: vocabulary)
+    }
+
+    /// After a longer pause in typing, the language model reads the words too (where Apple Intelligence is available).
+    func refineWithModel(_ typed: String, parsed: NaturalSearch.Interpretation) async {
+        // Single names are what the suggestions are for.
+        guard NaturalSearchModel.isAvailable, FuzzyMatch.words(typed).count >= 2 else { return }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled,
+            let model = try? await NaturalSearchModel.filters(for: typed, vocabulary: naturalVocabulary), !Task.isCancelled, query == typed
+        else { return }
+        let merged = NaturalSearch.merge(parsed, model: model)
+        if merged != parsed {
+            understood = merged
+            understoodByModel = true
+        }
+    }
+
+    /// Chips worth offering for the typed words as a whole: more than one, or one with words left over.
+    var understoodFilters: [SearchFilter]? {
+        guard let understood, understood.isStructured else { return nil }
+        let chips = understood.filters
+        guard chips.count >= 2 || understoodByModel else { return nil }
+        return chips
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            #if !os(macOS)
-                if !filters.isEmpty { filterBar }
-            #endif
+            if !filters.isEmpty {
+                SearchChipBar(
+                    filters: $filters, vocabulary: vocabulary, count: query.isEmpty && feed.loaded ? feed.items.count : nil)
+            }
             if !query.isEmpty {
                 suggestionList
             } else if filters.isEmpty {
@@ -237,6 +293,10 @@ struct SearchScreen: View {
         }
         .navigationTitle(String(localized: "Search", bundle: .module))
         .task { await loadVocabulary() }
+        .task {
+            guard let services = session.services else { return }
+            labels = await Self.knownLabels(services.database)
+        }
         .task {
             if let layout = session.services?.layout { recents = RecentSearches.load(account: session.account.id, layout: layout) }
         }
@@ -296,15 +356,43 @@ struct SearchScreen: View {
         Task {
             // Not the list on screen: it may still belong to what was typed a moment ago.
             let current = await Self.suggestions(for: typed, vocabulary: vocabulary)
-            guard query == typed, let filter = SearchCommit.filter(for: typed, suggestions: current, active: filters) else { return }
+            let parsed = await Self.interpret(typed, vocabulary: naturalVocabulary)
+            guard query == typed else { return }
+            // Words that say several things ("videos of Anna at the beach") become all their chips.
+            let whole = understood?.filters ?? parsed.filters
+            if parsed.isStructured, whole.count >= 2 {
+                apply(whole)
+                return
+            }
+            guard let filter = SearchCommit.filter(for: typed, suggestions: current, active: filters) else { return }
             filters.append(filter)
             query = ""
         }
     }
 
+    /// Adds chips to the search (replacing a chip of the same date or media kind) and clears the field.
+    func apply(_ chips: [SearchFilter]) {
+        var result = filters
+        for chip in chips where !result.contains(chip) {
+            switch chip {
+            case .dateRange: result.removeAll { if case .dateRange = $0 { true } else { false } }
+            case .videos, .photos: result.removeAll { $0 == .videos || $0 == .photos }
+            case .rating: result.removeAll { if case .rating = $0 { true } else { false } }
+            default: break
+            }
+            result.append(chip)
+        }
+        filters = result
+        query = ""
+    }
+
     /// Suggestions for the typed text, with "Ask" on top where a language model can answer.
     @ViewBuilder var suggestionList: some View {
-        if AskPhotos.isAvailable(session) {
+        if let chips = understoodFilters {
+            understoodRow(chips)
+        }
+        // The server's Assistant (SPEC SR-4); on devices with Apple Intelligence the words are read as they are typed.
+        if !NaturalSearchModel.isAvailable, AskPhotos.isAvailable(session) {
             Button {
                 ask()
             } label: {
@@ -339,6 +427,38 @@ struct SearchScreen: View {
                     description: Text("Try a place, an album, a date like “june 2023”, or part of a file name.", bundle: .module))
             }
         }
+    }
+
+    /// "Search for: Videos · Anna · beach · Summer 2026": the typed words as chips, on top of the suggestions.
+    func understoodRow(_ chips: [SearchFilter]) -> some View {
+        Button {
+            apply(chips)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: understoodByModel ? "sparkles" : "text.magnifyingglass")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(chips) { chip in
+                            Label(chip.label, systemImage: chip.systemImage)
+                                .font(.callout)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(.tint.opacity(0.14), in: .capsule)
+                        }
+                    }
+                }
+                Image(systemName: "return").foregroundStyle(.secondary).font(.caption).accessibilityHidden(true)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            Text(
+                "Search for \(AccessibilityText.join(chips.map(\.label)))", bundle: .module,
+                comment: "VoiceOver: the typed words understood as search filters, e.g. Search for Videos, Anna, beach, Summer 2026."))
     }
 
     /// Before anything is typed: what can be searched for, or the recent searches.
@@ -404,32 +524,6 @@ struct SearchScreen: View {
         saveRecents()
     }
 
-    /// The active filters (click one to remove it) and the number of results.
-    var filterBar: some View {
-        HStack {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
-                    ForEach(filters) { filter in
-                        Button {
-                            filters.removeAll { $0 == filter }
-                        } label: {
-                            Label(filter.label, systemImage: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.capsule)
-                        .accessibilityLabel(Text("Remove filter \(filter.label)", bundle: .module))
-                    }
-                }
-            }
-            if query.isEmpty && feed.loaded {
-                Text("\(feed.items.count) results", bundle: .module)
-                    .font(.callout).foregroundStyle(.secondary).monospacedDigit()
-            }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
-    }
-
     /// Natural-language search (SPEC SR-4).
     func ask() {
         asking = true
@@ -467,7 +561,15 @@ struct SearchScreen: View {
             )
         case .favorites: String(localized: "Favorites", bundle: .module)
         case .videos: String(localized: "Videos", bundle: .module)
+        case .photos: String(localized: "Photos", bundle: .module)
+        case .label: SearchChipWording.kind(filter)
+        case .rating: SearchChipWording.kind(filter)
         }
+    }
+
+    /// Words photos are known to show, off the main thread.
+    nonisolated static func knownLabels(_ database: AccountDatabase) async -> [String] {
+        (try? PhotoDescriptionStore(database: database).knownLabels(limit: 1500)) ?? []
     }
 
     func loadVocabulary() async {

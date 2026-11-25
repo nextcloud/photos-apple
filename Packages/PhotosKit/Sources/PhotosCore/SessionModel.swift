@@ -30,6 +30,10 @@ public final class SessionModel {
     /// Undo bookkeeping (`SessionModel+Undo.swift`): where the last change can be undone, and the undo managers this
     /// session registered with.
     @ObservationIgnored var undoState = UndoState()
+    /// Recent changes, newest first, for the undo history (SPEC §16.3.4; `SessionModel+Undo.swift`).
+    public internal(set) var history: [ChangeHistoryEntry] = []
+    /// Counted up whenever edits of photos change (`SessionModel+Edits.swift`): views showing edits read it.
+    public internal(set) var editRevision = 0
     public let transfers = TransferQueue()
     /// The app's backup. It belongs to one account, which is not necessarily this one, and keeps running across account switches.
     public let backup: BackupModel
@@ -40,6 +44,14 @@ public final class SessionModel {
     public private(set) var stickerBook: StickerBook?
     /// A partner's shared photos in this account's timeline (SPEC SH-8).
     public private(set) var partners: PartnerTimelineModel?
+    /// Smart albums from the rule builder, folder rules, camera details (SPEC §16.4).
+    public private(set) var organize: OrganizeModel?
+    /// The family library's suggestions (SPEC §16.7.2).
+    public internal(set) var family: FamilyLibraryModel?
+    /// The Nextcloud album mirrored into the device's library for the Lock Screen (SPEC §16.7.4).
+    public internal(set) var lockScreenAlbum: LockScreenAlbumModel?
+    /// When the family features last ran after a sync (`SessionModel+Family.swift`).
+    @ObservationIgnored var familyState = FamilyState()
     @ObservationIgnored var albumsRefreshedAt: Date?
     /// What was last written to Spotlight for this account (`SessionModel+Spotlight.swift`); nil before the first pass.
     @ObservationIgnored var spotlightEntries: [SpotlightEntry]?
@@ -77,12 +89,14 @@ public final class SessionModel {
         transfers.session = self
         if let services {
             partners = PartnerTimelineModel(services: services)
+            organize = OrganizeModel(services: services, session: self)
             let offline = OfflineManager(services: services)
             self.offline = offline
             let smart = SmartOfflineManager(
                 services: services, excludedFolders: { [weak self] in await MainActor.run { self?.excludedFolders ?? [] } })
             smartOffline = smart
             stickerBook = StickerBook(directory: services.layout.accountDirectory(account.id).appending(path: "Stickers"))
+            setUpFamily(services)
             // Weak: the offline managers own the services, whose image pipeline would otherwise own the managers.
             Task { [weak offline, weak smart] in
                 await services.images.setLocalOriginalProvider { [weak offline, weak smart] fileId, etag in
@@ -92,6 +106,7 @@ public final class SessionModel {
                     smart?.localPreview(fileId: fileId, etag: etag, bucket: bucket)
                 }
             }
+            observeEdits()
         }
     }
 
@@ -146,6 +161,7 @@ public final class SessionModel {
     func stop() {
         isStopped = true
         tasks.values.forEach { $0.cancel() }
+        organize?.stop()
         // Nothing of this account can be undone any more (account switch, removal).
         clearUndo()
     }
@@ -257,6 +273,8 @@ public final class SessionModel {
         guard let services, !isStopped else { return }
         await services.sync.sync(reconcile: reconcile)
         await services.outbox.kick()
+        // Edits saved on other devices, and edits made here while offline (SPEC §16.3.1).
+        await services.edits.sync()
         await refreshFailedOperations()
         // Beside, not before, what the caller does next (a background task's backup pass): labels for search and
         // shared-album activity are throttled extras.

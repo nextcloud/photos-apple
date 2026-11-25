@@ -16,6 +16,8 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     case search, backup, settings
     /// The sticker book (SPEC §15.8.2).
     case stickers
+    /// Photographer's statistics: cameras, lenses, exposure, keepers (SPEC §16.5.1).
+    case insights
     /// The tab that lists the places without a tab of their own (iPhone, narrow iPad windows; SPEC §6.2).
     case collections
 
@@ -47,6 +49,9 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .settings: LocalizedStringResource("Settings", bundle: .module)
         case .collections: LocalizedStringResource("Collections", bundle: .module)
         case .stickers: LocalizedStringResource("Stickers", bundle: .module, comment: "The sticker book in the sidebar.")
+        case .insights:
+            LocalizedStringResource(
+                "Insights", bundle: .module, comment: "Sidebar: statistics of the photographer's cameras, lenses and settings.")
         }
     }
 
@@ -76,6 +81,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .settings: "gearshape"
         case .collections: "square.stack"
         case .stickers: "face.smiling"
+        case .insights: "chart.bar.xaxis"
         }
     }
 
@@ -96,7 +102,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         switch self {
         case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup, .collections: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
-        case .recentlyDeleted, .duplicates, .freeSpace, .stickers: nil
+        case .recentlyDeleted, .duplicates, .freeSpace, .stickers, .insights: nil
         }
     }
 }
@@ -108,7 +114,7 @@ enum SidebarLayout {
     static let collections: [AppDestination] = [
         .albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou, .stickers,
     ]
-    static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace]
+    static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace, .insights]
 
     /// The row that is highlighted while `destination` is shown.
     static func row(for destination: AppDestination) -> AppDestination? {
@@ -163,8 +169,16 @@ struct MainView: View {
     @State private var importingLibrary = false
     /// File › Import from Camera or Card… (SPEC §15.2).
     @State private var importingCard = false
+    /// Edit ▸ Undo History… (SPEC §16.3.4).
+    @State private var showingUndoHistory = false
     /// "Show in library": the photo the Library timeline scrolls to and highlights.
     @State private var timelineReveal = TimelineRevealCenter()
+    /// The command palette of this window (SPEC §16.2).
+    @State private var palette = CommandPaletteCenter()
+    #if os(macOS)
+        /// The grid or viewer with the focus, whose selection the palette's commands act on.
+        @FocusedValue(\.gridActions) private var focusedGrid
+    #endif
 
     /// Debug builds: `PHOTOS_DEBUG_DESTINATION=albums` opens a destination at launch (screenshots, UI tests).
     static var debugDestination: AppDestination? {
@@ -202,27 +216,14 @@ struct MainView: View {
             .onChange(of: lock.isLocked) { _, _ in openRequested() }
             .onChange(of: selection) { _, _ in remember() }
             .onChange(of: paths) { _, _ in remember() }
-            .focusedSceneValue(
-                \.mainActions,
-                MainActions(
-                    available: AppDestination.allCases.filter(visible),
-                    go: { go($0) },
-                    focusSearch: { focusSearch() },
-                    newAlbum: {
-                        go(.albums)
-                        creatingAlbum = true
-                    },
-                    upload: { importingFiles = true },
-                    openPublicLink: { openingLink = true },
-                    syncNow: { Task { await session.syncNow(forceReconcile: true) } },
-                    importLibrary: { importingLibrary = true },
-                    importCard: CardImportAvailability.isAvailable ? { importingCard = true } : nil
-                )
-            )
+            .focusedSceneValue(\.mainActions, mainActions)
+            // ⌘K and the toolbar button (SPEC §16.2).
+            .commandPaletteHost(palette, actions: mainActions)
             .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
             .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
             .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
             .sheet(isPresented: $importingCard) { CardImportSheet() }
+            .undoHistorySheet(isPresented: $showingUndoHistory)
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_CARD_IMPORT=1` opens the import sheet at launch.
                 .task { if ProcessInfo.processInfo.environment["PHOTOS_DEBUG_CARD_IMPORT"] != nil { importingCard = true } }
@@ -233,6 +234,40 @@ struct MainView: View {
                 guard case .success(let urls) = result else { return }
                 session.transfers.upload(UploadSources.copies(of: urls))
             }
+    }
+
+    /// What the menus, the keyboard and the command palette can do in this window.
+    var mainActions: MainActions {
+        MainActions(
+            available: AppDestination.allCases.filter(visible),
+            go: { go($0) },
+            focusSearch: { focusSearch() },
+            newAlbum: {
+                go(.albums)
+                creatingAlbum = true
+            },
+            upload: { importingFiles = true },
+            openPublicLink: { openingLink = true },
+            syncNow: { Task { await session.syncNow(forceReconcile: true) } },
+            importLibrary: { importingLibrary = true },
+            importCard: CardImportAvailability.isAvailable ? { importingCard = true } : nil,
+            showUndoHistory: { showingUndoHistory = true },
+            openPalette: { grid in palette.open(grid: grid) },
+            openLink: { open($0) },
+            search: { filters in showSearch(filters) }
+        )
+    }
+
+    /// The search with these chips (from the command palette).
+    func showSearch(_ filters: [SearchFilter]) {
+        #if os(macOS)
+            searchText = ""
+            searchFilters = filters
+            selection = .search
+        #else
+            palette.pendingSearch = filters
+            go(.search)
+        #endif
     }
 
     // MARK: State
@@ -397,6 +432,9 @@ struct MainView: View {
                 Label(filter.label, systemImage: filter.systemImage)
             }
             .searchFocused($searchFocused)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { CommandPaletteButton(grid: focusedGrid) }
+            }
             .onSubmit(of: .search) {
                 showSearch()
                 searchSubmissions += 1
@@ -632,7 +670,7 @@ struct DestinationView: View {
         case .tags: TagsScreen()
         case .folders: FoldersScreen()
         case .sharedWithYou: FoldersScreen(sharedWithYou: true)
-        case .smartAlbums: SmartAlbumsScreen()
+        case .smartAlbums: SmartAlbumsLibraryScreen()
         case .archive: ArchiveScreen()
         case .search:
             #if os(macOS)
@@ -645,6 +683,7 @@ struct DestinationView: View {
         case .freeSpace: FreeSpaceScreen()
         case .sharedAlbums: AlbumsScreen(kind: .shared)
         case .stickers: StickerBookScreen()
+        case .insights: InsightsScreen()
         case .collections:
             #if os(macOS)
                 // The Mac has the sidebar; nothing leads here.

@@ -454,6 +454,8 @@ public final class AppModel {
 
     /// Maps a delivered notification to a destination (On this day for the Photos "onthisday" notification).
     public func handleNotification(userInfo: [AnyHashable: Any]) {
+        // Nothing opens from a notification in Guest Mode (SPEC §16.8.3).
+        if GuestMode.shared.isActive { return }
         // A link with the account (the photo of the day): it opens in that account, or asks to switch.
         if let link = (userInfo[PhotoOfTheDayNotifications.linkKey] as? String).flatMap(URL.init(string:)), open(link) { return }
         if let destination = userInfo[PushNotifications.destinationKey] as? String { requestedDestination = destination }

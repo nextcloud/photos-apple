@@ -13,6 +13,8 @@ struct SearchAndActivitySettings: View {
     @State private var progress: (labeled: Int, total: Int)?
     @AppStorage(SimilarIndexing.enabledKey) private var similarPhotos = true
     @State private var similarProgress: (indexed: Int, total: Int)?
+    @AppStorage(PhotoDescriptions.enabledKey) private var photoDescriptions = true
+    @State private var descriptionProgress: (described: Int, total: Int)?
 
     var body: some View {
         if ContentLabeling.isAvailable {
@@ -39,6 +41,7 @@ struct SearchAndActivitySettings: View {
             .task { loadProgress() }
         }
         similarSection
+        descriptionsSection
         Section {
             Toggle(String(localized: "New photos in shared albums", bundle: .module), isOn: $sharedAlbumNotifications)
         } header: {
@@ -75,6 +78,52 @@ struct SearchAndActivitySettings: View {
             loadSimilarProgress()
         }
         .task { loadSimilarProgress() }
+    }
+
+    /// Descriptions of photos written on this device (SPEC §16.2): on by default; off deletes them.
+    var descriptionsSection: some View {
+        Section {
+            Toggle(
+                String(
+                    localized: "Describe photos", bundle: .module,
+                    comment: "Settings › Search: write short descriptions of photos on this device."), isOn: $photoDescriptions)
+            if photoDescriptions, let descriptionProgress {
+                LabeledContent(
+                    String(
+                        localized: "Photos described", bundle: .module, comment: "Settings › Search: progress of the photo descriptions."),
+                    value: String(
+                        localized: "\(descriptionProgress.described.formatted()) of \(descriptionProgress.total.formatted())",
+                        bundle: .module,
+                        comment: "Progress of the on-device indexing for Show Similar: photos indexed of all photos"))
+            }
+        } footer: {
+            Text(Self.descriptionsNote)
+        }
+        .onChange(of: photoDescriptions) { _, enabled in
+            PhotoDescriptions.apply(enabled: enabled, services: session.services)
+            loadDescriptionProgress()
+        }
+        .task { loadDescriptionProgress() }
+    }
+
+    func loadDescriptionProgress() {
+        guard let services = session.services else { return }
+        descriptionProgress = try? PhotoDescriptionStore(database: services.database).progress()
+    }
+
+    /// What the descriptions are for and what happens to them, in the platform's words.
+    static var descriptionsNote: String {
+        #if os(macOS)
+            String(
+                localized:
+                    "Your Mac writes a short description of each photo, like “A dog running on a beach at sunset”, from the previews it has already downloaded, while it is idle. VoiceOver reads it, and search finds photos by it. The descriptions stay on this Mac and are never uploaded. Turning this off deletes them.",
+                bundle: .module, comment: "Settings › Search, Mac: photo descriptions.")
+        #else
+            String(
+                localized:
+                    "A short description of each photo, like “A dog running on a beach at sunset”, is written from the previews that are already downloaded, while charging. VoiceOver reads it, and search finds photos by it. The descriptions stay in this app and are never uploaded. Turning this off deletes them.",
+                bundle: .module, comment: "Settings › Search, iPhone, iPad and Vision Pro: photo descriptions.")
+        #endif
     }
 
     func loadSimilarProgress() {

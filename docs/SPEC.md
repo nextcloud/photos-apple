@@ -526,6 +526,8 @@ Core Image pipeline (`PhotosMedia/Editing`), non-destructive while editing, rend
 
 #### 7.16.2 Saving
 
+Since M7 the editor saves non-destructively (an edit recipe, §16.3.1); the two file saves below stay in its More menu.
+
 "Save as copy" (default): writes `<name> (edited).<ext>` next to the original (HEIC if the original was HEIC, else JPEG), so the stacking rule groups it with the original; the copy is added to the same own albums. "Overwrite original": PUT over the original; tell the user that the previous version stays in Nextcloud's file versions (if `files_versions` is enabled). Not available for files without write permission. The original keeps its format and name (only formats Image I/O can write: JPEG, HEIC/HEIF, PNG, TIFF; others can only be saved as a copy), and the PUT carries `If-Match` with the ETag the app edited, so a newer version on the server is never replaced.
 
 #### 7.16.3 Metadata editing
@@ -1398,6 +1400,688 @@ photos of 2 albums you opened recently").
   2 years ago", "From your favorites · June 2019". With app lock on: "A photo from your library is waiting for you." with
   no photo, date or place. Tapping opens the photo in the viewer of its account (`nextcloudphotos://user@host/photo/<id>`,
   after the unlock). Pending ones are removed with their account.
+
+## 16. M7 — Elegant and powerful
+
+Round 6 (2026-11-25): 30 ideas to make the app more elegant, more fun and more powerful. No server changes. Each
+subsection is owned by one work package (name in brackets).
+
+### 16.1 Library: moments, scrub to peek, range select, story cards [library]
+
+**Moments.** The Library's days are grouped into named moments ("Sunday in Lisbon", "Anna’s birthday", "Hike near
+Zermatt"), computed on the device from the local index (`LibraryMoments`, PhotosDomain).
+- *Grouping.* A moment is one local calendar day (the grid's day sections, so ids and the scrubber stay as they are), or
+  a run of consecutive days away from home at one place: same main place, or the same foreign country, at most 36 h
+  between the photos of two days, at most 7 days. A day without any place between two days of one stay belongs to it
+  (a camera without GPS that day); at the end of a stay it does not (that may be the day back home). Home is the place
+  that is the main place of the most days (at least 3).
+- *Titles* (rules, in this order; `MomentTitle`, localised in the PhotosDomain catalog): an event the device recognised
+  in the photos — a birthday ("Anna’s birthday", after the named person seen most, else "Birthday"), a wedding,
+  Christmas (December and January only); an activity — skiing, hike, concert, camping, beach, snow, mountains ("Hike near
+  Zermatt"; the place only away from home); a day away ("Sunday in Lisbon"), a weekend away ("Weekend in Lisbon"), a
+  longer stay ("3 days in Lisbon"), two places ("Lisbon & Porto", the second with at least half as many photos); a day
+  with named people ("Sunday with Anna and Ben": people in at least 30 % of the photos or in 3 of them; Recognize's
+  unnamed clusters and people hidden on this device are never used). Activities come from the on-device labels of
+  Settings › Search (`visionLabel`, current version of the file only) with a minimum share of the moment's labelled
+  photos (10 % for events, 20–40 % for scenery). Fewer than 3 photos, or nothing of the above (a day at home with
+  nobody named): no title, the day keeps its plain header ("where it reads well").
+- *Nicer titles.* Where Apple Intelligence's on-device model is available and speaks the user's language
+  (`SystemLanguageModel`), the newest 24 titled moments of each build are worded by it, one at a time, not in Low
+  Power Mode. It only gets the moment's facts (days, places, country, people, activities; `MomentTitleWording`); an
+  answer is kept only if it has at most 6 words and 40 characters, no year or date, emoji, hashtag or line break, and
+  names the moment's place (away), person (birthday, a day with people). Kept titles are stored per moment with the
+  facts they came from (table `momentTitle`, migration `v6-library-moment-titles`) and used while those facts stay
+  the same; otherwise the rule title is shown. Nothing leaves the device.
+- *Where.* Library, unfiltered (all media, no rating filter): the header of a moment's newest day shows the title before
+  the day on the same line ("Sunday in Lisbon ›  Sun 22 Nov"; header heights do not change, so scrolling and the
+  scrubber stay exact). The Days level shows the title above the moment's newest day. A tap (click on the Mac, pointing
+  hand cursor) on the title opens the moment as a memory: its grid, Play Slideshow (the memory film), Save as Album,
+  Share as Link, music (`MemoryScreen`, kind trip). VoiceOver: the title line is a button "Sunday in Lisbon, Sun 22
+  November" with the hint "Opens the moment".
+- *Cost.* Built after each sync (and when the day or the excluded folders change) off the main actor from five columns
+  of every visible item plus the named people and the label rows that contain an activity word: 100 000 items in
+  0.22 s in a debug build (unit test budget 3 s). Titles appear in place without a relayout.
+- Settings › On this device › "Name moments" (on by default).
+
+**Scrub to peek.** Videos, Live Photos and stacks can be looked into without opening them.
+- iPhone, iPad, Vision Pro: hold a finger on the tile for 0.2 s, then slide sideways: the tile shows frames of the
+  video (8, spread over its length), of the Live Photo's motion (6), or the stack's copies (one segment each), following
+  the finger across the tile, with a bar along the bottom (position in the video, or which copy). A quicker move
+  scrolls; holding still lets the context menu come; letting go ends it. iPad pointer (trackpad, mouse) and Mac: the
+  pointer resting on the tile for 0.25 s starts it, moving across scrubs, leaving ends it. Not while selecting.
+- Low cost: frames are decoded at the tile's size with a key-frame tolerance, the one under the finger first; a video
+  that is not on the device is read through the app's HTTP client (byte ranges, as for playback), without a player.
+  Leaving the tile, scrolling or a change of the grid cancels the loading. The frames of the last 8 peeks are kept in
+  memory. Formats the system cannot play are not peeked into.
+
+**Range selection.** iPhone, iPad, Vision Pro: in the selection mode a finger that slides sideways over the tiles selects
+everything from the tile it started on to the tile under it, in the grid's order (or deselects, when it started on a
+selected tile); moving back gives the tiles left behind their state from before the drag. Dragged into the top or
+bottom 64 pt of the grid it scrolls, faster towards the edge (up to 1600 pt/s). A vertical move still scrolls. A
+two-finger drag starts the selection mode and selects as in Photos (UIKit's multi-selection, unchanged). Mac: ⇧-click
+selects the range, ⌘-click single tiles, dragging on the background draws a selection rectangle (NSCollectionView, as
+before).
+
+**Story cards.** The memories at the top of the Library (On this day, the year in review, recent trips; at most 12) are
+story cards by default: one large card at a time on iPhone (the next one peeks in), several side by side where there
+is room; a fixed band of 184 pt on iPhone, 220 pt on iPad, 210 pt on the Mac (no empty band, as the strip since round
+4). The card in front plays: up to 6 photos (the cover, then photos spread over the memory) follow one another every
+4 s with a slow zoom (a cross-fade with Reduce Motion), with a bar per photo; a tap on the trailing two thirds goes on,
+on the leading third back (mirrored right to left); after the last photo the next card comes to the front. The title
+opens the memory, the play button its film; with the pointer, chevrons appear. VoiceOver: one element per card (title,
+dates, count, "Photo 2 of 6"), swipe up/down steps through the photos, double-tap opens; no auto-advance while
+VoiceOver runs. The card's context menu: Play Slideshow, Show as Strip, Hide Memories. Settings › On this device ›
+Memories: Stories or Strip (the strip's context menu has Show as Stories).
+
+### 16.2 Search: command palette, natural-language search with chips, photo descriptions [search]
+
+**Command palette ("Quick Actions", ⌘K).** One field that goes anywhere and does anything.
+- *Where.* ⌘K on the Mac (Go ▸ Quick Actions…) and on iPad or iPhone with a keyboard (the same command gives the
+  shortcut); the ⌘ button in the Mac window's toolbar and in the Search tab's toolbar elsewhere. A floating panel over
+  the window (Mac, iPad, Vision Pro; a click or tap outside closes it, as Spotlight), a sheet on iPhone (compact width).
+- *What it finds* (`CommandPalette`, `CommandPaletteCatalog`, read from the local index each time it opens): the app's
+  places (with words people use for them: "trash" finds Recently deleted, "settings backup" finds Backup), the Mac's
+  Settings pages ("General Settings"… opens that tab of the Settings window), own and shared albums, people, places,
+  tags (not the rating and flag tags), the years of the library (with their photo count; choosing one searches it),
+  and commands: New Album, Upload Photos, Import Library, Import from Camera or Card, Open Public Album Link, Sync Now,
+  Slideshow, and on the selection of the grid or viewer that had the focus when the palette opened: Add to/Remove from
+  Favorites, Add to Album…, Add to New Album…, Open, Get Info, Edit…, Edit Date and Location…, Rotate Left/Right,
+  Export, Compare, Pick, Reject, Unflag, Delete…. Commands are offered only where the grid or viewer offers them (no
+  rating on a read-only share). Wording follows the platform (title case on the Mac).
+- *Typed intents.* "add to Summer" / "add to album Road trip" / "put in summer" lists the best matching albums (at most
+  5) as "Add to “Summer”" entries for the selection; "rate 4", "4 stars", "★★★★" rates it (0 clears).
+- *Words as a search.* The typed words are also read as a search (`NaturalSearch`, below): when they make two or more
+  chips ("Lisbon 2019", "favourites of Anna"), the first entry is that search ("Lisbon · 2019"), unless a name is typed
+  exactly (the album "Lisbon 2025" stays first, its search second). The last entry always searches for the words.
+- *Matching* (`FuzzyMatch`): case and diacritics ignored; every typed word must match a word of the name or of its
+  keywords — whole word 1.0, start of a word 0.9, start of the whole name across words 0.75 ("newal"), inside a word
+  0.6, one typo in words of four letters or more 0.45 ("lisbn", "lsibon"), letters in order 0.3 × density ("lsbn").
+  Keywords count three quarters. Bonuses for the name's word order and for typing the whole name; names with more
+  other words rank slightly lower. Recently chosen entries rank higher (+0.12 for the newest) and are shown first when
+  nothing is typed, followed by the selection's commands and the places. At most 40 entries.
+- *Keyboard.* ↑/↓ move the highlight (the list follows), Return runs it, Escape closes; hovering highlights on the Mac.
+  VoiceOver reads each entry as "title, detail, kind".
+- *Recent entries* (8) are kept per account in its directory (`palette-recents.json`) and go with the account.
+
+**Searches typed in words, with chips.** "videos of Anna at the beach last summer" → Videos · Anna · beach · Summer 2026.
+- *On the device, deterministic* (`NaturalSearch.interpret`, instant, on every pause in typing): read left to right,
+  the longest of: a date (`SearchDates`), a rating ("5 stars", "4+ stars", "three-star", "★★★", "rated 3", "at least
+  3 stars"), a media kind ("videos", "clips"; "photos only", "stills", "no videos" → still photos) or favourites
+  ("favourites", "faves", "loved"), a name the library knows — a person (also by first name when only one person has
+  it; possessives "Anna's"), a place, a tag, an album only next to the word "album" ("album Summer", "summer album") —
+  else a filler word ("of", "at", "the", "photos"…) is dropped, a word photos show becomes a "shows" chip (the labels
+  this device recognised, SR-7, and ~100 common words; plurals: "dogs" → dog), and what is left is one free-text chip,
+  so plain text searches as before. A person wins over a date after "with"/"of" ("with Jan"), a place after "in"/"at".
+- *Dates in many forms* (`SearchDates`, the user's calendar, month names in English and the user's language): years,
+  "2018-2020", "2018 to 2020", "between June 2020 and March 2021", "since 2020", decades ("90s", "1980s"), months with or
+  without a year (without: the last one that has begun), "3 March 2021", "March 3rd", "2021-03-03", "2021-03", seasons
+  ("summer 2019", "summer of 2019", "last summer" = the last one that is over, "this summer"; winter 2019 = December
+  2019 to February 2020; reversed in southern-hemisphere regions), holidays (Christmas = 24–26 December, Christmas
+  Eve, New Year's Eve/Day, Halloween, Valentine's Day, Easter = Good Friday to Easter Monday; with or without a year),
+  today, yesterday, this/last week, weekend, month, year, "last June", "3 years ago", "two months ago", "last 10 days",
+  "recently" (30 days).
+- *Apple Intelligence* (`NaturalSearchModel`, OS 27, where `SystemLanguageModel` is available): after a 0.6 s pause and
+  for two words or more, the on-device model reads the words into a guided-generation struct (media type, people,
+  places, things, first/last day, favourites, least rating); the answer is checked against the library (people and
+  places must be known ones, things one or two plain words, dates real dates). `NaturalSearch.merge`: the parser's
+  chips stay; the model adds kinds the parser did not find ("seaside" → beach); when it added something, the parser's
+  left-over free text goes. The row then shows a sparkles symbol. Without Apple Intelligence the server's Assistant
+  stays available as "Ask" (SR-4), unchanged.
+- *In the search screen* the understood chips are a row on top of the suggestions ("Search for Videos, Anna, beach,
+  Summer 2026" for VoiceOver); a tap or Return applies them (replacing a date, media-kind or rating chip already
+  there). Single names keep the existing suggestions and Return behaviour.
+- *Editable chips* (`SearchChipBar`, all platforms; on the Mac in addition to the field's tokens): a tap opens the
+  chip's menu — dates: the period before/after (a year by a year, a month by a month, a week by a week, a season or
+  holiday to the same days of another year, keeping its name: "Summer 2018"; never into the future) and Choose
+  Dates… (two date pickers); person/place/tag/album: another one; Videos ↔ Photos; rating: 1–5 stars or more; words:
+  Change Words…; and Remove. Results follow every change. The result count is beside the chips.
+- *New chip kinds*: `.photos` (still photos only), `.label(word)` (searched in all indexed text: labels, descriptions,
+  tags, captions…), `.rating(atLeast:)` (the rating tags of §15.2). They are stored in recent searches; smart albums
+  keep storing only what the web app's filters know (places, dates, names, tags).
+- *Camera* is not a chip: the index has no camera make/model (it would need `nc:metadata-photos-ifd0` in the sync).
+
+**Photo descriptions.** A short sentence per photo, written on the device: "A dog on a beach at sunset".
+- *How* (`PhotoDescriber`): Vision on the cached preview (1024, else 256, decoded at 512 px) — the image classifier
+  (labels at 90 % precision), face rectangles (faces of a reasonable size), fast text recognition (the three largest
+  lines). With Apple Intelligence: the on-device model writes one sentence of at most 15 words from the picture itself
+  (image attachment, when the model has the vision capability) and Vision's facts, in the user's language, with
+  instructions not to guess names, ages, feelings or brands; temperature 0.2. Without it (or when it fails):
+  `PhotoDescription.compose` writes an English sentence from the facts (subject: faces as "a person", "two people",
+  "a group of people", and the most specific non-generic label; a scene with its preposition; light/time "at sunset";
+  text "with the text “…”"). Every answer is cleaned (one line, no wrapping quotes or "Description:", no full stop,
+  refusals dropped, at most 140 characters cut at a word).
+- *Stored* per version of the file in the account database (table `photoDescription`: text — nil when the photo could
+  not be described, so it is not tried again until its file changes —, language, source, time; migration
+  `v6-search-descriptions`). Descriptions go with their photos (trigger). Never uploaded.
+- *Search*: the description of a photo's current version is part of its full-text index text
+  (`SearchDescriptions`: the v4 triggers with the description added, and triggers on `photoDescription`; a new file
+  version drops the old description from the index). The words photos show feed the "shows" chips.
+- *VoiceOver*: tiles (UIKit and AppKit grids) add the description to their label ("Photo, 13 January 2025 at 14:23,
+  Favorite, A tower"), the viewer uses it when the server has no caption, and the info panel shows it as Description.
+  Only descriptions in the user's language are read (`PhotoDescriptionLookup`, an in-memory cache of what tiles asked
+  for, 4 000 entries).
+- *When*: like Show Similar (§15.5) — a `BGProcessingTask` that requires external power on iPhone and iPad
+  (`com.nextcloud.photos.describe`), an `NSBackgroundActivityScheduler` activity on the Mac, and while the Library is on
+  screen a trickle of 8 photos at a time with 1 s pauses at background priority, which on devices with a battery runs
+  only while charging (the language model is the heaviest on-device work of the app). Vision Pro only has the trickle.
+- *Settings › Search*: "Describe photos" (on by default) with the number of photos described; off deletes every
+  description and the index forgets them.
+- The simulator cannot run Vision: nothing is described there.
+
+### 16.3 Editing: non-destructive edits, RAW, Live Photo effects, visual undo history [edit]
+
+#### 16.3.1 Non-destructive edits
+
+The editor's result is an **edit recipe**, not a new file: a small versioned JSON document (crop, turns, straighten,
+mirror, auto-enhance, filter, adjustments, RAW development, Live Photo effect and key photo) that every view renders on
+top of the original. The original file is never changed by Done.
+
+- **Where**: one file per photo in the user's own Nextcloud, `/.nextcloud-photos/edits/<fileId>.json` (decided against
+  a sidecar `IMG_1234.edit.json` next to the photo). Keyed by **file id**: a photo moved or renamed in the web, the Files
+  app or the desktop client keeps its file id, so its edit follows it; a sidecar would show up in every folder and break
+  with every move. A copy is a new file without the edit. The **dot folder** keeps the recipes out of sight: the web
+  Files app hides hidden files by default, the desktop client does not sync hidden files by default, and the Photos web
+  app lists only pictures and videos (other clients show the original). A photo **shared with the user** is edited in the
+  user's own folder: the edit is that user's view of it. **Deleting** a photo leaves its recipe (a few hundred bytes), so a
+  photo restored from the trash bin comes back with its edit.
+- **Format** (`EditRecipe`): `{"format": "nextcloud-photos-edit", "version": 1, "updatedAt": …, "original": {name, etag,
+  width, height}, "geometry": {rotation, straighten, flipped, aspect, aspectLocked, crop{x,y,width,height}},
+  "adjustments": {…}, "filter": …, "raw": {…}, "live": {effect, keyFrameTime}}`. Only values that differ from
+  "unchanged" are written. Unknown keys, filters and effects are ignored; broken values fall back to "unchanged"; a crop
+  is kept inside the picture. A recipe of a **newer version** is not applied (the original is shown) and not lost: the
+  editor says "edited with a newer version" and only saving there replaces it.
+- **Sync** (`EditLibrary`, per account, kept on the device in `Edits/recipes.json`): a save is shown at once and sent in
+  the background; offline changes wait for the next sync. Every library sync takes over what other devices changed (one
+  `PROPFIND` depth 0 of the folder; the listing and `GET`s only when its ETag changed). Writes are **ETag-safe**: `PUT`
+  with `If-Match` of the version this device knows (`If-None-Match: *` for a new recipe), revert is `DELETE` with
+  `If-Match`. On 412 the device reads the server's version and **the edit made later wins** (by `updatedAt`, the time the
+  user made it); the replaced version stays in the server's file versions.
+- **Everywhere**: grid tiles, the viewer, context menu previews, covers and the undo history show the edited rendition,
+  rendered on the device from the server's preview (or, for a long exposure or another key photo, from the Live Photo's
+  motion) and cached under `<etag>_e<digest>` (the digest of what the recipe renders), so a changed edit never shows an
+  old picture and a reverted one shows the server's preview at once. Export and Share render the recipe on the
+  full-resolution original (`<name> (edited)`, HEIC for HEIC originals, else JPEG, metadata kept); the viewer's More menu
+  has **Export Original… / Save Original to Photos** and **Share Original**. Edited Live Photos are saved to Photos as a
+  still. Grids in aspect-ratio mode keep the original's tile shape (the edited picture fits inside it).
+- **Editor**: re-editing starts from the recipe. **Done** saves the recipe. The More menu has **Save as Copy** (a real
+  file next to the original, as before), **Overwrite Original…** (kept, but secondary and with a confirmation: the edit
+  is written into the file, the previous version stays in the file versions, and the recipe is removed since it is part
+  of the file now; not for read-only shares, formats Image I/O cannot write, or a JPEG developed from its RAW) and
+  **Revert to Original** (removes the recipe on all devices; undoable).
+- **Image ▸ Rotate** (menu, ⌘R/⌥⌘R, context menu, viewer) is a turn added to the recipe: undoable, works on read-only
+  shares and RAW files, and no longer uploads a new version of the file.
+
+#### 16.3.2 RAW
+
+- RAW files (any type conforming to `public.camera-raw-image`) are developed with Core Image's RAW decoder
+  (`CIRAWFilter`) in the editor (2048 px proxy, full resolution on save/export) and, on demand, in the viewer (**RAW**
+  button: the whole file is downloaded and developed at up to 4096 px with the photo's edit).
+- RAW tool: exposure, white balance (temperature and tint, starting from the camera's), shadow boost, highlight recovery
+  and noise reduction (offered where the decoder supports them for the camera), "Camera Settings" resets.
+- **RAW+JPEG**: the editor finds the other file of the pair (same folder and base name, as the stacking rule). Editing the
+  JPEG offers **Edit RAW** (develop the RAW instead); editing the RAW develops it. The recipe is saved for both files: the
+  RAW renders it developed, the JPEG stays the quick preview and shows the RAW settings approximated with ordinary filters
+  until the RAW itself is decoded. Re-editing a pair developed before goes on with the RAW.
+
+#### 16.3.3 Live Photo effects
+
+- Editor **Live** tool: Live (default), **Loop**, **Bounce**, **Long Exposure**, and **Key Photo** (a slider over the
+  motion; "Use the Original Key Photo" goes back). All in the recipe; nothing is written into the files.
+- Long exposure: 48 frames sampled evenly from the motion and averaged pixel by pixel (`FrameAverager`). Another key photo:
+  the motion's frame at that time. Both replace the still everywhere (grid, viewer, export).
+- Loop and Bounce play by themselves, muted, in the viewer (with Reduce Motion only while pressed). Loop plays the motion
+  itself (a video with the edit's look on every frame when the photo has adjustments), Bounce a forward-and-back video
+  made once and cached. The badge says the effect.
+- Export: **Share Loop/Bounce as Video** (MP4, three rounds) and **as GIF** (15 fps, 480 px, loops for ever) in the viewer's
+  More menu — through the share sheet, which also saves to Files or Photos.
+
+#### 16.3.4 Undo history
+
+- Every undoable change of the session is recorded (newest first, at most 50): favourites, archive, delete, remove from
+  and **add to album** ("Added 12 items to Summer", now undoable), **edits** ("Edited IMG_1234"), **rotations** ("Rotated 3
+  photos") and reverts. The history lives as long as the session (like the undo manager).
+- **Panel**: Edit ▸ **Undo History…** (⌥⌘Z) on the Mac and iPad keyboards; "Undo history" in the selection's More menu and
+  in the viewer's More menu on iPhone and iPad. Each row: up to three thumbnails of the photos (edited renditions), what
+  happened, when, and **Undo** — for any entry, not only the last. Undoing an entry does not undo the ones after it. When
+  an entry cannot be undone the row says why: already undone, deleted for good (no trash bin), photos shared with the
+  user, or "Edited again since" (a later edit, here or on another device, replaced it).
+- Undoing from the history goes through the window's undo manager when the entry is on top of it (so Edit ▸ Redo offers it
+  again); otherwise the registration is retired so ⌘Z never takes the change back twice.
+
+### 16.4 Organising: smart album builder, batch time/place/rename, GPX geotagging, folder rules, Shortcuts [organize]
+
+Five tools for keeping a large library in order, on every platform of the main app (iPhone, iPad, Mac, Vision Pro; the
+TV and watch apps are not affected). No server change: what has to be shared by the user's devices is kept as small JSON
+files in the user's own Nextcloud, in the hidden folder `/.nextcloud-photos/` (`AppDataFiles`), and every write names
+the version it replaces (`If-Match`, or `If-None-Match: *` for a new file), so two devices never overwrite each other
+unseen.
+
+#### 16.4.1 Smart album builder
+
+- **Rules** (`SmartRule`, PhotosModel): conditions combined with *All*, *Any* and *None*, each condition can be negated
+  ("is not"), and groups with their own All/Any/None give a second level (Anna AND (beach OR lake) AND NOT rejected).
+  Conditions: person, place (name or country code), tag, own album, rating (at least n stars, the round-5 culling tags),
+  flag (picked / rejected / unflagged), media type (photo, video, Live Photo, screenshot, RAW, panorama), favourite,
+  date range, taken in the last n days, older than n days, folder (and below; `/Photos/Cam` does not contain
+  `/Photos/Camera`), file name, any text (name, place, country, caption, folder: what the search's free text looks
+  at), camera (make or model), lens, focal length, aperture, ISO (ranges, either end open).
+- **Evaluation** (`SmartRuleEvaluator`, PhotosDomain) runs on the device over the local index: one read of the index
+  gives the memberships (tags, people, own albums from the stored memberships of `LabelSync` and album contents), the
+  ratings/flags and the camera details (`OrganizeStore.ruleContext`), and the rule runs in memory, so the builder
+  counts while the user edits (cached for a minute, recounted 250 ms after the last change).
+- **Camera details**: the index has no EXIF. The server's `nc:metadata-photos-exif`/`-ifd0` come in bulk with a
+  SEARCH for up to 90 file ids at a time (`PhotosAPI.cameraDetails`; the server allows 100 operators and cannot sort
+  by file id), stored in the table `cameraDetails` (migration `v6-organize-camera`) with the ETag they were read from.
+  They are read only while some smart album or enabled folder rule asks about cameras: about 4 500 photos after each
+  sync in the background, and all of them while the builder shows such a condition (with progress; the count grows
+  as they arrive).
+- **Builder** (`SmartAlbumBuilder`): name, live count with the first photos, the rules, order (newest/oldest first)
+  and an optional limit. Entry points: Smart Albums (sidebar/Collections) "+", the Albums screen, Settings ›
+  Organize; "Save as smart album" in the search saves into the same list (on extended servers with the server's
+  `smartAlbums` setting the search keeps saving there, so the web app sees them; those are listed as "Saved on the
+  web").
+- **Shown with the albums**: a "Smart Albums" strip above the own albums and the Smart Albums screen (cover = first
+  photo, count, context menu Edit/Duplicate/Delete); an album opens as a photo grid with "Edit Rules".
+- **Sync between devices**: `.nextcloud-photos/smart-albums.json` (`{"version":1,"items":[…]}`), merged record by
+  record (`SyncedList`): the newer `modifiedAt` wins, a change is always stamped later than the version it changes
+  (clocks that are behind), deletions are tombstones for 90 days, records a newer version wrote and conditions this
+  version does not know are kept unchanged (they match nothing here). The device keeps a copy (offline use; changes
+  made offline are merged when the server is reachable). Smart albums that round 4 stored "On this device" move into
+  the shared file once.
+- *Decision:* Photos' own server-side album filters (extended servers) are not used for these: they cover only
+  dates, places, names and tags, and the rules need people, ratings, cameras and NOT.
+
+#### 16.4.2 Batch fixes
+
+One sheet (`BatchFixSheet`) with four tabs, from the selection's context menu (Adjust ▸ Adjust Date and Time… / Set
+Location… / Rename… / Geotag from GPS Track…), the Mac's Image ▸ Edit Date and Location…, and the viewer's More menu.
+Every tab previews what changes; Apply shows progress, then a summary with what was not changed and why, and **Undo**
+(also Edit ▸ Undo / ⌘Z / shake, registered with the window's undo manager).
+
+- **Date and time**: shift by days/hours/minutes, or "set the first photo to" a date (the shift follows; intervals
+  stay). **Time zone**: "taken in another time zone" keeps the wall-clock time the camera recorded and says in which
+  zone it was (the zone's offset on that day, so summer time is right); the recorded time is the capture time in the
+  photo's own offset, or in UTC when it has none, because Nextcloud reads an EXIF time without offset as UTC.
+- **Place**: one position for all, picked on a map (tap) or found by name (MapKit search); grey dots show where the
+  photos are now; "only photos without a location"; or remove the location.
+- **Rename**: a pattern with `{date}`, `{time}`, `{place}`, `{country}`, `{camera}`, `{name}`, `{year}`, `{month}`,
+  `{day}`, `{counter}`/`{counter:N}` (token buttons), a start number; the counter follows the capture time; names
+  that are taken in the folder (or within the batch) get " (2)"; forbidden characters become "-"; the extension stays
+  and a Live Photo's video gets the same name. MOVE with `If-Match` per file; undo moves back.
+- **How dates and places are written**: on servers with metadata editing (Nextcloud 35+, `metadataEdit`) through the
+  existing outbox operation (PROPPATCH, optimistic, offline-safe). On older servers the importer's approach: the
+  original is downloaded, its EXIF (`DateTimeOriginal` + offset, GPS) rewritten without re-encoding
+  (`MetadataRewriter`, JPEG/HEIC/PNG/TIFF) and uploaded over the version the index knows (`If-Match`): the server
+  reads the new values like any photo's (checked: it re-reads EXIF date, offset and GPS on overwrite), and the old
+  version stays in the file's versions. Videos and other formats are skipped there, and the sheet says so before.
+  Undo writes the previous values the same way.
+
+#### 16.4.3 GPS track geotagging
+
+The fourth tab, or Settings › Organize › "Geotag photos from a GPS track…" for the whole library. GPX (`trkpt`,
+`wpt`, `rtept` with times) and KML (`gx:Track` with `when`/`gx:coord`, placemarks with a `TimeStamp` and a point);
+several files at once are one track. Each photo gets the position at its time: interpolated between two points up to
+15 minutes apart, else the nearest point within the tolerance (1–60 min, default 5). The camera clock correction
+(±14 h in quarter hours) is suggested: the offset that puts the most photos on the track, or, when at least three of
+the photos already have positions, the one that agrees with them (within 1 km). The map shows the track and each
+matched photo's thumbnail before anything changes; by default only photos without a location are tagged; library-wide
+it looks at own photos taken within 14 hours of the track. Writing as in 16.4.2.
+
+*Decided:* no track recording in the app. Recording a track in the background needs "Always" location permission and
+the background location mode (Info.plist, App Store review), and the user's phone, watch or sports app records better
+tracks already; exporting GPX/KML from them is the supported way. iPhone location history is not accessible to apps.
+
+#### 16.4.4 Folder rules
+
+Automations that run after each sync (Settings › Organize › Folder Rules): **when** a photo matches a rule (the same
+conditions as smart albums), **then** add to an album, archive, favourite or tag (albums and tags are created when
+missing). Examples to start from: "new in a folder → album", "screenshots older than 30 days → archive", "★★★★★ →
+album Best of". A rule acts on photos uploaded after it was made, or also on those already there (switch). Editor with a
+preview of what the rule would act on now.
+
+- Stored in `.nextcloud-photos/folder-rules.json` (merged like smart albums), so all devices have the same rules.
+- **One device at a time**: before running, a device takes the lease `.nextcloud-photos/folder-rules.lock` (holder id
+  — a random id per installation and account — device name, expiry 10 minutes); taking it is a conditional write, so
+  two devices cannot both win; it is released after the run and expires when a device goes away.
+- **State and log** `.nextcloud-photos/folder-rules-state.json`: the file ids each rule has handled (a photo is handled
+  once — taken out of the album again, it stays out) and the last 200 runs (rule, count, device, error), shown in the
+  Folder Rules screen. At most 500 photos per rule and run; the actions go through the outbox (offline-safe, retried).
+  Runs at most every 2 minutes ("Run Rules Now" forces one); rules with conditions a newer version wrote, or an
+  unknown action, do not run here.
+
+#### 16.4.5 Shortcuts
+
+App Intents (`App/Shared/OrganizeIntents.swift`; the work is in `SessionModel+Intents`, PhotosCore) with a
+`PhotoEntity` (string query = search, suggestions = newest) and a `MemoryEntity`, next to round 4's `AlbumEntity` and
+`PersonEntity`, so actions chain in Shortcuts and personal automations: **Find Photos** (words — people, tags, places,
+text, years — person, album, favourites, type, dates, limit → photos), **Create Album from Search** (also an App
+Shortcut with a Siri phrase), **Add Photos to Album**, **Rate Photos** (0–5), **Flag Photos**, **Favorite Photos**,
+**Archive Photos**, **Export Photos** (originals as files), **Share Photos as Link** (quick share → URL), **Show Photo**,
+**Show Memories** (On this day for a memory of this day), **Get Photos of Memory**; backup has "Back up photos to
+Nextcloud" (round 4) and the controls' intents (round 5). Entities belong to the account shown; a photo of another
+account does not resolve.
+
+### 16.5 Photographer: stats, loupe and filmstrip culling, Continuity Camera, Mac menu bar extra [pro]
+
+For people who shoot a lot: learn from their own photos, go through a shoot full screen, get a picture from the phone
+into the right album, and drop files on the server without opening a window. Builds on the culling tags of §15.2.
+
+**16.5.1 Insights (all platforms).** A destination "Insights" (sidebar section Utilities, the Collections list on
+iPhone, Go menu) with cards: Cameras and Lenses (ranked bars, six then "Show All"), Focal Lengths, Apertures, ISO and
+Shutter Speeds (bar charts), Time of Day (24 bars), Keeper Rate by Lens. Every bar opens its photos in the usual grid
+("35 mm", "ƒ/2.8", "Nikon D700", "Keepers: <lens>"); on the Mac a hovered bar shows its count; VoiceOver gets the bars
+of a chart as buttons.
+- Data: the server's EXIF (`nc:metadata-photos-exif` and `-ifd0`, filled by stock Nextcloud 28+; no Photos API needed).
+  The local index has no EXIF, so it is read lazily in the background and kept in table `photoExif` (migration
+  `v6-pro-exif`: camera, lens, focal length, 35 mm equivalent, f-number, ISO, exposure time, hour, ETag). Reading starts
+  when Insights is opened and continues while the app runs: libraries with 1000+ photos to read are paged through the
+  timeline folders newest first (SEARCH, 500 per request, keyset on the capture time), the rest is asked for by file id
+  (50 per request), with 250 ms between requests. A photo the server does not return gets an empty row; rows carry the
+  index's ETag, so a photo is read again only after the sync saw it change. The header shows "Reading camera data: N of
+  M photos" meanwhile; numbers refresh at most every 3 s.
+- Parsing: camera = maker and model said once in the maker's usual spelling ("NIKON CORPORATION"/"NIKON D700" → "Nikon
+  D700", Apple models alone); lens from `LensModel`; rationals and APEX values (`ApertureValue`, `ShutterSpeedValue`)
+  understood; placeholders ("----", "0") and absurd values dropped; the hour from `DateTimeOriginal` (camera clock = local
+  time), else from the capture time in the photo's own offset, else this device's zone.
+- Buckets on a logarithmic scale (nearest stop): focal lengths of common lenses (4 … 1200 mm, the 35 mm equivalent where
+  the camera wrote one, said in a footnote), f-numbers in thirds, ISO and shutter speeds in full stops. A bar's photos are
+  the values between the geometric middles to its neighbours, the same rule in Swift and SQL.
+- Keeper = Pick, or 3 stars or more without Rejected (Pick wins, as in §15.2). Rate = keepers / all photos of the lens
+  (photos without a lens name count per camera); only lenses with 5+ photos, and only once anything was rated; until then
+  the card explains P and 1–5.
+- Scope: the library's photos (no videos, not archived, not in `.nomedia` folders). Only aggregates are computed, on the
+  device.
+
+**16.5.2 Culling view: loupe and filmstrip (Mac first, iPad, Vision Pro).** Image ▸ Culling View (⌥⌘L), the grid's
+context menu: several selected photos are culled on their own, else the whole grid from the selected (or first) photo.
+On the Mac it opens in a window of its own that goes full screen (the main window stays; a second display works; not
+restored at relaunch); iPhone/iPad: a full-screen cover without status bar; Vision Pro: pushed.
+- Layout: top bar (Close, name, date and time, "12 of 340", the mark, toggles), the photo on black, a control row (Previous,
+  Pick, Reject, Unflag, stars 1–5, Next) and a filmstrip of 64 pt thumbnails (current one outlined and centred, marks on
+  each, rejected dimmed; tap to go there).
+- Loupe: a click (tap) toggles 100 % at the point clicked; press and hold shows 100 % while held, following the pointer;
+  a drag pans the zoomed photo; Z or Space toggles 100 % at the middle; a swipe on the unzoomed photo goes to the next or
+  previous one. 100 % = one image pixel per screen pixel, at least twice "fit" (a photo with about as many pixels as the
+  screen would not change); above the 4096 px preview the original is decoded (RAW by Image
+  I/O). The next two photos are fetched ahead.
+- Overlays, computed on the device from the shown preview (CPU, no GPU or Vision): focus peaking F (Sobel gradient of
+  the luma; the sharpest 6 % of the photo and never below an absolute floor, so a soft photo shows nothing; magenta),
+  clipping warnings J (any channel at 254+ red, all channels at 1 or less blue, with the clipped share), histogram H
+  (luminance and RGB, with clipping triangles, and the exposure line "35 mm ƒ/2.8 1/250 s ISO 400" from Insights' data,
+  read from the server for that photo if needed). Overlays use a version of at most 2048 px, so at 100 % they are
+  coarser than the photo. The toggles are remembered.
+- Keys: P X U 0–5 as in §15.2 (outbox, Undo, confirmation) with auto-advance; ← → ↑ ↓, Home, End; Esc leaves 100 %, then
+  the view. The Image menu's Flag and Rating work on the photo shown.
+
+**16.5.3 Take photos and scan documents into an album or folder.** On the Mac, Continuity Camera: File ▸ Import from
+iPhone or iPad ▸ Take Photo / Scan Documents / Add Sketch (and the same in the context menu) while the Library, an own
+album or a folder is shown. A photo is uploaded as it comes (HEIC, JPEG, PNG; other formats as JPEG) named
+`IMG_yyyyMMdd_HHmmss`, with its EXIF capture time; a scan becomes one JPEG per page (`Scan_yyyyMMdd_HHmmss_N.jpg`, pages a
+second apart so they keep their order), because the library shows pictures, not PDFs. Destination: the album (uploaded
+to the upload folder and added), the folder, or the upload folder. iPhone and iPad: Take Photo (system camera) and Scan
+Documents (VisionKit) in the Library's Upload menu when the device has a camera. Uploads go through the manual-upload
+queue (§7.17).
+
+**16.5.4 Menu bar extra (Mac).** Off by default; Settings › General › Show in Menu Bar. An icon (upload arrow while
+uploading or backing up) with a panel: account, Open Nextcloud Photos (opens a main window again when all were closed),
+today's memory (On this day) as a picture that opens it, a drop zone for photos and videos with "Upload to <upload
+folder | own album>", upload progress and result, the backup's state, Library, Albums and Settings. It works while no
+window is open (the app keeps running when the last window is closed).
+
+### 16.6 Films: through the years, film styles, SharePlay [films]
+
+Builds on the memory films of §15.1 (`FilmPlan`, `MemoryFilmPlayer`, `FilmExporter`, beat detection).
+
+**FS-1 Through the years.** A time-lapse of one *named* person's face across the years.
+- *Entry*: the person's screen (Person menu ▸ Through the Years / Through the years), and a "Through the years" row in
+  Memories with the named people (not hidden on this device, ≥ 6 photos, at most 12, most photographed first).
+- *Needs*: Recognize on the server (its face clusters and boxes, stock Recognize DAV API). Without Recognize the row and the
+  film explain that the Recognize app is needed; an unnamed person gets "Name this person first" with Add Name…; fewer than
+  three periods with a usable face gives "not enough photos across time". No server change.
+- *Selection* (`ThroughTheYears`, PhotosDomain): one photo per month while the photos span ≤ 4 years, per season (3 months)
+  up to 12 years, per year beyond; at most 120 frames, thinned evenly keeping the first and last. Within a period the photo
+  with the largest, most central face (Recognize's box) wins, favourites ×1.25, tiny faces (< 6 % of the width) only as a
+  last resort; the next two are tried when the best face cannot be lined up. Archived photos and videos are left out.
+- *Alignment* (`FaceTimeLapse`, PhotosMedia, on the device): Vision face landmarks; the face overlapping Recognize's box
+  (IoU > 0.1) is the person's; pupils (else the eye outlines' centres) give the eyes. A face turned away (|yaw| > 35°, or
+  eyes closer than 20 % of the face width) is skipped; if Vision finds nothing, Recognize's box (≥ 8 % wide) gives estimated
+  eyes. Each photo is turned so the eyes are level, scaled so they are 17 % of the frame's shorter side apart, and moved so
+  their middle is at (50 %, 42 %); the rest of the frame is a blurred, darkened copy of the aligned photo. The player draws
+  square frames (fill a landscape or portrait screen alike), only those around the current time; only the eyes are kept.
+- *Film*: a title card (name, "Through the years", year span) over the first face, then the faces dissolving into each
+  other: Slow 1.6 s / Normal 1.0 s / Fast 0.55 s per face (remembered), 60 % of it a dissolve; last face 2.6 s and a fade
+  to black. Under each face its month and year (year for yearly films) and, with a birthday, the age ("8 months old" below
+  two, then "5 years old"). The birthday is added in the film's menu and kept on this device per account (Recognize has no
+  birthdays). The calm style's music plays (Mute). Controls as in §15.1 (scrubber, ← → Space M Esc, VoiceOver describes
+  name, date and age).
+- *Export*: 1920 × 1080 video through `FilmExporter` (faces aligned again from 2560-px previews for the landscape frame,
+  captions rendered in, calm music), H.264/HEVC, Share/Save to Nextcloud/Save to Mac as in MF-2.
+
+**FS-2 Film styles.** Every memory film can be remixed in the player's style menu (wand icon): Cinematic (default, the
+round-5 film unchanged), Upbeat, Black & White, Super 8, Calm. A style (`FilmStyle`) sets:
+- *pacing*: about 3.4 / 1.8 / 3.8 / 2.6 / 5.2 s per picture (whole beats of the music); favourites ×2 (not in Calm);
+- *transitions*: steady dissolves of 0.8 / 0.3 / 1.1 / 0.45 / 1.8 s; with music, cuts on the beat within a day and a dissolve
+  of 1 / ½ / 1 / ½ / 2 beats into a new day — Calm dissolves every picture;
+- *camera*: Ken Burns zoom 1.15 / 1.22 / 1.12 / 1.10 / 1.08;
+- *look* (`FilmLook`, one colour matrix applied the same way everywhere): Upbeat punchier colours; Black & White monochrome,
+  contrast, slight fade, vignette, fine grain; Super 8 warm faded colours, strong vignette, coarse grain, a gate that jitters
+  and light that flickers at 18 film frames a second (deterministic, so the player and the video look the same); Calm softer,
+  warmer, low contrast. The player grades pictures, map pictures and clips (`AVVideoComposition`) with Core Image and draws
+  vignette, grain and flicker over the frame; the export applies the same with Core Image per frame. Titles are not graded.
+- *music mood*: each style has its own score (`FilmScore` + `ScoreSynth`): the app ships no recordings, so a short piece is
+  composed by the app's code and synthesised on the device (pads, plucked strings, bass, organ with tape wobble, kick, hats,
+  shaker, a small reverb), 16 bars that loop seamlessly — Cinematic 70 BPM major, Upbeat 120 BPM with drums, Black & White
+  66 BPM minor and sparse, Super 8 96 BPM organ and shaker, Calm 54 BPM pads. Made once (about a second) and cached. The tempo
+  is known, so cuts land on its beat.
+- *Music menu*: the style's music (default when the user has no music of their own), the user's own music from Settings
+  (default when chosen; then the style changes only the pacing, the beat is detected as in §15.1), or No Music.
+- *Remembered per memory* on this device (by memory id, last 300); the film is rebuilt from the picture it was at. The video
+  export (from the player, its end card and the memory's More menu) uses the memory's style and music and says which.
+
+**FS-3 SharePlay.** Watch a memory film or a slideshow together over FaceTime (GroupActivities, `WatchTogether` in
+PhotosCore) on iPhone, iPad, Mac, Vision Pro and Apple TV.
+- *Start*: SharePlay button in the film's top bar and in the slideshow's top bar. A slideshow is shared as a film (its photos
+  in their order, up to 200, in the style's pacing and music) so every device can be in step; the slideshow closes and the
+  film opens.
+- *What goes through Apple*: only the activity (`SharedFilm`): title, dates line, the timeline (`FilmPlan` without places —
+  no coordinates or place names; map flights become a quiet pause for the others), the files' ids/etags/types, the style and
+  the Nextcloud's address. No photo, no preview image on the activity, no music: every participant loads the pictures from
+  that Nextcloud **with their own account**, and every device synthesises the style's music itself (the user's own music is
+  personal and never shared: sharing switches the film to the style's music).
+- *Who sees what*: participants need Nextcloud Photos and an account on the same Nextcloud with access to the photos — the
+  practical way is a shared album (or shared folder) both can open. A participant on another account of that server gets
+  "Switch Account"; one not signed in to it gets an explanation naming the server. Photos not shared with them show as a dark
+  "Not shared with you" card at their place in the timeline, so everyone stays in step. Each participant reports how many of
+  the photos they can see (`GroupSessionMessenger`), and everyone's banner says "Watching with N others", "N people can't
+  see some photos. Share the album with them on Nextcloud." / "… can't see these photos …", and for the guest "You can see
+  37 of 40 photos …".
+- *In step*: `AVDelegatingPlaybackCoordinator` with the film as a custom player: play, pause, seek (scrubber, ← →) from
+  anyone apply to everyone on the host clock (`FilmSync`); late joiners are brought to the group's time; nobody waits for a
+  participant who cannot load pictures. Only whoever shared it changes the style (re-shared to everyone). Closing the film
+  leaves SharePlay on that device. While watching together the film keeps playing when the app goes to the background.
+- *Platforms*: iPhone/iPad full screen, Mac in a window of its own, Vision Pro full screen; Apple TV (`TVSharedFilmView`,
+  also via "continue on TV") with pictures, camera moves, title, look and music — clips show their still; Play/Pause and ← →
+  control everyone, Menu leaves. Films shared to a locked app wait until it is unlocked.
+- *Needs*: the Group Activities capability (`com.apple.developer.group-session`, added to the app's and the TV app's
+  entitlements) in the provisioning profiles of team NKUJUXUJ3B.
+
+Not done: birthdays from the Nextcloud Contacts app (CardDAV `BDAY`), syncing styles and birthdays between devices,
+inline clips on Apple TV, a spatial SharePlay template on Vision Pro, beat-synced Ken Burns accents.
+
+### 16.7 Sharing and family: postcards, family library, weekly prompts, Lock Screen shuffle album [family]
+
+Four ways to share photos with the people close to you, all on stock Nextcloud (WebDAV, OCS sharing, the Photos album
+API) and the device's own frameworks. Nothing is created on the server beyond ordinary files, folders, albums and links.
+
+#### 16.7.1 Postcards (all platforms)
+
+- **Where**: viewer › More › "Send as postcard…" (Mac: "Send as Postcard…"), photos only.
+- **The card**: 6 × 4 inches at 300 dpi (1800 × 1200 px), upright (1200 × 1800) for upright photos, the same size on
+  both sides so it can be turned over in place. Drawn with Core Graphics and Core Text (`PostcardRenderer`, layout in
+  `PostcardLayout`), so it looks the same on every platform and renders off the main thread.
+  - *Front*: the photo (4096 px preview, aspect fill) in one of four styles — **Classic** (white border), **Edge to
+    Edge**, **Airmail** (red/blue diagonal stripes, white margin), **Vintage** (cream border, scalloped deckle edge,
+    warm faded tones, vignette) — and optional lettering, prefilled with "Greetings from <place>" when the photo has a
+    place (condensed heavy type, white with a soft shadow, shrunk to fit).
+  - *Back*: warm paper (airmail stripes for Airmail), "POSTCARD" heading, a divider, the message in a handwriting font
+    (Bradley Hand, else Noteworthy) in blue ink, as large as fits (at most 400 characters and 12 lines; longer text is
+    cut at a word with "…"), a perforated stamp cut from the photo, a tilted postmark with place and date and wavy
+    cancellation lines, "To:" with the recipient's name on the first of three address lines.
+- **Sending** (`SessionModel.sendPostcard`): the two sides are uploaded as JPEGs `1 Front.jpg` and `2 Back.jpg`
+  (numbered so the public page lists the front first) into `/Postcards/<yyyy-MM-dd> <place>` (a number is added when
+  the name is taken). `/Postcards` gets an empty `.nomedia` file, so sent cards never appear in the timeline. The folder
+  gets an ordinary read-only public link labelled "Postcard to <name>" whose **note is the message**, so the stock public
+  page shows both sides and the message as text. **Decision**: an image pair in a folder, not a flip video — the stock
+  public page shows pictures well and instantly, a video needs a tap and a player, and the pictures are what people
+  save and print. When the server allows no public links, the card is still saved and shared as pictures.
+- **After sending** the card turns over (3D flip) and gets a red "SENT" rubber stamp with a success haptic; the link can
+  be copied, and "Share Postcard" opens the share sheet with both pictures, the link as message text and "A postcard
+  for you" as mail subject (Messages, Mail…). Tapping the card flips it at any time (VoiceOver: an action "Turns the card
+  over").
+- The sent postcards stay in Files (`/Postcards`); the link is managed there or in the web app's sharing tab.
+
+#### 16.7.2 Family library (all platforms)
+
+- **Setup** (Settings › Family Library; Mac: a sheet from the General tab): the user picks
+  - the **family folder**: a folder shared with or by the user that the user can add files to — found with a `PROPFIND`
+    of the top level (`oc:permissions` with `C`/`K`, `nc:mount-type` `shared`/`group`, `oc:share-types`), the received
+    shares (`shared_with_me`, wherever they were moved) and the user's own folder shares to people, groups or Teams
+    (`GET …/shares`). Public links alone do not count. Each is labelled "Shared by Ben", "Team folder" or
+    "Shared with Ben and Family";
+  - the **family members**: named people of Recognize (unnamed clusters are not offered);
+  - **move or copy** (move by default). When the family folder is not one of the timeline folders, a note says that
+    moved photos leave the Library and "Show Family Folder in Library" adds it to the timeline folders.
+- **Suggestions** (`FamilySuggestions`, computed on the device from the local index): the user's own photos and videos
+  (own storage, not archived, not in the family folder or excluded folders, no screenshots or screen recordings, no Live
+  Photo motion parts) that
+  1. were taken on a day the family folder has photos of (its newest 1000, read with a DAV SEARCH scoped to it) **and**
+     within 2 km of one of them or in the same named place — "12 photos from Lisbon on 4 July" (a photo without location
+     never matches by date alone), or
+  2. show a family member — "These 14 photos show your family", grouped by month.
+  At most 200 photos per suggestion; newest first.
+- **Card** in Memories with the newest suggestion: four thumbnails, "Move them to <folder>?", a one-tap "Move 14" / "Copy
+  14" (the tap is the confirmation; nothing ever happens on its own), "Review", and ✕ ("Don't suggest these photos
+  again"). **Review** lists all suggestions with selectable thumbnails, Move / Copy / "Not These".
+- **Moving/copying** uses DAV `MOVE`/`COPY` without overwrite; a name that is taken gets " 2", " 3"…; a Live Photo's
+  motion part goes along under the photo's new name. Progress is shown; a sync follows.
+- **Decisions are remembered** (`familyDecision` table, migration `v6-family-decisions`): moved, copied and dismissed
+  photos are never suggested again. Choosing another folder starts over; "Suggest Dismissed Photos Again" forgets them.
+  Suggestions are refreshed after syncs at most every 30 minutes. The options and decisions are per account and per
+  device (not synced between devices).
+
+#### 16.7.3 Weekly photo prompts (all platforms)
+
+- 52 built-in themes with a one-line hint ("Reflections — Mirrors, puddles, shop windows, a spoon."), localised, in an
+  order where colours, light, subjects and techniques take turns. The week's theme is the same for everyone
+  (`WeeklyPrompts`, counted from the week of 3 January 2024 in the user's calendar, whose first weekday follows the
+  region; daylight saving changes don't skip a week), so a family can play along without any server.
+- **Off by default.** While off, Memories shows a small dismissible invitation ("Turn On"). On: a card at the top of
+  Memories with the theme, hint, the week's dates and the photos added so far; "Add Photos" lists the user's own photos
+  and videos taken that week (already added ones are marked) and adds the chosen ones to the normal album
+  "Prompt: <theme>" (created when missing; the theme comes back after a year and adds to the same album).
+- **Past Prompts**: the weeks since prompts were first turned on (up to a year), each with how many photos were added
+  or "Skipped", linking to its album.
+- **Reminder** (off by default, asks for notification permission): one local notification on the week's sixth day at
+  10:00 (Saturday where weeks start on Monday) — "This week: Hands. Hands at work, at rest, holding on." — not for a
+  week the user already added photos to. Four weeks are scheduled ahead and again after syncs (at most every 6 hours),
+  when the setting changes and after adding photos. Tapping opens Memories. No photo is shown, so app lock needs no
+  special text.
+
+#### 16.7.4 Lock Screen album (iPhone and iPad)
+
+- Settings › Lock Screen Album: pick one Nextcloud album (own or shared). The app mirrors it into an album
+  "Nextcloud: <name>" in the device's own Photos library with PhotoKit, so the Lock Screen's **Photo Shuffle** (and
+  Memories, widgets, wallpapers of the system) can use it. The footer says plainly that copies are stored on the device.
+- **Copies**: 2048 px server previews (sharp on every iPhone/iPad screen, a fraction of the originals), with the capture
+  date and location; at most 300 photos in the album's order. Left out: videos, Live Photo motion parts, archived photos
+  and photos with a person hidden on this device.
+- **Sync** (`DeviceMirror.plan`, table `deviceMirror`, migration `v6-family-device-mirror`): after each sync of the
+  account (at most every 15 minutes) and when the setting changes. New photos are added without asking; a photo edited
+  on the server is replaced; a copy the user deleted on the device is made again (the album follows Nextcloud).
+  Photos that left the Nextcloud album are taken out of the device album at once and then deleted from the device —
+  PhotoKit always asks the user before deleting. If the user says no, they wait, and Settings shows "N removed photos
+  are still on this device" to try again.
+- **Turning off** ("Turn Off and Remove Copies", confirmed) deletes all copies and the device album in one system
+  confirmation. The Nextcloud album is not touched.
+- **Permission**: PhotoKit's add-only access cannot make or manage an album, so the app asks for library access when the
+  user picks an album; **limited access is enough** (the app only ever touches the copies it made, which join the limited
+  selection). If access is denied, Settings says where to allow it. The usage text says what the access is for.
+- Mac, Vision Pro, Apple TV, Watch: not offered (no Lock Screen Photo Shuffle; the Mac has its own desktop pictures,
+  §15.4).
+
+### 16.8 Look and access: colour from the photo, living album covers, guest mode [look]
+
+**16.8.1 Colour from the photo.** The app takes one colour from a photo and uses a toned version of it as a quiet
+backdrop. Platforms: iPhone, iPad, Mac, Vision Pro (headers not on Vision Pro, whose windows are glass).
+
+- *Where the colour comes from* — no extra network: the photo's BlurHash (already in the index) decoded at 8×8, or, when
+  the server gave none, a preview that is in memory anyway, scaled to 8×8 on the CPU. The dominant colour is the mean of
+  the heaviest of twelve hue families, where colourful pixels weigh more than grey ones (a red coat on a grey street
+  gives red); a photo without a hue family of at least 20 % of the weight gives its mean grey (`PhotoPalette`).
+- *Toning* (`PhotoTintRole`) — the hue is kept, the saturation calmed, and the colour set to a fixed relative luminance
+  for its place: the viewer backdrop and the scrim of memory cards very dark (white text on them ≥ 7:1, WCAG AAA), the
+  header wash in Dark Mode dark, in Light Mode light (black text ≥ 7:1). Every tone is checked against its text colour
+  and darkened or lightened further if rounding would cost contrast.
+- *Viewer* — Settings ▸ Appearance ▸ Viewer Background: **Black** (as before), **Photo Color** (default: the black takes
+  a deep shade of the photo's colour) or **Ambient Glow** (the photo's BlurHash colours, each toned dark — brighter parts a
+  little brighter, all ≥ 7:1 against white — scaled up and blurred behind the photo). The viewer stays dark in Light Mode,
+  as before (its bars are dark), so both options apply in both modes; "ambient in Light Mode" of the idea became the
+  Ambient Glow option. While paging, the colour follows the finger: the backdrop blends the two photos the pager is
+  between by the scroll position (a jump, e.g. a step with Reduce Motion, fades over 0.4 s). Guest Mode's viewer has the
+  same backdrop.
+- *Headers* — an album's and a memory's navigation bar (Mac: window toolbar) takes a wash of the cover's colour; memory
+  cards draw their title scrim in a deep shade of the cover instead of black. Setting "Tint Headers with Photo Colors"
+  (on by default) turns both off.
+- *Accessibility* — with Increase Contrast no photo colour is used anywhere (pure black backdrop, plain bars, black
+  scrims). With Reduce Transparency the ambient glow becomes the plain tone, header washes are opaque and memory scrims
+  black.
+
+**16.8.2 Living album covers.**
+
+- *Live Photo covers* (effect **Automatic**, the default) — a Live Photo cover plays its motion once per app session when
+  at least 80 % of the card has been in view for 0.7 s: muted, filling the cover, fading in and back to the still. Not
+  with Reduce Motion, Low Power Mode, the system's "Auto-Play Video Previews" off (iPhone, iPad, Vision Pro) or the setting
+  "Play Live Photo Covers" off. The motion is streamed like in the viewer (a local or cached copy when there is one).
+- *Depth covers* (effect **Depth**) — the album's title is drawn large in the upper part of the cover and the photo's
+  subject stands in front of it, like the Lock Screen's depth effect. The subject is found on the device with Vision's
+  foreground instance mask from a 768-pixel preview, and kept as a mask PNG next to the account's previews (removed with
+  them; a photo without a subject is remembered too, so Vision runs once per photo version). When the subject would hide
+  more than 55 % of the title band, or none is found (or Vision is not available, e.g. the simulator), the title is drawn
+  in front. The title on the cover is decoration; the card's accessibility label is unchanged and the title stays below
+  the card, so the grid keeps its rhythm.
+- **Still** never moves.
+- *Choosing* — "Customize Cover…" in an album's options menu and in its card's context menu: a preview, the effect, and
+  the cover photo from the album's photos (or "Album's Own Cover").
+- *Where the choice is kept (decision)* — not in the album description (that is the album's content, shared with
+  collaborators and shown on the web), and not only on the device: in the user's own files at
+  `/.nextcloud-photos/album-covers.json` (`AlbumLookBook`: `{"version": 1, "albums": {"<kind>:<DAV name>": {"cover": <fileId>,
+  "effect": "automatic|still|depth", "updated": "<ISO 8601>"}}}`), so all the user's devices show the same covers, also for
+  albums shared with the user and on stock servers. A copy on the device is used at once; the file is read when the
+  albums appear (at most every 5 minutes) and written after a change with `If-Match` (`If-None-Match: *` for the first
+  version); on 412 the app reads the newer file, merges album by album (the later choice wins; resets are kept as default
+  entries so they reach other devices too) and writes again. Offline changes go up with the next read. A rename moves
+  the choice. For an own album on a server with the extended cover API, the chosen photo is also set as the album's
+  cover there, so the web shows it.
+
+**16.8.3 Guest Mode.**
+
+- "Show to a Guest…" in an album's options menu, its card's context menu and a memory's More menu opens a sheet that
+  explains what a guest can and cannot do (and warns when the device has no passcode, so nothing can protect the mode).
+  On iPhone, iPad and Vision Pro it also suggests the system's Guided Access, which keeps the guest inside the app.
+- In Guest Mode every window of the app shows only the album's or memory's photos as they were when it started (a grid,
+  a viewer with paging, zoom, Live Photos, videos and the tinted backdrop, and a slideshow on iPhone, iPad and Vision Pro).
+  No sharing, deleting, info, favourites, Live Text, editing, other albums, search, settings or account switching; no
+  accessibility actions for them either. Links, Spotlight results, widgets and notifications open nothing (`AppModel.open`
+  and `handleNotification` ignore them), and notification banners are not shown in the app (they wait in Notification
+  Centre). Only photos of the account the mode was started in are shown.
+- It ends with "End Guest Mode", which asks for Face ID, Touch ID, Optic ID or the passcode (the app lock's
+  authentication, `.deviceOwnerAuthentication`); on a device without a passcode it ends at once. Anything a guest opened
+  from outside meanwhile is dropped. Guest Mode is stored in the app's defaults: quitting and opening the app again comes
+  back in Guest Mode. With app lock on, the lock still covers the app as usual.
+- Mac: a presentation window of its own fills the screen with the Dock, the menu bar and app switching hidden
+  (`NSApplication.PresentationOptions`), cannot be closed or minimised, and ⌘Q is refused; it ends with Touch ID or the
+  login password. The other windows (and Settings) show only "Guest Mode" meanwhile. Force Quit stays available as the
+  emergency exit; the app then reopens in Guest Mode.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

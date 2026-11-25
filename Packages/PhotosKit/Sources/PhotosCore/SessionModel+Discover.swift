@@ -44,6 +44,8 @@ extension SessionModel {
         {
             return
         }
+        // Without the server setting: shared by the user's devices through their Nextcloud (SPEC §16.4).
+        if await saveSharedSmartAlbum(album) { return }
         let local = ((try? services?.collections.smartAlbums()) ?? []).filter(\.isLocal).map(\.0)
         try? services?.collections.replaceSmartAlbums(local + [album], isLocal: true)
     }

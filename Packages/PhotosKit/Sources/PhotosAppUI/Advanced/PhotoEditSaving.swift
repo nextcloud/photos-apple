@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import CoreGraphics
 import Foundation
 import PhotosCore
 import PhotosMedia
@@ -8,9 +9,10 @@ import PhotosModel
 import PhotosNetworking
 import PhotosStore
 
-/// Saving an edited photo (SPEC §7.16.2). One path for the editor and for Image ▸ Rotate: the edits are rendered from
-/// the original at full resolution and either replace it — a new version of the file, the previous one stays in
-/// Nextcloud's file versions — or are uploaded as `<name> (edited)` next to it.
+/// Saving an edited photo as a file (SPEC §7.16.2): the edits are rendered from the original at full resolution and either
+/// replace it — a new version of the file, the previous one stays in Nextcloud's file versions — or are uploaded as
+/// `<name> (edited)` next to it. The editor's own result is an edit recipe (SPEC §16.3); these are its "Save as Copy" and
+/// "Overwrite Original…".
 enum PhotoEditSaving {
     enum Failure: LocalizedError, Equatable {
         /// The file is in a share without edit permission.
@@ -49,6 +51,16 @@ enum PhotoEditSaving {
     ///
     /// - Parameter original: the downloaded original, when the caller has it already (the editor).
     static func overwrite(_ item: MediaItem, with edits: PhotoEdits, original: URL? = nil, services: AccountServices) async throws {
+        try await overwrite(item, with: EditRecipe(edits: edits), original: original, services: services)
+    }
+
+    /// Replaces the original with the recipe rendered on it. The photo's own recipe is removed afterwards: it is part of
+    /// the file now (a new version; the previous one stays in the file versions).
+    /// - Parameter still: a Live Photo effect's still (long exposure, another key photo) at full size, instead of the
+    ///   original's picture.
+    static func overwrite(
+        _ item: MediaItem, with recipe: EditRecipe, original: URL? = nil, still: CGImage? = nil, services: AccountServices
+    ) async throws {
         if let problem = overwriteProblem(item) { throw problem }
         let file: URL
         if let original {
@@ -60,7 +72,8 @@ enum PhotoEditSaving {
         try Task.checkCancellation()
         let directory = try workDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let rendered = try PhotoEditor.render(edits, original: file, name: item.name, replacingOriginal: true, to: directory)
+        let rendered = try EditRendering.renderFile(
+            recipe, original: file, name: item.name, still: still, replacingOriginal: true, to: directory)
         var headers: [String: String] = [:]
         if !item.etag.isEmpty { headers["If-Match"] = "\"\(item.etag)\"" }
         do {
@@ -68,13 +81,16 @@ enum PhotoEditSaving {
         } catch NetworkError.preconditionFailed {
             throw Failure.changedOnServer
         }
+        await services.edits.revert(item.fileId)
     }
 
     /// Uploads the edited version as a copy next to the original and puts it into the same own albums (SPEC §7.16.2).
-    static func saveCopy(_ item: MediaItem, with edits: PhotoEdits, original: URL, services: AccountServices) async throws {
+    static func saveCopy(
+        _ item: MediaItem, with recipe: EditRecipe, original: URL, still: CGImage? = nil, services: AccountServices
+    ) async throws {
         let directory = try workDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let rendered = try PhotoEditor.render(edits, original: original, name: item.name, to: directory)
+        let rendered = try EditRendering.renderFile(recipe, original: original, name: item.name, still: still, to: directory)
         let uploaded = try await Uploader(dav: services.dav).upload(
             file: rendered, fileName: rendered.lastPathComponent, folder: item.directory, capturedAt: item.capturedAt)
         let ownAlbums = Set(((try? services.collections.albums(.own)) ?? []).map(\.id))

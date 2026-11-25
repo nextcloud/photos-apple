@@ -93,6 +93,8 @@ struct SlideshowPlayer: View {
     /// Videos that cannot be played here: they show their still for the interval instead.
     @State private var stills: Set<FileID> = []
     @State private var lock = AppLock.shared
+    /// SharePlay could not start (SPEC §16.6).
+    @State private var sharePlayUnavailable = false
     @FocusState private var focused: Bool
 
     var interval: Int { SlideshowPlan.interval(seconds: storedInterval) }
@@ -158,6 +160,13 @@ struct SlideshowPlayer: View {
             .onChange(of: lock.requiresUnlock) { _, locked in
                 if locked { close(nil) }
             }
+            .alert(
+                String(localized: "SharePlay isn't available", bundle: .module, comment: "Memory film: SharePlay could not start."),
+                isPresented: $sharePlayUnavailable
+            ) {
+            } message: {
+                Text(WatchTogetherText.howToStart)
+            }
     }
 
     @ViewBuilder var stage: some View {
@@ -222,6 +231,23 @@ struct SlideshowPlayer: View {
         show(delta < 0 ? Slideshow.previous(before: index, count: items.count) : Slideshow.next(after: index, count: items.count))
     }
 
+    /// Shares the slideshow's photos as a film (in their order, in the film style and with its music) with the people in
+    /// the FaceTime call; the film opens here and on their devices once SharePlay has started, and the slideshow closes.
+    func shareWithGroup() {
+        let start = SlideshowStart(slideshow: request.title, ids: items.map(\.fileId))
+        let model = MemoryFilmModel(start: start)
+        playing = false
+        Task {
+            await model.load(session: session, autoplay: false)
+            switch await model.shareWithGroup() {
+            case .started: close(current?.fileId)
+            case .unavailable: sharePlayUnavailable = true
+            case .cancelled: break
+            }
+            model.stop()
+        }
+    }
+
     func description(of item: MediaItem) -> String {
         AccessibilityText.media(
             isVideo: item.kind == .video, isLivePhoto: item.isLivePhoto, date: item.timestamp, duration: item.duration,
@@ -252,6 +278,17 @@ struct SlideshowPlayer: View {
                     .frame(width: 44, height: 44)
                     .help(String(localized: "AirPlay", bundle: .module))
             #endif
+            // Watch together over FaceTime: the slideshow plays as a film in step on everyone's screen (SPEC §16.6).
+            Button {
+                shareWithGroup()
+            } label: {
+                Label(WatchTogetherText.shareTitle, systemImage: "shareplay")
+                    .labelStyle(.iconOnly)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .help(WatchTogetherText.shareTitle)
+            .disabled(items.isEmpty)
             optionsMenu
         }
         .buttonStyle(.plain)

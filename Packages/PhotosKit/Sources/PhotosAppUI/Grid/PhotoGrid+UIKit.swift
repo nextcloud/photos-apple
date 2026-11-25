@@ -20,6 +20,8 @@
         var showsHeaders: Bool
         /// Square tiles, or each picture whole in its tile (`TileStyle`).
         var squareTiles = true
+        /// Moment titles on the day headers (the Library, SPEC §16.1).
+        var moments = MomentHeaders.none
         var services: AccountServices
         var callbacks: GridCallbacks
 
@@ -38,6 +40,7 @@
             controller.update(
                 update, zoomStep: zoomStep, selection: selection, isSelecting: isSelecting, showsHeaders: showsHeaders,
                 squareTiles: squareTiles)
+            controller.setMoments(moments)
         }
     }
 
@@ -81,6 +84,11 @@
         private var sectionOffsets: [Double] = []
         /// Ratings and flags shown on the tiles (SPEC §15.2).
         let culling: GridCullingObserver
+        /// Edited photos' tiles are drawn again with their new rendition (SPEC §16.3).
+        private let edits = GridEditObserver()
+        /// Sliding across tiles while selecting, and peeking into videos, Live Photos and stacks (SPEC §16.1).
+        private var rangeSelector: GridRangeSelector?
+        private var peek: GridPeekPresenter?
 
         var model: GridModel { core.model }
         var squareTiles: Bool { core.squareTiles }
@@ -93,6 +101,7 @@
             culling = GridCullingObserver(services: services)
             super.init(nibName: nil, bundle: nil)
             culling.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
+            edits.changed = { [weak self] ids in self?.refreshVisibleTiles(only: ids) }
         }
 
         required init?(coder: NSCoder) { fatalError() }
@@ -128,6 +137,8 @@
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             collectionView.addGestureRecognizer(pinch)
             pinchRecognizer = pinch
+            rangeSelector = GridRangeSelector(host: self)
+            peek = GridPeekPresenter(host: self)
             offsetObservation = collectionView.observe(\.contentOffset, options: []) { [weak self] _, _ in
                 // UIKit changes the offset on the main thread.
                 MainActor.assumeIsolated { self?.contentOffsetChanged() }
@@ -143,6 +154,24 @@
                 controller.refreshVisibleTiles()
             }
             updateRefreshControl()
+        }
+
+        // MARK: Moments (SPEC §16.1)
+
+        /// New moment titles: the headers on screen show them at once; their heights stay (one line either way).
+        func setMoments(_ moments: MomentHeaders) {
+            guard core.headerTexts.setMoments(moments), isViewLoaded else { return }
+            let kind = UICollectionView.elementKindSectionHeader
+            for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+                guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? SectionHeader else { continue }
+                configure(header, section: indexPath.section)
+            }
+        }
+
+        private func configure(_ header: SectionHeader, section index: Int) {
+            guard let section = model.sections[safe: index] else { return }
+            header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
+            header.openMoment = { [weak self] id in self?.callbacks?.openMoment?(id) }
         }
 
         // MARK: Pull to refresh
@@ -213,6 +242,8 @@
                 let pinched = plan.layoutChanged ? pinchAnchor : nil
                 pinchAnchor = nil
                 let anchor = pinched?.id ?? anchorItem()
+                // The tile a peek is over may be somewhere else now.
+                peek?.end()
                 core.show(update.model, relayout: true)
                 yearTicker.reset()
                 let relayout: () -> Void = { [self] in
@@ -281,6 +312,7 @@
             isSelecting = selecting
             collectionView.isEditing = selecting
             collectionView.allowsMultipleSelection = selecting
+            if selecting { peek?.end() }
         }
 
         /// Reconfigures the cells on screen: badges, and a preview that fits the current tile size. A cell keeps the
@@ -498,6 +530,8 @@
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             // Only the user's scrolling shows the scrubber, not a jump to a photo or a relayout.
             updateScrubberPosition(userInitiated: scrollView.isTracking || scrollView.isDecelerating)
+            // A peek belongs to the tile under the pointer; the grid moved away under it.
+            if peek?.isPeeking == true, scrollView.isTracking || scrollView.isDecelerating { peek?.end() }
         }
 
         func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
@@ -712,9 +746,7 @@
                 collectionView.dequeueReusableSupplementaryView(
                     ofKind: kind, withReuseIdentifier: SectionHeader.reuseIdentifier, for: indexPath)
                 as! SectionHeader
-            if let section = model.sections[safe: indexPath.section] {
-                header.configure(core.headerTexts.text(for: section), metrics: headerMetrics)
-            }
+            configure(header, section: indexPath.section)
             return header
         }
 
@@ -904,6 +936,31 @@
         }
     }
 
+    /// Range selection and peeks (`GridGestures+UIKit`) work on this grid.
+    extension PhotoGridController: GridGestureHost {
+        var gestureCollectionView: UICollectionView { collectionView }
+        var gestureIsSelecting: Bool { isSelecting }
+
+        func applyRangeChanges(_ changes: [(index: Int, selected: Bool)]) {
+            guard !changes.isEmpty else { return }
+            var added: [FileID] = []
+            var removed: [FileID] = []
+            for change in changes {
+                guard let indexPath = indexPath(ofIndex: change.index), let id = fileId(at: indexPath) else { continue }
+                if change.selected {
+                    collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    added.append(id)
+                } else {
+                    collectionView.deselectItem(at: indexPath, animated: false)
+                    removed.append(id)
+                }
+            }
+            selected.insert(added)
+            selected.remove(removed)
+            callbacks?.selectionChanged(selected.ids)
+        }
+    }
+
     final class PhotoCell: UICollectionViewCell {
         static let reuseIdentifier = "PhotoCell"
         private let imageView = UIImageView()
@@ -1061,6 +1118,8 @@
             isDimmed = culling.isDimmed
             imageView.alpha = (isTileSelected ? 0.75 : 1) * (isDimmed ? 0.4 : 1)
             if let text = culling.accessibilityText { accessibilityLabel = (accessibilityLabel ?? "") + ", " + text }
+            // What the photo shows, written on this device (SPEC §16.2).
+            if let text = services.descriptions.text(of: item.fileId) { accessibilityLabel = (accessibilityLabel ?? "") + ", " + text }
             setNeedsUpdateConfiguration()
             tilePicture.configure(
                 item: item, request: services.previewRequest(for: item, tileSide: tileSide, scale: scale, square: square),
@@ -1186,6 +1245,10 @@
         private let subtitleLabel = UILabel()
         private let background = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
         private var metrics = GridHeaderMetrics(titleHeight: 28, subtitleHeight: 20)
+        /// The moment's title and the day: a button that opens the moment (SPEC §16.1).
+        private let momentButton = UIControl()
+        private var moment: MomentHeaders.Entry?
+        var openMoment: ((String) -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -1194,6 +1257,13 @@
             titleLabel.accessibilityTraits = .header
             addSubview(titleLabel)
             addSubview(subtitleLabel)
+            momentButton.isHidden = true
+            momentButton.isAccessibilityElement = true
+            momentButton.accessibilityTraits = [.button, .header]
+            // Pointer (iPad) and gaze (Vision Pro): the title is highlighted like a button.
+            momentButton.hoverStyle = UIHoverStyle(effect: .highlight, shape: .rect(cornerRadius: 6))
+            momentButton.addTarget(self, action: #selector(momentTapped), for: .touchUpInside)
+            addSubview(momentButton)
         }
 
         required init?(coder: NSCoder) { fatalError() }
@@ -1210,6 +1280,9 @@
             }
             if !subtitleLabel.isHidden {
                 subtitleLabel.frame = CGRect(x: area.minX, y: y, width: area.width, height: CGFloat(metrics.subtitleHeight))
+                // The button covers the text (and a little around it), not the whole width of the header.
+                let textWidth = min(subtitleLabel.intrinsicContentSize.width, area.width)
+                momentButton.frame = CGRect(x: area.minX - 6, y: y - 4, width: textWidth + 12, height: CGFloat(metrics.subtitleHeight) + 8)
             }
         }
 
@@ -1219,9 +1292,44 @@
             subtitleLabel.font = Self.subtitleFont
             titleLabel.text = text.title
             titleLabel.isHidden = text.title == nil
-            subtitleLabel.text = text.subtitle
-            subtitleLabel.isHidden = text.subtitle == nil
+            moment = text.moment
+            if let moment = text.moment {
+                subtitleLabel.attributedText = Self.momentLine(moment.title, day: text.subtitle, font: Self.subtitleFont)
+                momentButton.accessibilityLabel = text.momentAccessibilityLabel
+                momentButton.accessibilityHint = String(
+                    localized: "Opens the moment", bundle: .module,
+                    comment: "VoiceOver hint of a moment title on a day header of the library.")
+                subtitleLabel.isAccessibilityElement = false
+            } else {
+                subtitleLabel.attributedText = nil
+                subtitleLabel.text = text.subtitle
+                subtitleLabel.isAccessibilityElement = true
+            }
+            momentButton.isHidden = text.moment == nil
+            subtitleLabel.isHidden = text.subtitle == nil && text.moment == nil
             setNeedsLayout()
+        }
+
+        /// "Sunday in Lisbon ›  Sun 22 November": the moment in the label colour, the day after it as before.
+        static func momentLine(_ title: String, day: String?, font: UIFont) -> NSAttributedString {
+            let line = NSMutableAttributedString(string: title, attributes: [.font: font, .foregroundColor: UIColor.label])
+            let symbol = UIImage(
+                systemName: "chevron.forward", withConfiguration: UIImage.SymbolConfiguration(font: font.withSize(font.pointSize * 0.75)))
+            if let symbol {
+                let attachment = NSTextAttachment(image: symbol.withTintColor(.tertiaryLabel, renderingMode: .alwaysOriginal))
+                line.append(NSAttributedString(string: " "))
+                line.append(NSAttributedString(attachment: attachment))
+            }
+            if let day {
+                line.append(
+                    NSAttributedString(string: "  " + day, attributes: [.font: font, .foregroundColor: UIColor.secondaryLabel]))
+            }
+            return line
+        }
+
+        @objc private func momentTapped() {
+            guard let moment else { return }
+            openMoment?(moment.momentId)
         }
     }
 

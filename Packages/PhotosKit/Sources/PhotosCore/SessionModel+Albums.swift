@@ -47,6 +47,9 @@ extension SessionModel {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != album.name else { return }
         try await services.api.renameAlbum(album, to: trimmed)
+        // Its chosen cover and effect follow it (SPEC §16.8.2).
+        let looks = AlbumLookStore.store(for: services)
+        Task { await looks.renamed(album, to: trimmed) }
         try services.collections.deleteAlbum(id: album.id)
         try await refreshAlbums(force: true)
     }
@@ -91,8 +94,9 @@ extension SessionModel {
         await perform(.removeFromAlbum(members, album: album), undoManager: undoManager)
     }
 
-    public func addToAlbum(_ items: [MediaItem], album: Album) async {
-        await add(items, to: album)
+    /// Adds photos to an album; undoable with `undoManager` and in the undo history (SPEC §16.3.4).
+    public func addToAlbum(_ items: [MediaItem], album: Album, undoManager: UndoManager? = nil) async {
+        await perform(.addToAlbum(items, album: album), undoManager: undoManager)
     }
 
     /// Creates a public link album from a selection and returns the link (SPEC SH-4). `title` names the album (a memory's

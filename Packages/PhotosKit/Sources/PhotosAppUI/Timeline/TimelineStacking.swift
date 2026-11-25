@@ -99,18 +99,38 @@ struct TimelineDisplaySection: View {
     @AppStorage(TimelineDisplay.stackCopiesKey) private var stackCopies = true
     @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
     @AppStorage(TileStyle.squareTilesKey) private var squareTiles = true
+    @AppStorage(MemoriesStyle.key) private var memoriesStyle = MemoriesStyle.stories
+    @AppStorage(TimelineDisplay.showsMomentsKey) private var showsMoments = true
 
     var body: some View {
         Section {
             Toggle(String(localized: "Show memories", bundle: .module), isOn: $showsMemories)
+            if showsMemories {
+                Picker(
+                    String(localized: "Memories", bundle: .module, comment: "Settings: how memories are shown at the top of the library."),
+                    selection: $memoriesStyle
+                ) {
+                    ForEach(MemoriesStyle.allCases) { style in Text(style.title).tag(style) }
+                }
+            }
+            Toggle(
+                String(
+                    localized: "Name moments", bundle: .module,
+                    comment: "Settings: moment titles such as Sunday in Lisbon on the library's days."),
+                isOn: $showsMoments)
             Toggle(String(localized: "Square tiles", bundle: .module), isOn: $squareTiles)
             Toggle(String(localized: "Stack copies of a photo", bundle: .module), isOn: $stackCopies)
         } header: {
             Text("On this device", bundle: .module)
         } footer: {
-            Text(
-                "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge, and so is a burst that the camera named as one. Open it to see every photo.",
-                bundle: .module)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(
+                    "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge, and so is a burst that the camera named as one. Open it to see every photo.",
+                    bundle: .module)
+                Text(
+                    "Moments name days away and days with the people you named, such as “Sunday in Lisbon”, from what this device knows about your photos.",
+                    bundle: .module, comment: "Settings footer, after the explanation of stacks.")
+            }
         }
     }
 }

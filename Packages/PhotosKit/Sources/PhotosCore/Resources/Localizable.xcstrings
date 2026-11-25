@@ -158,6 +158,9 @@
     "A photo from your library is waiting for you." : {
       "comment" : "Body of the daily photo notification while app lock is on: no photo, date or place is shown."
     },
+    "Add to Album" : {
+      "comment" : "Edit › Undo Add to Album (the undo action's name)."
+    },
     "Add to Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo on the Mac and iPad (shown as \"Undo Add to Favorites\"): photos were marked as favourites. Title-style capitalisation as in the menu bar."
     },
@@ -166,6 +169,9 @@
     },
     "An album was shared with you." : {
       "comment" : "Notification body; the title is the album's title."
+    },
+    "Another file in the folder already has this name." : {
+      "comment" : "Batch rename: why a photo was not renamed."
     },
     "Archive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
@@ -275,6 +281,9 @@
     "Cancelled" : {
       "comment" : "Status of an upload or download that the user cancelled, in the list of transfers."
     },
+    "Changed on the server in the meantime. Try again after the next sync." : {
+      "comment" : "Batch fixes: why a photo was not changed (newer version on the server)."
+    },
     "Checking your Nextcloud… %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel while the app compares the device's photos with the server."
     },
@@ -286,6 +295,9 @@
     },
     "Delete" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Delete\"): photos were moved to the server's trash bin. A verb."
+    },
+    "Edit" : {
+      "comment" : "Edit › Undo Edit: the undo action's name for a photo edited in the editor."
     },
     "From your favorites · %@" : {
       "comment" : "Daily photo notification when the photo is a favourite: the argument is its month and year, e.g. June 2019."
@@ -340,6 +352,12 @@
     "Place" : {
       "comment" : "Spotlight: kind of a result that is a place."
     },
+    "Postcard" : {
+      "comment" : "Label of the public link of a sent postcard."
+    },
+    "Postcard to %@" : {
+      "comment" : "Label of the public link of a sent postcard; the argument is the name the card is addressed to."
+    },
     "Ratings and flags need the Collaborative tags app on your server." : {
       "comment" : "Culling error: the server has no system tags."
     },
@@ -349,11 +367,20 @@
     "Remove from Favorites" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Remove from Favorites\"): photos are no longer favourites. Title-style capitalisation as in the menu bar."
     },
+    "Revert to Original" : {
+      "comment" : "Edit › Undo Revert to Original: the undo action's name for removing a photo's edits."
+    },
+    "Rotate" : {
+      "comment" : "Edit › Undo Rotate: the undo action's name for Image › Rotate."
+    },
     "Shared items were not uploaded" : {
       "comment" : "Title of a notification: items the user shared to Nextcloud Photos from another app could not be uploaded after the share sheet was closed."
     },
     "Shared on %@" : {
       "comment" : "Name of the album that is created when the user shares photos with a link. %@ is today's date, e.g. \"Shared on 23 Nov 2026\"."
+    },
+    "Shared with you without permission to change it." : {
+      "comment" : "Batch fixes: why a photo was not changed."
     },
     "The desktop pictures change while the account they come from is shown in Nextcloud Photos." : {
       "comment" : "Settings › Desktop Picture: the rotation waits because another account is active."
@@ -363,6 +390,9 @@
     },
     "There are no photos to show. Open the album once, so that its photos are on this Mac." : {
       "comment" : "Settings › Desktop Picture: the rotation's album or source has no photos (yet)."
+    },
+    "This server can't change the date or place of this kind of file. Nextcloud 35 or later can." : {
+      "comment" : "Batch fixes: why a video or other file was skipped on servers older than Nextcloud 35."
     },
     "This week %lld years ago" : {
       "comment" : "Daily photo notification: the photo was taken around this day N years ago. Plural variations in the catalog.",
@@ -387,11 +417,25 @@
         }
       }
     },
+    "This week: %@. %@" : {
+      "comment" : "Body of the weekly photo prompt reminder: the theme, then its hint, e.g. This week: Hands. Hands at work, at rest, holding on.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This week: %1$@. %2$@"
+          }
+        }
+      }
+    },
     "Unarchive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."
     },
     "Uploading %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."
+    },
+    "Weekly Photo Prompt" : {
+      "comment" : "Title of the weekly photo prompt reminder notification."
     },
     "Your login could not be saved in the keychain (error %@)." : {
       "comment" : "Shown when a login cannot be completed because the app could not store the app password in the system keychain. The placeholder is the system's error number (e.g. -34018), not formatted."

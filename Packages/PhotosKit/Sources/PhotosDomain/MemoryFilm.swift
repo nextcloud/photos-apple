@@ -6,7 +6,7 @@ import PhotosModel
 
 /// The beat a memory film is cut to (SPEC §15.1): the music's tempo and the time of its first beat, or a steady rhythm
 /// when no music is chosen or no clear beat was found.
-public struct FilmRhythm: Hashable, Sendable {
+public struct FilmRhythm: Hashable, Sendable, Codable {
     /// Seconds per beat.
     public var beat: Double
     /// The time of a beat (film time; the music starts with the film).
@@ -28,8 +28,11 @@ public struct FilmRhythm: Hashable, Sendable {
 
     /// How long a picture is shown, in beats: a whole number of beats (2, 4, 8 or 16) closest to about 3.4 s, so cuts
     /// fall on the beat and the film keeps a calm pace whatever the tempo.
-    public var beatsPerShot: Int {
-        [2, 4, 8, 16].min { abs(Double($0) * beat - 3.4) < abs(Double($1) * beat - 3.4) }!
+    public var beatsPerShot: Int { beatsPerShot(target: 3.4) }
+
+    /// The whole number of beats (2, 4, 8 or 16) closest to `target` seconds: a film style's pacing (`FilmStyle`).
+    public func beatsPerShot(target: Double) -> Int {
+        [2, 4, 8, 16].min { abs(Double($0) * beat - target) < abs(Double($1) * beat - target) }!
     }
 
     /// The first beat at or after `time`.
@@ -41,8 +44,8 @@ public struct FilmRhythm: Hashable, Sendable {
 }
 
 /// A picture or clip of a memory film.
-public struct FilmShot: Hashable, Sendable {
-    public enum Kind: Hashable, Sendable {
+public struct FilmShot: Hashable, Sendable, Codable {
+    public enum Kind: Hashable, Sendable, Codable {
         case photo
         /// A Live Photo: its motion (this long, seconds) plays at the start of its shot.
         case livePhoto(motion: Double)
@@ -93,8 +96,8 @@ public struct FilmShot: Hashable, Sendable {
 
 /// One part of a film: the title, a picture or clip, a map flight between two stops of a trip, or a card (year in
 /// review).
-public struct FilmSegment: Hashable, Sendable {
-    public enum Content: Hashable, Sendable {
+public struct FilmSegment: Hashable, Sendable, Codable {
+    public enum Content: Hashable, Sendable, Codable {
         /// The title over the cover picture (`FilmPlan.cover`).
         case title
         /// `FilmPlan.shots[index]`.
@@ -130,12 +133,14 @@ public struct FilmLayer: Hashable, Sendable {
 /// A memory film's timeline (SPEC §15.1): which picture is on screen when, cut to the music's beat or a steady rhythm,
 /// with a title first and, for trips, map flights between the stops. Pure timing: the player and the video export both
 /// render it with `layers(at:)`, so they show the same film.
-public struct FilmPlan: Hashable, Sendable {
+public struct FilmPlan: Hashable, Sendable, Codable {
     public var shots: [FilmShot]
     public var segments: [FilmSegment]
     public var rhythm: FilmRhythm
     /// The picture under the title.
     public var cover: Int?
+    /// How the film is told: pacing, transitions, camera and look (SPEC §16.6).
+    public var style: FilmStyle = .standard
 
     /// At most this many pictures: a film is a highlight, not the whole memory.
     public static let shotLimit = 60
@@ -155,18 +160,23 @@ public struct FilmPlan: Hashable, Sendable {
     public var duration: Double { segments.last?.end ?? 0 }
 
     /// Builds the film of a memory's pictures (in the order they were taken). `flights`: trips fly over the map between
-    /// their stops.
-    public init(shots allShots: [FilmShot], cover: FileID? = nil, rhythm: FilmRhythm = .steady, flights: Bool = false) {
+    /// their stops. `style` sets the pacing and the transitions (SPEC §16.6). `keepsOrder`: a slideshow's photos, all of
+    /// them (up to `SharedFilm.pictureLimit`) in the order given, instead of a memory's highlights.
+    public init(
+        shots allShots: [FilmShot], cover: FileID? = nil, rhythm: FilmRhythm = .steady, flights: Bool = false,
+        style: FilmStyle = .standard, keepsOrder: Bool = false
+    ) {
         self.rhythm = rhythm
-        let shots = Self.select(allShots, limit: Self.shotLimit)
+        self.style = style
+        let shots = keepsOrder ? Array(allShots.prefix(SharedFilm.pictureLimit)) : Self.select(allShots, limit: Self.shotLimit)
         self.shots = shots
         self.cover = cover.flatMap { id in shots.firstIndex { $0.fileId == id } } ?? (shots.isEmpty ? nil : shots.count / 2)
         segments = []
         guard !shots.isEmpty else { return }
 
         let beat = rhythm.beat
-        let shotBeats = rhythm.beatsPerShot
-        let crossfade = rhythm.isMusical ? beat : 0.8
+        let shotBeats = rhythm.beatsPerShot(target: style.shotSeconds)
+        let crossfade = rhythm.isMusical ? beat * style.musicalDissolveBeats : style.steadyCrossfade
         // The first cut lands on a beat, after a title that lasts about one and a half pictures.
         var time = rhythm.beat(atOrAfter: Double(shotBeats) * beat * 1.5)
         segments.append(FilmSegment(content: .title, start: 0, duration: time, transition: 0, seed: 0))
@@ -189,7 +199,8 @@ public struct FilmPlan: Hashable, Sendable {
                 time += length
             }
             var beats = shotBeats
-            if shot.isFavorite && Double(beats * 2) * beat <= 7 { beats *= 2 }
+            let factor = style.favouriteFactor
+            if shot.isFavorite && factor > 1 && Double(beats * factor) * beat <= style.longestFavourite { beats *= factor }
             var length = Double(beats) * beat
             switch shot.kind {
             case .video(let clip):
@@ -200,7 +211,8 @@ public struct FilmPlan: Hashable, Sendable {
                 length = max(length, (motion / beat).rounded(.up) * beat + beat)
             case .photo: break
             }
-            let transition = !rhythm.isMusical || newChapter || index == 0 ? crossfade : 0
+            let dissolves = !rhythm.isMusical || newChapter || index == 0 || !style.cutsWithinChapter
+            let transition = dissolves ? crossfade : 0
             segments.append(FilmSegment(content: .shot(index), start: time, duration: length, transition: transition, seed: index))
             time += length
         }
@@ -223,6 +235,43 @@ public struct FilmPlan: Hashable, Sendable {
             time += length
         }
         if !segments.isEmpty { segments[segments.count - 1].duration += Self.fade }
+    }
+
+    /// A time-lapse of prepared cards (through the years, SPEC §16.6): each card `hold` seconds, dissolving into the next
+    /// over `crossfade`; the first (the title) and the last stay longer.
+    public init(timeLapse count: Int, hold: Double, crossfade: Double, firstHold: Double, lastHold: Double) {
+        rhythm = FilmRhythm(beat: hold, phase: 0, isMusical: false)
+        shots = []
+        cover = nil
+        segments = []
+        var time = 0.0
+        for index in 0..<count {
+            let length = index == 0 ? firstHold : index == count - 1 ? lastHold : hold
+            let fade = index == 0 ? 0 : index == 1 ? max(crossfade, 0.8) : crossfade
+            segments.append(FilmSegment(content: .card(index), start: time, duration: length, transition: fade, seed: index))
+            time += length
+        }
+        if !segments.isEmpty { segments[segments.count - 1].duration += Self.fade }
+    }
+
+    /// Without places: a copy to hand to other people (SharePlay, SPEC §16.6). The pictures' coordinates and place names
+    /// and the stops of map flights stay on this device; the timeline stays the same.
+    public func withoutPlaces() -> FilmPlan {
+        var copy = self
+        copy.shots = shots.map { shot in
+            var shot = shot
+            shot.location = nil
+            shot.place = nil
+            return shot
+        }
+        let nowhere = GeoPoint(latitude: 0, longitude: 0)
+        copy.segments = segments.map { segment in
+            guard case .flight = segment.content else { return segment }
+            var segment = segment
+            segment.content = .flight(from: nowhere, to: nowhere, fromName: nil, toName: nil)
+            return segment
+        }
+        return copy
     }
 
     /// The pictures of a long memory: favourites first, then evenly through the rest, in the order they were taken.

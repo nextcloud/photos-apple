@@ -27,8 +27,14 @@ struct NextcloudPhotosApp: App {
         SessionModel.collectionsIndexed = { PhotosShortcuts.updateAppShortcutParameters() }
     }
 
+    #if os(macOS)
+        /// Settings › General › Show in Menu Bar (SPEC §16.5.4).
+        @AppStorage(MenuBarExtraSettings.isShownKey) private var showsMenuBarExtra = false
+    #endif
+
     var body: some Scene {
-        WindowGroup {
+        // An id, so the menu bar extra can open a main window again after all were closed.
+        WindowGroup(id: MainWindow.sceneId) {
             RootView()
                 .environment(app)
                 #if os(macOS)
@@ -67,6 +73,8 @@ struct NextcloudPhotosApp: App {
         .commands {
             #if os(macOS)
                 SidebarCommands()
+                // File ▸ Import from iPhone or iPad: Continuity Camera into the album or folder shown (SPEC §16.5.3).
+                ImportFromDevicesCommands()
             #endif
             PhotosCommands()
         }
@@ -95,10 +103,40 @@ struct NextcloudPhotosApp: App {
         #endif
 
         #if os(macOS)
+            // The culling view in a full-screen window of its own (SPEC §16.5.2); not restored with the app.
+            WindowGroup(id: LoupeWindowValue.sceneId, for: LoupeWindowValue.self) { $value in
+                LoupeWindowView(value: $value)
+                    .environment(app)
+            }
+            .handlesExternalEvents(matching: [])
+            .restorationBehavior(.disabled)
+            .windowToolbarStyle(.unifiedCompact)
+            .defaultSize(width: 1400, height: 900)
+
+            // Drop zone, upload and backup status, today's memory (SPEC §16.5.4); also while no window is open.
+            MenuBarExtra(isInserted: $showsMenuBarExtra) {
+                PhotosMenuBarPanel()
+                    .environment(app)
+            } label: {
+                PhotosMenuBarLabel()
+                    .environment(app)
+            }
+            .menuBarExtraStyle(.window)
+
             Settings {
                 MacSettingsView()
                     .environment(app)
             }
+
+            // Guest Mode's presentation (SPEC §16.8.3): one album or memory on the whole screen until Touch ID or the
+            // password ends it. Opened by "Show to a Guest…", and again after a relaunch in Guest Mode.
+            Window(Text(verbatim: "Nextcloud Photos"), id: GuestModeScene.id) {
+                GuestModeWindow()
+                    .environment(app)
+            }
+            .windowStyle(.hiddenTitleBar)
+            .restorationBehavior(.disabled)
+            .handlesExternalEvents(matching: [])
         #endif
     }
 }

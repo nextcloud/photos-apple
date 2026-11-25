@@ -96,7 +96,7 @@ let package = Package(
         .testTarget(
             name: "PhotosCoreTests",
             dependencies: [
-                "PhotosCore", "PhotosModel", "PhotosNetworking", "PhotosStore", "PhotosBackup",
+                "PhotosCore", "PhotosModel", "PhotosNetworking", "PhotosStore", "PhotosBackup", "PhotosMedia",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             swiftSettings: swiftSettings

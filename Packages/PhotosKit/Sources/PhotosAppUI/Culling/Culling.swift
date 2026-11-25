@@ -381,6 +381,10 @@ struct CullingCommands: View {
         Toggle(CullingWording.autoAdvanceTitle, isOn: $autoAdvance)
         Button(CompareWording.menuTitle) { grid?.compare?() }
             .disabled(grid?.compare == nil)
+        // ⌥⌘L: L for loupe.
+        Button(LoupeWording.menuTitle) { grid?.loupe?() }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            .disabled(grid?.loupe == nil)
         #if os(macOS)
             EditWithMenu(item: grid?.editWith)
         #endif

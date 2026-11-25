@@ -97,9 +97,9 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
-        NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup.
+        NSPhotoLibraryUsageDescription: Nextcloud Photos backs up your photos and videos to your Nextcloud when you turn on backup, and keeps copies of an album you choose for the Lock Screen.
         NSPhotoLibraryAddUsageDescription: Nextcloud Photos saves photos and videos from your Nextcloud to your photo library when you ask it to.
-        NSCameraUsageDescription: Nextcloud Photos uses the camera to scan a login QR code.
+        NSCameraUsageDescription: Nextcloud Photos uses the camera to take photos and scan documents for your Nextcloud, and to scan a login QR code.
         # iPhone and iPad: a song of the Music library as the music of memory slideshows (SPEC ME-4), only when the user
         # picks one.
         NSAppleMusicUsageDescription: Nextcloud Photos plays the song you choose from your music library during memory slideshows.
@@ -136,6 +136,7 @@ targets:
           - com.nextcloud.photos.processing
           - com.nextcloud.photos.labels
           - com.nextcloud.photos.similar
+          - com.nextcloud.photos.describe
           - com.nextcloud.photos.offline
           - $(PRODUCT_BUNDLE_IDENTIFIER).backup.*
         UIBackgroundModes: [fetch, processing, remote-notification]

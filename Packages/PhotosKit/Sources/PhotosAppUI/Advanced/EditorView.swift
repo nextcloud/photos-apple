@@ -9,39 +9,118 @@ import PhotosModel
 import PhotosNetworking
 import SwiftUI
 
-/// Photo editor (SPEC §7.16): geometry, auto-enhance, filters, adjustments; save as copy or overwrite.
+/// What the editor changes, as one value: one step of its undo and redo.
+struct EditorState: Equatable {
+    var edits = PhotoEdits()
+    /// RAW development; nil while the photo is not developed from RAW.
+    var raw: RAWAdjustments?
+    var live: LivePhotoEffect?
+
+    init(edits: PhotoEdits = PhotoEdits(), raw: RAWAdjustments? = nil, live: LivePhotoEffect? = nil) {
+        self.edits = edits
+        self.raw = raw
+        self.live = live
+    }
+
+    init(_ recipe: EditRecipe?) {
+        self.init(edits: recipe?.edits ?? PhotoEdits(), raw: recipe?.raw, live: recipe?.live)
+    }
+
+    /// The recipe the editor saves.
+    func recipe(developsRAW: Bool) -> EditRecipe {
+        EditRecipe(edits: edits, raw: developsRAW ? (raw ?? RAWAdjustments()) : nil, live: live?.isIdentity == true ? nil : live)
+    }
+
+    /// Nothing that shows: Done saves no edit (or reverts one).
+    var isIdentity: Bool { recipe(developsRAW: raw != nil).isIdentity }
+}
+
+/// Photo editor (SPEC §7.16, §16.3): geometry, auto-enhance, filters, adjustments, RAW development and Live Photo
+/// effects. Non-destructive: Done saves an edit recipe in the user's Nextcloud and the original stays as it is; "Save as
+/// Copy" writes a new file, "Overwrite Original…" (secondary) replaces the file.
 struct EditorView: View {
     let item: MediaItem
     @Environment(SessionModel.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @State private var edits = PhotoEdits()
-    @State private var history: [PhotoEdits] = []
-    @State private var future: [PhotoEdits] = []
+    @Environment(\.undoManager) private var undoManager
+    @State private var state = EditorState()
+    @State private var history: [EditorState] = []
+    /// Set while Undo or Redo puts a state back (or the editor loads): that is not a new step.
+    @State private var restoring = false
+    @State private var future: [EditorState] = []
+    /// What the photo shows now (its recipe when the editor opened): Done with no change saves nothing.
+    @State private var saved = EditorState()
+    @State private var hadEdit = false
+    /// The photo (non-RAW) at proxy size.
     @State private var source: CIImage?
+    /// The RAW being developed (the photo itself, or the RAW file beside a JPEG), at proxy size.
+    @State private var rawFilter: CIRAWFilter?
+    @State private var rawInfo: EditRendering.RAWInfo?
+    @State private var rawItem: MediaItem?
+    @State private var rawFile: URL?
+    /// The RAW or JPEG beside this photo (same shot), if any.
+    @State private var partner: MediaItem?
+    /// The still of a Live Photo effect (long exposure, another key photo), at proxy size.
+    @State private var liveStill: CIImage?
+    @State private var motionFile: URL?
+    @State private var motionDuration: Double = 0
     @State private var preview: CGImage?
     /// The crop tool shows the whole picture with the crop's frame over it.
     @State private var uncropped: CGImage?
     /// The crop while a handle is dragged; it becomes an edit (one undo step) when the drag ends.
     @State private var draftCrop: CropRect?
     @State private var originalFile: URL?
-    @State private var tab = 0
-    @State private var saving = false
+    @State private var tab: Tool = .adjust
+    @State private var working: String?
     @State private var showOriginal = false
+    @State private var confirmingOverwrite = false
+    @State private var confirmingRevert = false
+    /// The recipe on the server was written by a newer version of the app.
+    @State private var newerFormat = false
     @State private var error: String?
     /// Width of the adjustment names; grows with the text size.
     @ScaledMetric(relativeTo: .body) private var labelWidth = 110.0
 
+    enum Tool: Hashable {
+        case adjust, filters, crop, raw, live
+    }
+
+    /// Proxy size the editor works on; save and export render the full original.
+    static let proxySize = 2048
+
+    var developsRAW: Bool { rawFilter != nil }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if newerFormat {
+                    Label(
+                        String(
+                            localized: "This photo was edited with a newer version of the app. Saving here replaces that edit.",
+                            bundle: .module, comment: "Editor: the photo's edit recipe has a format this version does not know."),
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.footnote)
+                    .padding(8)
+                }
                 ZStack {
                     Color.black
                     picture
+                    if tab == .live, let live = state.live, live.playsByItself {
+                        LiveEffectPlayer(item: item, effect: live.effect, recipe: state.recipe(developsRAW: developsRAW))
+                            .allowsHitTesting(false)
+                    }
                 }
                 Picker(String(localized: "Tools", bundle: .module), selection: $tab) {
-                    Text("Adjust", bundle: .module).tag(0)
-                    Text("Filters", bundle: .module).tag(1)
-                    Text("Crop", bundle: .module).tag(2)
+                    Text("Adjust", bundle: .module).tag(Tool.adjust)
+                    Text("Filters", bundle: .module).tag(Tool.filters)
+                    Text("Crop", bundle: .module).tag(Tool.crop)
+                    if developsRAW || partnerIsRAW {
+                        Text("RAW", bundle: .module, comment: "Editor tool: RAW development (exposure, white balance…).").tag(Tool.raw)
+                    }
+                    if item.isLivePhoto {
+                        Text("Live", bundle: .module, comment: "Editor tool: Live Photo effects and key photo.").tag(Tool.live)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -52,41 +131,10 @@ struct EditorView: View {
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        if let last = history.popLast() {
-                            future.append(edits)
-                            edits = last
-                        }
-                    } label: {
-                        Label(String(localized: "Undo", bundle: .module), systemImage: "arrow.uturn.backward")
-                    }
-                    .disabled(history.isEmpty)
-                    Button {
-                        if let next = future.popLast() {
-                            history.append(edits)
-                            edits = next
-                        }
-                    } label: {
-                        Label(String(localized: "Redo", bundle: .module), systemImage: "arrow.uturn.forward")
-                    }
-                    .disabled(future.isEmpty)
-                    Menu(String(localized: "Save", bundle: .module)) {
-                        Button(String(localized: "Save as copy", bundle: .module)) { save(overwrite: false) }
-                        // Not for read-only shares or formats that can't be written back (SPEC §7.16.2).
-                        if PhotoEditSaving.overwriteProblem(item) == nil {
-                            Button(String(localized: "Overwrite original", bundle: .module)) { save(overwrite: true) }
-                        }
-                    }
-                    .disabled(edits.isIdentity || saving)
-                }
-            }
+            .toolbar { toolbar }
             .overlay {
-                if saving {
-                    ProgressView(String(localized: "Saving…", bundle: .module)).padding().background(
-                        .regularMaterial, in: .rect(cornerRadius: 12))
+                if let working {
+                    ProgressView(working).padding().background(.regularMaterial, in: .rect(cornerRadius: 12))
                 }
             }
             .alert(
@@ -96,43 +144,126 @@ struct EditorView: View {
             } message: {
                 Text(error ?? "")
             }
+            .confirmationDialog(
+                String(localized: "Overwrite the original?", bundle: .module, comment: "Editor: asks before replacing the file."),
+                isPresented: $confirmingOverwrite, titleVisibility: .visible
+            ) {
+                Button(String(localized: "Overwrite Original", bundle: .module, comment: "Editor: replaces the file."), role: .destructive)
+                {
+                    save(.overwrite)
+                }
+            } message: {
+                Text(
+                    "The edit is written into the file itself, for every app. The previous version stays in the file's versions on your Nextcloud.",
+                    bundle: .module, comment: "Editor: what Overwrite Original does.")
+            }
+            .confirmationDialog(
+                String(localized: "Revert to the original?", bundle: .module, comment: "Editor: asks before removing all edits."),
+                isPresented: $confirmingRevert, titleVisibility: .visible
+            ) {
+                Button(String(localized: "Revert to Original", bundle: .module), role: .destructive) { revert() }
+            } message: {
+                Text(
+                    "All edits of this photo are removed on all your devices. You can undo this.", bundle: .module,
+                    comment: "Editor: what Revert to Original does.")
+            }
         }
         #if os(macOS)
             // The sheet's smallest size on the Mac. Elsewhere the presentation has the size: on iPad this made the editor
             // wider than its sheet, which cut off the picture's sides and the lower tools.
             .frame(minWidth: 700, minHeight: 640)
         #endif
-        .task { await loadOriginal() }
-        .onChange(of: edits) { old, _ in
-            if history.last != old { history.append(old) }
-            future = []
-            updatePreview()
+        .task { await load() }
+        .onChange(of: state) { old, new in
+            if restoring {
+                restoring = false
+            } else {
+                if history.last != old { history.append(old) }
+                future = []
+            }
+            if old.live != new.live {
+                Task { await updateLiveStill() }
+            } else {
+                updatePreview()
+            }
         }
         .onChange(of: tab) { _, _ in updatePreview() }
     }
 
-    var isCropping: Bool { tab == 2 }
+    @ToolbarContentBuilder var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                if let last = history.popLast() {
+                    future.append(state)
+                    restoring = true
+                    state = last
+                }
+            } label: {
+                Label(String(localized: "Undo", bundle: .module), systemImage: "arrow.uturn.backward")
+            }
+            .disabled(history.isEmpty)
+            Button {
+                if let next = future.popLast() {
+                    history.append(state)
+                    restoring = true
+                    state = next
+                }
+            } label: {
+                Label(String(localized: "Redo", bundle: .module), systemImage: "arrow.uturn.forward")
+            }
+            .disabled(future.isEmpty)
+            Menu {
+                Button(String(localized: "Save as Copy", bundle: .module, comment: "Editor: writes the edited photo as a new file.")) {
+                    save(.copy)
+                }
+                .disabled(state.isIdentity)
+                // Not for read-only shares, formats that can't be written back, or a JPEG developed from its RAW.
+                if PhotoEditSaving.overwriteProblem(item) == nil && !developsRAW {
+                    Button(String(localized: "Overwrite Original…", bundle: .module, comment: "Editor: replaces the file (secondary).")) {
+                        confirmingOverwrite = true
+                    }
+                    .disabled(state.isIdentity)
+                }
+                if hadEdit {
+                    Divider()
+                    Button(String(localized: "Revert to Original", bundle: .module), role: .destructive) { confirmingRevert = true }
+                }
+            } label: {
+                Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
+            }
+            .disabled(working != nil)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button(String(localized: "Done", bundle: .module)) { done() }
+                .disabled(working != nil)
+        }
+    }
+
+    var isCropping: Bool { tab == .crop }
+
+    var partnerIsRAW: Bool { partner.map { EditRendering.isRAW(name: $0.name) } ?? false }
 
     /// The edited photo; in the crop tool the whole picture with the crop's frame and handles. Pressing and holding shows
     /// the original (not while cropping: there a press starts a drag).
     @ViewBuilder var picture: some View {
         if isCropping, let uncropped {
             let size = CGSize(width: uncropped.width, height: uncropped.height)
-            let current: CropRect = PhotoEditor.cropArea(edits, size: size) ?? .full
+            let current: CropRect = PhotoEditor.cropArea(state.edits, size: size) ?? .full
             // The frame is the accessible element (its value and adjustable action), not the picture under it.
             Image(decorative: uncropped, scale: 1).resizable().scaledToFit()
                 .accessibilityHidden(true)
                 .overlay {
                     CropOverlay(
-                        area: draftCrop ?? current, pictureSize: size, locksAspect: edits.aspectLocked,
+                        area: draftCrop ?? current, pictureSize: size, locksAspect: state.edits.aspectLocked,
                         changing: { draftCrop = $0 },
                         changed: { area in
                             draftCrop = nil
-                            if area != current { edits.crop = area }
+                            if area != current { state.edits.crop = area }
                         })
                 }
                 .padding(12)
-        } else if let image = showOriginal ? source.flatMap(render(original:)) : preview {
+        } else if let image = showOriginal ? originalPicture : preview {
             Image(decorative: image, scale: 1).resizable().scaledToFit()
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
@@ -150,6 +281,17 @@ struct EditorView: View {
         }
     }
 
+    /// The photo without any edit, for press-and-hold.
+    var originalPicture: CGImage? {
+        guard let image = source ?? rawFilter.flatMap({ Self.defaultDevelopment($0) }) else { return nil }
+        return PhotoEditor.context.createCGImage(image, from: image.extent)
+    }
+
+    static func defaultDevelopment(_ filter: CIRAWFilter) -> CIImage? {
+        EditRendering.configure(filter, RAWAdjustments())
+        return filter.outputImage
+    }
+
     /// The size of the picture the crop works on (after straighten, turns and flip), in proxy pixels.
     var cropPictureSize: CGSize? {
         uncropped.map { CGSize(width: $0.width, height: $0.height) }
@@ -157,104 +299,256 @@ struct EditorView: View {
 
     /// A preset: its ratio is locked and its largest area in the middle is the new crop ("Free" only unlocks).
     func choose(_ aspect: PhotoEdits.Aspect) {
-        var next = edits
+        var next = state.edits
         next.aspect = aspect
         next.aspectLocked = aspect != .free
         if aspect != .free, let size = cropPictureSize, let ratio = aspect.pixelAspect(for: size) {
             next.crop = CropRect.centered(aspect: ratio, in: size)
         }
-        edits = next
+        state.edits = next
     }
 
     var aspectLock: Binding<Bool> {
         Binding(
-            get: { edits.aspectLocked },
+            get: { state.edits.aspectLocked },
             set: { locked in
-                var next = edits
+                var next = state.edits
                 next.aspectLocked = locked
                 // Unlocked, the frame is free: the preset no longer applies.
                 if !locked {
                     if next.crop == nil, let size = cropPictureSize { next.crop = PhotoEditor.cropArea(next, size: size) }
                     next.aspect = .free
                 }
-                edits = next
+                state.edits = next
             })
     }
 
     @ViewBuilder var controls: some View {
         switch tab {
-        case 0:
+        case .adjust:
             ScrollView {
                 VStack(spacing: 6) {
-                    Toggle(String(localized: "Auto-enhance", bundle: .module), isOn: $edits.autoEnhance)
-                    slider(String(localized: "Exposure", bundle: .module), $edits.exposure, -2...2)
-                    slider(String(localized: "Brightness", bundle: .module), $edits.brightness, -0.5...0.5)
-                    slider(String(localized: "Contrast", bundle: .module), $edits.contrast, 0.5...1.5)
-                    slider(String(localized: "Highlights", bundle: .module), $edits.highlights, 0...1)
-                    slider(String(localized: "Shadows", bundle: .module), $edits.shadows, -1...1)
-                    slider(String(localized: "Saturation", bundle: .module), $edits.saturation, 0...2)
-                    slider(String(localized: "Vibrance", bundle: .module), $edits.vibrance, -1...1)
-                    slider(String(localized: "Warmth", bundle: .module), $edits.warmth, -1...1)
-                    slider(String(localized: "Tint", bundle: .module), $edits.tint, -1...1)
-                    slider(String(localized: "Sharpness", bundle: .module), $edits.sharpness, 0...2)
-                    slider(String(localized: "Vignette", bundle: .module), $edits.vignette, 0...2)
+                    Toggle(String(localized: "Auto-enhance", bundle: .module), isOn: $state.edits.autoEnhance)
+                    slider(String(localized: "Exposure", bundle: .module), $state.edits.exposure, -2...2)
+                    slider(String(localized: "Brightness", bundle: .module), $state.edits.brightness, -0.5...0.5)
+                    slider(String(localized: "Contrast", bundle: .module), $state.edits.contrast, 0.5...1.5)
+                    slider(String(localized: "Highlights", bundle: .module), $state.edits.highlights, 0...1)
+                    slider(String(localized: "Shadows", bundle: .module), $state.edits.shadows, -1...1)
+                    slider(String(localized: "Saturation", bundle: .module), $state.edits.saturation, 0...2)
+                    slider(String(localized: "Vibrance", bundle: .module), $state.edits.vibrance, -1...1)
+                    slider(String(localized: "Warmth", bundle: .module), $state.edits.warmth, -1...1)
+                    slider(String(localized: "Tint", bundle: .module), $state.edits.tint, -1...1)
+                    slider(String(localized: "Sharpness", bundle: .module), $state.edits.sharpness, 0...2)
+                    slider(String(localized: "Vignette", bundle: .module), $state.edits.vignette, 0...2)
                 }
                 .padding(.horizontal)
             }
-        case 1:
+        case .filters:
             ScrollView(.horizontal) {
                 HStack {
                     ForEach(PhotoEdits.Filter.allCases, id: \.self) { filter in
-                        Button(Self.title(of: filter)) { edits.filter = filter }
+                        Button(Self.title(of: filter)) { state.edits.filter = filter }
                             .buttonStyle(.bordered)
-                            .tint(edits.filter == filter ? .accentColor : .secondary)
-                            .accessibilityAddTraits(edits.filter == filter ? .isSelected : [])
+                            .tint(state.edits.filter == filter ? .accentColor : .secondary)
+                            .accessibilityAddTraits(state.edits.filter == filter ? .isSelected : [])
                     }
                 }
                 .padding()
             }
-        default:
-            VStack {
-                HStack {
-                    Button {
-                        edits.rotate(clockwise: false)
-                    } label: {
-                        Label(String(localized: "Rotate Left", bundle: .module), systemImage: "rotate.left")
-                    }
-                    Button {
-                        edits.rotate(clockwise: true)
-                    } label: {
-                        Label(String(localized: "Rotate Right", bundle: .module), systemImage: "rotate.right")
-                    }
-                    Button {
-                        edits.flip()
-                    } label: {
-                        Label(
-                            String(localized: "Flip", bundle: .module),
-                            systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
-                    }
+        case .crop:
+            cropControls
+        case .raw:
+            rawControls
+        case .live:
+            liveControls
+        }
+    }
+
+    var cropControls: some View {
+        VStack {
+            HStack {
+                Button {
+                    state.edits.rotate(clockwise: false)
+                } label: {
+                    Label(String(localized: "Rotate Left", bundle: .module), systemImage: "rotate.left")
                 }
-                HStack {
-                    Picker(
-                        String(localized: "Aspect", bundle: .module),
-                        selection: Binding<PhotoEdits.Aspect>(get: { edits.aspect }, set: { choose($0) })
+                Button {
+                    state.edits.rotate(clockwise: true)
+                } label: {
+                    Label(String(localized: "Rotate Right", bundle: .module), systemImage: "rotate.right")
+                }
+                Button {
+                    state.edits.flip()
+                } label: {
+                    Label(
+                        String(localized: "Flip", bundle: .module),
+                        systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                }
+            }
+            HStack {
+                Picker(
+                    String(localized: "Aspect", bundle: .module),
+                    selection: Binding<PhotoEdits.Aspect>(get: { state.edits.aspect }, set: { choose($0) })
+                ) {
+                    ForEach(PhotoEdits.Aspect.allCases, id: \.self) { Text(Self.title(of: $0)).tag($0) }
+                }
+                .fixedSize()
+                Toggle(isOn: aspectLock) {
+                    Label(
+                        String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."),
+                        systemImage: state.edits.aspectLocked ? "lock" : "lock.open")
+                }
+                .toggleStyle(.button)
+                .help(String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."))
+            }
+            slider(String(localized: "Straighten", bundle: .module), $state.edits.straighten, -45...45)
+            Button(String(localized: "Reset", bundle: .module)) { state.edits = PhotoEdits() }
+        }
+        .padding()
+    }
+
+    /// A RAW setting; its value is created when the photo is developed from RAW.
+    func rawBinding<Value>(_ keyPath: WritableKeyPath<RAWAdjustments, Value>) -> Binding<Value> {
+        Binding(
+            get: { (state.raw ?? RAWAdjustments())[keyPath: keyPath] },
+            set: { value in
+                var raw = state.raw ?? RAWAdjustments()
+                raw[keyPath: keyPath] = value
+                state.raw = raw
+            })
+    }
+
+    /// White balance in Kelvin, starting from the camera's.
+    var temperature: Binding<Double> {
+        Binding(
+            get: { state.raw?.temperature ?? rawInfo?.temperature ?? EditRendering.assumedAsShotTemperature },
+            set: { value in
+                var raw = state.raw ?? RAWAdjustments()
+                raw.temperature = value
+                state.raw = raw
+            })
+    }
+
+    var tint: Binding<Double> {
+        Binding(
+            get: { state.raw?.tint ?? rawInfo?.tint ?? 0 },
+            set: { value in
+                var raw = state.raw ?? RAWAdjustments()
+                raw.tint = value
+                state.raw = raw
+            })
+    }
+
+    @ViewBuilder var rawControls: some View {
+        if developsRAW {
+            ScrollView {
+                VStack(spacing: 6) {
+                    slider(
+                        String(localized: "RAW Exposure", bundle: .module, comment: "RAW development: exposure in EV."),
+                        rawBinding(\.exposure), -3...3)
+                    slider(
+                        String(localized: "Temperature", bundle: .module, comment: "RAW development: white balance in Kelvin."),
+                        temperature,
+                        2000...12000)
+                    slider(
+                        String(localized: "RAW Tint", bundle: .module, comment: "RAW development: white balance tint."), tint, -150...150)
+                    slider(
+                        String(localized: "Shadow Boost", bundle: .module, comment: "RAW development: lifts the shadows."),
+                        rawBinding(\.shadowBoost), 0...1)
+                    if rawInfo?.supportsHighlightRecovery ?? true {
+                        Toggle(
+                            String(
+                                localized: "Recover Highlights", bundle: .module, comment: "RAW development: brings back blown highlights."),
+                            isOn: rawBinding(\.highlightRecovery))
+                    }
+                    if rawInfo?.supportsNoiseReduction ?? true {
+                        slider(
+                            String(localized: "Noise Reduction", bundle: .module, comment: "RAW development: luminance noise reduction."),
+                            Binding(
+                                get: { state.raw?.noiseReduction ?? 0 },
+                                set: { value in
+                                    var raw = state.raw ?? RAWAdjustments()
+                                    raw.noiseReduction = value
+                                    state.raw = raw
+                                }), 0...1)
+                    }
+                    Button(
+                        String(localized: "Camera Settings", bundle: .module, comment: "RAW development: back to the camera's development.")
                     ) {
-                        ForEach(PhotoEdits.Aspect.allCases, id: \.self) { Text(Self.title(of: $0)).tag($0) }
+                        state.raw = RAWAdjustments()
                     }
-                    .fixedSize()
-                    Toggle(isOn: aspectLock) {
-                        Label(
-                            String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."),
-                            systemImage: edits.aspectLocked ? "lock" : "lock.open")
-                    }
-                    .toggleStyle(.button)
-                    .help(String(localized: "Lock Aspect Ratio", bundle: .module, comment: "Crop tool: resizing keeps the ratio."))
                 }
-                slider(String(localized: "Straighten", bundle: .module), $edits.straighten, -45...45)
-                Button(String(localized: "Reset", bundle: .module)) { edits = PhotoEdits() }
+                .padding(.horizontal)
+            }
+        } else if let partner, partnerIsRAW {
+            VStack(spacing: 10) {
+                Text(
+                    "Develop \(partner.name) instead of this JPEG: more detail in highlights and shadows, and the camera's white balance can be changed. The JPEG stays the quick preview.",
+                    bundle: .module, comment: "Editor RAW tool for the JPEG of a RAW+JPEG pair. %@ is the RAW file's name."
+                )
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                Button(String(localized: "Edit RAW", bundle: .module, comment: "Editor: develops the RAW file beside the JPEG.")) {
+                    Task { await useRAW(partner) }
+                }
+                .buttonStyle(.borderedProminent)
             }
             .padding()
         }
+    }
+
+    var effect: Binding<LivePhotoEffect.Effect> {
+        Binding(
+            get: { state.live?.effect ?? .live },
+            set: { value in
+                var live = state.live ?? LivePhotoEffect()
+                live.effect = value
+                state.live = live
+            })
+    }
+
+    var keyFrame: Binding<Double> {
+        Binding(
+            get: { state.live?.keyFrameTime ?? motionDuration / 2 },
+            set: { value in
+                var live = state.live ?? LivePhotoEffect()
+                live.keyFrameTime = value
+                state.live = live
+            })
+    }
+
+    var liveControls: some View {
+        VStack(spacing: 10) {
+            Picker(String(localized: "Effect", bundle: .module, comment: "Editor: Live Photo effect picker."), selection: effect) {
+                ForEach(LivePhotoEffect.Effect.allCases, id: \.self) { effect in
+                    Label(LiveEffectWording.title(effect), systemImage: LiveEffectWording.symbol(effect)).tag(effect)
+                }
+            }
+            .pickerStyle(.segmented)
+            if motionDuration > 0 && state.live?.effect != .longExposure {
+                HStack {
+                    Text("Key Photo", bundle: .module, comment: "Editor: the frame of a Live Photo that is its still.")
+                        .frame(width: labelWidth, alignment: .leading)
+                        .accessibilityHidden(true)
+                    Slider(value: keyFrame, in: 0...motionDuration) {
+                        Text("Key Photo", bundle: .module, comment: "Editor: the frame of a Live Photo that is its still.")
+                    }
+                    .accessibilityValue(keyFrame.wrappedValue.formatted(.number.precision(.fractionLength(1))))
+                }
+                if state.live?.keyFrameTime != nil {
+                    Button(
+                        String(
+                            localized: "Use the Original Key Photo", bundle: .module, comment: "Editor: back to the photo the camera took.")
+                    ) {
+                        state.live?.keyFrameTime = nil
+                    }
+                }
+            } else if motionDuration == 0 {
+                ProgressView()
+            }
+        }
+        .padding()
+        .task { await loadMotion() }
     }
 
     func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
@@ -289,51 +583,169 @@ struct EditorView: View {
         }
     }
 
-    func render(original: CIImage) -> CGImage? {
-        PhotoEditor.context.createCGImage(original, from: original.extent)
+    // MARK: Loading
+
+    /// Starts from the photo's edit (re-editing), on its original — a RAW developed with Core Image.
+    func load() async {
+        guard let services = session.services else { return }
+        let recipe = services.edits.recipe(for: item.fileId)
+        hadEdit = recipe != nil
+        let start = EditorState(recipe)
+        saved = start
+        restoring = start != state
+        state = start
+        newerFormat = await services.edits.hasNewerFormat(item.fileId)
+        partner = session.rawPartner(of: item)
+        do {
+            if EditRendering.isRAW(name: item.name) {
+                await useRAW(item)
+            } else {
+                let file = try await services.images.originals.original(
+                    fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
+                originalFile = file
+                source = EditRendering.loadOriginal(file, name: item.name, raw: nil, maxPixelSize: Self.proxySize)?.image
+                // The pair was developed from its RAW last time: go on with the RAW.
+                if recipe?.raw != nil, let partner, partnerIsRAW { await useRAW(partner) }
+            }
+            if start.live?.changesStill == true { await updateLiveStill() } else { updatePreview() }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
-    func loadOriginal() async {
+    /// Develops `raw` (this photo or the RAW beside it) from now on.
+    func useRAW(_ raw: MediaItem) async {
         guard let services = session.services else { return }
+        working = String(localized: "Loading RAW…", bundle: .module, comment: "Editor: the RAW file is downloaded and decoded.")
+        defer { working = nil }
         do {
             let file = try await services.images.originals.original(
-                fileId: item.fileId, etag: item.etag, url: services.originalURL(for: item))
-            originalFile = file
-            // Edit on a ≤ 2048 px proxy for responsiveness; save renders the full original.
-            if let image = PhotoEditor.load(file) {
-                let scale = min(1, 2048 / max(image.extent.width, image.extent.height))
-                source = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                fileId: raw.fileId, etag: raw.etag, url: services.originalURL(for: raw))
+            guard let filter = CIRAWFilter(imageURL: file) else { throw CocoaError(.fileReadCorruptFile) }
+            let native = max(filter.nativeSize.width, filter.nativeSize.height)
+            if native > 0 { filter.scaleFactor = Float(min(1, CGFloat(Self.proxySize) / native)) }
+            rawFile = file
+            rawItem = raw
+            rawInfo = EditRendering.rawInfo(file)
+            rawFilter = filter
+            if state.raw == nil {
+                // Not an undo step: developing the RAW is not an edit of its own.
+                restoring = true
+                state.raw = RAWAdjustments()
             }
+            tab = .raw
             updatePreview()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
+    func loadMotion() async {
+        guard motionFile == nil, let services = session.services, item.isLivePhoto else { return }
+        guard let file = try? await LiveEffectFiles.motion(of: item, services: services) else { return }
+        motionFile = file
+        motionDuration = (try? await LivePhotoEffects.duration(of: file)) ?? 0
+    }
+
+    /// The still of the effect (long exposure, another key photo) at proxy size, or none.
+    func updateLiveStill() async {
+        guard let live = state.live, live.changesStill else {
+            liveStill = nil
+            updatePreview()
+            return
+        }
+        await loadMotion()
+        guard let motionFile else { return }
+        let image: CGImage?
+        if live.effect == .longExposure {
+            working = String(localized: "Making long exposure…", bundle: .module, comment: "Editor: frames of a Live Photo are blended.")
+            image = try? await LivePhotoEffects.longExposure(of: motionFile, maxPixelSize: Self.proxySize)
+            working = nil
+        } else if let time = live.keyFrameTime {
+            image = try? await LivePhotoEffects.frame(of: motionFile, at: time, maxPixelSize: Self.proxySize)
+        } else {
+            image = nil
+        }
+        // Another change came in meanwhile: its own update shows it.
+        guard state.live == live else { return }
+        liveStill = image.map { CIImage(cgImage: $0) }
+        updatePreview()
+    }
+
+    /// The picture the edits are applied to.
+    var baseImage: (image: CIImage, developed: Bool)? {
+        if let liveStill { return (liveStill, false) }
+        if let rawFilter {
+            EditRendering.configure(rawFilter, state.raw ?? RAWAdjustments())
+            if let output = rawFilter.outputImage { return (output, true) }
+        }
+        return source.map { ($0, false) }
+    }
+
     func updatePreview() {
-        guard let source else { return }
+        guard let base = baseImage else { return }
         if isCropping {
-            let output = PhotoEditor.applyWithoutCrop(edits, to: source)
+            let output = PhotoEditor.applyWithoutCrop(state.edits, to: base.image)
             uncropped = PhotoEditor.context.createCGImage(output, from: output.extent)
         } else {
-            let output = PhotoEditor.apply(edits, to: source)
+            var recipe = state.recipe(developsRAW: developsRAW)
+            if !base.developed { recipe.raw = nil }
+            let output = EditRendering.apply(recipe, to: base.image, developed: true)
             preview = PhotoEditor.context.createCGImage(output, from: output.extent)
         }
     }
 
-    func save(overwrite: Bool) {
-        guard let originalFile, let services = session.services else { return }
-        saving = true
-        let item = item
-        let edits = edits
+    // MARK: Saving
+
+    /// The photos the edit is saved for: this one, and the other half of a RAW+JPEG pair when the RAW is developed (the
+    /// JPEG stays the quick preview, showing the same edit).
+    var targets: [MediaItem] {
+        guard developsRAW, let partner else { return [item] }
+        return [item, partner]
+    }
+
+    /// Saves the edit recipe (non-destructive) and closes.
+    func done() {
+        guard state != saved || newerFormat else {
+            dismiss()
+            return
+        }
+        let recipe = state.recipe(developsRAW: developsRAW)
+        let undoManager = undoManager
+        let pairs: [(item: MediaItem, recipe: EditRecipe)] = targets.map { ($0, recipe) }
+        Task { await session.saveEdits(pairs, undoManager: undoManager) }
+        dismiss()
+    }
+
+    func revert() {
+        guard let services = session.services else { return }
+        let items: [MediaItem] = ([item] + (partner.map { [$0] } ?? [])).filter { services.edits.recipe(for: $0.fileId) != nil }
+        let undoManager = undoManager
+        Task { await session.revertToOriginal(items, undoManager: undoManager) }
+        dismiss()
+    }
+
+    enum FileSave { case copy, overwrite }
+
+    /// "Save as Copy" and "Overwrite Original…": the edit rendered at full resolution into a file.
+    func save(_ kind: FileSave) {
+        guard let services = session.services else { return }
+        let source: MediaItem = developsRAW ? (rawItem ?? item) : item
+        guard let file = developsRAW ? rawFile : originalFile else { return }
+        working = String(localized: "Saving…", bundle: .module)
+        let recipe = state.recipe(developsRAW: developsRAW)
+        let target = item
+        let motionFile = motionFile
         Task {
-            defer { saving = false }
+            defer { working = nil }
             do {
+                let still = try await Self.fullStill(recipe, motion: motionFile)
                 // Rendered off the main thread (`PhotoEditSaving` is not bound to it): the UI stays responsive.
-                if overwrite {
-                    try await PhotoEditSaving.overwrite(item, with: edits, original: originalFile, services: services)
-                } else {
-                    try await PhotoEditSaving.saveCopy(item, with: edits, original: originalFile, services: services)
+                switch kind {
+                case .overwrite:
+                    try await PhotoEditSaving.overwrite(target, with: recipe, original: file, still: still, services: services)
+                case .copy:
+                    try await PhotoEditSaving.saveCopy(source, with: recipe, original: file, still: still, services: services)
                 }
                 await session.syncNow()
                 dismiss()
@@ -341,6 +753,14 @@ struct EditorView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// The effect's still at full size for a file (long exposure, another key photo); nil to use the original.
+    nonisolated static func fullStill(_ recipe: EditRecipe, motion: URL?) async throws -> CGImage? {
+        guard let live = recipe.live, live.changesStill, let motion else { return nil }
+        if live.effect == .longExposure { return try await LivePhotoEffects.longExposure(of: motion, maxPixelSize: 4096) }
+        if let time = live.keyFrameTime { return try await LivePhotoEffects.frame(of: motion, at: time, maxPixelSize: 4096) }
+        return nil
     }
 }
 

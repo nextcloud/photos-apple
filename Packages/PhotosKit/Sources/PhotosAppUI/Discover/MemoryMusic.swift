@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import AVFoundation
+import PhotosDomain
+import PhotosMedia
 import SwiftUI
 
 #if os(iOS)
@@ -18,6 +20,20 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
         case file(String)
         /// A song of the Music library (`MPMediaItem.persistentID`).
         case library(UInt64)
+        /// A film style's own score (`FilmScore.Mood` raw value), made on the device (SPEC §16.6). Never stored as the
+        /// user's choice.
+        case score(String)
+    }
+
+    /// A film style's score.
+    static func score(_ mood: FilmScore.Mood, title: String) -> SlideshowMusic {
+        SlideshowMusic(source: .score(mood.rawValue), title: title)
+    }
+
+    /// The score's mood, for a style's music.
+    var scoreMood: FilmScore.Mood? {
+        if case .score(let raw) = source { return FilmScore.Mood(rawValue: raw) }
+        return nil
     }
 
     var source: Source
@@ -80,6 +96,8 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
         switch music.source {
         case .file(let name):
             return fileURL(name)
+        case .score(let raw):
+            return FilmScore.Mood(rawValue: raw).flatMap { ScoreSynth.existingFile(for: $0) }
         case .library(let id):
             #if os(iOS)
                 let query = MPMediaQuery.songs()
@@ -116,7 +134,7 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
             load(music)
         }
         switch music.source {
-        case .file:
+        case .file, .score:
             guard let audio else { return }
             if let position, audio.duration > 0 { audio.currentTime = position.truncatingRemainder(dividingBy: audio.duration) }
             if !audio.isPlaying {
@@ -160,20 +178,27 @@ struct SlideshowMusic: Codable, Equatable, Sendable {
         loaded = nil
     }
 
+    /// A file played in a loop, mixed with other audio (the `ambient` category on iPhone, iPad and Vision Pro).
+    private func loadFile(_ url: URL) {
+        #if !os(macOS)
+            let session = AVAudioSession.sharedInstance()
+            if previousCategory == nil { previousCategory = session.category }
+            try? session.setCategory(.ambient)
+            try? session.setActive(true)
+        #endif
+        let player = try? AVAudioPlayer(contentsOf: url)
+        player?.numberOfLoops = -1
+        player?.prepareToPlay()
+        audio = player
+    }
+
     private func load(_ music: SlideshowMusic) {
         loaded = music
         switch music.source {
         case .file(let name):
-            #if !os(macOS)
-                let session = AVAudioSession.sharedInstance()
-                previousCategory = session.category
-                try? session.setCategory(.ambient)
-                try? session.setActive(true)
-            #endif
-            let player = try? AVAudioPlayer(contentsOf: SlideshowMusicStore.fileURL(name))
-            player?.numberOfLoops = -1
-            player?.prepareToPlay()
-            audio = player
+            loadFile(SlideshowMusicStore.fileURL(name))
+        case .score:
+            if let url = SlideshowMusicStore.readableURL(for: music) { loadFile(url) }
         case .library(let id):
             #if os(iOS)
                 let query = MPMediaQuery.songs()

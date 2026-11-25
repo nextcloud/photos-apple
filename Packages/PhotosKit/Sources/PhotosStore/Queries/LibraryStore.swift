@@ -171,6 +171,10 @@ public struct LibrarySearch: Hashable, Sendable {
     public var dateRanges: [Range<Date>]
     public var favoritesOnly: Bool
     public var videosOnly: Bool
+    /// Still photos only (SPEC §16.2). With `videosOnly` too, nothing matches.
+    public var photosOnly: Bool = false
+    /// At least this many stars (SPEC §15.2 ratings, §16.2).
+    public var minimumRating: Int?
     public var albumIds: [String]
     /// Memberships that come from the server (tags, people): results must be in every set.
     public var memberships: [Set<FileID>]
@@ -208,6 +212,10 @@ extension LibrarySearch {
             case .album(let id, _): albumIds.append(id)
             case .favorites: favoritesOnly = true
             case .videos: videosOnly = true
+            case .photos: photosOnly = true
+            // Something the photo shows is looked for in all the indexed text (labels, descriptions, tags…).
+            case .label(let word): texts.append(word)
+            case .rating(let stars): minimumRating = max(minimumRating ?? 0, stars)
             case .tag, .person: break
             }
         }
@@ -712,6 +720,11 @@ public struct LibraryStore: Sendable {
         }
         if search.favoritesOnly { conditions.append("media.isFavorite = 1") }
         if search.videosOnly { conditions.append("media.kind = 'video'") }
+        if search.photosOnly { conditions.append("media.kind = 'image'") }
+        if let stars = search.minimumRating, case let (condition, values)? = CullingStore.condition(for: .rating(atLeast: stars)) {
+            conditions.append(condition)
+            arguments += values
+        }
         if !search.albumIds.isEmpty {
             let marks = search.albumIds.map { _ in "?" }.joined(separator: ",")
             conditions.append("media.fileId IN (SELECT fileId FROM albumItem WHERE albumId IN (\(marks)))")
@@ -800,6 +813,9 @@ public struct LibraryStore: Sendable {
         if !search.dateRanges.isEmpty && !search.dateRanges.contains(where: { $0.contains(item.timestamp) }) { return false }
         if search.favoritesOnly && !item.isFavorite { return false }
         if search.videosOnly && item.kind != .video { return false }
+        if search.photosOnly && item.kind != .image { return false }
+        // Ratings are tags of the user's own files; photos only known from albums have none here.
+        if search.minimumRating != nil { return false }
         return search.memberships.allSatisfy { $0.contains(item.fileId) }
     }
 
@@ -1067,25 +1083,25 @@ public struct LibraryStore: Sendable {
     /// they do not depend on the folders, and offline albums are defined by them.
     public func deleteIndex() throws {
         try database.writer.write { db in
-            try db.execute(sql: SearchAlbums.dropTriggersSQL)
+            try db.execute(sql: SearchDescriptions.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(sql: "DELETE FROM media; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect")
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchAlbums.triggersSQL)
+            try db.execute(sql: SearchDescriptions.triggersSQL)
         }
     }
 
     public func deleteAll() throws {
         try database.writer.write { db in
             // Without the triggers the tables are emptied in one step each instead of row by row.
-            try db.execute(sql: SearchAlbums.dropTriggersSQL)
+            try db.execute(sql: SearchDescriptions.dropTriggersSQL)
             try db.execute(sql: SearchIndex.dropSQL)
             try db.execute(
                 sql:
                     "DELETE FROM media; DELETE FROM albumItem; DELETE FROM album; DELETE FROM syncState; DELETE FROM reconcileUnseen; DELETE FROM reconcileSuspect"
             )
             try db.execute(sql: SearchIndex.createSQL)
-            try db.execute(sql: SearchAlbums.triggersSQL)
+            try db.execute(sql: SearchDescriptions.triggersSQL)
         }
     }
 }

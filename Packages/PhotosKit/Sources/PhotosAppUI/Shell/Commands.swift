@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import PhotosDomain
 import PhotosModel
 import SwiftUI
 
@@ -18,6 +19,14 @@ public struct MainActions {
     var importLibrary: (() -> Void)? = nil
     /// Import from a camera, memory card or folder (Mac, iPad; SPEC §15.2).
     var importCard: (() -> Void)? = nil
+    /// Edit ▸ Undo History… (SPEC §16.3.4).
+    var showUndoHistory: (() -> Void)? = nil
+    /// Opens the command palette (⌘K) for the focused grid or viewer (SPEC §16.2).
+    var openPalette: ((GridActions?) -> Void)? = nil
+    /// Opens an album, person, place, tag or photo of this window's account.
+    var openLink: ((DeepLink) -> Void)? = nil
+    /// Shows the search with these chips.
+    var search: (([SearchFilter]) -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -57,6 +66,8 @@ public struct GridActions {
     var cull: ((CullingCommand) -> Void)? = nil
     /// Image ▸ Compare (2–4 selected).
     var compare: (() -> Void)? = nil
+    /// Image ▸ Culling View: the loupe and filmstrip over the selection or the grid (SPEC §16.5.2).
+    var loupe: (() -> Void)? = nil
     /// Image ▸ Delete Rejected… (the Library).
     var deleteRejected: (() -> Void)? = nil
     /// Image ▸ Edit With ▸ (Mac): the photo to open in another app.
@@ -127,6 +138,13 @@ public struct PhotosCommands: Commands {
                 }
                 .disabled(shownAlbum == nil)
             }
+        }
+
+        // Below Undo and Redo, which the system keeps.
+        CommandGroup(after: .undoRedo) {
+            Button(ChangeWording.historyMenuTitle) { main?.showUndoHistory?() }
+                .keyboardShortcut("z", modifiers: [.command, .option])
+                .disabled(main?.showUndoHistory == nil)
         }
 
         CommandGroup(replacing: .importExport) {
@@ -247,6 +265,10 @@ public struct PhotosCommands: Commands {
             Button(String(localized: "Search", bundle: .module)) { main?.focusSearch() }
                 .keyboardShortcut("f")
                 .disabled(main == nil)
+            // Go to, search or do anything (SPEC §16.2).
+            Button(PaletteWording.title) { main?.openPalette?(grid) }
+                .keyboardShortcut("k")
+                .disabled(main?.openPalette == nil)
         }
     }
 

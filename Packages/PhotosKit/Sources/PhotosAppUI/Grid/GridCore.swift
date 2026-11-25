@@ -362,7 +362,10 @@ final class GridTilePicture {
         init(services: AccountServices) {
             let images = services.images
             self.init(
-                cached: { images.cache.bestMemoryImage(fileId: $0.fileId, etag: $0.etag, upTo: 4096) },
+                cached: {
+                    images.cache.bestMemoryImage(
+                        fileId: $0.fileId, etag: images.displayedEtag(fileId: $0.fileId, etag: $0.etag), upTo: 4096)
+                },
                 blur: { BlurHashCache.image($0.blurhash) },
                 load: { await images.preview($0) })
         }

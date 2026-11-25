@@ -28,6 +28,10 @@ extension SessionModel {
         await updateSpotlight()
         // Smart offline and the photo of the day follow the library (SPEC §15.8).
         await afterSyncExtras()
+        // Shared smart albums and folder rules (SPEC §16.4).
+        await afterSyncOrganize()
+        // The Lock Screen album, family suggestions and prompt reminders (SPEC §16.7).
+        await afterSyncFamily()
     }
 
     // MARK: Search labels

@@ -5,11 +5,52 @@
       "comment" : "The name of an album or a person in Shortcuts and Siri. Not translated.",
       "shouldTranslate" : false
     },
+    "Add ${photos} to ${album}" : {
+      "comment" : "Shortcuts action summary. ${photos} and ${album} are parameters; keep them."
+    },
+    "Add ${photos} to favorites" : {
+      "comment" : "Shortcuts action summary. Keep ${photos}."
+    },
+    "Add Photos to Album" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Added %lld photos to “%@”." : {
+      "comment" : "Shortcuts action result of Create Album from Search: number of photos and album name.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Added %1$lld photos to “%2$@”."
+          }
+        }
+      }
+    },
+    "Adds photos to an album in Nextcloud Photos. Only your own photos can be added." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Adds photos to your favorites, or removes them." : {
+      "comment" : "Shortcuts action description."
+    },
     "Album" : {
       "comment" : "Type of a Shortcuts parameter: one of the user's albums."
     },
+    "Album from search" : {
+      "comment" : "Shortcuts tile title of Create Album from Search."
+    },
+    "Album name" : {
+      "comment" : "Shortcuts action parameter: name of the album."
+    },
     "Albums" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: the user's albums."
+    },
+    "Archive ${photos}" : {
+      "comment" : "Shortcuts action summary. Keep ${photos}."
+    },
+    "Archive Photos" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Archived %lld items." : {
+      "comment" : "Shortcuts action result: number of archived items."
     },
     "Back Up Now" : {
       "comment" : "Shortcuts/Control Center: title of the action that starts a photo backup."
@@ -26,20 +67,95 @@
     "Backup is not turned on in Nextcloud Photos." : {
       "comment" : "Answer of the \"Back up now\" shortcut when the user has not turned on backup in the app."
     },
+    "Create Album from Search" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Create album ${name} from photos matching ${search}" : {
+      "comment" : "Shortcuts action summary. Keep ${name} and ${search}."
+    },
+    "Downloads the originals, to pass them on to other actions (Save to Files, Share…)." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Export ${photos}" : {
+      "comment" : "Shortcuts action summary. Keep ${photos}."
+    },
+    "Export Photos" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Favorite" : {
+      "comment" : "Shortcuts action parameter: add to (on) or remove from (off) favorites."
+    },
+    "Favorite Photos" : {
+      "comment" : "Shortcuts action title."
+    },
     "Favorites" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: favorite photos."
+    },
+    "Favorites only" : {
+      "comment" : "Shortcuts action parameter of Find Photos."
+    },
+    "Find Photos" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Find photos matching ${text}" : {
+      "comment" : "Shortcuts action summary. Keep ${text}."
+    },
+    "Finds photos and videos in Nextcloud Photos by words (people, places, tags, names, years), person, album, date and favorites." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Flag" : {
+      "comment" : "Shortcuts action parameter and type: pick or reject flag."
+    },
+    "Flag ${photos} as ${flag}" : {
+      "comment" : "Shortcuts action summary. Keep ${photos} and ${flag}."
+    },
+    "Flag Photos" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Get Photos of Memory" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Gives photos a star rating (0 removes it), shared with your other devices." : {
+      "comment" : "Shortcuts action description."
     },
     "Library" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: the timeline of all photos."
     },
+    "Limit" : {
+      "comment" : "Shortcuts action parameter: the most photos Find Photos returns."
+    },
+    "Live Photos" : {
+      "comment" : "Shortcuts action media type choice."
+    },
+    "Makes a new album in Nextcloud Photos with the photos a search finds." : {
+      "comment" : "Shortcuts action description."
+    },
     "Map" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: photos on a map."
+    },
+    "Marks photos as picked or rejected, or removes the flag." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Media type" : {
+      "comment" : "Shortcuts type name: photos, videos, Live Photos, screenshots."
     },
     "Memories" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: automatically created memories."
     },
+    "Memory" : {
+      "comment" : "Shortcuts type name and parameter: a memory of the library."
+    },
+    "Moves your own photos to the archive, out of the library." : {
+      "comment" : "Shortcuts action description."
+    },
     "Nextcloud Photos view" : {
       "comment" : "Name of the kind of thing the \"Open in Nextcloud Photos\" shortcut takes as its parameter (a view such as Library or Map). \"Nextcloud Photos\" is the app's name, do not translate it."
+    },
+    "No flag" : {
+      "comment" : "Shortcuts action flag choice: remove the flag."
+    },
+    "No photos were found." : {
+      "comment" : "Shortcuts action error."
     },
     "On this day" : {
       "comment" : "Photos taken on today's date in earlier years: name of a view that Siri and Shortcuts can open, and short title of the App Shortcut that opens it."
@@ -53,8 +169,14 @@
     "Open in Nextcloud Photos" : {
       "comment" : "Title of the Shortcuts action that opens a view of the app. \"Nextcloud Photos\" is the app's name, do not translate it."
     },
+    "Opens a photo in Nextcloud Photos." : {
+      "comment" : "Shortcuts action description."
+    },
     "Opens a view of Nextcloud Photos, such as On this day or the map." : {
       "comment" : "Description of the \"Open in Nextcloud Photos\" action in Shortcuts."
+    },
+    "Opens your memories in Nextcloud Photos (On this day for a memory of this day)." : {
+      "comment" : "Shortcuts action description."
     },
     "Pause Backup" : {
       "comment" : "Title of the action behind the Pause button of the backup's Live Activity."
@@ -65,14 +187,47 @@
     "Person" : {
       "comment" : "Type of a Shortcuts parameter: a person recognised in the user's photos."
     },
+    "Photo" : {
+      "comment" : "Shortcuts type name and parameter: a photo or video."
+    },
     "Photo map" : {
       "comment" : "Short title of the App Shortcut that opens the map of photos, shown in Shortcuts and Spotlight."
+    },
+    "Photos" : {
+      "comment" : "Shortcuts action parameter: the photos to act on; media type choice."
+    },
+    "Photos and videos" : {
+      "comment" : "Shortcuts action media type choice: any."
     },
     "Photos of a person" : {
       "comment" : "Short title of the App Shortcut that shows the photos of a person, shown in Shortcuts and Spotlight."
     },
+    "Pick" : {
+      "comment" : "Shortcuts action flag choice: picked (a keeper)."
+    },
     "Places" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: photos grouped by place."
+    },
+    "Puts your own photos into a new album with a public link and returns the link." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Rate ${photos} with ${stars} stars" : {
+      "comment" : "Shortcuts action summary. Keep ${photos} and ${stars}."
+    },
+    "Rate Photos" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Reject" : {
+      "comment" : "Shortcuts action flag choice: rejected."
+    },
+    "Remove ${photos} from favorites" : {
+      "comment" : "Shortcuts action summary. Keep ${photos}."
+    },
+    "Returns the photos of a memory, for example to make a slideshow or wallpaper." : {
+      "comment" : "Shortcuts action description."
+    },
+    "Screenshots" : {
+      "comment" : "Shortcuts action media type choice."
     },
     "Search" : {
       "comment" : "Name of a view of the app that Siri and Shortcuts can open: search."
@@ -89,6 +244,18 @@
     "Set up backup in Nextcloud Photos first." : {
       "comment" : "Spoken or shown when the Control Center backup switch is turned on before backup was set up; the app opens."
     },
+    "Share ${photos} as a link" : {
+      "comment" : "Shortcuts action summary. Keep ${photos}."
+    },
+    "Share Photos as Link" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Show Memories" : {
+      "comment" : "Shortcuts action title."
+    },
+    "Show Photo" : {
+      "comment" : "Shortcuts action title."
+    },
     "Show photos of a person" : {
       "comment" : "Title of the App Intent that shows the photos of a person."
     },
@@ -97,6 +264,21 @@
     },
     "Shows the photos of a person in Nextcloud Photos." : {
       "comment" : "Description of the App Intent that shows the photos of a person, shown in Shortcuts."
+    },
+    "Sign in to Nextcloud Photos first." : {
+      "comment" : "Shortcuts action error when no account is signed in."
+    },
+    "Stars" : {
+      "comment" : "Shortcuts action parameter: 0 to 5 stars."
+    },
+    "Taken after" : {
+      "comment" : "Shortcuts action parameter of Find Photos: earliest capture date."
+    },
+    "Taken before" : {
+      "comment" : "Shortcuts action parameter of Find Photos: latest capture date."
+    },
+    "The album was not found in the account shown in Nextcloud Photos." : {
+      "comment" : "Shortcuts action error."
     },
     "Turn Backup On or Off" : {
       "comment" : "Shortcuts action and Control Center switch: turns the photo backup on or off."
@@ -107,8 +289,14 @@
     "Turns the backup of this device's photos to your Nextcloud on or off." : {
       "comment" : "Description of the Shortcuts action \"Turn Backup On or Off\"."
     },
+    "Type" : {
+      "comment" : "Shortcuts action parameter of Find Photos: media type."
+    },
     "Uploads new photos of this device to your Nextcloud." : {
       "comment" : "Description of the \"Back up now\" action in Shortcuts."
+    },
+    "Videos" : {
+      "comment" : "Shortcuts action media type choice."
     },
     "View" : {
       "comment" : "Label of the parameter of the \"Open in Nextcloud Photos\" shortcut action: which view of the app to open (noun)."
