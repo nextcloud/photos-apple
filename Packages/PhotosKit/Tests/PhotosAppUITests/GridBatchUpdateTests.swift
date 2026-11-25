@@ -53,10 +53,26 @@
                 collectionView.makeItem(withIdentifier: Self.identifier, for: indexPath)
             }
 
+            /// Tiles applied one by one (the animated batch of a delete, archive or undo, SPEC §17.2).
+            var itemBatches = 0
+
             /// Applies the next model the way the grid does and returns whether the collection view then agrees with it.
-            func apply(_ next: GridModel) -> Bool {
+            /// - Parameter itemLevel: section changes go as single tiles where `GridItemChanges` allows it.
+            func apply(_ next: GridModel, itemLevel: Bool = false) -> Bool {
                 let change = next.change(from: model)
-                if case .sections(let changes) = change {
+                if itemLevel, case .sections(let changes) = change,
+                    let items = GridItemChanges.make(old: model, new: next, changes: changes)
+                {
+                    _ = collectionView.numberOfSections
+                    model = next
+                    collectionView.performBatchUpdates {
+                        collectionView.deleteSections(items.deletedSections)
+                        collectionView.insertSections(items.insertedSections)
+                        collectionView.deleteItems(at: Set(items.deletedItems))
+                        collectionView.insertItems(at: Set(items.insertedItems))
+                    }
+                    itemBatches += 1
+                } else if case .sections(let changes) = change {
                     _ = collectionView.numberOfSections
                     model = next
                     collectionView.performBatchUpdates {
@@ -97,6 +113,15 @@
         /// Uploads, deletes, favourites and edits in random order: every step is applied as a batch (or a reload when too
         /// much changed), and the collection view always agrees with the model.
         @Test func randomChangesKeepTheCollectionViewConsistent() {
+            randomChanges(itemLevel: false)
+        }
+
+        /// The same with the tiles that leave and come applied one by one, as an animated delete or undo does.
+        @Test func randomItemChangesKeepTheCollectionViewConsistent() {
+            randomChanges(itemLevel: true)
+        }
+
+        func randomChanges(itemLevel: Bool) {
             var seed: UInt64 = 42
             func random(_ upper: Int) -> Int {
                 seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
@@ -133,11 +158,12 @@
                         items[id] = media(id, start - Double(random(90)) * 86_400)
                     }
                 }
-                #expect(probe.apply(model()), "step \(step)")
+                #expect(probe.apply(model(), itemLevel: itemLevel), "step \(step)")
             }
             // Nearly all of it went as batches.
-            #expect(probe.batches > 200)
+            #expect(probe.batches + probe.itemBatches > 200)
             #expect(probe.reloads < 10)
+            if itemLevel { #expect(probe.itemBatches > 150) }
         }
     }
 #endif

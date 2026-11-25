@@ -18,6 +18,9 @@ struct RecentlyDeletedScreen: View {
     @Environment(SessionModel.self) private var session
     @State private var items: [TrashedItem] = []
     @State private var unlocked = false
+    /// The padlock clicks open before the list replaces it (SPEC §17.3).
+    @State private var lockOpen = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmEmpty = false
     /// The item waiting for the confirmation of its permanent deletion.
     @State private var confirmDelete: TrashedItem?
@@ -27,7 +30,11 @@ struct RecentlyDeletedScreen: View {
         Group {
             if !unlocked {
                 ContentUnavailableView {
-                    Label(String(localized: "Recently deleted is locked", bundle: .module), systemImage: "lock")
+                    Label {
+                        Text("Recently deleted is locked", bundle: .module)
+                    } icon: {
+                        ChromeLockSymbol(isOpen: lockOpen)
+                    }
                 } actions: {
                     Button(String(localized: "Unlock", bundle: .module)) { Task { await unlock() } }.buttonStyle(.borderedProminent)
                 }
@@ -96,11 +103,17 @@ struct RecentlyDeletedScreen: View {
 
     func unlock() async {
         let context = LAContext()
-        unlocked =
+        let granted: Bool =
             (try? await context.evaluatePolicy(
                 .deviceOwnerAuthentication, localizedReason: String(localized: "Show recently deleted photos", bundle: .module)))
             ?? false
-        if unlocked { await load() }
+        guard granted else { return }
+        lockOpen = true
+        // The list loads while the lock opens.
+        async let loaded: Void = load()
+        if !reduceMotion { try? await Task.sleep(for: ChromeMotion.unlockedLinger) }
+        await loaded
+        unlocked = true
     }
 
     func load() async {

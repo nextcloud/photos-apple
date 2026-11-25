@@ -271,6 +271,7 @@ struct SearchScreen: View {
                     Button(String(localized: "Try again", bundle: .module)) { searchAttempt += 1 }
                         .buttonStyle(.borderedProminent)
                 }
+                .livingEmptyBackground()
             } else {
                 MediaGridScreen(
                     feed: feed, title: String(localized: "Search", bundle: .module), showsHeaders: true,
@@ -471,6 +472,8 @@ struct SearchScreen: View {
             } actions: {
                 quickFilters
             }
+            // On a living wash (SPEC §17.6.1).
+            .livingEmptyBackground()
         } else {
             List {
                 Section {

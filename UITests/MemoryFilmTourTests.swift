@@ -107,7 +107,11 @@ import XCTest
                 pause(1.5)
                 shot("16-film-scrubbed")
             }
-            app.buttons["Next"].firstMatch.tap()
+            // The controls fade out a few seconds after the last touch: bring them back first if needed.
+            let next = app.buttons["Next"].firstMatch
+            if !next.waitForExistence(timeout: 1) { app.tap() }
+            XCTAssertTrue(next.waitForExistence(timeout: 5), "No Next button")
+            next.tap()
             pause(1)
             shot("17-film-skipped")
             // Export.

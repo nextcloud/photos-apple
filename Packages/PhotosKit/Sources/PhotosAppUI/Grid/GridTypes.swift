@@ -87,6 +87,8 @@ struct GridCallbacks {
     var zoomPastEnd: (@MainActor (FileID?, UnitPoint) -> Void)? = nil
     /// A moment's title on a day header was tapped or clicked (SPEC §16.1): open the moment with this id.
     var openMoment: (@MainActor (String) -> Void)? = nil
+    /// Heart bursts and the way removed tiles leave and come back (SPEC §17.2); nil: changes are not animated.
+    var motion: GridActionMotion? = nil
 }
 
 /// Where a tile of the grid is on screen; the platform grid fills it in. The zoom transition into the viewer starts from
@@ -101,6 +103,13 @@ final class GridTileLocator {
     var place: (FileID, Double) -> Void = { _, _ in }
     /// The first tile below the pinned header at the top, nil at the very top.
     var topItem: () -> FileID? = { nil }
+    /// Something covers the whole grid (the Library's years, months or days, SPEC §17.5): its tiles are out of reach of
+    /// VoiceOver until it is uncovered. SwiftUI's `accessibilityHidden` does not reach into the platform grid.
+    var isCovered = false {
+        didSet { if isCovered != oldValue { coveredChanged(isCovered) } }
+    }
+    /// Applies `isCovered` (set by the platform grid).
+    var coveredChanged: (Bool) -> Void = { _ in }
 }
 
 /// Whether a grid screen is selecting and how many items; screens around `MediaGridScreen` read it as a preference

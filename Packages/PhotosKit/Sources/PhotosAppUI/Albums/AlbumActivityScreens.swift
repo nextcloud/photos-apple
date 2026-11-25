@@ -84,6 +84,8 @@ struct AlbumActivityBanner: View {
 /// What is new in shared albums, newest first (SPEC SH-9). Found by comparing the albums each time the app lists them;
 /// opening an album marks its entry as seen.
 struct AlbumActivityScreen: View {
+    /// An album zooms out of its thumbnail (SPEC §17.4).
+    @Environment(\.routeTransitionNamespace) private var transitions
     @Environment(SessionModel.self) private var session
     @State private var entries: [AlbumActivity] = []
     @State private var loaded = false
@@ -151,6 +153,7 @@ struct AlbumActivityScreen: View {
                 }
                 .frame(width: 48, height: 48)
                 .clipShape(.rect(cornerRadius: 6))
+                .cardTransitionSource(id: AppRoute.album(id: entry.albumId), in: transitions, cornerRadius: 6)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title).font(.headline).lineLimit(1)

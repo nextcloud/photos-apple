@@ -2083,6 +2083,363 @@ backdrop. Platforms: iPhone, iPad, Mac, Vision Pro (headers not on Vision Pro, w
   login password. The other windows (and Settings) show only "Guest Mode" meanwhile. Force Quit stays available as the
   emergency exit; the app then reopens in Guest Mode.
 
+## 17. M8 — Elegant motion and glass
+
+Round 7 (2026-11-25): 25 ideas for a more elegant UI with Liquid Glass, transparency and motion. Everything falls back
+cleanly with Reduce Motion (fades instead of movement) and Reduce Transparency (solid surfaces). No server changes.
+
+### 17.1 Viewer as a stage: full-screen photo, glass controls, info glass card, interactive dismissal, viewer colour [viewer]
+
+**17.1.1 The stage (iPhone, iPad).** The photo fills the whole screen, under the status bar and the home indicator;
+there are no navigation or bottom bars. The controls float over it as Liquid Glass (`ViewerStageControls`): a round
+close button at the top left, a date pill in the middle of the top ("22 November 2026" / "14:36 · Lisbon"; a tap shows
+the info), and a glass action bar at the bottom (Share, Favourite, Info, Edit for photos, More, Delete) in one
+`GlassEffectContainer`. The heart changes with a symbol transition and bounces. One tap on the photo hides or shows
+the controls and the status bar with a 0.25 s fade (also with Reduce Motion — it is a fade). Badges on the photo (Live,
+RAW) and a stack's strip of copies sit below the floating controls. VoiceOver order: close, date pill (a header, hint
+"Shows the info"), the photo, the action bar; the photo's actions rotor is unchanged. Hidden controls are hidden for
+VoiceOver too, as the bars were. Mac: the window toolbar stays (the platform's idiom); Vision Pro: the toolbar and the
+dark viewer stay (windows are glass there).
+
+**17.1.2 Viewer colour (decision; replaces the open question of a light viewer).** The stage is **pure black in Dark
+Mode and pure white in Light Mode**, with the glass controls in both. While the controls are hidden it is black in both
+modes (as in Photos: a tap turns the white stage black), cross-fading in 0.3 s. Settings ▸ Appearance ▸ Viewer
+Background still offers three styles, each now with a dark and a light version that follows the stage:
+
+| Style | Dark stage | Light stage |
+|---|---|---|
+| **Black or White** (default; stored as `black`) | pure black | pure white |
+| **Photo Color** (`tinted`) | deep shade of the photo's colour (as in §16.8.1, white text ≥ 7:1) | pale shade (the light header tone mixed with 55 % white; black text ≥ 7:1) |
+| **Ambient Glow** (`ambient`) | a blurred (60 pt), enlarged (1.25×) copy of the photo under 50 % black | the same under 60 % white |
+
+The copy for Ambient Glow is the preview already in memory (usually the grid's tile), else the BlurHash; nothing is
+loaded for it, and two photos cross-fade while paging as before. The default changed from Photo Color to Black or
+White; a style that was chosen explicitly is kept. Increase Contrast: plain black or white, no photo colours (as
+before); Reduce Transparency: Ambient Glow becomes the plain tone, and the system makes the glass controls solid.
+
+**17.1.3 Info as a glass card.** On iPhone (and narrow iPad windows) the info panel stays a sheet with the half-height
+and full-height detents, drawn as the system's Liquid Glass sheet over the photo; the photo moves up and, if needed,
+shrinks so it stays in view between the date pill and the card (`ViewerStage.infoPlacement`), following the card while
+it is dragged. Paging still works under the card. A swipe down on the photo closes the card first. Regular-width iPad
+and the Mac keep the inspector column beside the photo.
+
+**17.1.4 Interactive dismissal (iPhone, iPad).** Dragging a photo that is not zoomed downwards makes it follow the
+finger in both directions and shrink (to 55 % at 60 % of the screen height) while the backdrop and the controls fade.
+(Meant: the grid shows through as the backdrop fades. With the zoom transition the system takes the grid's view out of
+the window while the cover is up, so for now the stage fades to the system background; see STATUS.) Letting go past 120 pt, or with a downward flick faster than 800 pt/s, lands the photo
+exactly in its tile: a no-bounce spring (0.38 s) that starts at the finger's speed moves, scales and clips the photo to
+the tile's frame (as the tile crops it); the tile is left empty meanwhile and the viewer then closes without a second
+transition. The tile's frame comes from the grid's zoom-transition mark (`ViewerTileTracker`, in global coordinates);
+when the tile is not on screen, or the viewer was opened from somewhere without a zoom source, the viewer closes the
+usual way. Letting go earlier springs back from the finger's speed. Reduce Motion: the photo still follows the finger
+(direct manipulation), but closing fades it out where it is and cancelling snaps back without a spring. The close
+button and Escape use the system's zoom transition back into the tile as before.
+
+**17.1.5 Keys without the software keyboard (bug fix).** The viewer, slideshows, films (memory films, Through the
+Years) and Guest Mode's viewer were focusable views with `onKeyPress`; on iPhone and iPad a focused view takes key input
+like a text field, so whenever it became first responder again (a menu opened over it — the viewer's More menu, the
+editor's and the film's menus) the software keyboard came up. On iPhone and iPad these views are no longer focusable;
+their keys (arrows, Space, Escape, M, and the rating keys P X U 0–5 in the viewer) are key commands on hidden buttons
+(`hardwareKeys`), which a hardware keyboard reaches without a first responder. The Mac and Vision Pro keep focus and
+`onKeyPress`. The culling loupe and compare views (iPad and Mac) are unchanged.
+
+### 17.2 Grid: edge to edge, floating date pills, photo arrival, physical selection, action feedback, Live Photo and video tiles [grid]
+
+The photo grid (`PhotoGrid+UIKit`, `PhotoGrid+AppKit`, decisions in `GridMotion`) gets glass and motion. Everything is
+done by the system or Core Animation (no per-frame work on the main thread beyond what scrolling did before), and every
+effect has its Reduce Motion / Reduce Transparency form.
+
+- **Edge to edge** (iPhone, iPad, Vision Pro). Every grid screen (`MediaGridScreen`) lays its collection view under the
+  top and bottom bars (`ignoresSafeArea`); the collection view's own insets keep the first and last rows clear of them,
+  and the top edge uses the system's soft scroll-edge effect (`topEdgeEffect.style = .soft`) instead of a band. The
+  pinned section headers and their material band are gone (see the date pill). The Library's memories strip scrolls with
+  the photos: it is hosted inside the collection view as a header above the first section (a `UIHostingController` child
+  with the grid's SwiftUI environment, so its links and buttons work as before), its height counted in the scrubber's and
+  the pill's offsets; it comes and goes (selection mode, settings) with the grid kept at the top or on the photo that was
+  at the top. Albums and memories with a cover colour (§16.8.1): the solid tinted bar is replaced by a wash of that
+  colour that runs from the top of the screen to 36 pt below the bar and fades out, over the photos scrolling under it;
+  with Reduce Transparency the solid bar stays. The Mac keeps its own toolbar idiom (memories above the grid, the tinted
+  window toolbar, pinned headers in the window's header material).
+- **Floating date pill** (iPhone, iPad, Vision Pro; timeline grids only). A glass capsule (`UIGlassEffect`, the thin
+  material on Vision Pro) under the bar at the leading edge says what the photos at the top are: "November 2026", or
+  with the round-6 moment they belong to "November 2026 · Lisbon" (the moment's place, else its title; a moment covers
+  the days from its title day down to its oldest day, `MomentHeaders.Entry.oldestDay/place`). The section under the
+  pill's lower edge names it, found by a binary search over the section offsets; the text changes only when the month
+  or the moment does, and then hands over with a short push in the scrolling direction (a cross-fade with Reduce Motion).
+  It fades in once the grid is scrolled past its first header (and the memories), and out at the top. It takes part in
+  the scroll-edge effect (`UIScrollEdgeElementContainerInteraction`), is one VoiceOver element ("November 2026, Lisbon")
+  and follows Dynamic Type. The day and month headers in the content stay as light text without a band and scroll with
+  their photos; heights are unchanged, so the date scrubber, year ticks and "Show in library" stay exact.
+- **Photo arrival.** A preview that loads after its tile was configured cross-fades from the BlurHash (0.22 s) and
+  settles from 4 % larger into place — a `contentsRect` animation of the picture's layer, inside the tile, so nothing
+  moves in the layout. A sharper preview over a picture only cross-fades; pictures already in memory (scrolling back)
+  appear at once, so nothing animates during fast scrolling. Reduce Motion: the fade only. Mac: the same on its layer.
+- **Physical selection** (iPhone, iPad, Vision Pro). A selected tile shrinks to 92 % and rounds its corners (7 % of the
+  side, 3–10 pt, continuous corners), with a short spring; the picture dims slightly (85 %) so the state also reads in
+  black and white. The tick replaces the ring with a symbol transition and a bounce. Only a change of the tile on screen
+  animates (not cell reuse, not range selection's off-screen tiles); range selection and two-finger selection animate
+  tile by tile as they pass. Reduce Motion: no shrink, the corners and dimming change with a plain spring. The "N
+  selected" title rolls its number (`contentTransition(.numericText)`), as the bar's principal item; the navigation
+  title keeps the same text for VoiceOver and the back button. The Mac keeps its selection ring.
+- **Action feedback.** The screen tells the grid what the user did (`GridActionMotion`): a new favourite gets a heart
+  that springs up over its tile and fades (a fade with Reduce Motion; also on the Mac), and the tile's heart badge
+  bounces in (iPhone, iPad, Vision Pro). Delete
+  (after its confirmation), Archive / Unarchive and Remove from Album mark their tiles as leaving; when the library's
+  change arrives (within 8 s), the grid applies it as an animated batch of single tiles (`GridItemChanges`: tiles that
+  leave and come by index path, at most 400, nothing reordered) in one spring: deleted tiles collapse in place, archived
+  or removed ones slide away to the trailing side, and their neighbours flow into the gap. Tiles that come back within
+  two minutes (Undo, from the banner, Edit › Undo, shake) return the same way. Changes nobody asked for (sync, other
+  devices) and larger ones keep the existing non-animated batch. Reduce Motion: tiles fade out and in. Mac: the same
+  batch, animated by AppKit (fade and move).
+- **Live Photos and videos.** The Live badge plays (`variableColor`, layer by layer) while the tile is held for its
+  context menu, while the pointer rests on it (iPad, Vision Pro) and while a peek (§16.1) scrubs its motion. Video tiles
+  show their duration in a small glass capsule with the camera glyph in the bottom trailing corner (the glyph alone on
+  tiles under 64 pt, nothing under 34 pt; a solid dark capsule with Reduce Transparency or Increase Contrast); the dark
+  shade at the tile's foot is only drawn under a favourite's heart now. The Mac keeps its duration label.
+
+### 17.3 Chrome: morphing toolbars, minimizing tab bar with progress accessory, animated icons, rolling numbers, edge to edge on the other screens [chrome]
+
+Shared helpers live in `Common/Design.swift` (block "Chrome motion"): `ChromeMotion` (the springs: `.smooth(0.35)` for
+morphs, `.snappy(0.3)` for counters; a 0.2 s ease with Reduce Motion), `rollingNumber(_:)`, `ChromeStatusSymbol`,
+`ChromeLockSymbol`, `favoriteBounce(_:)` and `chromeGlass(in:)` (Liquid Glass on iPhone, iPad and Mac,
+`glassBackgroundEffect` on Vision Pro, a solid surface with a hairline edge with Reduce Transparency or Increase
+Contrast).
+
+1. **Selection bar that morphs (iPhone, iPad).** Select hides the tab bar and the selection's action bar materialises in
+   its place (`SelectionActionBar`, a `GlassEffectContainer` in a `safeAreaBar` of the grid). With nothing selected it is
+   one glass capsule "Select items"; the first selected photo splits it (`glassEffectID`) into Share · the count ·
+   Favorite, Add to album, Delete, More, and emptying the selection melts them back. Done dissolves the bar and the tab
+   bar returns. "Add to album" (recent albums, New album…, All albums…) is a button of its own now; More holds the
+   rest without the bar's buttons (`SelectionBarLayout.ownButtons`). The count rolls; the heart bounces and is replaced by
+   the crossed-out heart when everything selected is a favourite. The Mac keeps its window-toolbar items (its own idiom);
+   only the heart bounce is shared. Map: the time range panel rises as glass out of the bottom edge.
+2. **Tab bar that minimises, progress accessory (iPhone, narrow iPad windows).** `tabBarMinimizeBehavior(.onScrollDown)`
+   on the main `TabView`; the UIKit photo grid tells the bars it is the screen's scroll view
+   (`registerContentScrollView`, `setContentScrollView` up to the navigation controller), which SwiftUI does not do for
+   it. While something runs, `tabViewBottomAccessory` shows a slim bar above the tab bar (beside the
+   minimised tab bar it is one line): the activity's animated symbol, what it is ("Uploading", "Backing up", "Importing
+   from EOS R5"), "12 of 400" rolling, a "+1 more" when others run, and a thin progress ring. One activity at a time, in
+   this order: card import, library import, manual uploads, backup. The backup only counts while it uploads (looking for
+   new photos and checking the server at every start would make the bar flicker). When the activity ends the symbol turns
+   into a check mark (an exclamation mark when something failed), the title says how it ended, and after 2.5 s the bar
+   goes; a pause ends without a check mark. A tap opens the uploads list, Backup, or the import sheet. The toolbar's
+   upload gauge steps back while the accessory shows the uploads. The decisions are in `ChromeActivities` (pure, tested).
+   Debug builds: `PHOTOS_DEBUG_ACTIVITY=upload|backup|import` plays a made-up activity for screenshots.
+3. **Animated symbols.** The upload cloud lifts its arrow (`wiggle.up`, every 1.2 s) while uploading; the backup symbol
+   breathes while the backup runs (accessory, Backup screen, the Backup row of Collections); the sync arrows turn while
+   syncing (Settings › Server, the first sync's pill) and are replaced by a check mark when the sync is through; the
+   Backup screen's symbol is one image for every phase, so "running → up to date" is a replacement into the green check
+   cloud instead of a spinner swapped for an icon. Archive and Recently deleted show a padlock that clicks open
+   (`replace.magic`) after Face ID / Touch ID / the passcode, then the content replaces it 0.45 s later. With Reduce
+   Motion no repeating effect runs, replacements are cross-fades and the unlock does not wait.
+4. **Rolling numbers.** `contentTransition(.numericText)` on: the selection count, the accessory's counts, the Backup
+   screen's title and counters, the Backup row's progress, Settings' "Loading library"/"Checking library" counts, the first
+   sync's pill, and the Insights header and ranked counts (the Year in review cards had it already). With Reduce Motion
+   the numbers change in place.
+5. **Edge to edge on the other screens.** Lists and scroll views (Collections, People, Places, Memories, Search,
+   Settings) already run under the glass bars with the system's scroll edge effect. The solid bands are gone: the Places
+   country headers are glass capsules floating over the places instead of pinned `.bar` strips; the map runs under the
+   navigation and tab bars with a small title (MapKit keeps its controls in the safe area) and its time range panel and the grid's status
+   bars and first-sync pill are glass (`chromeGlass`) instead of `regularMaterial`.
+
+### 17.4 Albums and transitions: glass caption plates, empty-album gradients, hero headers, parallax, zoom transitions everywhere [albums]
+
+**Album cards (idea 4).** An album's title and count (plus owner and place, as before) sit on a caption plate over the
+bottom of the cover instead of under it: Liquid Glass (`glassEffect(.regular)`) on iPhone, iPad and Mac, a regular
+material on Vision Pro, a solid plate with a hairline border with Reduce Transparency or Increase Contrast
+(`CaptionPlate`). At the accessibility text sizes the plate goes and the title and count wrap below the cover as before.
+A depth cover (SPEC §16.8.2) already draws the title on the photo: its plate only says the count. Live covers play under
+the plate. The sharing badge is a small glass circle (`GlassCircle`). Smart album cards (in Albums and the Smart albums
+screen) look the same, with the wand badge at the top. An album without a cover photo shows a soft `MeshGradient` in
+Nextcloud's blues made from its name (`AlbumGradient`: FNV-1a hash of the name seeds a SplitMix64 generator; nine tones
+with hues 0.5–0.7, brighter in light mode, deeper in dark mode; the inner mesh points move a little), the same on every
+device; it is also the backdrop a cover fades in over.
+
+**Hero headers (idea 14).** On iPhone and iPad an album opens with its cover full width at the top (`GridHero`,
+`HeroHeaderView`): the cover from the top of the screen to the first row (62 % of the width, at most 42 % of the height
+and 380 pt), the title in large bold white type and the album's details line on a scrim at the bottom; under the status
+bar and the glass bar buttons the system's own scroll edge effect keeps them readable in light and dark mode. The hero
+lives in the grid's collection view, above the first row in the content inset (`GridHeroHost`, `HeroHeaderLayout`), so
+it scrolls with the photos without any per-frame work. While its title is in view the navigation bar shows no title
+(`toolbar(removing: .title)`); once less than 64 pt of the hero shows below the bar, the bar takes over the title (and
+the subtitle), with a short fade. Pulled down past the top, the hero grows upward with the pull and the cover stretches.
+An album, memory or person opened with the zoom transition (below) keeps the system's own gesture instead: pulled down
+at the top, the screen shrinks back into its card, as in Photos; the stretch (and pull to refresh) then belong to
+screens pushed without a zoom (links, restored state, Reduce Motion). While selecting, the bar shows the count as
+before. Memories (cover, title, dates) and people (photo, face in a ring, name, count) get the same hero; an empty album
+or a grid that is still loading shows no hero. The Mac and Vision Pro keep the title in the window's toolbar with the
+cover tint of §16.8.1: that is the calmer version there.
+
+**Parallax (idea 15).** The pictures of album cards, smart album cards, memory cards (Memories screen, strip) and story
+cards drift up to 5 % of their length against the scrolling (vertical lists) or swiping (story cards, strips), enlarged
+by 10 % so no edge shows (`scrollParallax`, `ScrollParallax.offset`). It is a `visualEffect` on the picture: applied
+while rendering, no layout or state change while scrolling. Off with Reduce Motion.
+
+**Zoom transitions (idea 8).** Cards open their screens with `matchedTransitionSource` + `navigationTransition(.zoom)`
+on iPhone and iPad and shrink back into the card on the way back: album cards and the thumbnails of "New in shared
+albums" → album (pushed by value: each navigation stack gives its `Namespace` through `routeTransitionNamespace`,
+`RouteView` applies the destination side, only for album routes so list rows and deep links push as before); memory
+cards, story cards and Year in review cards → memory / review; person → person page; place tile → place's photos; the
+Map button of Places → map (a toolbar item as source); smart album cards → their grid. With Reduce Motion and on Vision
+Pro the push is the system's `.crossFade`; on the Mac, whose stacks have no transitions, the pushed screen fades in over
+0.18 s (`CardTransition`).
+
+### 17.5 Zoom levels that morph, typography [levels]
+
+**Zoom levels that morph (idea 13).** The Library's Years › Months › Days › All Photos (§15.5) no longer only
+cross-fade: the photos shown on both levels travel and scale from where they were to where they are on the new level.
+- *What travels.* A year's key photo is also the key photo of the month and the day it was taken in (`KeyPhoto` picks
+  the first best photo of a range), and a day's highlights are tiles of the grid, so photos are matched by their id:
+  a year card's photo flies into its month card, a month's into its day, a day's photos into their grid tiles (the grid
+  is placed with the tapped photo under the finger), and the other way round when zooming out (grid tiles into the
+  days' mosaics, days into months, months into years). The card the zoom starts from (the *hero*) always travels to the
+  card it opens, cross-fading its picture when that card's key photo is another one. At most 24 photos travel, the ones
+  closest to the fingers; the rest of both levels cross-fades with a slight scale (0.94/1.06) around the fingers
+  (`LibraryZoomMorph`).
+- *How.* The cards report their photos' frames in the zoom overlay's coordinate space; the grid reports its tiles'
+  frames (`GridTileLocator.frame`, now also on the Mac). One or two frames after a level change, when the new level is
+  laid out and the grid has scrolled to its photo, the travelling copies are drawn above both levels with the pictures
+  already decoded in memory (no BlurHash flash), and the photos they stand for are hidden on both levels until they land
+  (grid tiles are painted over in the background colour). Corner radii morph too (year 14, month 10, day and grid 0).
+  Timing: the levels cross-fade in 0.38 s (`.smooth`), the photos travel in 0.44 s (`.smooth`, no bounce).
+- *With the pinch.* While the fingers move the level follows them as before; on release the photos continue from
+  where the fingers left them (the pinch's scale around its anchor is applied to their start frames), so the move is
+  one gesture. The pinch out of the grid's densest step hands over to the days in the same way. A level that follows
+  the fingers with the next level already showing underneath is ⬜ (see STATUS).
+- *Picker, ⌘+/⌘−.* The same morph, without a hero (the top of the screen is kept).
+- *Reduce Motion:* no travelling photos and no scale; the levels cross-fade (0.2 s).
+- *Budget.* Nothing is done per item of the library: the matching looks only at photos on screen (a few dozen at most),
+  and frames are reported by the cards on screen without redrawing them. The summary is built as before (100 000 items
+  within the round-5 budget).
+- *Fix.* While a summary level covered it, the grid underneath was still in the accessibility tree and could take taps:
+  VoiceOver reached invisible tiles and a day's photo was "not hittable" for UI tests where a grid tile lay beneath it
+  (`FeelTourTests.testZoomLevelsTour`). The grid takes no hits while years, months or days are shown, and its tiles are
+  hidden from VoiceOver by the platform grid itself (`GridTileLocator.isCovered`): on iPhone and iPad its views are
+  `accessibilityElementsHidden` and the collection view becomes a leaf element, since SwiftUI's host listed the cells
+  even under a hidden parent; on the Mac the grid is `accessibilityHidden`. The toolbar stays reachable.
+- *Writing on photos* (a card's title and count, "+12" on a day) is hidden while its photo travels and fades in
+  (0.2 s) when it lands, instead of popping back after the copy that flew over it.
+- *Picker.* The floating Years · Months · Days · All Photos control is on Liquid Glass on iPhone and iPad
+  (`glassEffect(.regular)`, not interactive: the segmented control inside reacts to touches itself and an interactive glass around it swallowed taps; the system makes it solid with Reduce Transparency); material on Vision Pro;
+  the Mac keeps it in the toolbar.
+
+**Typography (idea 20).** The text styles are defined once (`Typography` in `Common/Design.swift`) and are all Dynamic
+Type styles; the Mac uses its own type scale:
+
+| Token | iPhone, iPad, Vision Pro | Mac | Used for |
+|---|---|---|---|
+| `yearTitle` | large title, rounded, bold | same style (Mac size) | year cards |
+| `heroFigure` | title, rounded, bold, tabular | same | the one big figure of a screen (countries visited) |
+| `figure` | title 2, rounded, semibold, tabular | same | "+12" on a day, a smart album's count |
+| `yearLabel` | title 2, rounded, bold, tabular | same | years under pictures (Then and now) |
+| `count` / `smallCount` | subheadline / caption, rounded, tabular | same | counts beside titles, Insights rows and charts |
+| `cardTitle` (+ `cardTitleStyle()`) | subheadline semibold, 2 lines (4 at accessibility sizes), cut at the end | body semibold | album titles |
+| `cardSubtitle` | caption | subheadline | the line under an album title |
+| `overlayTitle` / `overlaySubtitle` | headline bold, 2 lines / caption medium | same | titles on photos (memories, month cards) |
+| `dateTitle` / `dayTitle` / `dateDetail` | title 2 bold / headline bold / subheadline regular | 20 pt bold / 12 pt regular (grid) | date headers: bold date, light day line; a moment's title on the day line is semibold |
+| `sectionTitle` | title 2 bold | same | section headings (Memories, Collections, Through the years, Then and now) |
+
+Rules: big numbers rounded; counts tabular so they do not wobble; titles on cards a little smaller than a headline and
+two lines rather than one cut short; date headers bold over light. Year in review's poster cards keep their fixed
+sizes (they are pictures that are also shared) and were already rounded. Screens owned by other round-7 packages got
+only font changes.
+
+### 17.6 First impressions: living gradients, first launch and login [welcome]
+
+#### 17.6.1 Living gradients
+- A slowly moving `MeshGradient` (3 × 3 points; corners fixed, edge points slide along their edge, the centre wanders;
+  one seamless cycle every 24 s, points move at most 12 % of the size) — `LivingGradient` in `Common/LivingGradient.swift`,
+  reusable by every surface (`.livingEmptyBackground()` for an empty state).
+- Palettes: **wash** (a faint Nextcloud blue under the system text colours, light and dark variants) for empty states
+  and onboarding; **hero** (deep Nextcloud blues under white text, the same in light and dark mode) for the login and the
+  welcome; **blend** (between a Year in Review card's two colours, perceptual mix, never lighter than the lighter one) for
+  the Year in Review cards, replacing their flat linear gradient. Text contrast is checked in unit tests: ≥ 7:1 for the
+  primary text on the wash, ≥ 4.5:1 for white on the hero (≥ 7:1 with Increase Contrast).
+- Where: the empty Library/grid ("No photos yet", "You're offline", "Couldn't load your library", "No results", "No
+  favorites yet" — every `MediaGridScreen` empty or failed state), "No albums yet"/"No shared albums", the search start
+  screen and "Couldn't search", the backup offer after the first login, the login screen, the welcome, the Year in Review
+  cards (not the intro card and the photo cards, which keep their photos).
+- Cost: the system draws the mesh on the GPU; the view only recomputes nine points, at most 30 times a second
+  (`TimelineView(.animation(minimumInterval: 1/30, paused:))`). It pauses — keeping its place, no jump when it goes on
+  (`LivingClock`) — with Reduce Motion (then it is a still mesh), off screen (`onDisappear`), while the scene is not
+  active, and for a Year in Review card that is not the current page; a card rendered as a picture or into the video is
+  still (no timeline at all). Decorative: hidden from VoiceOver, taps go through.
+- Increase Contrast: the wash becomes nearly the plain background, the hero darker. Reduce Transparency does not change
+  the gradients (they are opaque) but does change what lies on them (§17.6.2).
+- The notification question after the backup offer is the system's alert; the app has no screen of its own for it.
+
+#### 17.6.2 First launch: the login
+- Behind the first login (not the "Add account" sheet, which stays a plain sheet): a wall of generated pictures —
+  gradients that suggest a sunset, the sea, a forest, snow, a city at night, a meadow, a desert, dusk; no photos, nothing
+  copyrighted — in columns that drift slowly up and down (6–10 pt/s, neighbouring columns opposite ways), turned by 10°,
+  under the moving hero blue at 78 %. Each column is drawn once into one layer (`drawingGroup`); the drift only moves the
+  layers. Still with Reduce Motion, paused off screen and while inactive.
+- A calm headline, "Welcome to Nextcloud Photos", the app icon and the existing one-line description, with the form on
+  one card: Liquid Glass (`glassEffect`, tinted dark) on iPhone and iPad, the window's glass (`glassBackgroundEffect`) on
+  Vision Pro, a material panel on the Mac. The login screen is always dark (like the Year in Review), so the text on the
+  card reads the same in light and dark mode. With Reduce Transparency or Increase Contrast the wall is left out and the
+  card is solid dark blue with an outline.
+- The user's own photos are not used for the wall or a splash: before the login there are none, after a logout they
+  must not be shown, and on later launches a picture splash would sit in front of the app lock and cost launch time.
+
+#### 17.6.3 The welcome into the Library, and the launch
+- After the first login (the first account, `AppModel.welcomesFirstLogin`) the window shows the app icon and "Welcome,
+  <name>" on the hero blue for 0.45 s of calm (the hold starts again while the app is too busy to draw, at most 3 s,
+  so the greeting is never swallowed by the first sync); then the icon grows towards the viewer as everything fades (0.6 s, `.smooth`),
+  revealing the Library, which is already there and can be used at once (the welcome takes no input and is hidden from
+  VoiceOver). With Reduce Motion the icon keeps its size and everything only fades. The backup offer (iPhone, iPad)
+  comes after the welcome. Adding a second account plays nothing.
+- Every other launch: the app's first appearance fades in over 0.35 s with a hint of scale (98.5 % → 100 %), only a fade
+  of 0.2 s with Reduce Motion; it starts with the first frame and delays nothing. Once per process, not on an account
+  switch.
+- Debug builds: `PHOTOS_DEBUG_WELCOME=login` shows the login screen although an account is logged in (screenshots);
+  `PHOTOS_DEBUG_WELCOME=transition` plays the welcome at launch, and lets the debug login (`PHOTOS_DEBUG_LOGIN`) play it
+  as a real first login does; `PHOTOS_DEBUG_WELCOME_HOLD=<seconds>` holds it longer (XCUITest's `launch()` returns
+  only once the app is idle). Without it the debug login plays no welcome, so other UI tests are unchanged.
+
+### 17.7 Mac and Vision Pro polish [platforms]
+
+Each platform's own idiom, from the system's own parts; nothing of the iPhone's glass is forced onto the Mac.
+
+**Mac**
+
+- *Sidebar* — the system's sidebar material (`NavigationSplitView` with `.listStyle(.sidebar)`): translucent with the
+  system's vibrancy, solid with Reduce Transparency. The app draws nothing over it (checked in Light and Dark Mode).
+- *Photos under the toolbar* — the grid reaches up under the window's unified toolbar (`PhotoGrid` ignores the top
+  safe area; the scroll view's automatic content insets keep the first row and the pinned day headers below the
+  toolbar). Photos scrolled past the top pass under the glass toolbar, which blurs and fades them with the system's
+  scroll edge effect; Reduce Transparency makes that edge solid (system behaviour). In the Library the memories strip
+  stays above the grid, so there the grid starts below it.
+- *Glass toolbar items* — the window toolbar's items are the system's: on macOS 27 they are drawn as glass capsules,
+  grouped by the system (zoom level picker, zoom slider, ratings, upload, search). No hand-made glass.
+- *Tiles lift under the pointer* (`GridHoverLift`) — the picture under the pointer grows by 8 points (2–5 % of its side)
+  in 0.16 s and casts a soft shadow (radius 10, 35 %); it settles back in 0.24 s when the pointer leaves. Layer
+  properties of one tile only (sublayer transform, shadow with a path), no layout; one tracking area for the grid; only
+  in the key window. Over the picture only (in the aspect-ratio grid not over the empty part of the tile). Scrolling, a
+  pinch and a peek (scrub to peek, §16.1) put it down; the pointer has to move before the next tile lifts. Reduce
+  Motion: no growth, the shadow fades in alone.
+- *Smooth trackpad zoom* (`GridPinchZoom`, `GridPinchScaler`) — a pinch no longer jumps between zoom steps: between two
+  steps the grid is scaled about the pointer with the fingers, geometrically from 1 to the ratio of the next step's tile
+  side (so the tiles are at the next step's size when it is reached); after 0.22 of magnification the layout switches
+  to that step (level-change haptic, as before), cross-fading (0.16 s) from the scaled grid into the new layout with the
+  photo under the pointer kept in place. A long pinch goes through several steps. Released before a step: at least half
+  way switches to it, less springs back (0.22 s). Past the largest step the grid stretches by at most 5 % and springs
+  back; out of the densest step the Library's days take over as before. The scale is a sublayer transform of the clip
+  view (GPU only, nothing is laid out per frame). Reduce Motion: no scaling; the steps cross-fade.
+
+**Vision Pro**
+
+- *Glass ornaments* — the viewer's actions (share, favourite, info, spatial, edit, More, delete) and a grid's selection
+  actions (share, favourite, More, delete) are toolbar items in the `.bottomOrnament` placement: a glass ornament under
+  the window, beside the photo instead of over it. The slideshow's playback controls (previous, play/pause, next) are an
+  ornament of their own under the window (`slideshowControls`, glass background); a tap on the slideshow shows and
+  hides them as before.
+- *Hover* — grid tiles use the system's lift hover effect (`UIHoverStyle(.lift)`, rounded 6 pt): the tile looked at lifts
+  towards the eyes; drawn by the system out of process, nothing in the app runs per gaze. Library year and month cards
+  keep their hover effect.
+- *Depth* — the viewer's own controls in the window (previous/next buttons, the copies of a stack) float 24 pt in front
+  of the photo (`viewerChromeDepth`).
+
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
 1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-ios) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".

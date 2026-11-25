@@ -99,6 +99,10 @@ struct BackupSetupSteps: View {
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }
+        // The offer after the first login is a step of the welcome: on a living wash (SPEC §17.6.1).
+        .background {
+            if isOffer { LivingGradient(palette: .wash).ignoresSafeArea() }
+        }
         .task(id: hasAccess) {
             guard hasAccess else { return }
             await firstCheck()

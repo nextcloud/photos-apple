@@ -270,10 +270,13 @@ struct ZoomSurfaceEvents {
 
             @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
                 // In window coordinates: the page itself moves with the finger.
-                let translation: CGFloat = recognizer.translation(in: nil).y
+                let point: CGPoint = recognizer.translation(in: nil)
+                let translation = CGSize(width: point.x, height: point.y)
                 switch recognizer.state {
                 case .began, .changed: handler(.changed(translation: translation))
-                case .ended: handler(.ended(translation: translation, velocity: recognizer.velocity(in: nil).y))
+                case .ended:
+                    let velocity: CGPoint = recognizer.velocity(in: nil)
+                    handler(.ended(translation: translation, velocity: CGVector(dx: velocity.x, dy: velocity.y)))
                 case .cancelled, .failed: handler(.cancelled)
                 default: break
                 }

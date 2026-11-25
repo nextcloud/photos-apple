@@ -595,7 +595,7 @@ struct CountriesScreen: View {
             .tint(.green)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(TravelWording.countries(countries.count)).font(.title.bold())
+                Text(TravelWording.countries(countries.count)).font(Typography.heroFigure)
                 Text(
                     "\(share.formatted(.percent.precision(.fractionLength(0)))) of the world", bundle: .module,
                     comment: "Countries: the share of the world's 195 countries visited, e.g. \"19 % of the world\"."

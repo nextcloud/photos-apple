@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Settings ▸ Appearance (SPEC §16.8): colour from photos and moving covers.
 struct LookSettingsSection: View {
-    @AppStorage(LookSettings.backdropKey) private var backdrop: ViewerBackdropStyle = .tinted
+    @AppStorage(LookSettings.backdropKey) private var backdrop: ViewerBackdropStyle = .standard
     @AppStorage(LookSettings.headerTintKey) private var headerTint = true
     @AppStorage(LookSettings.liveCoversKey) private var liveCovers = true
 

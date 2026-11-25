@@ -17,24 +17,33 @@ enum LookSettings {
     static let liveCoversKey = "lookLiveCovers"
 }
 
-/// The viewer's backdrop.
+/// The viewer's backdrop. Each style has a dark and a light version: the stage is dark in Dark Mode and while the
+/// viewer's controls are hidden, light otherwise (SPEC §17.1, `ViewerStage.isDark`).
 enum ViewerBackdropStyle: String, CaseIterable, Identifiable {
-    /// Black, as before.
+    /// Pure black, or pure white on a light stage (the default; the raw value is kept from when it was always black).
     case black
-    /// Black with a deep shade of the photo's colour.
+    /// A deep shade of the photo's colour, or a pale one on a light stage.
     case tinted
-    /// A soft glow of the photo's colours around it.
+    /// A blurred, enlarged copy of the photo, dimmed or brightened for the stage.
     case ambient
+
+    /// What the viewer shows when nothing was chosen.
+    static let standard: ViewerBackdropStyle = .black
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .black: String(localized: "Black", bundle: .module, comment: "Viewer background setting: plain black.")
+        case .black:
+            String(
+                localized: "Black or White", bundle: .module,
+                comment: "Viewer background setting: pure black in Dark Mode, pure white in Light Mode.")
         case .tinted:
             String(localized: "Photo Color", bundle: .module, comment: "Viewer background setting: black tinted with the photo's colour.")
         case .ambient:
-            String(localized: "Ambient Glow", bundle: .module, comment: "Viewer background setting: a soft glow of the photo's colours.")
+            String(
+                localized: "Ambient Glow", bundle: .module,
+                comment: "Viewer background setting: a blurred, enlarged copy of the photo behind it.")
         }
     }
 }
@@ -81,6 +90,7 @@ final class ViewerTint {
     @ObservationIgnored private var indexOfCurrent: Int?
     @ObservationIgnored private var colors: [FileID: PaletteColor?] = [:]
     @ObservationIgnored private var ambient: [FileID: CGImage?] = [:]
+    @ObservationIgnored private var copies: [FileID: CGImage] = [:]
 
     /// The two pages the pager is between and how far it is from the first to the second.
     var blend: (from: FileID, to: FileID, amount: Double)? {
@@ -117,19 +127,54 @@ final class ViewerTint {
         ambient[fileId] = image
         return image
     }
+
+    /// The picture behind the blurred copy of a photo: a small preview in memory (the grid's tile, usually), else its
+    /// BlurHash; nothing is loaded for it. A preview is kept, a BlurHash is asked again (the preview may come).
+    func copyImage(of fileId: FileID, services: AccountServices?) -> CGImage? {
+        if let known = copies[fileId] { return known }
+        guard let services, let item = try? services.library.item(fileId) else { return nil }
+        let etag: String = services.images.displayedEtag(fileId: fileId, etag: item.etag)
+        if let preview = services.images.cache.bestMemoryImage(fileId: fileId, etag: etag, upTo: 1024) {
+            if copies.count > 40 { copies.removeAll() }
+            copies[fileId] = preview
+            return preview
+        }
+        return BlurHashCache.image(item.blurhash)
+    }
 }
 
-/// The viewer's backdrop: black, or toned with the colour of the photo shown, blended between two photos while paging.
+/// The backdrop's colour on a light stage: the photo's colour, pale (black text on it keeps ≥ 7:1).
+enum ViewerBackdropTone {
+    /// The photo's colour toned for the stage: deep on a dark one, pale on a light one.
+    static func tone(_ dominant: PaletteColor, dark: Bool) -> PaletteColor {
+        dark ? PhotoTintRole.backdrop.tone(dominant) : light(dominant)
+    }
+
+    static func light(_ dominant: PaletteColor) -> PaletteColor {
+        PhotoTintRole.headerLight.tone(dominant).mixed(with: .white, amount: 0.55)
+    }
+
+    /// How much of the stage's own colour lies over the blurred copy of the photo: enough for the glass controls and
+    /// for the photo to stand out, little enough to keep its colours.
+    static func copyWash(dark: Bool) -> Double { dark ? 0.5 : 0.6 }
+}
+
+/// The viewer's backdrop: black or white with the stage, toned with the colour of the photo shown, or a blurred copy of
+/// it — blended between two photos while paging. The stage's colour scheme (`colorScheme` in the environment) decides
+/// between the dark and the light version (SPEC §16.8.1, §17.1).
 struct ViewerBackdrop: View {
     let tint: ViewerTint
     @Environment(SessionModel.self) private var session
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @AppStorage(LookSettings.backdropKey) private var style: ViewerBackdropStyle = .tinted
+    @AppStorage(LookSettings.backdropKey) private var style: ViewerBackdropStyle = .standard
+
+    var dark: Bool { colorScheme == .dark }
 
     var body: some View {
         ZStack {
-            Color.black
+            dark ? Color.black : Color.white
             if style != .black, PhotoTintLookup.allowed(contrast: contrast), let blend = tint.blend {
                 if style == .ambient, !reduceTransparency {
                     ambient(blend)
@@ -138,8 +183,10 @@ struct ViewerBackdrop: View {
                 }
             }
         }
-        // A jump (a step with Reduce Motion, a page taken out) fades; paging follows the finger by itself.
+        // A jump (a step with Reduce Motion, a page taken out) fades; paging follows the finger by itself. The stage
+        // turning dark or light (controls hidden or shown) cross-fades too.
         .animation(.easeInOut(duration: 0.4), value: tint.current)
+        .animation(.easeInOut(duration: 0.3), value: dark)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }
@@ -147,36 +194,43 @@ struct ViewerBackdrop: View {
     /// The backdrop colour between the two pages.
     func tone(_ blend: (from: FileID, to: FileID, amount: Double)) -> PaletteColor {
         let services = session.services
-        let from = tint.color(of: blend.from, services: services).map(PhotoTintRole.backdrop.tone) ?? .black
-        let to = tint.color(of: blend.to, services: services).map(PhotoTintRole.backdrop.tone) ?? .black
+        let base: PaletteColor = dark ? .black : .white
+        let dark: Bool = dark
+        let toned: (PaletteColor) -> PaletteColor = { (color: PaletteColor) -> PaletteColor in
+            ViewerBackdropTone.tone(color, dark: dark)
+        }
+        let from: PaletteColor = tint.color(of: blend.from, services: services).map(toned) ?? base
+        let to: PaletteColor = tint.color(of: blend.to, services: services).map(toned) ?? base
         return from.mixed(with: to, amount: blend.amount)
     }
 
-    /// The photo's colours, toned dark, scaled up and blurred into a glow; two photos cross-fade while paging.
+    /// The photo itself, enlarged and blurred behind it under a wash of the stage's colour; two photos cross-fade while
+    /// paging. Without a preview in memory the BlurHash stands in; without either, the plain tone.
     func ambient(_ blend: (from: FileID, to: FileID, amount: Double)) -> some View {
         let services = session.services
-        let from = tint.ambientImage(of: blend.from, services: services)
-        let to = blend.to == blend.from ? nil : tint.ambientImage(of: blend.to, services: services)
+        let from = tint.copyImage(of: blend.from, services: services)
+        let to = blend.to == blend.from ? nil : tint.copyImage(of: blend.to, services: services)
         return ZStack {
-            // Without a BlurHash the glow falls back to the plain tone.
             tone(blend).color
-            glow(from).opacity(1 - blend.amount)
-            glow(to).opacity(blend.amount)
+            copy(from).opacity(1 - blend.amount)
+            copy(to).opacity(blend.amount)
+            (dark ? Color.black : Color.white).opacity(ViewerBackdropTone.copyWash(dark: dark))
         }
     }
 
-    @ViewBuilder func glow(_ image: CGImage?) -> some View {
+    @ViewBuilder func copy(_ image: CGImage?) -> some View {
         if let image {
-            // Filling the backdrop's own size, not the picture's.
+            // Filling the backdrop's own size, not the picture's; enlarged, so the blur has no pale edges.
             Color.clear
                 .overlay {
                     Image(decorative: image, scale: 1)
                         .resizable()
-                        .interpolation(.high)
+                        .interpolation(.medium)
                         .scaledToFill()
+                        .scaleEffect(1.25)
                 }
                 .clipped()
-                .blur(radius: 48, opaque: true)
+                .blur(radius: 60, opaque: true)
         }
     }
 }
@@ -229,11 +283,34 @@ private struct HeaderBackground: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-            if let color {
+            if let color, opaque {
+                // Reduce Transparency: a solid bar in the cover's colour.
                 content
-                    .toolbarBackground(color.color.opacity(opaque ? 1 : 0.92), for: .navigationBar)
+                    .toolbarBackground(color.color, for: .navigationBar)
                     .toolbarBackgroundVisibility(.visible, for: .navigationBar)
                     // A large title is drawn under the bar's background, where the wash would hide it.
+                    .navigationBarTitleDisplayMode(.inline)
+            } else if let color {
+                // Edge to edge (SPEC §17.2): the photos scroll under the bar with the system's soft blur; the cover's
+                // colour is a wash over the top edge that fades out below the bar instead of a solid band.
+                content
+                    .overlay(alignment: .top) {
+                        // 36 pt below the bar, and up under it to the top of the screen.
+                        Color.clear
+                            .frame(height: 36)
+                            .background {
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: color.color.opacity(0.85), location: 0),
+                                        .init(color: color.color.opacity(0.5), location: 0.65),
+                                        .init(color: color.color.opacity(0), location: 1),
+                                    ], startPoint: .top, endPoint: .bottom
+                                )
+                                .ignoresSafeArea(edges: .top)
+                            }
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                     .navigationBarTitleDisplayMode(.inline)
             } else {
                 content

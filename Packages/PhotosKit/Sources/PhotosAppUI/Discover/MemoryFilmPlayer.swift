@@ -170,7 +170,7 @@ struct MemoryFilmPlayer: View {
         #else
             .navigationTitle(start.title)
         #endif
-        .focusable()
+        .keyFocusable()
         .focusEffectDisabled()
         .focused($focused)
         .onAppear {
@@ -178,8 +178,8 @@ struct MemoryFilmPlayer: View {
             model.still = reduceMotion
             FilmPlayers.open += 1
         }
-        .onKeyPress(keys: [.leftArrow, .rightArrow, .space, .escape, "m"]) { press in
-            switch press.key {
+        .hardwareKeys([.leftArrow, .rightArrow, .space, .escape, "m"]) { key in
+            switch key {
             case .leftArrow: model.skip(false)
             case .rightArrow: model.skip(true)
             case .space: model.togglePlaying()
@@ -187,7 +187,6 @@ struct MemoryFilmPlayer: View {
             default: finish()
             }
             lastInteraction = Date()
-            return .handled
         }
         .task(id: ObjectIdentifier(model)) {
             model.still = reduceMotion

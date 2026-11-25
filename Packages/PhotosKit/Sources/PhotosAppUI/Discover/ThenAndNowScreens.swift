@@ -130,7 +130,7 @@ struct ThenAndNowRow: View {
             if !shown.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(ThenAndNowWording.title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                        Text(ThenAndNowWording.title).font(Typography.sectionTitle).accessibilityAddTraits(.isHeader)
                         Spacer()
                         if model.spots.count > shown.count {
                             NavigationLink {
@@ -327,7 +327,7 @@ struct ThenAndNowScreen: View {
                     .overlay { PreviewImage(fileId: year.cover, etag: "", bucket: 1024) }
                     .clipShape(.rect(cornerRadius: 12))
                     .contentShape(.rect(cornerRadius: 12))
-                Text(String(year.year)).font(.title2.bold()).monospacedDigit()
+                Text(String(year.year)).font(Typography.yearLabel)
                 Text(AccessibilityText.photos(year.items.count)).font(.caption).foregroundStyle(.secondary)
             }
         }

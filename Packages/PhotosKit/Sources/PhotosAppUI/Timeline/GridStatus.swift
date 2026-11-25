@@ -107,8 +107,7 @@ struct GridStatusBanner: View {
                 // With what smart offline keeps (SPEC §15.8.1).
                 OfflineAvailabilityBanner()
             case .loading(let count):
-                pill(
-                    InitialSyncProgress.text(count: count, total: session.initialSyncTotal), systemImage: "arrow.triangle.2.circlepath")
+                pill(InitialSyncProgress.text(count: count, total: session.initialSyncTotal), count: count)
             case nil:
                 EmptyView()
             }
@@ -138,18 +137,23 @@ struct GridStatusBanner: View {
         }
         .font(.callout)
         .padding(12)
-        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        .chromeGlass(in: .rect(cornerRadius: 16))
         .padding(.horizontal)
         .padding(.bottom, 12)
     }
 
-    func pill(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.footnote)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: .capsule)
-            .padding(.bottom, 12)
+    /// The first sync's progress: turning arrows and a count that rolls, on a glass capsule (SPEC §17.3).
+    func pill(_ title: String, count: Int) -> some View {
+        Label {
+            Text(title).rollingNumber(count)
+        } icon: {
+            ChromeStatusSymbol(kind: .sync, state: .working)
+        }
+        .font(.footnote)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .chromeGlass(in: .capsule)
+        .padding(.bottom, 12)
     }
 }
 

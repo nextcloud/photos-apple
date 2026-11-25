@@ -59,7 +59,8 @@ struct AlbumDetailScreen: View {
             emptyMessage: isOwn ? String(localized: "Add photos from your library.", bundle: .module) : "",
             columns: $columns,
             extraActions: extraActions,
-            keepsTitleWhileSelecting: AlbumToolbar.keepsTitleWhileSelecting
+            keepsTitleWhileSelecting: AlbumToolbar.keepsTitleWhileSelecting,
+            hero: hero
         ) {
             albumMenu
         }
@@ -107,8 +108,12 @@ struct AlbumDetailScreen: View {
         .refreshable { try? await session.refreshAlbumContent(album, force: true) }
         .collageEditor($collage)
         .albumCardSheets($cardSheet)
-        // A hint of the cover's colour in the header (SPEC §16.8.1).
-        .photoHeaderTint(session.services.map { AlbumLookStore.store(for: $0).coverFileId(for: album) } ?? album.displayCoverFileId)
+        // A hint of the cover's colour in the header (SPEC §16.8.1); on iPhone and iPad the hero shows the cover itself
+        // under the bar (SPEC §17.4), and a wash would only lie over it.
+        .photoHeaderTint(
+            GridHero.isSupported
+                ? nil : session.services.map { AlbumLookStore.store(for: $0).coverFileId(for: album) } ?? album.displayCoverFileId
+        )
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .addPhotos: PhotoPickerSheet(album: album)
@@ -176,6 +181,21 @@ struct AlbumDetailScreen: View {
         }
         // File ▸ Import from iPhone or iPad (Continuity Camera, Mac; SPEC §16.5.3): uploaded and added to this album.
         .continuityCameraImport(album: album, isEnabled: isOwn)
+    }
+
+    /// The album's cover at the top, with its title and details (iPhone, iPad; SPEC §17.4); a gradient from the name
+    /// for an album without a cover.
+    var hero: GridHero {
+        let cover: FileID? = session.services.map { AlbumLookStore.store(for: $0).coverFileId(for: album) } ?? album.displayCoverFileId
+        let album = album
+        return GridHero {
+            HeroHeaderView(title: album.title, subtitle: AlbumDetails.summary(of: album)) {
+                ZStack {
+                    AlbumGradientView(name: album.title)
+                    if let cover { AlbumCover(fileId: cover) }
+                }
+            }
+        }
     }
 
     var deleteTitle: String {

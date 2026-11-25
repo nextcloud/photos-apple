@@ -94,11 +94,11 @@ struct SmartAlbumBuilder: View {
                 HStack(alignment: .firstTextBaseline) {
                     if let count {
                         Text("^[\(count) photo](inflect: true)", bundle: .module)
-                            .font(.title2.weight(.bold))
+                            .font(Typography.figure)
                             .contentTransition(.numericText(value: Double(count)))
                             .animation(.snappy, value: count)
                     } else {
-                        Text("Counting…", bundle: .module).font(.title2.weight(.bold)).foregroundStyle(.secondary)
+                        Text("Counting…", bundle: .module).font(Typography.figure).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if counting { ProgressView().controlSize(.small) }

@@ -153,6 +153,8 @@ struct MainView: View {
     #endif
     #if os(iOS)
         @State private var linkedPhoto: ViewerStart?
+        /// The uploads list, opened from the tab bar's accessory (SPEC §17.3).
+        @State private var showingTransfers = false
     #endif
     #if os(macOS)
         @AppStorage("sidebarUtilitiesExpanded") private var utilitiesExpanded = false
@@ -175,6 +177,8 @@ struct MainView: View {
     @State private var timelineReveal = TimelineRevealCenter()
     /// The command palette of this window (SPEC §16.2).
     @State private var palette = CommandPaletteCenter()
+    /// The zoom transitions from cards into the screens pushed by value (SPEC §17.4).
+    @Namespace private var routeTransitions
     #if os(macOS)
         /// The grid or viewer with the focus, whose selection the palette's commands act on.
         @FocusedValue(\.gridActions) private var focusedGrid
@@ -393,6 +397,7 @@ struct MainView: View {
             )
             .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
         }
+        .environment(\.routeTransitionNamespace, routeTransitions)
     }
 
     // MARK: Layout
@@ -558,8 +563,25 @@ struct MainView: View {
             }
             #if os(iOS)
                 .mediaViewer($linkedPhoto)
+                // iPhone: the tab bar steps back while the content scrolls down, and the accessory above it shows what
+                // uploads, backs up or imports (SPEC §17.3).
+                .tabBarMinimizeBehavior(.onScrollDown)
+                .activityAccessory(isAvailable: usesCollectionsTab) { kind in openActivity(kind) }
+                .sheet(isPresented: $showingTransfers) { TransfersList() }
             #endif
         }
+
+        #if os(iOS)
+            /// A tap on the tab bar's accessory: the screen of what it shows.
+            func openActivity(_ kind: ChromeActivity.Kind) {
+                switch kind {
+                case .upload: showingTransfers = true
+                case .backup: go(.backup)
+                case .libraryImport: importingLibrary = true
+                case .cardImport: importingCard = true
+                }
+            }
+        #endif
 
         func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {
             Tab(value: destination) {
@@ -619,6 +641,7 @@ struct MainView: View {
                 CollectionsList()
                     .navigationDestination(for: AppRoute.self) { route in RouteView(route: route) }
             }
+            .environment(\.routeTransitionNamespace, routeTransitions)
         }
     #endif
 }
@@ -626,8 +649,14 @@ struct MainView: View {
 /// A screen opened by value: from a link in a list, a deep link or scene restoration.
 struct RouteView: View {
     let route: AppRoute
+    @Environment(\.routeTransitionNamespace) private var transitions
 
     var body: some View {
+        // An album zooms out of its card (SPEC §17.4). Only routes that cards open: a list row has no card to zoom from.
+        screen.cardTransitionDestination(id: route, in: route.opensFromCard ? transitions : nil)
+    }
+
+    @ViewBuilder var screen: some View {
         switch route {
         case .album(let id): AlbumRouteScreen(albumId: id)
         case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
@@ -641,6 +670,14 @@ struct RouteView: View {
                 DestinationView(destination: destination, searchText: .constant(""), searchFilters: .constant([]))
             }
         }
+    }
+}
+
+extension AppRoute {
+    /// Opened from a card (an album's cover), so it zooms out of that card.
+    var opensFromCard: Bool {
+        if case .album = self { return true }
+        return false
     }
 }
 

@@ -12,6 +12,7 @@ import SwiftUI
 
 struct MapScreen: View {
     @Environment(SessionModel.self) private var session
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// One annotation per grid cell of the loaded region, aggregated by the database; MapKit clusters them. The located
     /// items are never loaded.
     @State private var cells: [MapCell] = []
@@ -81,12 +82,21 @@ struct MapScreen: View {
         ClusteredMapView(
             cells: cells, target: target, session: session, onRegionChange: { region = $0 }, onSelect: { selected = .cells($0) }
         )
+        // Edge to edge: the map runs under the navigation and tab bars, as in Maps; MapKit keeps its own controls and
+        // the legal notice inside the safe area (SPEC §17.3).
+        .ignoresSafeArea(edges: [.top, .bottom])
         .safeAreaInset(edge: .bottom) {
             if showsTimeRange, let timeline {
+                // The glass panel rises out of the bottom edge; a fade with Reduce Motion (SPEC §17.3).
                 MapTimeRangePanel(timeline: timeline, from: $fromMonth, to: $toMonth)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
         .navigationTitle(String(localized: "Map", bundle: .module))
+        #if os(iOS)
+            // A small title: the map fills the screen up to the top edge.
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar { toolbar }
         .sheet(item: $selected) { selection in
             NavigationStack {
@@ -109,7 +119,7 @@ struct MapScreen: View {
 
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
         ToolbarItem {
-            Toggle(isOn: $showsTimeRange.animation()) {
+            Toggle(isOn: $showsTimeRange.animation(ChromeMotion.morph(reduceMotion: reduceMotion))) {
                 Label(Self.timeRangeTitle, systemImage: "calendar.badge.clock")
             }
             .disabled(timeline == nil)
@@ -230,7 +240,7 @@ struct MapTimeRangePanel: View {
             }
         }
         .padding(14)
-        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .chromeGlass(in: .rect(cornerRadius: 24))
         .padding(.horizontal)
         .padding(.bottom, 8)
         .frame(maxWidth: 640)

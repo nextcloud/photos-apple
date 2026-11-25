@@ -18,6 +18,8 @@ struct PlacesScreen: View {
     @State private var error: String?
     /// The travel globe's history and stats (SPEC §15.6).
     @State private var travel = TravelModel()
+    /// A place's photos zoom out of its tile, the map out of its button (SPEC §17.4).
+    @Namespace private var zoom
 
     var grouped: [(country: String, places: [Place])] {
         guard session.features.has(.placeCountry) else { return [("", places)] }
@@ -43,18 +45,26 @@ struct PlacesScreen: View {
                                     ItemsScreen(title: place.name) { services in
                                         try await services.api.placeContent(place.name).map(\.item)
                                     }
+                                    .cardTransitionDestination(id: "place-" + place.name, in: zoom)
                                 } label: {
                                     CollectionTile(
                                         title: place.name, subtitle: AccessibilityText.photos(place.itemCount),
-                                        coverFileId: place.coverFileId, kind: String(localized: "place", bundle: .module))
+                                        coverFileId: place.coverFileId, kind: String(localized: "place", bundle: .module),
+                                        transition: CollectionTile.Transition(id: "place-" + place.name, namespace: zoom))
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                     } header: {
                         if grouped.count > 1 {
+                            // A glass label that floats over the places scrolling under it, not a solid band (SPEC §17.3).
                             Text(group.country.isEmpty ? String(localized: "Other", bundle: .module) : group.country)
-                                .font(.title2.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4).background(.bar)
+                                .font(.title3.bold())
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .chromeGlass(in: .capsule)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 4)
                                 .accessibilityAddTraits(.isHeader)
                         }
                     }
@@ -65,11 +75,16 @@ struct PlacesScreen: View {
         }
         .navigationTitle(String(localized: "Places", bundle: .module))
         .toolbar {
-            NavigationLink {
-                MapScreen()
-            } label: {
-                Label(String(localized: "Map", bundle: .module), systemImage: "map")
+            ToolbarItem {
+                NavigationLink {
+                    MapScreen().cardTransitionDestination(id: "map", in: zoom)
+                } label: {
+                    Label(String(localized: "Map", bundle: .module), systemImage: "map")
+                }
             }
+            #if os(iOS)
+                .matchedTransitionSource(id: AnyHashable("map"), in: zoom)
+            #endif
         }
         .task {
             guard let services = session.services else { return }
@@ -97,6 +112,8 @@ struct PeopleScreen: View {
     @State private var renaming: Person?
     @State private var newName = ""
     @State private var actionError: String?
+    /// A person's page zooms out of their face (SPEC §17.4).
+    @Namespace private var zoom
 
     var shown: [Person] {
         showsHidden ? people : people.filter { !hidden.names.contains($0.name) }
@@ -114,11 +131,13 @@ struct PeopleScreen: View {
                 ForEach(shown) { person in
                     NavigationLink {
                         PersonScreen(person: person) { Task { await load() } }
+                            .cardTransitionDestination(id: "person-" + person.name, in: zoom)
                     } label: {
                         CollectionTile(
                             title: person.isUnnamed ? String(localized: "Add name", bundle: .module) : person.name,
                             subtitle: AccessibilityText.photos(person.itemCount), coverFileId: person.coverFileId,
-                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module)
+                            faceBox: person.coverBox, circular: true, kind: String(localized: "person", bundle: .module),
+                            transition: CollectionTile.Transition(id: "person-" + person.name, namespace: zoom)
                         )
                         .opacity(hidden.names.contains(person.name) ? 0.45 : 1)
                     }
@@ -322,6 +341,7 @@ struct PersonScreen: View {
                     },
                 ]
             },
+            hero: hero,
             load: { services in
                 photos = try await services.api.personPhotos(person.name, key: await session.recognizeKey())
                 return photos.map(\.item)
@@ -401,6 +421,28 @@ struct PersonScreen: View {
         ) {
         } message: {
             Text(error ?? "")
+        }
+    }
+
+    /// The person's photo at the top, their face and name over it (iPhone, iPad; SPEC §17.4).
+    var hero: GridHero {
+        let person = person
+        let title = person.isUnnamed ? String(localized: "Unnamed person", bundle: .module) : person.name
+        return GridHero {
+            HeroHeaderView(title: title, subtitle: AccessibilityText.photos(person.itemCount)) {
+                if let cover = person.coverFileId {
+                    PreviewImage(fileId: cover, etag: "", bucket: 1024)
+                } else {
+                    AlbumGradientView(name: person.name)
+                }
+            } badge: {
+                if let cover = person.coverFileId {
+                    FaceCroppedPreview(fileId: cover, box: person.coverBox)
+                        .frame(width: 64, height: 64)
+                        .clipShape(.circle)
+                        .overlay { Circle().strokeBorder(.white.opacity(0.8), lineWidth: 2) }
+                }
+            }
         }
     }
 

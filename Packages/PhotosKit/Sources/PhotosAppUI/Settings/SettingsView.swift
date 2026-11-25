@@ -312,23 +312,30 @@ public struct SettingsView: View {
         }
     }
 
+    /// The sync's state with one symbol for all of them: the arrows turn while it syncs and become a check mark when it
+    /// is through; the counts roll (SPEC §17.3).
     @ViewBuilder var syncStatusRow: some View {
         switch session.syncStatus {
-        case .idle(let last), .offline(let last):
-            LabeledContent(
-                String(localized: "Last sync", bundle: .module), value: last?.formatted(date: .abbreviated, time: .shortened) ?? "–")
-        case .initialSync(let count):
-            LabeledContent(String(localized: "Loading library", bundle: .module), value: count.formatted())
-        case .syncing:
-            LabeledContent(String(localized: "Syncing", bundle: .module)) { ProgressView().controlSize(.small) }
-        case .reconciling(let count):
-            LabeledContent(String(localized: "Checking library", bundle: .module), value: count.formatted())
         case .failed(let message, _):
             LabeledContent {
                 Button(String(localized: "Retry", bundle: .module)) { Task { await session.syncNow() } }
             } label: {
                 Text("Couldn't sync", bundle: .module)
                 Text(message).foregroundStyle(.red)
+            }
+        default:
+            let row: SyncStatusRow = SyncStatusRow(session.syncStatus)
+            LabeledContent {
+                HStack(spacing: 8) {
+                    if let count = row.count {
+                        Text(count.formatted()).rollingNumber(count)
+                    } else if let value = row.value {
+                        Text(value)
+                    }
+                    ChromeStatusSymbol(kind: .sync, state: row.symbol)
+                }
+            } label: {
+                Text(row.title)
             }
         }
     }
@@ -655,3 +662,36 @@ struct ServerFolderList: View {
         }
     }
 #endif
+
+/// What Settings › Server says about the sync, without its failure (SPEC §17.3).
+struct SyncStatusRow: Equatable {
+    var title: String
+    /// A count that rolls (items loaded, checked).
+    var count: Int?
+    /// Or a text (the time of the last sync).
+    var value: String?
+    var symbol: ChromeSymbolState
+
+    init(_ status: SyncStatus) {
+        switch status {
+        case .idle(let last), .offline(let last):
+            title = String(localized: "Last sync", bundle: .module)
+            value = last?.formatted(date: .abbreviated, time: .shortened) ?? "–"
+            if case .idle = status, last != nil { symbol = .done } else { symbol = .idle }
+        case .initialSync(let count):
+            title = String(localized: "Loading library", bundle: .module)
+            self.count = count
+            symbol = .working
+        case .syncing:
+            title = String(localized: "Syncing", bundle: .module)
+            symbol = .working
+        case .reconciling(let count):
+            title = String(localized: "Checking library", bundle: .module)
+            self.count = count
+            symbol = .working
+        case .failed:
+            title = String(localized: "Couldn't sync", bundle: .module)
+            symbol = .failed
+        }
+    }
+}

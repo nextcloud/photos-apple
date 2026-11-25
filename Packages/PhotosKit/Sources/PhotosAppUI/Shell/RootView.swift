@@ -14,12 +14,14 @@ public struct RootView: View {
     @SceneStorage("navigation") private var storedNavigation = ""
     /// Guest Mode shows one album or memory instead of the app (SPEC §16.8.3).
     @State private var guest = GuestMode.shared
+    /// `PHOTOS_DEBUG_WELCOME=transition`: the welcome plays at launch although no login happened (screenshots).
+    @State private var debugWelcome = WelcomeDebug.playsTransition
 
     public init() {}
 
     public var body: some View {
         Group {
-            if app.needsLogin {
+            if app.needsLogin || WelcomeDebug.showsLogin {
                 LoginView()
             } else if let session = app.session {
                 AppLockGate {
@@ -34,9 +36,26 @@ public struct RootView: View {
                             .id(session.account.id)
                     }
                 }
+                // A normal launch: the app comes up with a quick fade (SPEC §17.6.3).
+                .modifier(LaunchReveal())
+                // After the first login: the short welcome into the Library, over it (SPEC §17.6.3).
+                .overlay {
+                    if app.welcomesFirstLogin || debugWelcome {
+                        FirstLaunchWelcome(name: session.account.displayName) {
+                            debugWelcome = false
+                            app.finishWelcome()
+                        }
+                        .transition(.identity)
+                    }
+                }
                 #if os(iOS)
-                    // After the first login: backup is offered before anything else is asked (round-3 item 33).
-                    .fullScreenCover(isPresented: Binding(get: { app.offersBackup }, set: { if !$0 { app.finishBackupOffer() } })) {
+                    // After the first login: backup is offered before anything else is asked (round-3 item 33), once the
+                    // welcome has played.
+                    .fullScreenCover(
+                        isPresented: Binding(
+                            get: { app.offersBackup && !app.welcomesFirstLogin && !debugWelcome },
+                            set: { if !$0 { app.finishBackupOffer() } })
+                    ) {
                         BackupOfferSheet().environment(session).environment(app)
                     }
                 #endif

@@ -528,12 +528,12 @@ struct ThroughTheYearsPlayer: View {
         #else
             .navigationTitle(person)
         #endif
-        .focusable()
+        .keyFocusable()
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
-        .onKeyPress(keys: [.leftArrow, .rightArrow, .space, .escape, "m"]) { press in
-            switch press.key {
+        .hardwareKeys([.leftArrow, .rightArrow, .space, .escape, "m"]) { key in
+            switch key {
             case .leftArrow: model.skip(false)
             case .rightArrow: model.skip(true)
             case .space: model.togglePlaying()
@@ -541,7 +541,6 @@ struct ThroughTheYearsPlayer: View {
             default: dismiss()
             }
             lastInteraction = Date()
-            return .handled
         }
         .task {
             model.birthday = BirthdayStore.birthday(of: person, account: session.account.id.rawValue)
@@ -840,7 +839,7 @@ struct ThroughTheYearsRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if loaded {
-                Text(YearsText.title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                Text(YearsText.title).font(Typography.sectionTitle).accessibilityAddTraits(.isHeader)
                 if !session.features.has(.recognize) {
                     note(
                         String(

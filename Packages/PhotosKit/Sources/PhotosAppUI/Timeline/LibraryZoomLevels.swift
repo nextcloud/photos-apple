@@ -54,6 +54,24 @@ final class LibraryZoomModel {
     /// When the last pinch on a summary level ended; taps right after it are the fingers lifting, not taps.
     @ObservationIgnored var pinchEnded: ContinuousClock.Instant?
     var acceptsTaps: Bool { pinchEnded.map { ContinuousClock.now - $0 > .milliseconds(500) } ?? true }
+    // The morph between the levels (SPEC §17.5).
+    @ObservationIgnored let photoFrames = ZoomPhotoFrames()
+    /// The photos travelling from one level to the next; nil when no level change is under way.
+    private(set) var morph: ZoomMorph?
+    /// Photos whose travelling copy stands in for them: hidden on both levels until it lands.
+    private(set) var hidden: Set<FileID> = []
+    /// A grid tile's frame in the zoom overlay's coordinate space, nil when it is not on screen (set by the grid).
+    @ObservationIgnored var gridTileFrame: @MainActor (FileID) -> CGRect? = { _ in nil }
+    /// The area the levels are shown in, in the zoom overlay's coordinate space.
+    @ObservationIgnored var viewport: CGRect = .zero
+    /// A photo's picture if it is decoded in memory (set by the overlay from the account's image cache).
+    @ObservationIgnored var decodedImage: @MainActor (GridMedia) -> CGImage? = { _ in nil }
+    /// The scale and anchor of the pinch that ends in a level change: its flights start where the fingers left the photos.
+    @ObservationIgnored var releasedPinch: (scale: Double, anchor: CGPoint)?
+    /// The photo of the card or tile a zoom starts from, and the one of the card or tile it arrives at.
+    @ObservationIgnored private var heroSource: GridMedia?
+    @ObservationIgnored private var heroDestination: GridMedia?
+    @ObservationIgnored private var morphTask: Task<Void, Never>?
     @ObservationIgnored private var builtRevision = -1
     @ObservationIgnored private var building: Task<Void, Never>?
     @ObservationIgnored private let defaults: UserDefaults
@@ -109,11 +127,17 @@ final class LibraryZoomModel {
         Self.logger.debug("zoom from \(level.rawValue, privacy: .public) by \(steps) to \(target.level.rawValue, privacy: .public)")
         anchor = point
         zoomedIn = steps > 0
+        heroSource = photo.flatMap { photoFrames.items[$0] } ?? bucket?.key
         if case .grid = target {
-            enterGrid(at: photo ?? bucket.map { summary.items[$0.range.lowerBound].fileId }, fraction: point.y)
+            let first = bucket.map { summary.items[$0.range.lowerBound] }
+            heroDestination = photo.flatMap { photoFrames.items[$0] } ?? first
+            enterGrid(at: photo ?? first?.fileId, fraction: point.y)
             return
         }
-        if let bucket, let matching = summary.bucket(target.level, matching: bucket) { focus[target.level] = matching.id }
+        if let bucket, let matching = summary.bucket(target.level, matching: bucket) {
+            focus[target.level] = matching.id
+            heroDestination = matching.key
+        }
         set(target.level)
     }
 
@@ -122,7 +146,11 @@ final class LibraryZoomModel {
         lastGridStep = currentStep == ladder.densestGrid.map(Self.step(of:)) ? GridColumns.default : currentStep
         anchor = point
         zoomedIn = false
-        focus[.days] = fileId.flatMap { summary.index(of: $0) }.flatMap { summary.bucket(.days, containing: $0)?.id }
+        let index = fileId.flatMap { summary.index(of: $0) }
+        let day = index.flatMap { summary.bucket(.days, containing: $0) }
+        focus[.days] = day?.id
+        heroSource = index.map { summary.items[$0] }
+        heroDestination = day?.key
         set(.days)
     }
 
@@ -167,10 +195,92 @@ final class LibraryZoomModel {
     }
 
     private func set(_ target: LibraryZoomLevel) {
+        let hero = (heroSource, heroDestination)
+        let pinch = releasedPinch
+        heroSource = nil
+        heroDestination = nil
+        releasedPinch = nil
         guard target != level else { return }
+        let from = level
+        // Where the photos are on the level that is left, as the user sees them now.
+        var source = from == .all ? [:] : photoFrames.frames(on: from)
+        if let pinch {
+            source = source.mapValues { LibraryZoomMorph.scaled($0, by: pinch.scale, around: pinch.anchor) }
+        }
+        endMorph()
         withAnimation(Self.animation) { level = target }
         snaps += 1
         defaults.set(target.rawValue, forKey: LibraryZoomLevel.storageKey)
+        guard LibraryZoomMorph.style(reduceMotion: LibraryZoomHaptics.reduceMotion) == .flights else { return }
+        morphTask = Task { [weak self] in
+            // The new level is laid out (and the grid has scrolled to its photo) a frame or two later.
+            try? await Task.sleep(for: .milliseconds(target == .all ? 50 : 32))
+            guard !Task.isCancelled, let self else { return }
+            self.launchMorph(from: from, to: target, source: source, hero: hero)
+        }
+    }
+
+    // MARK: Morph (SPEC §17.5)
+
+    /// Sends the photos on screen on both levels on their way: from where they were on `from` to where they are on `to`.
+    private func launchMorph(
+        from: LibraryZoomLevel, to target: LibraryZoomLevel, source: [FileID: CGRect], hero: (GridMedia?, GridMedia?)
+    ) {
+        var source = source
+        var destination: [FileID: CGRect]
+        var items = photoFrames.items
+        for item in [hero.0, hero.1].compactMap(\.self) where items[item.fileId] == nil { items[item.fileId] = item }
+        if target == .all {
+            // Into the grid: the summary's photos (and the hero) where their tiles are now.
+            let ids = Set(source.keys).union([hero.1?.fileId].compactMap(\.self))
+            destination = Dictionary(uniqueKeysWithValues: ids.compactMap { id in gridTileFrame(id).map { (id, $0) } })
+        } else {
+            destination = photoFrames.frames(on: target)
+        }
+        if from == .all {
+            // Out of the grid: the tiles of the photos the new level shows.
+            let ids = Set(destination.keys).union([hero.0?.fileId].compactMap(\.self))
+            source = Dictionary(uniqueKeysWithValues: ids.compactMap { id in gridTileFrame(id).map { (id, $0) } })
+        }
+        let heroPair: (source: FileID, destination: FileID)? = {
+            guard let start = hero.0?.fileId, let end = hero.1?.fileId else { return nil }
+            return (start, end)
+        }()
+        let plan = LibraryZoomMorph.flights(
+            from: source, to: destination, hero: heroPair, viewport: viewport,
+            anchor: CGPoint(x: viewport.minX + anchor.x * viewport.width, y: viewport.minY + anchor.y * viewport.height))
+        let fromRadius = LibraryZoomMorph.cornerRadius(on: from)
+        let toRadius = LibraryZoomMorph.cornerRadius(on: target)
+        let flights: [ZoomFlight] = plan.enumerated().compactMap { index, flight in
+            guard let start = items[flight.source], let end = items[flight.destination] else { return nil }
+            return ZoomFlight(
+                id: index, source: start, destination: end, from: flight.from, to: flight.to, fromRadius: fromRadius,
+                toRadius: toRadius, image: decodedImage(start), destinationImage: flight.crossFades ? decodedImage(end) : nil)
+        }
+        guard !flights.isEmpty else { return }
+        Self.logger.debug("morph \(from.rawValue, privacy: .public) → \(target.rawValue, privacy: .public): \(flights.count) photos")
+        let holes: [CGRect] = from == .all ? flights.map(\.from) : target == .all ? flights.map(\.to) : []
+        hidden = Set(flights.flatMap { [$0.source.fileId, $0.destination.fileId] })
+        morph = ZoomMorph(flights: flights, gridHoles: holes)
+    }
+
+    /// Waits until the photos of the last level change are on their way (tests).
+    func morphLaunched() async {
+        await morphTask?.value
+    }
+
+    /// The flights landed: the levels' own photos take their place.
+    func finishMorph(_ id: UUID) {
+        guard morph?.id == id else { return }
+        morph = nil
+        hidden = []
+    }
+
+    private func endMorph() {
+        morphTask?.cancel()
+        morphTask = nil
+        if morph != nil { morph = nil }
+        if !hidden.isEmpty { hidden = [] }
     }
 
     static func step(of stop: LibraryZoomStop) -> Int {
@@ -232,14 +342,30 @@ struct LibraryZoomOverlay: ViewModifier {
     let feed: GridFeed
     var isSelecting: Bool
     @Environment(SessionModel.self) private var session
+    /// The floating picker's height, so the grid's notices stand above it (they showed through its glass).
+    @State private var pickerHeight: CGFloat = 0
+
+    var showsPicker: Bool { !isSelecting && feed.model.hasTiles }
 
     func body(content: Content) -> some View {
         content
             .environment(\.libraryZoom, model)
+            #if !os(macOS)
+                .environment(\.floatingBottomInset, showsPicker && pickerHeight > 0 ? pickerHeight + 12 + 8 : 0)
+            #endif
             #if os(visionOS)
                 // The cards have the window's glass behind them, not an opaque page: the grid must not show through.
                 .opacity(model.level == .all ? 1 : 0)
             #endif
+            // Covered by years, months or days, the grid is out of reach: VoiceOver and taps went to its tiles under the
+            // cards (a day's photo could not be tapped where a tile lay beneath it).
+            .accessibilityHidden(model.level != .all)
+            .allowsHitTesting(model.level == .all)
+            .overlay {
+                if let morph = model.morph, !morph.gridHoles.isEmpty {
+                    ZoomGridHoles(holes: morph.gridHoles, color: LibrarySummaryView.background)
+                }
+            }
             .overlay {
                 if model.level != .all, feed.model.hasTiles {
                     LibrarySummaryView(model: model, level: model.level)
@@ -247,10 +373,34 @@ struct LibraryZoomOverlay: ViewModifier {
                         .transition(transition)
                 }
             }
+            .overlay {
+                if let morph = model.morph {
+                    ZoomFlightsLayer(morph: morph) { model.finishMorph($0) }
+                        .id(morph.id)
+                }
+            }
+            .coordinateSpace(.named(LibraryZoomSpace.name))
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .local)
+            } action: { frame in
+                model.viewport = frame
+            }
+            .onAppear {
+                model.decodedImage = { [session] item in
+                    guard let images = session.services?.images else { return nil }
+                    let etag = images.displayedEtag(fileId: item.fileId, etag: item.etag)
+                    return images.cache.bestMemoryImage(fileId: item.fileId, etag: etag, upTo: 1024)
+                }
+            }
             #if !os(macOS)
                 .overlay(alignment: .bottom) {
-                    if !isSelecting, feed.model.hasTiles {
+                    if showsPicker {
                         LibraryZoomPicker(model: model, gridStep: feed.zoomStep)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.size.height
+                        } action: { height in
+                            pickerHeight = height
+                        }
                         .padding(.bottom, 12)
                         .transition(.opacity)
                     }
@@ -273,12 +423,14 @@ struct LibraryZoomOverlay: ViewModifier {
     }
 
     /// Zooming in, the new level grows out of where the fingers were and the old one grows past them; out, both shrink.
+    /// Gently: the photos the two levels share travel themselves (`ZoomFlightsLayer`). Reduce Motion: a cross-fade.
     var transition: AnyTransition {
+        guard LibraryZoomMorph.style(reduceMotion: LibraryZoomHaptics.reduceMotion) == .flights else { return .opacity }
         let anchor = model.anchor
         let inward = model.zoomedIn
         return .asymmetric(
-            insertion: .scale(scale: inward ? 0.82 : 1.18, anchor: anchor).combined(with: .opacity),
-            removal: .scale(scale: inward ? 1.18 : 0.82, anchor: anchor).combined(with: .opacity))
+            insertion: .scale(scale: inward ? 0.94 : 1.06, anchor: anchor).combined(with: .opacity),
+            removal: .scale(scale: inward ? 1.06 : 0.94, anchor: anchor).combined(with: .opacity))
     }
 }
 
@@ -299,10 +451,13 @@ struct LibraryZoomPicker: View {
         }
         .pickerStyle(.segmented)
         .fixedSize()
-        #if !os(macOS)
+        #if os(iOS)
+            // Liquid Glass, floating over the photos (SPEC §17.5); solid with Reduce Transparency, as the system does it.
+            .padding(4)
+            .glassEffect(.regular, in: .capsule)
+        #elseif os(visionOS)
             .padding(4)
             .background(.regularMaterial, in: .capsule)
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         #endif
     }
 
@@ -377,6 +532,7 @@ struct LibrarySummaryView: View {
             .padding(.bottom, 56)
         }
         .scrollPosition(id: $scrolledId, anchor: .top)
+        .environment(\.zoomPhotoReporter, ZoomPhotoReporter(model: model, level: level))
         .accessibilityIdentifier("librarySummary")
         .coordinateSpace(.named(Self.space))
         .onGeometryChange(for: CGSize.self) {
@@ -384,7 +540,7 @@ struct LibrarySummaryView: View {
         } action: {
             size = $0
         }
-        .background(background)
+        .background(Self.background)
         .scaleEffect(displayScale, anchor: pinchAnchor)
         .opacity(1 - LibraryZoomGesture.progress(scale: pinch) * 0.25)
         .simultaneousGesture(magnify)
@@ -395,7 +551,7 @@ struct LibrarySummaryView: View {
         .accessibilityAction(named: Text("Zoom Out", bundle: .module)) { zoom(by: -1, bucket: topBucket, at: .top) }
     }
 
-    var background: Color {
+    static var background: Color {
         #if os(macOS)
             Color(nsColor: .windowBackgroundColor)
         #elseif os(visionOS)
@@ -455,8 +611,10 @@ struct LibrarySummaryView: View {
         model.move(from: level, by: steps, bucket: bucket, photo: photo, at: point)
     }
 
-    var displayScale: Double {
-        LibraryZoomGesture.displayScale(pinch, canZoomIn: true, canZoomOut: level != .years)
+    var displayScale: Double { displayScale(of: pinch) }
+
+    func displayScale(of scale: Double) -> Double {
+        LibraryZoomGesture.displayScale(scale, canZoomIn: true, canZoomOut: level != .years)
     }
 
     /// Follows the fingers; on release settles on the level the pinch was heading for, with its speed.
@@ -481,6 +639,11 @@ struct LibrarySummaryView: View {
                 withAnimation(.smooth(duration: 0.3)) { pinch = 1 }
                 guard steps != 0, steps > 0 || level != .years else { return }
                 LibraryZoomHaptics.trackpadLevelChange()
+                // The photos travel on from where the fingers left them (the level is scaled around the pinch).
+                model.releasedPinch = (
+                    displayScale(of: Double(value.magnification)),
+                    CGPoint(x: pinchAnchor.x * size.width, y: pinchAnchor.y * size.height)
+                )
                 zoom(by: steps, bucket: bucket, at: value.startAnchor)
             }
     }
@@ -501,7 +664,7 @@ struct SummaryCard: View {
             Color.clear
                 .aspectRatio(aspect, contentMode: .fit)
                 .overlay { SummaryPhoto(item: bucket.key, bucket: large ? 1024 : 256) }
-                .overlay(alignment: .bottomLeading) { caption }
+                .overlay(alignment: .bottomLeading) { caption.zoomMorphCaption(of: bucket.key.fileId) }
                 .clipShape(.rect(cornerRadius: large ? 14 : 10))
                 .contentShape(.rect(cornerRadius: large ? 14 : 10))
         }
@@ -516,9 +679,9 @@ struct SummaryCard: View {
     var caption: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(large ? .largeTitle.weight(.bold) : .headline)
+                .font(large ? Typography.yearTitle : Typography.overlayTitle)
             Text(AccessibilityText.photos(bucket.count))
-                .font(large ? .subheadline : .caption)
+                .font(large ? Typography.count : Typography.smallCount)
                 .opacity(0.85)
         }
         .foregroundStyle(.white)
@@ -569,9 +732,10 @@ struct DayMosaic: View {
                 open(nil)
             } label: {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(DayLabel.label(for: bucket.date)).font(.headline)
+                    // Bold date, light count (SPEC §17.5).
+                    Text(DayLabel.label(for: bucket.date)).font(Typography.dayTitle)
                     Spacer()
-                    Text(AccessibilityText.photos(bucket.count)).font(.subheadline).foregroundStyle(.secondary)
+                    Text(AccessibilityText.photos(bucket.count)).font(Typography.count).foregroundStyle(.secondary)
                 }
                 .contentShape(.rect)
             }
@@ -623,8 +787,9 @@ struct DayMosaic: View {
                     if more > 0 {
                         ZStack {
                             Color.black.opacity(0.35)
-                            Text(verbatim: "+\(more.formatted())").font(.title2.weight(.semibold)).foregroundStyle(.white)
+                            Text(verbatim: "+\(more.formatted())").font(Typography.figure).foregroundStyle(.white)
                         }
+                        .zoomMorphCaption(of: item.fileId)
                         .accessibilityHidden(true)
                     }
                 }
@@ -649,7 +814,9 @@ struct SummaryPhoto: View {
     var body: some View {
         PreviewImage(
             fileId: item.fileId, etag: item.etag, bucket: bucket, blurhash: item.blurhash, hasPreview: item.hasPreview,
-            mimeType: item.mimeType, path: item.directory.hasPrefix("/") ? Self.path(item) : nil)
+            mimeType: item.mimeType, path: item.directory.hasPrefix("/") ? Self.path(item) : nil
+        )
+        .zoomMorphPhoto(item)
     }
 
     static func path(_ item: GridMedia) -> String {

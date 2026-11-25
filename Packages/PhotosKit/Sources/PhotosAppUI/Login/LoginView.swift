@@ -16,6 +16,7 @@ public struct LoginView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var address = ""
     @State private var phase: Phase = .idle
     @State private var error: String?
@@ -82,9 +83,24 @@ public struct LoginView: View {
         // Centred in the window; scrolls when the window (or the screen with a keyboard) is smaller than the form.
         GeometryReader { (proxy: GeometryProxy) in
             ScrollView {
-                form.frame(minHeight: proxy.size.height)
+                if isAddingAccount {
+                    form.frame(maxWidth: .infinity).frame(minHeight: proxy.size.height)
+                } else {
+                    // The first login (SPEC §17.6.2): the form on a card over the drifting photo wall and the moving blue.
+                    form
+                        .welcomeCard()
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: proxy.size.height)
+                }
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
+        .background {
+            if !isAddingAccount { WelcomeBackdrop() }
+        }
+        // The backdrop is the same in light and dark mode, and so is the text on it.
+        .environment(\.colorScheme, isAddingAccount ? colorScheme : .dark)
         .certificateTrustAlert($untrusted) { untrusted in
             try? app.http.trustStore.trust(certificate: untrusted.certificate, for: untrusted.host)
             trustedHosts.insert(untrusted.host.lowercased())
@@ -158,7 +174,6 @@ public struct LoginView: View {
         }
         .padding(24)
         .frame(maxWidth: 480)
-        .frame(maxWidth: .infinity)
         // A login error appears away from the focus (VoiceOver is still on the button): read it out.
         .onChange(of: error) { _, message in
             if let message { AccessibilityNotification.Announcement(message).post() }
@@ -216,9 +231,18 @@ public struct LoginView: View {
                 .frame(width: 96, height: 96)
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 .accessibilityHidden(true)
-            Text("Nextcloud Photos", bundle: .module)
-                .font(.largeTitle.bold())
-                .accessibilityAddTraits(.isHeader)
+            Group {
+                if isAddingAccount {
+                    Text("Nextcloud Photos", bundle: .module)
+                } else {
+                    Text(
+                        "Welcome to Nextcloud Photos", bundle: .module,
+                        comment: "Headline of the login screen at the first launch, above the server address.")
+                }
+            }
+            .font(.largeTitle.bold())
+            .multilineTextAlignment(.center)
+            .accessibilityAddTraits(.isHeader)
             Text("All your photos and videos, on your own Nextcloud.", bundle: .module)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)

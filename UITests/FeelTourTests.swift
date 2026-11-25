@@ -60,63 +60,66 @@ final class FeelTourTests: XCTestCase {
         return app.scrollViews["librarySummary"]
     }
 
-    func testZoomLevelsTour() {
-        waitForTiles()
-        sleep(2)
-        shot("10-all-photos")
-
-        level("Years").tap()
-        sleep(3)
-        shot("11-years")
-        // A tap on a year zooms into its months.
-        let yearCard = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "^[0-9]{4}, .*")).firstMatch
-        XCTAssertTrue(yearCard.waitForExistence(timeout: 10), "No year cards")
-        yearCard.tap()
-        sleep(2)
-        shot("12-months-after-tapping-a-year")
-        XCTAssertTrue(level("Months").isSelected)
-
-        // Pinch in on the months: the days.
-        visibleCard().pinch(withScale: 1.25, velocity: 1)
-        sleep(2)
-        shot("13-days-after-pinch")
-        XCTAssertTrue(level("Days").isSelected)
-
-        // Pinch out on a day in the middle (a pinch on the whole scroll view would start on the tab bar): the months.
-        visibleCard().pinch(withScale: 0.75, velocity: -1)
-        sleep(2)
-        shot("14-months-after-pinch-out")
-        XCTAssertTrue(level("Months").isSelected)
-
-        level("Days").tap()
-        sleep(2)
-        // A tap on a day's photo opens All Photos at it.
-        let dayPhoto = app.scrollViews["librarySummary"].buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo'")).firstMatch
-        if dayPhoto.waitForExistence(timeout: 5) {
-            dayPhoto.tap()
+    // XCUIElement has no pinch on visionOS: the tour runs on iPhone and iPad.
+    #if !os(visionOS)
+        func testZoomLevelsTour() {
+            waitForTiles()
             sleep(2)
-            shot("15-all-photos-after-tapping-a-day")
-            XCTAssertTrue(level("All Photos").isSelected)
-        }
+            shot("10-all-photos")
 
-        // Pinch out of the grid until the days take over.
-        for attempt in 0..<7 {
-            guard level("Days").exists, !level("Days").isSelected else { break }
-            app.collectionViews.firstMatch.cells.element(boundBy: 6).pinch(withScale: 0.78, velocity: -1)
+            level("Years").tap()
+            sleep(3)
+            shot("11-years")
+            // A tap on a year zooms into its months.
+            let yearCard = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "^[0-9]{4}, .*")).firstMatch
+            XCTAssertTrue(yearCard.waitForExistence(timeout: 10), "No year cards")
+            yearCard.tap()
+            sleep(2)
+            shot("12-months-after-tapping-a-year")
+            XCTAssertTrue(level("Months").isSelected)
+
+            // Pinch in on the months: the days.
+            visibleCard().pinch(withScale: 1.25, velocity: 1)
+            sleep(2)
+            shot("13-days-after-pinch")
+            XCTAssertTrue(level("Days").isSelected)
+
+            // Pinch out on a day in the middle (a pinch on the whole scroll view would start on the tab bar): the months.
+            visibleCard().pinch(withScale: 0.75, velocity: -1)
+            sleep(2)
+            shot("14-months-after-pinch-out")
+            XCTAssertTrue(level("Months").isSelected)
+
+            level("Days").tap()
+            sleep(2)
+            // A tap on a day's photo opens All Photos at it.
+            let dayPhoto = app.scrollViews["librarySummary"].buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo'")).firstMatch
+            if dayPhoto.waitForExistence(timeout: 5) {
+                dayPhoto.tap()
+                sleep(2)
+                shot("15-all-photos-after-tapping-a-day")
+                XCTAssertTrue(level("All Photos").isSelected)
+            }
+
+            // Pinch out of the grid until the days take over.
+            for attempt in 0..<7 {
+                guard level("Days").exists, !level("Days").isSelected else { break }
+                app.collectionViews.firstMatch.cells.element(boundBy: 6).pinch(withScale: 0.78, velocity: -1)
+                sleep(1)
+                shot("16-grid-pinch-out-\(attempt)")
+            }
+            // A synthesized pinch can start UIKit's two-finger selection instead (real fingers rarely do): then this step is
+            // left out rather than failed.
+            guard level("Days").exists else {
+                app.buttons["Done"].firstMatch.tap()
+                return
+            }
+            shot("17-days-after-pinching-out-of-the-grid")
+            XCTAssertTrue(level("Days").isSelected)
+            level("All Photos").tap()
             sleep(1)
-            shot("16-grid-pinch-out-\(attempt)")
         }
-        // A synthesized pinch can start UIKit's two-finger selection instead (real fingers rarely do): then this step is
-        // left out rather than failed.
-        guard level("Days").exists else {
-            app.buttons["Done"].firstMatch.tap()
-            return
-        }
-        shot("17-days-after-pinching-out-of-the-grid")
-        XCTAssertTrue(level("Days").isSelected)
-        level("All Photos").tap()
-        sleep(1)
-    }
+    #endif
 
     func testShowSimilar() {
         waitForTiles()

@@ -97,6 +97,7 @@ enum BackupRowStatus {
     /// Root of the Collections tab.
     struct CollectionsList: View {
         @Environment(SessionModel.self) private var session
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var sections: [CompactNavigation.Section] {
             CompactNavigation.sections { (destination: AppDestination) -> Bool in
@@ -134,10 +135,17 @@ enum BackupRowStatus {
         @ViewBuilder func row(_ destination: AppDestination) -> some View {
             let label = Label(String(localized: destination.title), systemImage: destination.systemImage)
             if destination == .backup, let status = backupStatus {
+                // While the backup runs its icon breathes and the count rolls (SPEC §17.3).
+                let running: Bool = session.backup.status.isRunning
                 LabeledContent {
-                    Text(status)
+                    Text(status).rollingNumber(BackupStatusSymbol.progressValue(session.backup.status.phase))
                 } label: {
-                    label
+                    Label {
+                        Text(destination.title)
+                    } icon: {
+                        Image(systemName: destination.systemImage)
+                            .symbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous), isActive: running && !reduceMotion)
+                    }
                 }
             } else {
                 label

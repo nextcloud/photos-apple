@@ -20,6 +20,8 @@ struct MemoriesScreen: View {
     /// Years with enough photos for a year in review, newest first.
     @State private var years: [Int] = []
     @State private var loaded = false
+    /// A memory zooms out of its card (SPEC §17.4).
+    @Namespace private var zoom
 
     var body: some View {
         ScrollView {
@@ -74,14 +76,16 @@ struct MemoriesScreen: View {
     /// The year in review of every year with enough photos (SPEC §15.1); each also plays the year's film.
     var yearsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Year in review", bundle: .module).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+            Text("Year in review", bundle: .module).font(Typography.sectionTitle).accessibilityAddTraits(.isHeader)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(years, id: \.self) { (year: Int) in
                         NavigationLink {
                             YearInReviewScreen(year: year)
+                                .cardTransitionDestination(id: "year-\(year)", in: zoom)
                         } label: {
                             YearInReviewCard(year: year).frame(width: 150, height: 200)
+                                .cardTransitionSource(id: "year-\(year)", in: zoom, cornerRadius: 16)
                         }
                         .buttonStyle(.plain)
                     }
@@ -93,13 +97,15 @@ struct MemoriesScreen: View {
 
     func section(_ title: String?, _ memories: [Memory]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let title { Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader) }
+            if let title { Text(title).font(Typography.sectionTitle).accessibilityAddTraits(.isHeader) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 16)], spacing: 16) {
                 ForEach(memories) { memory in
                     NavigationLink {
                         MemoryScreen(memory: memory)
+                            .cardTransitionDestination(id: memory.id, in: zoom)
                     } label: {
                         MemoryCard(memory: memory)
+                            .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 14)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -157,14 +163,20 @@ struct MemoryCard: View {
     }
 
     var cover: some View {
-        PreviewImage(fileId: memory.cover, etag: "", bucket: 1024)
+        Color.clear
             .aspectRatio(4 / 3, contentMode: .fit)
+            .overlay {
+                // A little deeper than the card while the list scrolls (SPEC §17.4).
+                PreviewImage(fileId: memory.cover, etag: "", bucket: 1024).scrollParallax()
+            }
+            .clipped()
     }
 
     /// The picture fills the card the strip gives it; the title is on it and may take two lines.
     var compactCard: some View {
         Color.clear
-            .overlay { PreviewImage(fileId: memory.cover, etag: "", bucket: 256) }
+            .overlay { PreviewImage(fileId: memory.cover, etag: "", bucket: 256).scrollParallax(.horizontal) }
+            .clipped()
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(memory.title).font(.footnote.bold()).lineLimit(2)
@@ -181,8 +193,9 @@ struct MemoryCard: View {
 
     var titles: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(memory.title).font(.title3.bold())
-            if let dateLine { Text(dateLine).font(.caption) }
+            // A little smaller than before, two lines at most (SPEC §17.5).
+            Text(memory.title).font(Typography.overlayTitle).lineLimit(2)
+            if let dateLine { Text(dateLine).font(Typography.overlaySubtitle).lineLimit(1) }
         }
     }
 
@@ -203,7 +216,10 @@ struct MemoryCard: View {
 /// Archive needs authentication every time it is opened.
 struct ArchiveScreen: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var unlocked = false
+    /// The padlock clicks open before the archive replaces it (SPEC §17.3).
+    @State private var lockOpen = false
     @State private var error: String?
 
     var body: some View {
@@ -212,7 +228,11 @@ struct ArchiveScreen: View {
                 TimelineScreenArchived()
             } else {
                 ContentUnavailableView {
-                    Label(String(localized: "Archive is locked", bundle: .module), systemImage: "lock")
+                    Label {
+                        Text("Archive is locked", bundle: .module)
+                    } icon: {
+                        ChromeLockSymbol(isOpen: lockOpen)
+                    }
                 } description: {
                     Text(error ?? String(localized: "Archived photos are hidden from your library.", bundle: .module))
                 } actions: {
@@ -222,15 +242,26 @@ struct ArchiveScreen: View {
         }
         .navigationTitle(String(localized: "Archive", bundle: .module))
         .task { await unlock() }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { unlocked = false } }
-        .onDisappear { unlocked = false }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { lock() } }
+        .onDisappear { lock() }
+    }
+
+    func lock() {
+        unlocked = false
+        lockOpen = false
     }
 
     func unlock() async {
         let context = LAContext()
         do {
-            unlocked = try await context.evaluatePolicy(
+            let granted: Bool = try await context.evaluatePolicy(
                 .deviceOwnerAuthentication, localizedReason: String(localized: "Show archived photos", bundle: .module))
+            guard granted else { return }
+            lockOpen = true
+            if !reduceMotion { try? await Task.sleep(for: ChromeMotion.unlockedLinger) }
+            // Left (or sent to the background) while the lock opened: it stays locked.
+            guard lockOpen else { return }
+            unlocked = true
         } catch {
             self.error = error.localizedDescription
         }
