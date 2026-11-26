@@ -32,6 +32,8 @@
         @MainActor static func runRefresh() async {
             schedule()
             await run()
+            // With what the sync brought: the first screens, today's memories and recent albums (SPEC §18.3.2).
+            await SmartOfflineScheduling.prepareForNextOpen(model: AppHost.model)
             // A new day: the watch gets its photos without the app being opened.
             await WatchBridge.shared.update()
         }

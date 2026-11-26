@@ -103,6 +103,8 @@ final class LibraryZoomModel {
             }.value
             guard !Task.isCancelled, let self else { return }
             self.summary = built
+            // SPEC §18.2: key photos rank higher for the caches.
+            if let services { Task.detached(priority: .utility) { await services.noteKeyPhotos(of: built) } }
         }
     }
 

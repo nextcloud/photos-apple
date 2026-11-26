@@ -203,7 +203,7 @@ final class OrganizeTourTests: XCTestCase {
         func testFolderRules() {
             app.launch()
             waitForTimeline()
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             let rules = element("Folder Rules")
             scroll(to: rules)
             pause(1)
@@ -280,11 +280,11 @@ final class OrganizeTourTests: XCTestCase {
             undo.tap()
             pause(15)
             // Folder rules: a rule written into the server's file by the tester's script.
-            for _ in 0..<4 where !app.tabBars.buttons["Settings"].exists {
+            for _ in 0..<4 where !app.accountMenu.exists {
                 app.navigationBars.buttons.firstMatch.tap()
                 pause(1)
             }
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             let rules = element("Folder Rules")
             scroll(to: rules)
             rules.tap()

@@ -27,6 +27,8 @@ public struct MainActions {
     var openLink: ((DeepLink) -> Void)? = nil
     /// Shows the search with these chips.
     var search: (([SearchFilter]) -> Void)? = nil
+    /// View ▸ Edit Sidebar… (Mac; SPEC §19.1).
+    var editSidebar: (() -> Void)? = nil
 }
 
 /// Actions of the focused photo grid or viewer, used by the menu bar.
@@ -149,7 +151,8 @@ public struct PhotosCommands: Commands {
 
         CommandGroup(replacing: .importExport) {
             Button(String(localized: "Upload Photos…", bundle: .module)) { main?.upload() }
-                .keyboardShortcut("u", modifiers: [.command, .shift])
+                // ⌘U: the toolbar has no upload button any more; this, drag and drop and Continuity Camera remain (SPEC §19.2).
+                .keyboardShortcut("u")
                 .disabled(main == nil)
             Button(
                 String(
@@ -192,6 +195,9 @@ public struct PhotosCommands: Commands {
                 .disabled(grid?.zoomToFit == nil)
             Toggle(String(localized: "Square Tiles", bundle: .module), isOn: $squareTiles)
                 .keyboardShortcut("s", modifiers: [.command, .option])
+            if main?.editSidebar != nil {
+                Button(SidebarWording.editTitle) { main?.editSidebar?() }
+            }
             Divider()
             // ⇧⌘R: ⌘R is Image ▸ Rotate Left, as in Photos.
             Button(String(localized: "Sync Now", bundle: .module)) { main?.syncNow() }
@@ -256,9 +262,9 @@ public struct PhotosCommands: Commands {
 
         CommandMenu(String(localized: "Go", bundle: .module)) {
             let destinations: [AppDestination] = Self.goItems.filter { main?.available.contains($0) ?? true }
-            ForEach(Array(destinations.enumerated()), id: \.element) { index, destination in
+            ForEach(destinations) { destination in
                 Button(String(localized: destination.title)) { main?.go(destination) }
-                    .keyboardShortcut(index < 9 ? KeyEquivalent(Character(String(index + 1))) : nil)
+                    .keyboardShortcut(Self.goShortcut(destination))
                     .disabled(main == nil)
             }
             Divider()
@@ -277,8 +283,20 @@ public struct PhotosCommands: Commands {
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
     }
 
-    /// In the order of the sidebar; destinations the server does not offer are filtered out.
-    static let goItems: [AppDestination] = SidebarLayout.primary + SidebarLayout.collections + SidebarLayout.utilities
+    /// Every place, also those that are no sidebar row any more (Photos, Videos, Map, Smart albums…: SPEC §19.1), grouped
+    /// like the sidebar; destinations the server does not offer are filtered out.
+    static let goItems: [AppDestination] = [
+        .library, .photos, .videos, .favorites, .memories, .map, .albums, .sharedAlbums, .smartAlbums,
+        .people, .places, .sharedWithYou,
+        .folders, .tags, .archive, .recentlyDeleted, .cleanUp, .duplicates, .freeSpace, .insights, .stickers,
+    ]
+
+    /// ⌘1…⌘9 as before the slimmer sidebar, fixed per place (not by position, which moved with the server's features).
+    static func goShortcut(_ destination: AppDestination) -> KeyEquivalent? {
+        let numbered: [AppDestination] = [.library, .photos, .videos, .favorites, .memories, .map, .albums, .sharedAlbums, .smartAlbums]
+        guard let index = numbered.firstIndex(of: destination) else { return nil }
+        return KeyEquivalent(Character(String(index + 1)))
+    }
 }
 
 extension View {

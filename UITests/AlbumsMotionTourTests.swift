@@ -131,11 +131,14 @@ final class AlbumsMotionTourTests: XCTestCase {
         shot("albums-33-back-to-memories")
     }
 
-    /// Places: a place's grid, and the map from the toolbar.
+    /// Places: a place's grid, and the map — the two modes of Places (SPEC §19.1).
     func testPlaces() throws {
         pause(8)
         openLink("places")
         pause(3)
+        let grid = app.buttons["Grid"].firstMatch
+        if grid.waitForExistence(timeout: 5) { grid.tap() }
+        pause(2)
         shot("albums-40-places")
         let tile = app.scrollViews.buttons.matching(NSPredicate(format: "label CONTAINS 'place'")).firstMatch
         guard tile.waitForExistence(timeout: 15) else { throw XCTSkip("No places on this server.") }
@@ -145,7 +148,7 @@ final class AlbumsMotionTourTests: XCTestCase {
         pause(3)
         shot("albums-42-place")
         back()
-        let map = app.navigationBars.buttons["Map"].firstMatch
+        let map = app.buttons["Map"].firstMatch
         if map.waitForExistence(timeout: 5) {
             map.tap()
             pause(0.2)

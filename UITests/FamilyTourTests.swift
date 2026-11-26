@@ -174,7 +174,7 @@ final class FamilyTourTests: XCTestCase {
         func testFamilyLibrary() throws {
             app.launch()
             waitForTimeline()
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Family Library")).firstMatch
             scroll(to: row)
             shot("20-settings-family-rows")
@@ -209,7 +209,7 @@ final class FamilyTourTests: XCTestCase {
         func testLockScreenAlbum() throws {
             app.launch()
             waitForTimeline()
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lock Screen Album")).firstMatch
             scroll(to: row)
             pause(1)

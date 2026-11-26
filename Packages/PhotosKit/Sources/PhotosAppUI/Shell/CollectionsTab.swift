@@ -7,8 +7,9 @@ import PhotosDomain
 import PhotosModel
 import SwiftUI
 
-/// Navigation where there is only a tab bar (iPhone, narrow iPad windows; SPEC §6.2): Library, Collections, Search
-/// and Settings are tabs, and every other place is listed in the Collections tab and pushed in its stack.
+/// Navigation where there is only a tab bar (iPhone, narrow iPad windows; SPEC §6.2): Library, Collections and Search
+/// are tabs, every other place is listed in the Collections tab and pushed in its stack, and Settings is a sheet from
+/// the account button (SPEC §19.2).
 ///
 /// The app's navigation state stays what it is everywhere — the selected destination and its path. These functions
 /// translate between that state and the Collections tab's stack.
@@ -24,7 +25,10 @@ enum CompactNavigation {
     }
 
     /// Destinations with a tab of their own.
-    static let tabs: [AppDestination] = [.library, .collections, .search, .settings]
+    static let tabs: [AppDestination] = [.library, .collections, .search]
+
+    /// Destinations shown as a sheet over the window instead of a tab or a row (the account button opens them).
+    static let sheets: Set<AppDestination> = [.settings]
 
     /// An iPhone never has a sidebar, whatever its size class (a large iPhone is "regular" in landscape); an iPad
     /// has none while its window is narrow.
@@ -59,14 +63,15 @@ enum CompactNavigation {
         return (destination, Array(path.dropFirst()))
     }
 
-    /// The rows of the Collections list: everything the sidebar offers besides the Library, and Backup with the utilities.
+    /// The rows of the Collections list: the sidebar's rows besides the Library (SPEC §19.1), and Backup with the
+    /// utilities. Photos and Videos are filters of the Library, the map is in Places.
     static func sections(visible: (AppDestination) -> Bool) -> [Section] {
         let all: [Section] = [
-            Section(kind: .browse, destinations: SidebarLayout.primary.filter { $0 != .library }),
-            Section(kind: .collections, destinations: SidebarLayout.collections),
-            Section(kind: .utilities, destinations: SidebarLayout.utilities + [.backup]),
+            Section(kind: .browse, destinations: SidebarLayout.pinnedByDefault.filter { $0 != .library }.filter(visible)),
+            Section(kind: .collections, destinations: SidebarLayout.albumRows(visible: visible)),
+            Section(kind: .utilities, destinations: (SidebarLayout.utilities + [.backup]).filter(visible)),
         ]
-        return all.map { Section(kind: $0.kind, destinations: $0.destinations.filter(visible)) }.filter { !$0.destinations.isEmpty }
+        return all.filter { !$0.destinations.isEmpty }
     }
 }
 
@@ -122,6 +127,10 @@ enum BackupRowStatus {
                 }
             }
             .navigationTitle(String(localized: "Collections", bundle: .module))
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { CollectionsAddMenu() }
+                ToolbarItem(placement: AccountMenuButton.placement) { AccountMenuButton() }
+            }
         }
 
         @ViewBuilder func header(_ kind: CompactNavigation.Section.Kind) -> some View {
@@ -133,7 +142,7 @@ enum BackupRowStatus {
         }
 
         @ViewBuilder func row(_ destination: AppDestination) -> some View {
-            let label = Label(String(localized: destination.title), systemImage: destination.systemImage)
+            let label = Label(String(localized: destination.rowTitle), systemImage: destination.systemImage)
             if destination == .backup, let status = backupStatus {
                 // While the backup runs its icon breathes and the count rolls (SPEC §17.3).
                 let running: Bool = session.backup.status.isRunning
@@ -155,6 +164,37 @@ enum BackupRowStatus {
         var backupStatus: String? {
             let backup = session.backup
             return BackupRowStatus.text(isAvailable: backup.isAvailable, isEnabled: backup.settings.isEnabled, status: backup.status)
+        }
+    }
+
+    /// The Collections tab's "+": a new album, or an upload (SPEC §19.2).
+    struct CollectionsAddMenu: View {
+        @Environment(SessionModel.self) private var session
+        @State private var creatingAlbum = false
+        @State private var upload: UploadStart?
+
+        var body: some View {
+            Menu {
+                if session.features.has(.photosDAV) {
+                    Button {
+                        creatingAlbum = true
+                    } label: {
+                        Label(String(localized: "New album…", bundle: .module), systemImage: "rectangle.stack.badge.plus")
+                    }
+                }
+                Menu {
+                    UploadMenuItems { (start: UploadStart) in upload = start }
+                } label: {
+                    Label(UploadStart.menuTitle, systemImage: UploadStart.systemImage)
+                }
+            } label: {
+                Label(
+                    String(localized: "Add", bundle: .module, comment: "The Collections tab's + menu: new album, upload."),
+                    systemImage: "plus")
+            }
+            .accessibilityIdentifier("collections-add")
+            .uploadPresenter($upload)
+            .sheet(isPresented: $creatingAlbum) { AlbumEditor(album: nil) }
         }
     }
 #endif

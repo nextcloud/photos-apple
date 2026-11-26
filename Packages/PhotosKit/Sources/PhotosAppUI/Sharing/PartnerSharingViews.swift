@@ -73,28 +73,3 @@ struct PartnerSharingSection: View {
         return partners.settings.folders.filter { !shared.contains($0.path) }
     }
 }
-
-/// The timeline's switch between "with partner photos" and "only mine"; shown when partner folders are set up.
-struct PartnerFilterButton: View {
-    @Environment(SessionModel.self) private var session
-
-    var body: some View {
-        if let partners = session.partners, partners.hasPartners {
-            let shown = partners.settings.showInTimeline
-            let title: String =
-                shown
-                ? PlatformWording.title(
-                    mac: LocalizedStringResource("Hide Partner Photos", bundle: .module),
-                    other: LocalizedStringResource("Hide partner photos", bundle: .module))
-                : PlatformWording.title(
-                    mac: LocalizedStringResource("Show Partner Photos", bundle: .module),
-                    other: LocalizedStringResource("Show partner photos", bundle: .module))
-            Button {
-                partners.setShownInTimeline(!shown)
-            } label: {
-                Label(title, systemImage: shown ? "person.2.fill" : "person.2.slash")
-            }
-            .help(title)
-        }
-    }
-}

@@ -314,7 +314,7 @@ Server wins for everything except operations still in the outbox: a sync does no
 - Request only the bucket sizes **64, 256, 1024, 4096** (the server rounds up to these and pregenerates 64/256/1024 on extended servers). Pick the bucket from tile pixel size (point size × display scale, scale capped at 2, 0.8 tolerance; `photos-extended-api.md` hidpi-aware-previews).
 - The server preview is not cropped (aspect-fit). Square tiles crop client-side (centre, or face-aware if detections are cached).
 - Show `nc:metadata-blurhash` while loading.
-- **Disk cache** keyed by `(account, fileId, etag, bucket)`, LRU, default limit 2 GB (setting: 500 MB – 20 GB). Memory cache sized by the platform. Prefetch around the scroll position (UICollectionView prefetching) and in `BGProcessingTask` for the first screens of the timeline and recently opened albums.
+- **Disk cache** keyed by `(account, fileId, etag, bucket)`, LRU, default limit 2 GB (setting: 500 MB – 20 GB). Memory cache sized by the platform. Prefetch around the scroll position (UICollectionView prefetching) and in the background for the first screens of the timeline, today's memories and recently opened albums (§18.3.2).
 - If `nc:has-preview` is false or the preview request returns 404 (e.g. HEIC on a server without a HEIC preview provider), download the original (images < 50 MB) and make a thumbnail locally with ImageIO (`CGImageSourceCreateThumbnailAtIndex`), cached like a server preview. RAW/DNG likewise.
 
 #### 5.5.2 Full-size viewing
@@ -347,15 +347,15 @@ A still whose `nc:metadata-files-live-photo` holds a file id is a Live Photo; th
 The structure mirrors the web app's navigation (including the extended "Advanced" grouping) and adapts per platform.
 
 **iPhone** — tab bar (`TabView`, Liquid Glass):
-1. **Library** — the timeline (All / Photos / Videos / Favorites as a segmented control or filter menu), memories strip at the top, search & filter button.
-2. **Collections** — sections: Memories (trips, year recap, On this day), Albums, Shared albums, Smart albums, People, Places (with Map entry), Tags, Folders, Shared with you; at the bottom "Utilities": Archive, Recently deleted, Duplicates, Free up space, Backup status.
+1. **Library** — the timeline (All / Photos / Videos / Favorites in its filter menu, §19.2), memories strip at the top; top bar: filter menu, Select and the account button (Settings, Upload, accounts).
+2. **Collections** — the sidebar's rows (§19.1): Favorites, Memories, People, Places (map and places); Albums (with the smart albums), Shared (shared albums and "Shared with you"); at the bottom "Utilities": Folders, Tags, Archive, Recently deleted, Clean up, Insights, Stickers, Backup status. Its top bar has "+" (New album…, Upload) and the account button.
 3. **Search** (search tab role) — unified search (§7.7).
 
 **iPad, Mac, visionOS** — `NavigationSplitView` with a sidebar:
-- Library: All media, Photos, Videos, Favorites, On this day, Memories, Map
-- Collections: Albums (expandable list of albums), Shared albums, Smart albums (each smart album as a row), People, Places, Tags
-- Advanced (collapsed by default): Folders, Shared with you, Archive (lock icon), Recently deleted, Duplicates, Free up space
-- Backup status row at the bottom; account switcher in the sidebar header.
+- *Superseded by §19.1 (round 9), the slim sidebar:* Library, Favorites, Memories, People, Places; Albums (the top albums
+  listed on the Mac, then All Albums) and Shared; Utilities (collapsed): Folders, Tags, Archive, Recently deleted, Clean up,
+  Insights, Stickers. Photos and Videos are Library filters, the map is part of Places. The Mac's account is a compact row at
+  the bottom of the sidebar; iPad and Vision Pro keep the account switcher in the sidebar header.
 
 **macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square Tiles ⌥⌘S; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
 Decided in round 4 (as in Photos): Image ▸ Rotate Left ⌘R and Rotate Right ⌥⌘R work on the selection and save like the editor's "Overwrite original" (a new file version; not offered for read-only shares or formats that can't be written back), View ▸ Sync Now is ⇧⌘R; Edit ▸ Copy puts the originals on the pasteboard (image data and file URL; at most 100 items, Export for more); "Add to Album" is a submenu (New Album…, the albums used last in this app, then the most recently changed, All Albums…); the grid's context menu has Copy, Rotate, Share (system share menu/sheet) and the same submenu; an album opens in its own window from File ▸ Open in New Window, its card's context menu or ⌥-click (one window per album, restored with the app; it shows the album only while its account is the active one). On iPad, a photo dragged from a grid onto an album (another window) is added to it — the same file, not an uploaded copy; files from other apps dropped there are uploaded into it.
@@ -369,7 +369,7 @@ Every view has: first-load skeleton, empty state with a single helpful action (e
 ### 6.4 Photo grid
 
 - Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting is per device (Settings › On this device › Square tiles, View ▸ Square Tiles ⌥⌘S) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
-- Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and a toolbar slider. Map the density to the server config `gridDensity` (small/medium/large) where available.
+- Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and View ▸ Zoom In/Out (the toolbar slider was removed in M10, §19.2). Map the density to the server config `gridDensity` (small/medium/large) where available.
 - Section headers: **month** (sticky) and **day** headers (local calendar day of the capture time, "Today", "Yesterday", weekday names within the last week), each with a select-all checkbox while selecting.
 - **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync). *Decided (simulator pass):* on iPhone, iPad and Vision Pro it is not UIKit's section index (which lists every year in a column over the photos, into the tab bar) but the Mac's scrubber: it runs between the bars, appears while the grid scrolls and fades out like Photos' scroll indicator, can be grabbed at the edge only while shown, leaves out year labels that do not fit (the newest and oldest stay), draws each label on a background of its own, and stays for VoiceOver as an adjustable element (a year per swipe).
 - Badges: video duration, Live, favourite (heart), stack count, shared-album origin, offline (pinned), cloud-only original state where relevant, archived.
@@ -440,7 +440,7 @@ Requires: `photosDAV`. Wire formats: `photos-server-api.md` §6, §7; extended p
 - **SH-5** Comments on own and shared albums when `albumComments` (comments DAV `/remote.php/dav/comments/photos_album/<albumId>`): list, post, delete own; not for public links.
 - **SH-6** **Public album viewer**: open a public link (pasted, from the share sheet, or deep link) anonymously via `/remote.php/dav/photospublic/<token>` with `Authorization: Basic base64("<token>:")`, previews via `publicPreview`; read-only grid, viewer, slideshow, download/export. Does not need an account.
 - **SH-7** **Share via Nextcloud** (photo or folder): Nextcloud's own sharing through the OCS Files Sharing API (`/ocs/v2.php/apps/files_sharing/api/v1/shares`, recipients from `…/sharees`), on every server without a Photos change. Recipients: users, groups, users and groups on other servers (federation), email addresses, Teams, Talk conversations (when the `spreed` capability is there); what is offered follows `capabilities.files_sharing`. Public links with password, expiry date (enforced limits respected), permissions (folders: view, view and upload, file drop), hide download, label and note. Existing shares are listed and can be changed or removed. Albums keep SH-1/SH-2: the Photos server shares albums only with users, groups and one public link; the album sharing sheet says that other servers, email and Talk work for photos and folders, not for albums (that would need a server change). All links are shown and copied through one view (`SharedLinkView`, warns for http). Several photos at once: one share per photo and recipient (Nextcloud shares one file per share), email recipients left out (one email per photo); a public link to several photos is an album with a link (SH-4).
-- **SH-8** **Partner sharing**: Settings › Partner sharing lists folders shared with the user (received user/group shares); turning one on indexes it with the timeline folders (only that folder is read, no rebuild) and its photos get a partner badge; a toolbar button and a switch hide or show them in the timeline. "Share my photos with a partner…" opens SH-7 for the upload folder. Stored per account on the device; the server and the web app's timeline folders are not changed.
+- **SH-8** **Partner sharing**: Settings › Partner sharing lists folders shared with the user (received user/group shares); turning one on indexes it with the timeline folders (only that folder is read, no rebuild) and its photos get a partner badge; "Hide partner photos" in the Library's filter menu (§19.2) and a switch hide or show them in the timeline. "Share my photos with a partner…" opens SH-7 for the upload folder. Stored per account on the device; the server and the web app's timeline folders are not changed.
 - **SH-9** **Activity in shared albums**, without server changes: every listing of the albums (opening Albums, and after a sync at most every 15 minutes) is compared with the stored one; an album shared with the user, or an own album shared with people, that has more photos than before, and an album newly shared with the user, become an entry of a local activity list ("New in shared albums" row above the albums, list with "Mark all as seen"; opening the album marks it seen). Photos added in this app are not reported (the outbox raises the stored count first). Found by a background refresh while the app is not in front, it is also announced with a local notification (Settings › Shared albums, only if notifications are allowed; opens Shared albums). Instant push ("Anna added 12 photos") needs the server to send it (companion S5); the Photos server reports no adder either.
 
 ### 7.7 Search, filters and smart albums — M4 (basic filter bar in M1)
@@ -510,6 +510,8 @@ Requires: `files.undelete`. Lists trashed media (`PROPFIND /remote.php/dav/trash
 - **Duplicates**: groups by `size + captureTime + width×height` over the whole index (exact copies; `photos-extended-api.md` duplicates-view). Review UI per group: keep the best (largest/oldest path heuristics, user can change), delete the rest; "Merge favourites/albums" is not possible server-side — warn if the deleted copies are in albums. Decided in round 4: the warning uses the album content in the local index only (albums never opened on the device are reported as not checked, no extra server requests), names the albums the kept copy is not in, and offers to add the kept copy to them before deleting (own files only; albums filled by filters are left out).
 - **Free up space**: screenshots, screen recordings, large videos (> 100 MiB) heuristics from the web (patterns in `photos-extended-api.md` free-up-space), sorted by size, bulk delete with total size shown.
 - Device storage ("Remove backed-up photos from this device") is part of Backup (§7.18.8), not this screen.
+- Since M10 both screens are reached from one Clean up screen (§19.3), with similar shots, large videos and the device's
+  free-up row beside them; their destinations and links open Clean up at their section.
 
 ### 7.16 Editing — M5
 
@@ -892,7 +894,7 @@ keyboard, keep the best, edit in the tools they already use. Mac first; the iPad
 - Feedback: a short confirmation in the middle ("★★★ 3 Stars", "Pick") and VoiceOver announcement; tiles show the flag
   and stars in the top leading corner (stars hidden below 56 pt tiles), rejected tiles are dimmed; the viewer shows the
   mark in a corner.
-- Library toolbar menu "Ratings and Flags": All Items · Picks · Unflagged · Hide Rejected · Rejected · 1–5 Stars or More ·
+- "Ratings and Flags" submenu of the Library's filter menu (§19.2): All Items · Picks · Unflagged · Hide Rejected · Rejected · 1–5 Stars or More ·
   Unrated (a condition of the grid query, so 100 000 photos stay fast), Auto-Advance, **Delete Rejected…** (every
   rejected photo of the library that may be deleted, after a confirmation with the count; to the trash bin; undoable).
 
@@ -1477,7 +1479,8 @@ Memories: Stories or Strip (the strip's context menu has Show as Stories).
 
 **Command palette ("Quick Actions", ⌘K).** One field that goes anywhere and does anything.
 - *Where.* ⌘K on the Mac (Go ▸ Quick Actions…) and on iPad or iPhone with a keyboard (the same command gives the
-  shortcut); the ⌘ button in the Mac window's toolbar and in the Search tab's toolbar elsewhere. A floating panel over
+  shortcut); the ⌘ button in the Search tab's toolbar on iPhone, iPad and Vision Pro (the Mac window's toolbar button was
+  removed in M10, §19.2). A floating panel over
   the window (Mac, iPad, Vision Pro; a click or tap outside closes it, as Spotlight), a sheet on iPhone (compact width).
 - *What it finds* (`CommandPalette`, `CommandPaletteCatalog`, read from the local index each time it opens): the app's
   places (with words people use for them: "trash" finds Recently deleted, "settings backup" finds Backup), the Mac's
@@ -1819,7 +1822,7 @@ album or a folder is shown. A photo is uploaded as it comes (HEIC, JPEG, PNG; ot
 `IMG_yyyyMMdd_HHmmss`, with its EXIF capture time; a scan becomes one JPEG per page (`Scan_yyyyMMdd_HHmmss_N.jpg`, pages a
 second apart so they keep their order), because the library shows pictures, not PDFs. Destination: the album (uploaded
 to the upload folder and added), the folder, or the upload folder. iPhone and iPad: Take Photo (system camera) and Scan
-Documents (VisionKit) in the Library's Upload menu when the device has a camera. Uploads go through the manual-upload
+Documents (VisionKit) in the Upload menu (the account button's menu and the Collections tab's "+", §19.2) when the device has a camera. Uploads go through the manual-upload
 queue (§7.17).
 
 **16.5.4 Menu bar extra (Mac).** Off by default; Settings › General › Show in Menu Bar. An icon (upload arrow while
@@ -2411,7 +2414,8 @@ Each platform's own idiom, from the system's own parts; nothing of the iPhone's 
   scroll edge effect; Reduce Transparency makes that edge solid (system behaviour). In the Library the memories strip
   stays above the grid, so there the grid starts below it.
 - *Glass toolbar items* — the window toolbar's items are the system's: on macOS 27 they are drawn as glass capsules,
-  grouped by the system (zoom level picker, zoom slider, ratings, upload, search). No hand-made glass.
+  grouped by the system (filter menu, zoom level picker, search; M10 removed the zoom slider and the upload button, §19.2).
+  No hand-made glass.
 - *Tiles lift under the pointer* (`GridHoverLift`) — the picture under the pointer grows by 8 points (2–5 % of its side)
   in 0.16 s and casts a soft shadow (radius 10, 35 %); it settles back in 0.24 s when the pointer leaves. Layer
   properties of one tile only (sublayer transform, shadow with a path), no layout; one tracking area for the grid; only
@@ -2439,6 +2443,400 @@ Each platform's own idiom, from the system's own parts; nothing of the iPhone's 
   keep their hover effect.
 - *Depth* — the viewer's own controls in the window (previous/next buttons, the copies of a stack) float 24 pt in front
   of the photo (`viewerChromeDepth`).
+
+## 18. M9 — Caching for the photos that matter
+
+Goal (the owner's words): improve the local caching "so that the performance of the most important photos is better".
+Ten ideas in three packages; no server changes (existing preview, WebDAV and OCS APIs only). Builds on the preview
+pipeline (§5.5), smart offline (§15) and the budgets of §10.
+
+### 18.1 Loading and measuring: one cache key per photo, viewer neighbours, cache metrics [load]
+
+**18.1.1 One cache key per photo.** The memory and disk caches key a preview by `(fileId, ETag, bucket)`. Covers,
+memories, story cards, hero headers, Year in Review, places, people's covers, the lock-screen and family album pickers
+know only a file id and asked with an empty ETag, so the same photo was cached twice (`<id>-0-<bucket>` next to the
+grid's `<id>-<etag>-<bucket>`) and a cover downloaded a preview the grid had on disk. The pipeline now resolves the ETag
+itself: `ImagePipeline.setEtagProvider` is set by `AccountServices` to `LibraryStore.etag(of:)` (one primary-key read of
+`media`, else the album-only `collectionMedia` row), and `resolved(_:)` fills an empty ETag before anything else
+(`withEdits`, `displayedEtag`, `preview`, `prefetch` and `placeholder` all go through it). Callers keep passing `""`;
+the two places that read the memory cache directly with `""` (album cover tile, cover tint) ask `displayedEtag` first.
+A file the library does not know (a public album, which has no library) keeps its key of its own, as before. Requests
+with an ETag are not looked up, so the grid pays nothing. Buckets are chosen by `PreviewSizing` only;
+`PhotosAPI.previewBucket(forPixels:)`, which nobody called and which rounded differently (0.8 instead of 0.9), is gone.
+
+**18.1.2 Viewer neighbours and a picture at once.** When the viewer shows page *n* (`ViewerNeighbourPrefetch` on
+`MediaViewer`, `ViewerPrefetchPlan` in PhotosMedia):
+- the 1024 px previews of *n±1* and *n±2* are asked for with `prefetch(_:decode: true)`, the direction of paging first
+  (*n+1, n+2, n−1, n−2* when paging forward; forward when the viewer has just opened). Videos are included: their page
+  shows the same 1024 px poster. What is no longer a neighbour after a page change is taken back
+  (`cancelPrefetch`), and closing the viewer takes everything back.
+- `decode: true` is new: a neighbour that is on disk is also decoded into memory, in the local lane, after what is on
+  screen (a queue of local prefetches, like the network one; a prefetch that comes on screen joins the waited-for
+  queue). Without it (the grid's prefetching) disk previews are left alone, as before.
+- after the photo has been shown for 3 s, on a network that is not expensive or constrained (Wi-Fi, Ethernet; the
+  Mac on Wi-Fi) and not in Low Power Mode, its 4096 px preview is prefetched for zooming: stored whole on disk, decoded
+  only to 1024 px in memory (zooming decodes it again from disk at full size). Paging away before takes it back.
+- the page shows the best picture on the device at once: the largest decode in memory, else (new) a smaller preview
+  on disk — 256 or 64 px, usually the grid's tile — read off the main thread (`ImagePipeline.placeholder(for:)`, which
+  never downloads), while the 1024 px preview loads; the BlurHash only when there is nothing at all.
+Prefetches still run only when nothing on screen is waiting in their lane, newest batch first, and are bounded (200 per
+lane).
+
+**18.1.3 Measuring.** `CacheMetrics` (PhotosMedia, one shared instance) counts every preview the pipeline delivers by
+layer — memory, disk cache, smart offline, offline album, downloaded, not loaded — and bucket, separately for loads
+somebody waited for and loads only a prefetch asked for (the hit rate is waited-for previews served from the device).
+The grid's own memory fast path (`TileLoader`) counts as a memory hit. Times to show are kept as ring buffers of 1024
+samples each, reported as p50 and p95: grid tiles (configuration to first real picture; the BlurHash does not count),
+viewer first picture and viewer sharp picture (the page becoming current to any picture, and to its 1024 px preview).
+Recording is a few additions under an uncontended `Mutex` with no allocation; an actor would cost more than the event.
+`os_signpost` intervals "Preview" (one load, with the layer it came from), "Tile" and "Viewer" (subsystem
+`com.nextcloud.photos`, category `cache`) are only begun while Instruments records. Settings › Server › Cache
+performance shows the counts and shares per layer, the hit rate overall and per size, the times with the §10 goals, and
+what is stored per bucket and pool (preview cache per size, smart offline, offline albums, originals cache — scanned
+off the main thread every 10 s while the screen is open — and the memory budget); Reset counters starts again. While
+open it writes the snapshot to `Library/Caches/cache-metrics.json` (used by the simulator measurements).
+
+**18.1.4 Measured (iPhone 17 simulator, iOS 27.2, 8089 test library).** `CacheMeasureTests` runs its phases on a
+fresh install, each in a new process (counters from zero, disk cache carried over): 1. the timeline loads and scrolls;
+2. after Reset counters, Collections › Memories, Albums and Places with their covers; 3. after Reset counters, the
+viewer opened on the 8th tile and paged ten times at 1.5 s per photo; 4. on a fresh install of its own with smart
+offline off, the viewer paged ten times at 2 s per photo (`PHOTOS_UITEST_PACE`). Before = the metrics commit without
+18.1.1/18.1.2, after = with them (with the 4096 px prefetch after 1.5 s; now 3 s, see below). Script and JSON:
+`~/aloha-work/photos-tools/r8load/` (`measure.sh`, `summary.py`, `before*/after*.json`); shots
+`ios-fix-shots/r8-load/`. The Mac was heavily loaded by parallel builds (load average 100–600) and the PHP test server
+took 2.3–3.9 s per uncached 1024 px preview, so the times are far above a real server's; the counts are what compares.
+
+| Phase | Before | After |
+|---|---|---|
+| 2 covers: served from the device | 9 of 40 (22 %): 6+3 memory, 28 downloaded | 17 of 38 (45 %): 9 memory, 4 disk, 4 smart offline; 18 downloaded |
+| 3 viewer, smart offline on, 1.5 s/photo: 1024 px from the device | 47 of 54 (87 %), 5 downloaded | 24 of 27 (89 %), 1 downloaded |
+| 3 viewer: sharp picture p50 / p95 | 0 / 29 ms (11 pages) | 0 / 1194 ms (9 pages; one page waited for the server) |
+| 4 viewer, no smart offline, 2 s/photo: 1024 px from memory when shown | 2 of 22 (9 %) | 14 of 24 (58 %); 10 neighbours and 8 large previews loaded ahead |
+| 4 viewer: pages sharp while shown | 7 of 9, p95 768 ms | 9 of 9, p95 1606 ms |
+| All phases: first picture (any size) | p50 = p95 = 0 ms | p50 = p95 = 0 ms |
+
+Reading: one cache key doubles the covers served from the device — the rest are photos the grid never loaded in the
+run (older memories), and their files now serve the grid in turn. Before 18.1.2 the viewer already had one page ahead,
+because the paging stack builds the next page early, and smart offline holds most recent photos at 2048 px; the
+neighbours help most when photos come from the server and the user looks at each for a few seconds (phase 4: every page
+was sharp while shown instead of 7 of 9, 58 % of them straight from memory). At one photo per second (also measured)
+neither build kept up with a server needing 2–4 s per preview. The worse p95 of phase 4 came with eight 4096 px
+downloads competing with the neighbours on the slow server; the large preview now waits 3 s instead of 1.5 s, so quick
+browsing no longer asks for it. The §10 budgets (150 ms cached, 600 ms uncached) are met for every first picture and
+for cached pages; uncached sharp pictures are bound by the server here.
+
+### 18.2 Importance-aware cache: recently viewed, importance ranking, per-size budgets, memory pressure [evict]
+
+The caches keep what matters to the user longest: what was looked at lately, what the app shows first (covers, key photos,
+memory covers), and the thumbnails the grids cannot do without. Before, one LRU by file date decided for every size at
+once, and a memory warning emptied the whole memory cache.
+
+#### 18.2.1 Recently viewed
+
+- A photo the viewer shows for at least one second (`AccountServices.viewedAfter`) counts as viewed. The viewer runs
+  `AccountServices.viewerShows(_:neighbours:)` in a `.task(id: currentFileId)` (one line in `MediaViewer.swift`); paging
+  on or closing cancels it, so flicking through photos records nothing.
+- Per account, in the account database: table `recentlyViewed(fileId, viewedAt, count)` (`CacheImportanceStore`,
+  migration `v8-cache-importance`). One upsert per view; only the newest 2000 photos are kept (the bound is applied in the
+  same transaction). It survives relaunches and goes with the account (logout, removal).
+
+#### 18.2.2 Importance (`CacheImportance`, PhotosDomain)
+
+One pure scorer, used by smart offline (`SmartOfflinePolicy.score` delegates to it; `SmartOfflineReason` is its
+`Reason`) and by the preview cache's eviction. A photo's score is the best of its reasons (0…1):
+
+| Reason | Score |
+|---|---|
+| On this day in the next 7 days | 1.0 − 0.01 per day away |
+| Recent (last 12 months) | 0.9, halving every 60 days |
+| Viewed (last 90 days) | 0.7, halving every 14 days; +0.025 per further view (≤ +0.1) |
+| Memory cover (the memories strip) | 0.65 |
+| Album opened (last 30 days) | 0.6, halving every 7 days |
+| Key photo of a Library year, month or day (and a day's highlights) | 0.5 |
+| Cover of an album, place or tag | 0.45 |
+| Face (a person's cover) | 0.4 |
+| Favourite | 0.35 – 0.55, newer higher |
+
+The first, second, fifth and last rows are smart offline's scores of before, unchanged. Covers and faces come from their
+tables (`album.coverFileId`/`lastPhotoFileId`, `place`, `tag`, `person.coverFileId`); key photos and memory covers are
+worked out by the app (`LibraryZoomModel`, `MemoriesStrip`), which hand them to `AccountServices.noteCacheRole` /
+`noteKeyPhotos(of:)` after building them (table `cacheRole`, rewritten only when the set changed). Smart offline's
+candidate query includes viewed and role photos, so these are now kept for offline use too, ranked as above.
+
+For eviction, scores are cut into tiers (`CacheImportance.tier`: 0 for no reason, 1–4 for the quarters of the score);
+within a tier the least recently used file goes first. The tiers of the whole library come from two queries (the smart
+offline candidate query and the roles), never one query per file: 100 000 photos take well under a second.
+
+#### 18.2.3 Per-size pools (`CachePool`, `CachePoolBudgets`, `CacheEviction.plan`)
+
+- Pools by bucket: **thumbnails** (64, 256), **screen** (1024, anything up to 2048), **large** (4096).
+- The limit (the user's `previewCacheLimitBytes`, else the default below) is the total. Large previews get 15 % of it, at
+  most 300 MB, as a hard cap. Thumbnails and screen previews share the rest half and half; either may use room the other
+  leaves free. When the cache is over its limit, the pool furthest over its share gives back first; only when every pool
+  is within its share (offline-pinned previews take the room) does the least important file of any pool go.
+- Default limit: a twentieth of the free space for caches (`volumeAvailableCapacityForOpportunisticUsage`), at least
+  512 MB, at most 4 GB (2 GB with 40 GB free; 2 GB when the free space is unknown). Shown in Settings › Storage as
+  "1.2 GB, up to 2 GB".
+- Offline-pinned previews still count and are never removed. Trims run as before: at launch, on background, every 2000
+  downloads; the plan is a sort of one integer per file (100 000 files plan in about 0.25 s in a debug build).
+
+**Whole-library contract** (with §18.3): `UserDefaults.standard` key `cacheWholeLibraryThumbnails`
+(`CacheLimits.wholeLibraryThumbnailsKey`; its default and setting belong to the filler). When true, the 64 and 256 files of
+photos still in the library — same file id and the library's current ETag (or its edit `<etag>_e…`, or the ETag-less
+`0`) — are never removed and do not count towards any budget. When false they are ordinary members of the thumbnail pool.
+
+#### 18.2.4 Memory pressure (`MemoryImageCache`, `MemoryPressurePolicy`)
+
+The decoded previews live in an own LRU with a byte budget (the old `NSCache` budgets: iPhone physMem/80 within 48–120 MB,
+Mac and Vision Pro 200 MB) instead of `NSCache`, which empties itself and cannot be told what to keep. On a memory
+warning (`DispatchSource` memory pressure, also on the Mac):
+
+- the viewer's photo keeps every decode (on a critical warning: up to 1024 px), its neighbours (±1 page) decodes up to
+  1024 px (critical: tile-size only);
+- covers, key photos and memory covers keep their tile-size decodes (≤ 512 px);
+- of the other tile-size decodes the most recently used stay within a quarter of the budget (critical: a tenth): the tiles
+  on screen;
+- everything else goes, so 4096 and 1024 decodes are the first to go.
+
+On iPhone, iPad and Vision Pro the app does the same as a warning when it goes to the background.
+
+### 18.3 Filling the cache: whole-library thumbnails, background preparation, HEIC storage [fill]
+
+Measured on the 8089 test library (448 JPEG photos, 1920 px, Nextcloud 33, server previews by gd at quality 80): a 64 px
+preview is 1 538 bytes on average, 256 px 11 163, 1024 px 136 639, 2048 px 604 084 (a "2048" request of a 1920 px photo
+returns 1920 px). A 64 px preview made on the device from the 256 px one (ImageIO JPEG 0.8) is 2 430 bytes.
+
+#### 18.3.1 Thumbnails of the whole library
+
+- *Setting* — Settings › Storage › Thumbnails: "Keep thumbnails of the whole library" (`UserDefaults`
+  `cacheWholeLibraryThumbnails` = `CacheLimits.wholeLibraryThumbnailsKey`, read through `LibraryThumbnailSettings.isEnabled`,
+  which knows the default; the default is also registered at launch so `bool(forKey:)` agrees). Off: the row shows the
+  estimate first ("About 680 MB for 50,000 photos": photos with a server preview × the average sizes of this device's
+  cached 256/64 px previews, or the typical sizes above while fewer than 30 are cached). On: a progress bar
+  ("12,340 of 48,000 photos", "All 48,000 photos", "Waiting for Wi-Fi"). iPhone/iPad also get "Use cellular data"
+  (`cacheWholeLibraryThumbnailsOnCellular`, off).
+- *Default* — on on the Mac, off on iPhone, iPad and Vision Pro. The thumbnails take 13.6 KB a photo: 136 MB for 10 000
+  photos, 680 MB for 50 000, 1.4 GB for 100 000. That is small next to a Mac's disk, but on a phone it is as much as the
+  whole 2 GB preview cache's useful part for a large library, and the iPhone grid's default tiles are what it fills
+  anyway while scrolling (77 pt tiles at 2× need the 256 px bucket); so the phone keeps it a choice with the estimate
+  shown. (At the Mac's default zoom tiles are 130 pt and use 1024 px; there the thumbnails serve the smaller zoom steps,
+  Years and Months, and offline browsing.)
+- *What* — for every photo the timeline shows (not archived, not a Live Photo's video, not in an excluded folder) that
+  has a server preview: the 256 px preview, downloaded, and the 64 px one, made on the device from it (half the
+  requests to the server; no network at all when only the 64 px one is missing). Photos without a server preview (HEIC
+  without a provider, RAW) are left out: their thumbnails need the original. A lossless (PNG) preview is stored as HEIC
+  (§18.3.3).
+- *How* — `LibraryThumbnailFiller` (one per account, owned by `SmartOfflineManager`) walks the library newest first in
+  pages of 500 (keyset on the timeline's index) and fills what is missing; the files on disk are the state, so a pass
+  that stops is resumed by the next. Files are written into the disk cache without being decoded
+  (`PreviewCache.storeFile`), so the memory cache keeps what is on screen. Pacing (`FillPacing`): a download starts only
+  when the image pipeline has nothing to load from the server and no prefetch queued (`ImagePipeline.isNetworkIdle`)
+  and has been so for 1.5 s; while it is busy the filler looks again every 0.5 s; two downloads at a time (the grid has
+  six lanes). It stops without an unmetered network (cellular and hotspots unless allowed, never Low Data Mode) and in
+  Low Power Mode, and goes on in the next pass.
+- *Not through `ImagePipeline.prefetch`* (the brief's suggestion): its queue keeps the newest 200 prefetches and drops
+  the oldest, so a filler would push out the grid's own prefetches; it decodes every preview into the memory cache; and
+  it does not say when a preview is done, which pacing and progress need.
+- *When* — after a sync in the foreground (with smart offline's pass, at most every 10 minutes), right after the
+  setting is turned on, in smart offline's `BGProcessingTask` on iPhone/iPad (external power; now scheduled when smart
+  offline *or* the thumbnails are on) and in the Mac's background activity.
+- *Evict contract* — while on, the evict side keeps the 64/256 px files of photos still in the library and does not
+  count them against the pools (§18.2). Off: ordinary cache files, nothing is deleted at once.
+
+#### 18.3.2 Preparation before the app is opened
+
+`BackgroundPreparation` puts into the disk cache what the app shows first, most important first, at the sizes the views
+ask for: the first screen of the timeline, the covers of today's memories (1024 px, `MemoriesStrip`), the covers of the
+albums opened in the last 14 days (1024 px), the timeline's second screen, the first four story pages of each memory
+(1024 px) and the first screen of each of those albums — at most 3 memories, 3 albums and 300 previews (about 15 MB at
+the iPhone's sizes); what is cached is skipped. Tile sizes follow the grid: the stored zoom step (`gridColumns`) and
+square tiles (`squareTiles`) at the platform's reference width (`GridColumns`), so the bucket per photo is the one
+`AccountServices.previewRequest` picks (256 px on iPhone, 1024 px on the Mac and iPad at the default zoom).
+
+- *iPhone, iPad* — after the sync of the existing background refresh (`BGAppRefreshTask` `com.nextcloud.photos.refresh`,
+  `BackgroundTasks.runRefresh`): the sync brings the new photos the first screen will show. No new task identifier.
+  Also at the end of smart offline's processing task.
+- *Mac* — smart offline's `NSBackgroundActivityScheduler` activity now always runs (every 30 minutes, tolerance 15,
+  background quality, deferred while the Mac is busy or in Low Power Mode) and prepares after smart offline and the
+  thumbnails; the Mac app keeps running with its windows closed.
+- *Vision Pro* — only while the app is open.
+- Only on an unmetered network and not in Low Power Mode; four downloads at a time; written without decoding.
+- Covers and memories are requested by their views with `etag: ""` until §18.1's one-cache-key change: the prepared files
+  (real ETags) serve them once that is in.
+
+#### 18.3.3 HEIC storage
+
+Measured first (80 of the 2048 px previews, PSNR over RGB):
+
+| | bytes vs JPEG | PSNR vs the original |
+| --- | --- | --- |
+| server JPEG (gd q80) | 100 % | 37.81 dB |
+| HEIC from it, q 0.5 | 67.1 % | 35.46 dB (−2.35, worst −5.50) |
+| HEIC from it, q 0.6 | 88.9 % | 36.55 dB (−1.25) |
+| HEIC from it, q 0.7 | 100.9 % | 37.16 dB (−0.65) |
+
+Re-encoding the server's JPEG previews adds a second generation of artefacts: at the same fidelity a HEIC copy is not
+smaller, and choosing per photo the smallest HEIC within 40 dB of the JPEG saves 3 % overall (38 dB: 9 %) for about 0.1 s
+of CPU a photo. So JPEG previews are kept as they come. PNG files get PNG previews from the server, 3–9 MB at 2048 px;
+encoded as HEIC (quality 0.7) from that lossless source they take 11.5 % of the PNG (6 test PNGs: 37.7 MB → 4.35 MB)
+at 39.3 dB, better than the server's JPEGs. Rules (`PreviewTranscoding`):
+
+- A preview whose content is PNG, TIFF or BMP (one image) is stored as HEIC at quality 0.7 when the device can write
+  HEIC and the result is smaller; anything else is stored as it came. Smart offline's 2048 px files are named `.heic`
+  or `.jpg`; ImageIO reads both by content, the lookups do not care.
+- *Lazy migration* — every smart offline pass converts kept PNG previews of earlier versions without the network
+  (foreground at most 20 per pass, background no limit): the HEIC file is written and recorded before the old one is
+  removed. A JPEG file is looked at once per launch (its first bytes) and left alone.
+- The thumbnail filler and the preparation store lossless previews as HEIC too (in the `.jpg`-named cache files; the
+  cache reads by content). The pipeline's own 1024 px downloads are not converted: that is the load path, and on the
+  test library it would save nothing (all JPEG). Converting PNG previews of the 1024/4096 pools in the background is
+  possible later (⬜).
+
+## 19. M10 — Simpler navigation: sidebar and toolbars
+
+Goal (the owner's words): "simplify the left sidebar navigation and the toolbar". Fourteen ideas in three packages;
+every removed button keeps its keyboard shortcut and menu bar command, active filters stay visible.
+
+### 19.1 Sidebar: filters instead of rows, Places with the map, Albums and Shared, Utilities, editable sidebar, account [sidebar]
+
+**Rows (the default, "slim" sidebar).** First group: Library, Favorites, Memories, People, Places. Group "Albums": on the
+Mac the top albums (pinned ones first, then the ones used last in this app, then the most recently changed — at most 8,
+`SidebarAlbums`), "All Albums", and Shared. Group "Utilities", collapsed by default: Folders, Tags, Archive, Recently
+deleted, Clean up, Insights, Stickers (+ Backup on iPad/Vision Pro and in the iPhone's Collections list; on the Mac Backup is
+in Settings). Before: 20 rows in three expanded groups.
+
+**Nothing becomes unreachable.** Every `AppDestination` stays: Go menu (⌘1…⌘9 kept for Library, Photos, Videos, Favorites,
+Memories, Map, Albums, Shared albums, Smart albums — now fixed per place, not by position), deep links
+(`nextcloudphotos://photos`, `…/map`, `…/smartAlbums`…), Shortcuts (`OpenPhotosViewIntent`), widgets, notifications, the
+command palette and scene restoration. A destination without a row opens its row (`SidebarLayout.entry`):
+
+| Destination | Opens |
+|---|---|
+| Photos, Videos | Library with that media filter (`TimelineScreen(initialKind:)`); the filter is shown in the Library's toolbar |
+| Map | Places in its Map mode |
+| Smart albums | Albums with the smart albums pushed (Back → Albums) |
+| Shared with you | Shared with "Shared with you" pushed |
+| On this day | Memories with On this day pushed |
+| Duplicates, Free up server space | Clean up at that section (§19.3) |
+
+*Decided:* **Favorites stays a pinned row** (a filter too, in the Library's filter menu of §19.2): it is a collection people
+open directly, as in Apple Photos' Pinned, widgets link to it, and a row whose highlight follows a filter the user can change
+in place would be confusing. **Memories keeps its row**: the Library's strip is hidden while a filter is on and can be turned
+off; the row also holds On this day, trips and the year in review. **Tags moves to Utilities** (managing tags is a utility;
+the search already has tag tokens). **Places needs no server feature any more**: without the server's places it is the map
+(made on the device from GPS data); with them a segmented "Map | Grid" control switches between the map and the place
+tiles, the choice is remembered (`placesMode`), "Map" always opens the map. **Shared** shows the shared albums with a
+"Shared with you" link on top (also over the empty state); on a server without shared albums the row is "Shared with you"
+itself. **Albums** "+" is a menu: New album, New Smart Album (smart albums have no row of their own any more).
+
+**Editable sidebar.** Mac: right-click a row → Pin / Unpin (moves a row between the first group and Utilities), Hide from
+Sidebar, Edit Sidebar…, Restore Default Sidebar; rows of the first group are reordered by dragging; album rows: Pin / Unpin
+(keeps the album at the top of the list), Open in New Window. View ▸ Edit Sidebar… opens a sheet with every row: a check box
+to show it, Pin/Unpin, drag to reorder the pinned rows, Restore Defaults. Library cannot be hidden or unpinned; Albums and
+Shared stay in their group. Stored per device in `UserDefaults` (`sidebarLayout`, pinned albums per account in
+`sidebarPinnedAlbums.<account>`); the default writes nothing. iPad and Vision Pro use the system's sidebar editing
+(`TabViewCustomization`, now `@AppStorage("sidebarTabCustomization")`: per device, a new key so the slim default applies),
+with "Restore Default Sidebar" in the menu of the sidebar's account header (a section action would be a permanent row). The iPad's Albums group
+reads "All albums" and "Shared", as on the Mac; it does not list the top albums (a tab view has one selection type, and
+album tabs would leave stale ids in `TabViewCustomization` as albums come and go).
+
+**Account (Mac).** The large header with the logo is replaced by a compact row at the bottom of the sidebar (initials badge,
+name, server, ⌃⌄), like the account button of Mail or Music: a menu with the accounts (check mark on the shown one), Add
+Account…, Settings… (`SettingsLink`; ⌘, as before). iPad and Vision Pro keep the header with the account menu; their
+Settings entry is the toolbars package's account button (§19.2).
+
+### 19.2 Toolbars: one filter menu, one zoom control, upload when needed, a calmer viewer, three tabs [toolbars]
+
+Fewer buttons, the same reach: every removed button keeps its menu command, key and link.
+
+1. **No ⌘K button.** The window toolbar's command palette button is gone. The palette stays on ⌘K and Go ▸ Quick
+   Actions… — `PhotosCommands` is the menu bar on the Mac and the keyboard shortcuts on iPad, iPhone with a keyboard and
+   Vision Pro, so the item exists wherever there is a keyboard. *Decided:* the Search tab keeps its ⌘ button (iPhone,
+   iPad, Vision Pro): it is in Search, not the Library's bar, and is the only way to the palette without a keyboard.
+2. **One filter menu** (`LibraryFilterMenu`, all platforms, the Library only): Show (All Items, Photos, Videos,
+   Favorites), a "Ratings and Flags" submenu (today's culling filter with Auto-Advance and Delete Rejected…, with system
+   tags), "Hide partner photos" (with partner folders; it is the account’s setting, SH-8) and "Clear all filters". While a
+   filter is on, the symbol is filled and the button carries the number of active filters (badge; VoiceOver "Filter, 2
+   active"), and chips under the title (`LibraryFilterChips`: "Favorites ✕", "Picks ✕", "Without partner photos ✕")
+   clear one filter each: a row above the grid on the Mac, floating under the navigation bar elsewhere (a
+   `safeAreaBar` did not draw them and a horizontal scroll view there crashed SwiftUI on iOS 27.2).
+   `LibraryFilters` is the model (chips, count, clearing). *Decided:* no further filters — the grid query
+   (`LibraryStore.sql`) knows media kind, culling and excluded folders only; "Edited" or "RAW" would need new store
+   conditions, which is not "cheap", so they are left for later. Contract with §19.1: `TimelineScreen(initialKind:)`
+   opens the Library with that kind set (Photos, Videos, Favorites from links and menus); `TimelineScreen(filter:)` still
+   makes a timeline of its own.
+3. **One zoom control.** Years · Months · Days · All Photos stays (the Mac's toolbar, the floating picker elsewhere). The
+   Mac's zoom slider and its two step buttons are gone; ⌘+/⌘−, View ▸ Zoom In/Out and a pinch step the grid. *Decided:* no
+   slider in All Photos either — it duplicated ⌘+/⌘− and the pinch and took the most toolbar room.
+4. **Upload when needed.** No upload button in the Library's toolbar. Mac: File ▸ Upload Photos… (now ⌘U, was ⇧⌘U),
+   dropping files on the Library, File ▸ Import from iPhone or iPad. iPhone, iPad, Vision Pro: the account button's
+   Upload submenu and the Collections tab's "+" (New album…, Upload) — from Photos, files, the camera or the scanner
+   (`UploadMenuItems` + `uploadPresenter`, the pickers live outside the menu). The toolbar shows the uploads only while
+   they run or when some failed (`TransfersIndicatorState`); on iPhone the tab bar's accessory shows them.
+5. **A calmer Mac viewer.** After Back and the date: favourite, info, share, edit, More. Delete moved into More
+   ("Delete…", asks first) and onto ⌫/⌦ in the viewer (and Image ▸ Delete… ⌘⌫); no ⌘K button. Vision Pro's ornament
+   shows the same buttons in the same order (with the spatial button), Delete in More. *Open:* the window's search field
+   still shows while a photo is open. Tried on macOS 27.2: `toolbar(removing: .search)` on the viewer or on the detail
+   column leaves a `searchable` of the split view in place; `searchable` on the detail column shows no field at all; a
+   conditional `searchable` would rebuild the window's content (the open viewer closes). Needs a field of our own in
+   the toolbar or a later SwiftUI.
+6. **Three tabs on iPhone: Library, Collections, Search.** Settings is a sheet (`SettingsSheet`, Done) from the account
+   button (`AccountMenuButton`: the account's initials in a circle, a glass button of its own after Select; menu: name and server with the accounts to switch to
+   and Add account…, Upload, Settings) in the Library's and the Collections tab's top bars. `nextcloudphotos://settings`,
+   the command palette and a restored window that was on Settings open the sheet (`CompactNavigation.sheets`); the
+   account button is also on iPad and Vision Pro, which lost their Settings tab too. On the Mac Settings stays the
+   Settings window (⌘,); the account button's Settings item is a `SettingsLink` there.
+7. **iPhone Library top bar:** filter menu and Select, then the account button; the old All/Photos/Videos/Favorites
+   picker, the ratings menu, the partner button and the upload menu are inside those menus.
+
+### 19.3 Clean up: duplicates and free space in one screen [cleanup]
+
+One screen answers "how do I get space back?" (`CleanUpScreen`, `Advanced/CleanUpScreen.swift`). It replaces the two
+utility rows Duplicates and Free up server space with one entry point; their screens stay as its detail screens.
+
+- **Sections**, in this order, each a row with an icon, what it found in words, its size on the right and up to six
+  small pictures (the largest, or the kept copy / best shot); a click or tap opens the screen that reviews and deletes:
+  1. *Duplicates* — "N sets of identical copies · X can be freed" (the copies besides the suggested one that the user
+     may delete) → `DuplicatesScreen` (§7.15, unchanged).
+  2. *Similar shots* — series of shots of one scene across the whole library, "N series · X in the shots besides the
+     best" → `SimilarShotsScreen` (below).
+  3. *Large videos* — videos over 100 MiB, "N videos over 100 MB · X" → `FreeSpaceScreen(categories: [.largeVideos])`.
+  4. *Screenshots and screen recordings* → `FreeSpaceScreen(categories: [.screenshots, .screenRecordings])`.
+     Rows 3 and 4 together are the old "Free up server space" (§7.15, same rules in `Cleanup`).
+  5. *Free up space on this iPhone/iPad* (iPhone and iPad only, under "On this iPhone/iPad") — the device's available
+     storage (`volumeAvailableCapacityForImportantUsage`) → the Backup screen's "Free up space on this iPhone" (§7.18.8);
+     without access to the photo library it opens Backup instead. Not offered on the Mac and Vision Pro (no
+     backed-up device library to thin out).
+- **Headline**: "Up to X can be freed" over rows 1–4, each file counted once (`CleanUpTotals`: a large video can also
+  be a duplicate copy or a similar shot); "Nothing to clean up" when all are empty. The footer says that nothing is
+  deleted until the user confirms and that deleting deletes on the server and so everywhere. Every delete goes through
+  the same server-delete confirmation as before (count, size, trash bin or permanent).
+- **Loading**: all sections at once, off the main actor (store queries, not the whole index); rows show "Looking…"
+  until theirs is done. The screen loads again when the user comes back from a detail screen, keeping the old numbers
+  until the new ones are there.
+- **Similar shots** (`PhotosDomain/SimilarShots.swift`, query `SimilarityStore.similarShots()`): the photos compared by
+  "Show Similar" (§15.5; current versions, not archived, no Live Photo videos) in time order, read with a cursor and cut
+  on the way: a photo joins the series of the one before when it is at most 10 minutes later and its sketch at a cosine
+  of 0.84 or more (`Similarity.seriesThreshold`/`seriesGap`, as for the best shot of a series). Copies of one shot
+  never compete: a HEIC and the JPEG beside it (`CopyStacks` rule: same folder, same name apart from the extension,
+  ≤ 2 s) or the same file elsewhere (same size and capture second — that is Duplicates' business) are one shot. A series
+  has two or more shots; the best is chosen as in Show Similar (a favourite, else the best aesthetics score, else the
+  middle one) and keeps all its files; the others are offered, as far as the user may delete them (a series where
+  nothing can be deleted is not listed). The screen lists the series newest first (at most 100 at a time), each with
+  its shots as cards (the Duplicates cards: Keep/Delete badge, file name and folder, size); a click or tap keeps another
+  shot; "Delete N other shots…" asks the server-delete confirmation. While the comparison is incomplete it says how many
+  photos were compared and, like Show Similar, compares the cached previews not compared yet a few seconds at a time
+  (not in Low Power Mode, warm or low on battery) and looks again. With "Find similar photos" off, the row says so and
+  the screen offers "Turn On" (the same setting as Settings › Search).
+- **Old places keep working**: `AppDestination.duplicates` and `.freeSpace` stay (deep links `nextcloudphotos://duplicates`
+  and `…/freeSpace`, scene restoration, the command palette, the Go menu while the sidebar lists them) and show Clean up
+  scrolled to their section (`CleanUpSection.opened(by:)`: Duplicates → Duplicates, Free up server space → Large videos,
+  with Screenshots right below), which lights up for a moment. The new sidebar/Collections row `.cleanUp` (§19.1)
+  opens `CleanUpScreen()`.
+- Decided: the old destinations open the overview at their section instead of pushing the detail screen, so every way
+  in shows the sizes of all sections and Back never leads somewhere unexpected; the detail is one click or tap away.
+  Device storage stays a row that opens Backup's screen (it needs the photo library and a server check that takes a
+  while), not a number computed up front.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

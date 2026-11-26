@@ -13,6 +13,8 @@ let tileColumns = [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 16)]
 // MARK: - Places (SPEC PL-1)
 
 struct PlacesScreen: View {
+    /// A Map button in the toolbar; not when the list is a mode of Places next to its map (`PlacesHome`).
+    var showsMapButton = true
     @Environment(SessionModel.self) private var session
     @State private var places: [Place] = []
     @State private var error: String?
@@ -75,16 +77,18 @@ struct PlacesScreen: View {
         }
         .navigationTitle(String(localized: "Places", bundle: .module))
         .toolbar {
-            ToolbarItem {
-                NavigationLink {
-                    MapScreen().cardTransitionDestination(id: "map", in: zoom)
-                } label: {
-                    Label(String(localized: "Map", bundle: .module), systemImage: "map")
+            if showsMapButton {
+                ToolbarItem {
+                    NavigationLink {
+                        MapScreen().cardTransitionDestination(id: "map", in: zoom)
+                    } label: {
+                        Label(String(localized: "Map", bundle: .module), systemImage: "map")
+                    }
                 }
+                #if os(iOS)
+                    .matchedTransitionSource(id: AnyHashable("map"), in: zoom)
+                #endif
             }
-            #if os(iOS)
-                .matchedTransitionSource(id: AnyHashable("map"), in: zoom)
-            #endif
         }
         .task {
             guard let services = session.services else { return }

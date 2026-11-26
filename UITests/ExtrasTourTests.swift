@@ -78,7 +78,7 @@ final class ExtrasTourTests: XCTestCase {
         func testSmartOfflineSettings() {
             app.launch()
             waitForTimeline()
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             scroll(to: element("Space to use"))
             // Checked before the extra swipe: a list row scrolled off screen is no longer in the accessibility tree.
             XCTAssertTrue(element("Space to use").exists)
@@ -151,7 +151,7 @@ final class ExtrasTourTests: XCTestCase {
             app.launchEnvironment["PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN"] = "25"
             app.launch()
             waitForTimeline()
-            app.tabBars.buttons["Settings"].tap()
+            app.openSettings()
             let toggle = app.switches["Photo of the Day"].firstMatch
             scroll(to: toggle)
             let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

@@ -101,6 +101,23 @@ final class GridMotionTourTests: XCTestCase {
         shot("05-library-header-back")
     }
 
+    /// The Library stays scrolled away long enough for the memory story in front to finish (its photos at 4 s each):
+    /// going on to the next story animated the strip's scroll position outside the window and trapped in SwiftUI
+    /// (`ResolvedScrollBehavior.updateTarget`); the stories now wait while the strip is off screen (`GridHeaderVisibility`).
+    func testLibraryStoriesWhileScrolledAway() {
+        app.launch()
+        waitForTimeline()
+        for _ in 0..<3 {
+            for _ in 0..<4 { app.swipeUp(velocity: .fast) }
+            pause(40)
+            XCTAssertEqual(app.state, .runningForeground, "The app stopped while the Library was scrolled away")
+            for _ in 0..<6 { app.swipeDown(velocity: .fast) }
+            pause(6)
+            XCTAssertEqual(app.state, .runningForeground, "The app stopped when the Library's stories came back")
+        }
+        shot("06-library-stories-back")
+    }
+
     /// Selection mode: three tiles selected, then one deselected again.
     func testSelection() {
         app.launch()

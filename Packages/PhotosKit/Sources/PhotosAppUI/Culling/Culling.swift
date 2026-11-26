@@ -286,53 +286,6 @@ enum CullingMenu {
     }
 }
 
-/// The toolbar's filter menu of the Library: picks, rejected, ratings… and "Delete Rejected…".
-struct CullingFilterMenu: View {
-    @Binding var filter: CullingFilter
-    var deleteRejected: () -> Void
-    @AppStorage(CullingSettings.autoAdvanceKey) private var autoAdvance = true
-
-    static let choices: [[CullingFilter]] = [
-        [.all],
-        [.picks, .unflagged, .notRejected, .rejected],
-        [.rating(atLeast: 1), .rating(atLeast: 2), .rating(atLeast: 3), .rating(atLeast: 4), .rating(atLeast: 5), .unrated],
-    ]
-
-    var body: some View {
-        Menu {
-            Picker(selection: $filter) {
-                ForEach(Self.choices.indices, id: \.self) { group in
-                    Section {
-                        ForEach(Self.choices[group], id: \.self) { choice in
-                            Text(CullingWording.filterTitle(choice)).tag(choice)
-                        }
-                    }
-                }
-            } label: {
-                Text("Show", bundle: .module)
-            }
-            .pickerStyle(.inline)
-            Divider()
-            Toggle(CullingWording.autoAdvanceTitle, isOn: $autoAdvance)
-            Button(role: .destructive) {
-                deleteRejected()
-            } label: {
-                Label(CullingWording.deleteRejectedTitle, systemImage: "trash")
-            }
-        } label: {
-            Label(
-                String(localized: "Ratings and Flags", bundle: .module, comment: "Toolbar menu: filter the library by rating or flag."),
-                systemImage: filter == .all ? "star.circle" : "star.circle.fill")
-        }
-        .help(
-            filter == .all
-                ? String(localized: "Ratings and Flags", bundle: .module)
-                : String(
-                    localized: "Showing: \(CullingWording.filterTitle(filter))", bundle: .module,
-                    comment: "Tooltip of the ratings filter while one is active."))
-    }
-}
-
 /// "Delete Rejected…": every rejected photo of the library, after a confirmation that says how many.
 struct DeleteRejectedConfirmation: Identifiable {
     let id = UUID()

@@ -9,7 +9,8 @@ import PhotosNetworking
 import PhotosStore
 import SwiftUI
 
-/// Own albums or albums shared with the user (SPEC AL-1, SH-3).
+/// Own albums or albums shared with the user (SPEC AL-1, SH-3). The own albums are the Albums row, with the smart albums
+/// above them; the shared ones the Shared row, with "Shared with you" above them (SPEC §19.1).
 struct AlbumsScreen: View {
     let kind: AlbumKind
     @Environment(SessionModel.self) private var session
@@ -17,6 +18,7 @@ struct AlbumsScreen: View {
     @State private var loaded = false
     @State private var creating = false
     @State private var openingLink = false
+    @State private var creatingSmartAlbum = false
     @State private var error: String?
     @AppStorage("albumsSortOrder") private var sortOrder: AlbumSortOrder = .recent
     /// "Customize Cover…" or "Show to a Guest…" of an album (SPEC §16.8.2, §16.8.3).
@@ -25,7 +27,7 @@ struct AlbumsScreen: View {
     @Environment(\.routeTransitionNamespace) private var transitions
 
     var title: String {
-        kind == .shared ? String(localized: "Shared albums", bundle: .module) : String(localized: "Albums", bundle: .module)
+        kind == .shared ? String(localized: AppDestination.sharedAlbums.rowTitle) : String(localized: "Albums", bundle: .module)
     }
 
     /// "Recently changed" needs real album modification times, which only newer Photos versions report; without them
@@ -48,6 +50,8 @@ struct AlbumsScreen: View {
             AlbumActivityBanner()
             // Smart albums appear with the other albums (SPEC §16.4).
             if kind == .own { SmartAlbumsStrip() }
+            // The files and folders others share with the user: the other half of the Shared row.
+            if kind == .shared { SharedWithYouLink() }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 16)], spacing: 20) {
                 ForEach(sorted) { album in
                     // By value: the stack's path (MainView) knows which album is open.
@@ -84,6 +88,10 @@ struct AlbumsScreen: View {
                 }
                 // On a living wash (SPEC §17.6.1).
                 .livingEmptyBackground()
+                // The wash covers the scroll view: "Shared with you" stays reachable above it.
+                .overlay(alignment: .top) {
+                    if kind == .shared { SharedWithYouLink() }
+                }
             } else if !loaded {
                 // The covers' shape while the albums load (SPEC §15.5: no spinners).
                 SkeletonCovers().frame(maxHeight: .infinity, alignment: .top)
@@ -116,10 +124,18 @@ struct AlbumsScreen: View {
                     .help(String(localized: "Open public link", bundle: .module))
                 }
                 if kind == .own {
-                    Button {
-                        creating = true
+                    // Smart albums are made here too: they have no row of their own any more.
+                    Menu {
+                        Button(String(localized: "New album", bundle: .module), systemImage: "rectangle.stack.badge.plus") {
+                            creating = true
+                        }
+                        Button(String(localized: "New Smart Album", bundle: .module), systemImage: "wand.and.stars") {
+                            creatingSmartAlbum = true
+                        }
                     } label: {
                         Label(String(localized: "New album", bundle: .module), systemImage: "plus")
+                    } primaryAction: {
+                        creating = true
                     }
                     .help(String(localized: "New album", bundle: .module))
                 }
@@ -139,6 +155,7 @@ struct AlbumsScreen: View {
             } catch {}
         }
         .sheet(isPresented: $creating) { AlbumEditor(album: nil) }
+        .sheet(isPresented: $creatingSmartAlbum) { SmartAlbumBuilder(album: nil) }
         .sheet(isPresented: $openingLink) { OpenPublicLinkSheet() }
         .albumCardSheets($cardSheet)
         .alert(
@@ -157,6 +174,35 @@ struct AlbumsScreen: View {
             if albums.isEmpty { self.error = error.localizedDescription }
         }
         loaded = true
+    }
+}
+
+/// "Shared with you" at the top of Shared: the files and folders others share with the user, pushed on the Shared stack.
+struct SharedWithYouLink: View {
+    var body: some View {
+        NavigationLink(value: AppRoute.destination(AppDestination.sharedWithYou.rawValue)) {
+            HStack(spacing: 12) {
+                Image(systemName: AppDestination.sharedWithYou.systemImage)
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AppDestination.sharedWithYou.title).font(.headline)
+                    Text(
+                        "Files and folders others share with you", bundle: .module, comment: "Shared: subtitle of the Shared with you link."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward").foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .contentShape(.rect)
+            .background(.fill.quaternary, in: .rect(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding([.horizontal, .top])
     }
 }
 
@@ -271,7 +317,9 @@ struct AlbumCover: View {
             let request = ImagePipeline.Request(
                 fileId: fileId, etag: "", bucket: bucket, hasPreview: true, mimeType: "image/jpeg", originalURL: nil,
                 maxPixelSize: PreviewSizing.decodePixels(forPixels: pixels, bucket: bucket))
-            if image == nil, let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: "", upTo: bucket) { image = cached }
+            // Under the photo's own ETag, as the grid keeps it (SPEC §18.1.1).
+            let etag: String = services.images.displayedEtag(fileId: fileId, etag: "")
+            if image == nil, let cached = services.images.cache.bestMemoryImage(fileId: fileId, etag: etag, upTo: bucket) { image = cached }
             if let loaded = await services.images.preview(request) { image = loaded }
         }
     }

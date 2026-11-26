@@ -172,7 +172,7 @@ import XCTest
 
         func testSettings() {
             waitForTimeline()
-            tab("Settings")
+            app.openSettings()
             pause(2)
             shot("settings")
             for page in 2...5 {

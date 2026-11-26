@@ -3,6 +3,7 @@
 
 import LocalAuthentication
 import PhotosCore
+import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -17,6 +18,8 @@ public struct SettingsView: View {
     @State private var pickingFolder = false
     @State private var configError: String?
     @State private var cacheSize: Int64 = 0
+    /// The preview cache's limit: the user's, or scaled by the free space (SPEC §18.2).
+    @State private var cacheLimit = CacheLimits.defaultPreviewBytes
     @State private var pins: [OfflineManager.Pin] = []
     @State private var reviewedCertificate: CertificateProblem?
     /// Import Library… (iPhone, iPad, Vision Pro; the Mac has it in the File menu).
@@ -38,6 +41,15 @@ public struct SettingsView: View {
     }
 
     func shows(_ section: Page) -> Bool { page == .all || page == section }
+
+    /// "1.2 GB, up to 2 GB".
+    private var cacheUsage: String {
+        let used = Formatters.bytes(cacheSize)
+        let limit = Formatters.bytes(cacheLimit)
+        return String(
+            localized: "\(used), up to \(limit)", bundle: .module,
+            comment: "Settings › Storage, the preview cache: its size and its limit, e.g. \"1.2 GB, up to 2 GB\".")
+    }
 
     public var body: some View {
         Form {
@@ -208,7 +220,7 @@ public struct SettingsView: View {
 
             if shows(.storage) {
                 Section(String(localized: "Storage", bundle: .module)) {
-                    LabeledContent(String(localized: "Preview cache", bundle: .module), value: Formatters.bytes(cacheSize))
+                    LabeledContent(String(localized: "Preview cache", bundle: .module), value: cacheUsage)
                     Button(String(localized: "Clear cache", bundle: .module)) {
                         session.services?.images.cache.removeAll()
                         Task { await session.services?.images.originals.removeAll() }
@@ -216,6 +228,8 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            if shows(.storage) { LibraryThumbnailsSettingsSection() }
 
             if shows(.storage) { SmartOfflineSettingsSection() }
 
@@ -253,6 +267,7 @@ public struct SettingsView: View {
                         value: session.features.hasExtendedFeatures
                             ? String(localized: "Extended", bundle: .module) : String(localized: "Standard", bundle: .module))
                     NavigationLink(String(localized: "Server features", bundle: .module)) { ServerFeaturesView() }
+                    NavigationLink(CacheDiagnosticsView.title) { CacheDiagnosticsView() }
                     Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
                         .disabled(session.syncStatus.isWorking)
                     syncStatusRow
@@ -292,6 +307,7 @@ public struct SettingsView: View {
         }
         .task {
             cacheSize = session.services?.images.cache.totalSize() ?? 0
+            cacheLimit = CacheLimits.current().previewBytes
             pins = (try? await session.offline?.pins()) ?? []
         }
         .sheet(isPresented: $addingAccount) { AddAccountSheet() }

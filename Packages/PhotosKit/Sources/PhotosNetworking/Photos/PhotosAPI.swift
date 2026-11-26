@@ -390,12 +390,9 @@ public struct PhotosAPI: Sendable {
 
     // MARK: Previews
 
-    /// Size buckets the server rounds to and pregenerates (SPEC §5.5.1).
+    /// Size buckets the server rounds to and pregenerates (SPEC §5.5.1). Which one a view asks for is chosen by
+    /// `PreviewSizing` (PhotosDomain), so that every screen picks the same bucket for the same size (SPEC §18.1.1).
     public static let previewBuckets = [64, 256, 1024, 4096]
-
-    public static func previewBucket(forPixels pixels: Double) -> Int {
-        previewBuckets.first { Double($0) >= pixels * 0.8 } ?? 4096
-    }
 
     public func previewURL(fileId: FileID, size: Int, etag: String? = nil) -> URL {
         var query = [URLQueryItem(name: "x", value: String(size)), URLQueryItem(name: "y", value: String(size))]

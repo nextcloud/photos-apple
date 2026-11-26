@@ -398,13 +398,3 @@ struct CommandPaletteButton: View {
         }
     }
 }
-
-/// The palette button for the window's toolbar, with the focused grid's or viewer's actions. Reading the focused value
-/// here, not in the window's view, keeps its changes from re-rendering the window.
-struct FocusedCommandPaletteButton: View {
-    @FocusedValue(\.gridActions) private var focusedGrid
-
-    var body: some View {
-        CommandPaletteButton(grid: focusedGrid)
-    }
-}

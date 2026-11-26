@@ -22,6 +22,10 @@ struct ZoomablePhoto: View {
     /// The RAW developed by Core Image (with its edit), shown instead of the preview (SPEC §16.3.2).
     @State private var developed: CGImage?
     @State private var developing = false
+    /// The largest bucket shown so far (0: only a smaller picture or the BlurHash).
+    @State private var shownBucket = 0
+    /// Time to show while this is the current page (SPEC §18.1.3).
+    @State private var showTimers = ShowTimers()
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -71,6 +75,11 @@ struct ZoomablePhoto: View {
         return surface
     }
 
+    struct ShowTimers {
+        var first: CacheMetrics.ShowTimer?
+        var full: CacheMetrics.ShowTimer?
+    }
+
     struct LoadKey: Hashable {
         var fileId: FileID
         var etag: String
@@ -101,6 +110,7 @@ struct ZoomablePhoto: View {
             if EditRendering.isRAW(name: item.name) && isCurrent { rawButton }
         }
         .task(id: LoadKey(fileId: item.fileId, etag: item.etag, bucket: bucket, edit: edit?.renderingDigest ?? "")) { await load() }
+        .onChange(of: isCurrent, initial: true) { _, current in timeShowing(current) }
         .onChange(of: edit) { _, _ in developed = nil }
     }
 
@@ -155,15 +165,51 @@ struct ZoomablePhoto: View {
         .accessibilityAddTraits(developed != nil ? .isSelected : [])
     }
 
-    /// As `PreviewImage`: what is in memory at once, then the preview of the wanted size (edited, if it has an edit).
+    /// What is in memory at once, else a smaller preview from disk (never a blank page, SPEC §18.1.2), then the preview
+    /// of the wanted size (edited, if it has an edit).
     func load() async {
         guard let services = session.services else { return }
-        let etag: String = services.images.displayedEtag(fileId: item.fileId, etag: item.etag)
-        if let cached = services.images.cache.bestMemoryImage(fileId: item.fileId, etag: etag, upTo: bucket) { image = cached }
+        let images: ImagePipeline = services.images
+        let bucket: Int = bucket
+        let etag: String = images.displayedEtag(fileId: item.fileId, etag: item.etag)
+        if let cached = images.cache.bestMemoryImage(fileId: item.fileId, etag: etag, upTo: bucket) {
+            let complete: Bool = images.cache.memoryImage(fileId: item.fileId, etag: etag, bucket: bucket, minPixelSize: bucket) != nil
+            show(cached, bucket: complete ? bucket : 0)
+        }
         let request = ImagePipeline.Request(
             fileId: item.fileId, etag: item.etag, bucket: bucket, hasPreview: item.hasPreview, mimeType: item.mimeType,
             originalURL: services.originalURL(for: item))
-        if let loaded = await services.images.preview(request) { image = loaded }
+        async let loaded: CGImage? = images.preview(request)
+        if image == nil, let placeholder = await images.placeholder(for: request), image == nil { show(placeholder, bucket: 0) }
+        if let loaded = await loaded { show(loaded, bucket: bucket) }
+    }
+
+    func show(_ picture: CGImage, bucket: Int) {
+        image = picture
+        shownBucket = max(shownBucket, bucket)
+        finishTimers()
+    }
+
+    /// The page became the current one (or stopped being it): the time to show is measured from here.
+    func timeShowing(_ current: Bool) {
+        guard current else {
+            showTimers = ShowTimers()
+            return
+        }
+        let metrics: CacheMetrics = .shared
+        showTimers = ShowTimers(first: metrics.begin(.viewerFirst), full: metrics.begin(.viewerFull))
+        finishTimers()
+    }
+
+    func finishTimers() {
+        if image != nil, let first = showTimers.first {
+            CacheMetrics.shared.finish(first)
+            showTimers.first = nil
+        }
+        if shownBucket >= 1024, let full = showTimers.full {
+            CacheMetrics.shared.finish(full)
+            showTimers.full = nil
+        }
     }
 
     /// Develops the RAW original with Core Image at up to 4096 px, with the photo's edit.

@@ -309,7 +309,7 @@ struct FileNameLabel: View {
     }
 }
 
-// MARK: - Duplicates and Free up space (SPEC §7.15)
+// MARK: - Duplicates and Free up space (SPEC §7.15; reached from Clean up, §19.3)
 
 /// One set of identical files, with the copy suggested to keep.
 struct DuplicateSet: Identifiable, Sendable {
@@ -474,10 +474,16 @@ struct DuplicateCopyCard: View {
 }
 
 struct FreeSpaceScreen: View {
+    /// The categories listed: all of them, or those of one section of Clean up (SPEC §19.3).
+    let shown: [Cleanup.Category]
     @Environment(SessionModel.self) private var session
     @State private var categories: [Cleanup.Candidates] = []
     @State private var loaded = false
     @State private var pending: PendingServerDeletion?
+
+    init(categories: [Cleanup.Category] = Cleanup.Category.allCases) {
+        shown = categories
+    }
 
     /// How many rows of a category are listed; the delete button still covers (and counts) all of them.
     static let listed = 50
@@ -498,11 +504,7 @@ struct FreeSpaceScreen: View {
     var body: some View {
         List {
             if !categories.isEmpty {
-                Text(
-                    "Screenshots, screen recordings and large videos that take up storage on your Nextcloud server. Deleting them here removes them from the server and from all your devices.",
-                    bundle: .module
-                )
-                .font(.callout).foregroundStyle(.secondary)
+                Text(explanation).font(.callout).foregroundStyle(.secondary)
             }
             ForEach(categories, id: \.category) { category in
                 Section {
@@ -534,17 +536,64 @@ struct FreeSpaceScreen: View {
             } else if categories.isEmpty {
                 ContentUnavailableView(
                     String(localized: "Nothing to clean up", bundle: .module), systemImage: "checkmark.seal",
-                    description: Text(
-                        "Screenshots, screen recordings and large videos that take up storage on your Nextcloud server appear here.",
-                        bundle: .module))
+                    description: Text(emptyMessage))
             }
         }
-        .navigationTitle(String(localized: "Free up server space", bundle: .module))
+        .navigationTitle(title)
         .serverDeleteConfirmation($pending, session: session)
         .task {
             guard let services = session.services else { return }
-            categories = await Self.load(services.library)
+            let shown = shown
+            categories = await Self.load(services.library).filter { shown.contains($0.category) }
             loaded = true
+        }
+    }
+
+    var title: String {
+        switch Set(shown) {
+        case [.largeVideos]: Self.title(.largeVideos)
+        case [.screenshots, .screenRecordings]:
+            String(
+                localized: "Screenshots and screen recordings", bundle: .module,
+                comment: "Clean up: the section with screenshots and screen recordings.")
+        default: String(localized: "Free up server space", bundle: .module)
+        }
+    }
+
+    var explanation: String {
+        switch Set(shown) {
+        case [.largeVideos]:
+            String(
+                localized:
+                    "Videos over 100 MB on your Nextcloud server, largest first. Deleting them here removes them from the server and from all your devices.",
+                bundle: .module, comment: "Clean up › Large videos: explanation above the list.")
+        case [.screenshots, .screenRecordings]:
+            String(
+                localized:
+                    "Screenshots and screen recordings on your Nextcloud server, largest first. Deleting them here removes them from the server and from all your devices.",
+                bundle: .module, comment: "Clean up › Screenshots and screen recordings: explanation above the list.")
+        default:
+            String(
+                localized:
+                    "Screenshots, screen recordings and large videos that take up storage on your Nextcloud server. Deleting them here removes them from the server and from all your devices.",
+                bundle: .module)
+        }
+    }
+
+    var emptyMessage: String {
+        switch Set(shown) {
+        case [.largeVideos]:
+            String(
+                localized: "Videos over 100 MB on your Nextcloud server appear here.", bundle: .module,
+                comment: "Clean up › Large videos: nothing found.")
+        case [.screenshots, .screenRecordings]:
+            String(
+                localized: "Screenshots and screen recordings on your Nextcloud server appear here.", bundle: .module,
+                comment: "Clean up › Screenshots and screen recordings: nothing found.")
+        default:
+            String(
+                localized: "Screenshots, screen recordings and large videos that take up storage on your Nextcloud server appear here.",
+                bundle: .module)
         }
     }
 

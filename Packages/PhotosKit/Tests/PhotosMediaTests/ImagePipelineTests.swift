@@ -465,7 +465,7 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
         #expect(CacheLimits().previewBytes == 2 * 1024 * 1024 * 1024)
         #expect(CacheLimits().originalBytes == 1024 * 1024 * 1024)
         let defaults = UserDefaults(suiteName: "limits-\(UUID().uuidString)")!
-        #expect(CacheLimits.current(defaults) == CacheLimits())
+        #expect(CacheLimits.current(defaults, availableBytes: nil) == CacheLimits())
         defaults.set(500_000_000, forKey: CacheLimits.previewLimitKey)
         defaults.set(-1, forKey: CacheLimits.originalLimitKey)
         #expect(CacheLimits.current(defaults) == CacheLimits(previewBytes: 500_000_000))

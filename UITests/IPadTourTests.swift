@@ -111,9 +111,8 @@ import XCTest
         func revealedSidebarRow(_ title: String) -> XCUIElement {
             let row = sidebarRow(title)
             let known = [
-                "Library", "Search", "Backup", "Settings", "Photos", "Videos", "Favorites", "Memories", "Map", "Albums",
-                "Shared albums", "Smart albums", "Places", "Tags", "Shared with you", "Folders", "Archive", "Recently deleted",
-                "Duplicates", "Free up server space",
+                "Library", "Search", "Backup", "Settings", "Favorites", "Memories", "People", "Places", "All albums", "Shared",
+                "Folders", "Tags", "Archive", "Recently deleted", "Clean up", "Insights", "Stickers",
             ]
             // A row that exists is scrolled into view by tap(); one the list has not made yet needs a swipe.
             for attempt in 0..<6 where !row.exists {
@@ -143,14 +142,18 @@ import XCTest
             XCTAssertTrue(tiles.firstMatch.exists)
         }
 
-        /// The tab bar holds Library, Settings and Search; the sidebar's sections are not tabs of their own.
+        /// The tab bar holds Library and Search; Settings is in the account button's menu (SPEC §19.2), and the sidebar's
+        /// sections are not tabs of their own.
         func testTabBarInPortrait() {
             app.launch()
             waitForTiles("the Library")
             shot("ipad-03-tabbar-portrait")
-            for title in ["Library", "Settings", "Search"] {
+            for title in ["Library", "Search"] {
                 XCTAssertTrue(app.buttons[title].firstMatch.exists, "\(title) is not in the tab bar")
             }
+            XCTAssertFalse(app.tabBars.buttons["Settings"].firstMatch.exists, "Settings is a tab again")
+            app.openSettings()
+            shot("ipad-03b-settings-sheet")
             for section in ["Browse", "Utilities"] {
                 XCTAssertFalse(app.buttons[section].firstMatch.exists, "The sidebar section \(section) is in the tab bar")
             }
@@ -193,7 +196,7 @@ import XCTest
             springboard.buttons["Cancel"].firstMatch.tap()
             pause(2)
             shot("ipad-archive-2-cancelled")
-            for title in ["Settings", "Albums", "Library"] {
+            for title in ["Albums", "Library"] {
                 showSidebar()
                 sidebarRow(title).tap()
                 pause(4)
@@ -527,9 +530,10 @@ import XCTest
             XCUIDevice.shared.orientation = .landscapeLeft
             app.launch()
             waitForTiles("the Library")
+            // The slim sidebar (SPEC §19.1): Photos, Videos and the map are no rows any more.
             let titles = [
-                "Videos", "Memories", "Map", "Albums", "Shared albums", "Smart albums", "People", "Places", "Tags", "Shared with you",
-                "Folders", "Recently deleted", "Duplicates", "Free up server space", "Backup", "Settings",
+                "Favorites", "Memories", "People", "Places", "All albums", "Shared", "Folders", "Tags", "Recently deleted", "Clean up",
+                "Insights", "Stickers", "Backup",
             ]
             for (index, title) in titles.enumerated() {
                 showSidebar()

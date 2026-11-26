@@ -11,6 +11,8 @@ import SwiftUI
 // MARK: - Map (SPEC MP-1)
 
 struct MapScreen: View {
+    /// The title when the map is a mode of Places (SPEC §19.1); "Map" on its own.
+    var title: String? = nil
     @Environment(SessionModel.self) private var session
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// One annotation per grid cell of the loaded region, aggregated by the database; MapKit clusters them. The located
@@ -92,7 +94,7 @@ struct MapScreen: View {
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .navigationTitle(String(localized: "Map", bundle: .module))
+        .navigationTitle(title ?? String(localized: "Map", bundle: .module))
         #if os(iOS)
             // A small title: the map fills the screen up to the top edge.
             .navigationBarTitleDisplayMode(.inline)

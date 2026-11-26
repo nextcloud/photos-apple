@@ -231,8 +231,26 @@
 
         // MARK: Header (the Library's memories)
 
+        /// Told to the header's views: the stories play only while the header is on screen.
+        private let headerVisibility = GridHeaderVisibility()
+
+        func collectionView(
+            _ collectionView: UICollectionView, willDisplaySupplementaryView view: UICollectionReusableView,
+            forElementKind elementKind: String, at indexPath: IndexPath
+        ) {
+            if elementKind == Self.gridHeaderKind { headerVisibility.isVisible = true }
+        }
+
+        func collectionView(
+            _ collectionView: UICollectionView, didEndDisplayingSupplementaryView view: UICollectionReusableView,
+            forElementOfKind elementKind: String, at indexPath: IndexPath
+        ) {
+            if elementKind == Self.gridHeaderKind { headerVisibility.isVisible = false }
+        }
+
         func setHeader(_ header: AnyView?) {
             if let header {
+                let header = AnyView(header.environment(headerVisibility))
                 if let host = headerHost {
                     host.rootView = header
                 } else {
@@ -1610,8 +1628,21 @@
                 content.removeFromSuperview()
                 addSubview(content)
             }
+            content.autoresizingMask = []
+            fit(content)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            subviews.forEach(fit)
+        }
+
+        /// The header takes the slot's size, but never an empty one: a slot can be zero-sized for a moment while it is
+        /// reused, and a SwiftUI scroll view (the memory stories) that is animating in a zero-sized host trapped in
+        /// `ResolvedScrollBehavior.updateTarget` (STATUS §M8).
+        private func fit(_ content: UIView) {
+            guard !bounds.isEmpty, content.frame != bounds else { return }
             content.frame = bounds
-            content.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         }
     }
 

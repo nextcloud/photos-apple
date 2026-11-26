@@ -539,6 +539,17 @@ public struct LibraryStore: Sendable {
         }
     }
 
+    // MARK: Cache key (SPEC §18.1.1) — added by the M9 "load" package
+
+    /// The ETag of a file in the index or of a collection-only item; nil when the library does not know it. Read by the
+    /// image pipeline for previews requested without an ETag (covers, memories), one primary-key lookup.
+    public func etag(of fileId: FileID) throws -> String? {
+        try database.writer.read { db in
+            if let etag = try String.fetchOne(db, sql: "SELECT etag FROM media WHERE fileId = ?", arguments: [fileId]) { return etag }
+            return try CollectionMediaRecord.fetchOne(db, key: fileId)?.item.etag
+        }
+    }
+
     /// Live updates of one item (index or collection-only), e.g. the photo shown in the viewer: its favourite heart
     /// follows a toggle, and the next toggle sends the opposite value.
     public func observeItem(_ fileId: FileID) -> AsyncThrowingStream<MediaItem?, any Error> {

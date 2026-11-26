@@ -85,14 +85,22 @@ public struct SmartOfflineStore: Sendable {
     }
 
     /// Every photo a reason of `SmartOfflinePolicy` may apply to: taken in the recent months, a favourite, its "On this
-    /// day" comes up in the next days, or in an album opened recently. Reads only these rows, not the whole library.
+    /// day" comes up in the next days, in an album opened recently, viewed recently, or shown as a cover, key photo or face
+    /// (`CacheImportance`, SPEC §18.2). Reads only these rows, not the whole library.
     public func candidates(now: Date = Date(), excludedFolders: [String] = [], calendar: Calendar = .current) async throws
         -> [SmartOfflineCandidate]
     {
+        try await database.writer.read { db in
+            try Self.candidates(db, now: now, excludedFolders: excludedFolders, calendar: calendar)
+        }
+    }
+
+    static func candidates(_ db: Database, now: Date, excludedFolders: [String], calendar: Calendar) throws -> [SmartOfflineCandidate] {
         let timestamp = LibraryStore.timestamp
         let (visible, visibleArguments) = Self.visibleConditions(excludedFolders: excludedFolders)
         let recentStart = calendar.date(byAdding: .month, value: -SmartOfflinePolicy.recentMonths, to: now) ?? now
         let albumStart = now.addingTimeInterval(-SmartOfflinePolicy.albumWindowDays * 86_400)
+        let viewedStart = now.addingTimeInterval(-SmartOfflinePolicy.viewedWindowDays * 86_400)
         var reasons = ["\(timestamp) >= ?", "media.isFavorite = 1"]
         var reasonArguments: StatementArguments = [recentStart.timeIntervalSince1970]
         // The coming days of every earlier year the library can have.
@@ -108,25 +116,33 @@ public struct SmartOfflineStore: Sendable {
             "media.fileId IN (SELECT albumItem.fileId FROM albumItem JOIN smartOfflineAlbumView view ON view.albumId = albumItem.albumId WHERE view.viewedAt >= ?)"
         )
         reasonArguments += [albumStart.timeIntervalSince1970]
+        // Viewed recently, or shown as a cover, key photo or face (SPEC §18.2).
+        reasons.append("viewed.viewedAt >= ?")
+        reasonArguments += [viewedStart.timeIntervalSince1970]
+        reasons.append("roleBits.fileId IS NOT NULL")
         let sql = """
+            WITH \(CacheImportanceStore.rolesCTE)
             SELECT media.fileId, media.etag, \(timestamp) AS timestamp, media.isFavorite, media.kind, media.size,
                 (SELECT max(view.viewedAt) FROM albumItem JOIN smartOfflineAlbumView view ON view.albumId = albumItem.albumId
-                 WHERE albumItem.fileId = media.fileId AND view.viewedAt >= ?) AS albumViewedAt
+                 WHERE albumItem.fileId = media.fileId AND view.viewedAt >= ?) AS albumViewedAt,
+                viewed.viewedAt AS viewedAt, coalesce(viewed.count, 0) AS viewCount, coalesce(roleBits.roles, 0) AS roles
             FROM media
+            LEFT JOIN recentlyViewed viewed ON viewed.fileId = media.fileId
+            LEFT JOIN roleBits ON roleBits.fileId = media.fileId
             WHERE \(visible) AND (\(reasons.joined(separator: " OR ")))
             """
-        var allArguments: StatementArguments = [albumStart.timeIntervalSince1970]
-        allArguments += visibleArguments
-        allArguments += reasonArguments
-        let arguments = allArguments
-        return try await database.writer.read { db in
-            try GRDB.Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
-                let viewed: Double? = row["albumViewedAt"]
-                return SmartOfflineCandidate(
-                    fileId: row["fileId"], etag: row["etag"], timestamp: Date(timeIntervalSince1970: row["timestamp"]),
-                    isFavorite: row["isFavorite"], kind: MediaKind(rawValue: row["kind"]) ?? .image, size: row["size"],
-                    albumViewedAt: viewed.map { Date(timeIntervalSince1970: $0) })
-            }
+        var arguments: StatementArguments = [albumStart.timeIntervalSince1970]
+        arguments += visibleArguments
+        arguments += reasonArguments
+        return try GRDB.Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
+            let albumViewed: Double? = row["albumViewedAt"]
+            let viewed: Double? = row["viewedAt"]
+            return SmartOfflineCandidate(
+                fileId: row["fileId"], etag: row["etag"], timestamp: Date(timeIntervalSince1970: row["timestamp"]),
+                isFavorite: row["isFavorite"], kind: MediaKind(rawValue: row["kind"]) ?? .image, size: row["size"],
+                albumViewedAt: albumViewed.map { Date(timeIntervalSince1970: $0) },
+                viewedAt: viewed.map { Date(timeIntervalSince1970: $0) }, viewCount: row["viewCount"],
+                roles: CacheImportance.Roles(rawValue: row["roles"]))
         }
     }
 

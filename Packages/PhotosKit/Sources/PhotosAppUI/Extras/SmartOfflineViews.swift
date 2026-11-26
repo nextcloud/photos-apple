@@ -3,6 +3,7 @@
 
 import PhotosCore
 import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import SwiftUI
 
@@ -146,6 +147,157 @@ struct SmartOfflineSettingsSection: View {
             await session.smartOfflineSettingsChanged()
             await refresh()
             working = false
+        }
+    }
+}
+
+/// What the "Keep thumbnails of the whole library" texts say (SPEC §18.3.1).
+enum LibraryThumbnailsWording {
+    /// "About 640 MB for 48,000 photos".
+    static func estimate(bytes: Int64, photos: Int) -> String {
+        String(
+            localized: "About \(Formatters.bytes(bytes)) for \(photos) photos", bundle: .module,
+            comment:
+                "Settings › Thumbnails of the whole library, before it is turned on: the estimated space and the number of photos. Plural variations in the catalog."
+        )
+    }
+
+    /// "12,340 of 48,000 photos".
+    static func progress(done: Int, total: Int) -> String {
+        String(
+            localized: "\(done) of \(total) photos", bundle: .module,
+            comment: "Settings › Thumbnails of the whole library: how many photos have their thumbnails on this device so far.")
+    }
+
+    /// "All 48,000 photos".
+    static func complete(_ total: Int) -> String {
+        String(
+            localized: "All \(total) photos", bundle: .module,
+            comment:
+                "Settings › Thumbnails of the whole library: every photo's thumbnails are on this device. Plural variations in the catalog."
+        )
+    }
+
+    /// Why nothing is downloaded now, in the platform's words.
+    static var waiting: String {
+        #if os(macOS)
+            String(
+                localized: "Waiting for a network that isn't metered", bundle: .module,
+                comment:
+                    "Settings › Thumbnails of the whole library on the Mac: paused on a personal hotspot, in Low Data Mode or in Low Power Mode."
+            )
+        #else
+            String(
+                localized: "Waiting for Wi-Fi", bundle: .module,
+                comment:
+                    "Settings › Thumbnails of the whole library: paused because there is no Wi-Fi (or Low Power Mode or Low Data Mode is on)."
+            )
+        #endif
+    }
+
+    /// The footer of the section, in the platform's words.
+    static var footer: String {
+        #if os(macOS)
+            String(
+                localized:
+                    "Keeps a small picture of every photo on this Mac, so that your library shows pictures at once at every zoom level, also without a connection. They are downloaded while the app isn't loading anything else, and never slow down scrolling.",
+                bundle: .module, comment: "Footer of Settings › Thumbnails of the whole library on the Mac.")
+        #elseif os(visionOS)
+            String(
+                localized:
+                    "Keeps a small picture of every photo on Apple Vision Pro, so that your library shows pictures at once at every zoom level, also without a connection. They are downloaded on Wi-Fi while the app is open and isn't loading anything else.",
+                bundle: .module, comment: "Footer of Settings › Thumbnails of the whole library on Apple Vision Pro.")
+        #else
+            String(
+                localized:
+                    "Keeps a small picture of every photo, so that your library shows pictures at once at every zoom level, also without a connection. They are downloaded on Wi-Fi while the app isn't loading anything else, and while charging, never in Low Power Mode.",
+                bundle: .module, comment: "Footer of Settings › Thumbnails of the whole library on iPhone and iPad.")
+        #endif
+    }
+}
+
+/// Settings › Storage › Thumbnails of the whole library (SPEC §18.3.1): the switch with the space it takes before it is
+/// turned on, and how far the thumbnails are while it is on.
+struct LibraryThumbnailsSettingsSection: View {
+    @Environment(SessionModel.self) private var session
+    @AppStorage(CacheLimits.wholeLibraryThumbnailsKey) private var enabled = LibraryThumbnailPlan.defaultEnabled
+    @AppStorage(LibraryThumbnailSettings.cellularKey) private var cellular = false
+    @State private var estimate: (photos: Int, bytes: Int64)?
+    @State private var progress = LibraryThumbnailFiller.Progress()
+
+    var body: some View {
+        Section {
+            Toggle(
+                String(
+                    localized: "Keep thumbnails of the whole library", bundle: .module,
+                    comment: "Settings switch: keep a small preview of every photo of the library on the device."),
+                isOn: $enabled
+            )
+            .onChange(of: enabled) { _, _ in Task { await session.libraryThumbnailsSettingChanged() } }
+            if enabled {
+                progressRow
+                #if os(iOS)
+                    Toggle(
+                        String(
+                            localized: "Use cellular data", bundle: .module,
+                            comment: "Settings › Thumbnails of the whole library: also download them on cellular."),
+                        isOn: $cellular
+                    )
+                    .onChange(of: cellular) { _, _ in Task { await session.libraryThumbnailsSettingChanged() } }
+                #endif
+            } else if let estimate, estimate.photos > 0 {
+                Text(LibraryThumbnailsWording.estimate(bytes: estimate.bytes, photos: estimate.photos))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Thumbnails", bundle: .module, comment: "Settings section title: thumbnails of the whole library.")
+        } footer: {
+            Text(LibraryThumbnailsWording.footer)
+        }
+        .task(id: enabled) { await follow() }
+    }
+
+    @ViewBuilder var progressRow: some View {
+        if progress.countedAt == nil && !progress.isRunning {
+            ProgressView().controlSize(.small)
+        } else if progress.isComplete && !progress.isRunning {
+            LabeledContent(
+                String(
+                    localized: "Photos with thumbnails", bundle: .module,
+                    comment: "Settings › Thumbnails of the whole library: label of how many photos have their thumbnails on the device."),
+                value: LibraryThumbnailsWording.complete(progress.total))
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: progress.fraction)
+                HStack {
+                    Text(LibraryThumbnailsWording.progress(done: progress.done, total: progress.total))
+                    Spacer()
+                    if progress.isWaitingForConditions && !progress.isRunning {
+                        Text(LibraryThumbnailsWording.waiting)
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// Off: the estimate. On: the progress, followed while the section is shown.
+    func follow() async {
+        guard let thumbnails = session.smartOffline?.thumbnails else { return }
+        guard enabled else {
+            estimate = await thumbnails.estimate()
+            return
+        }
+        progress = thumbnails.progress
+        if progress.countedAt == nil && !progress.isRunning {
+            await thumbnails.count()
+        }
+        while !Task.isCancelled {
+            progress = thumbnails.progress
+            try? await Task.sleep(for: .seconds(1))
         }
     }
 }
