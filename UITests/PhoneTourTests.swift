@@ -212,6 +212,9 @@ import XCTest
                 if open.waitForExistence(timeout: 5) { open.tap() }
                 pause(4)
                 shot("link-\(route)")
+                // A screen the server cannot fill (People without Recognize, …) explains itself in an alert.
+                let alert = app.alerts.firstMatch
+                if alert.exists { alert.buttons["OK"].tap() }
             }
         }
 

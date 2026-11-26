@@ -5,6 +5,12 @@ import Foundation
 import PhotosModel
 import SwiftUI
 
+#if os(macOS)
+    import AppKit
+#elseif canImport(UIKit)
+    import UIKit
+#endif
+
 /// What VoiceOver, Voice Control and Switch Control read for elements that show pictures and badges rather than text
 /// (SPEC §9). Every part is a localised phrase; the parts are joined with commas so that VoiceOver pauses between them.
 enum AccessibilityText {
@@ -127,4 +133,50 @@ extension View {
             self
         #endif
     }
+}
+
+/// The accent colour in each appearance (SPEC §20.3). Nextcloud blue #0082c9 has a contrast of only 4.2:1 on white, too
+/// little for the text, symbols and tinted buttons drawn in it (WCAG AA asks 4.5:1); in light mode the app uses the
+/// server's own default primary colour (theming), #00679e (6.1:1), and #00507a (8.6:1) with Increase
+/// Contrast. On dark backgrounds #0082c9 itself is legible (5.0:1 on black) and stays.
+enum AccentPalette {
+    static let light = LivingRGB(0, 103 / 255, 158 / 255)
+    static let lightIncreasedContrast = LivingRGB(0, 80 / 255, 122 / 255)
+    static let dark = LivingRGB(0, 130 / 255, 201 / 255)
+
+    static func rgb(dark isDark: Bool, increasedContrast: Bool) -> LivingRGB {
+        isDark ? dark : (increasedContrast ? lightIncreasedContrast : light)
+    }
+
+    /// Follows the appearance and Increase Contrast by itself, also where SwiftUI's environment does not reach
+    /// (UIKit and AppKit views tinted with it).
+    static var color: Color {
+        #if os(macOS)
+            Color(
+                nsColor: NSColor(name: nil) { appearance in
+                    let match = appearance.bestMatch(from: [
+                        .aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+                    ])
+                    let isDark = match == .darkAqua || match == .accessibilityHighContrastDarkAqua
+                    return nsColor(rgb(dark: isDark, increasedContrast: match == .accessibilityHighContrastAqua))
+                })
+        #elseif os(watchOS)
+            dark.color
+        #else
+            Color(
+                uiColor: UIColor { traits in
+                    uiColor(rgb(dark: traits.userInterfaceStyle == .dark, increasedContrast: traits.accessibilityContrast == .high))
+                })
+        #endif
+    }
+
+    #if os(macOS)
+        private static func nsColor(_ rgb: LivingRGB) -> NSColor {
+            NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        }
+    #elseif !os(watchOS)
+        private static func uiColor(_ rgb: LivingRGB) -> UIColor {
+            UIColor(red: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        }
+    #endif
 }

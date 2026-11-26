@@ -26,7 +26,8 @@ Legend: ✅ implemented and checked against a real server · 🟡 implemented, n
 - UI smoke tests (`UITests`) ✅ on iPhone: `PhoneTourTests` (library and date scrubber, selection, context menu, viewer, Collections,
   Settings, Search, a memory, every link destination) run in the iOS 27.2 simulator (iPhone 18 Pro and iPhone 17e) against the local test
   server, screenshots in `ios-fix-shots/r4-iphone/`; `SmokeTests` (three cases) pass there too. Not run on the Mac.
-- Nothing has run on a device; the plan for that is [test-plan.md](test-plan.md).
+- Nothing has run on a device; what must be tested there first is [DEVICE-TEST-PLAN.md](DEVICE-TEST-PLAN.md) (round 10), the
+  full pass per screen [test-plan.md](test-plan.md).
 - Not available on the build Mac: a visionOS simulator runtime (the iOS 27.2 simulator is installed since 2026-11-24), signed builds (App Groups, keychain group, push), devices.
 
 ## M0 Foundation — ✅
@@ -264,8 +265,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   1000-row page 65 ms, local search 0.1–10 ms (budget 100 ms), timeline 58 ms as grid rows and 13 ms as lightweight rows,
   map cells for 50 000 geotagged items 8–9 ms (budget 200 ms; debug, round 4: the cells MapKit clusters 9 ms, with the time
   slider 34 ms, a cluster's first page 6–34 ms, the map's opening area 19 ms; MapKit takes 20 ms for 1024 cell annotations
-  and 1.45 s for 50 000, one per photo, `MapClusteringTests`). ⬜ Launch, scroll hitch rate, viewer and memory budgets are not
-  measured (need Instruments on devices); the grid does not use the lightweight timeline rows yet (its observation of grid
+  and 1.45 s for 50 000, one per photo, `MapClusteringTests`). Launch, scrolling, viewer and memory 🟡 measured in the
+  simulator and on the Mac in round 10 (§20.6, PERFORMANCE.md; scroll hitches and the real budgets need a device); the grid does not use the lightweight timeline rows yet (its observation of grid
   rows is coalesced to one refetch per 300 ms, and to one per 2 s while writes keep coming: a sync, a backup, the
   outbox). A grid update that only touches some sections (an upload, a sync page) is applied as a batch update of those
   sections instead of a reload (checked against a real `NSCollectionView` with random changes, `GridBatchUpdateTests`);
@@ -922,8 +923,9 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   `testApplyAndUndoInOwnFolder`): +1 h applied (server capture times +3600 s) and undone (original values back);
   rename `{date} {place} {counter}` applied (`2024-06-14 001.jpg` …) and undone. Sheets seen on iPhone: shots 09–14, 19–20.
   File-level writing for servers before Nextcloud 35: `MetadataRewriter` unit-tested, the server's re-reading of
-  EXIF date, offset and GPS after an overwrite checked by hand on 8093; 🟡 the whole path not run against an NC 33/34
-  server (none available; 8089/8091/8093 are all ≥ 35, so the app takes the PROPPATCH path there).
+  EXIF date, offset and GPS after an overwrite checked by hand on 8093; ✅ the whole path against Nextcloud 33.0.11
+  (round 10, `testApplyAndUndoInOwnFolder` on own copies in `Photos/r10-servers-organize`): +1 h written into the three
+  files (GET, PUT of a new version), the server's capture times +3600 s, GPS kept; Undo wrote the original values back.
 - ✅ GPS track geotagging: GPX/KML reading, matching with interpolation and tolerance, suggested clock correction
   unit-tested; ✅ sheet seen in the simulator; 🟡 picking a file in the simulator and applying not run (the file picker
   needs real input); ⬜ recording a track in the app — decided against (SPEC §16.4.3).
@@ -1061,9 +1063,8 @@ Combined (branch `feat/r7-combined`): where two packages met on one screen —
   Round 8/9 combine, iPhone 17 simulator, `CacheMeasureTests.test1Grid`: 3 of 4 runs crashed with it; with the strip's
   scroll target behaviour and position off, 0 of 3; with only `.viewAligned` off on iPhone, iPad and Vision Pro (the
   fix), 0 of 3, and the Settings, Library and toolbar tours that had crashed pass. The Mac keeps `.viewAligned` (its strip
-  is not in the grid; never seen there). ⬜ A swipe through the stories no longer snaps to a card on iPhone and iPad
-  (going on to the next story and the taps still align it); plan: a custom snapping that does not use a scroll target
-  behaviour, or the strip outside the collection view. Also kept: the stories play only while the strip is on screen
+  is not in the grid; never seen there). ✅ Snapping is back without a scroll target behaviour (§20.1,
+  `MemoryStorySnap`). Also kept: the stories play only while the strip is on screen
   (`GridHeaderVisibility`) and the header slot never gets an empty size. Crash logs in `~/aloha-work/photos-tools/r8r9/`. Crash logs: `~/aloha-work/photos-tools/r7merge/crash-scrolltarget-193447.ips`,
   `~/Library/Logs/DiagnosticReports/Retired/Nextcloud Photos-2026-11-2*`.
 
@@ -1396,6 +1397,283 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
   (`CleanUpSection.opened(by:)`), unit-tested; `FreeSpaceScreen(categories:)` shows one section's categories.
 - ⬜ The sidebar row `.cleanUp` comes with §19.1 (sidebar package); until that is merged the Utilities rows Duplicates and
   Free up server space both open Clean up.
+
+## M11 Stabilization (SPEC §20) — ⬜
+
+### §20.1 Visible bugs
+- ✅ Mac sidebar symbols: cause found — the launch reveal faded/scaled the split view in one animated transaction and
+  sidebar rows built in it kept their symbols at that moment's opacity (Library half drawn, the rest invisible), only on
+  some launches. Now only a cover above the content fades (`LaunchReveal`). Mac test build on the 8089 server: original
+  2 of 2 launches without symbols, first fix (cover + scale) 2 of ~10, final 0 of 9, no reveal at all 0 of 6; light and
+  dark, selected and unselected rows, window not key (shots `ios-fix-shots/r10-fixes/01–06`, trial crops in
+  `~/aloha-work/photos-tools/r10/fixes/trial-*.png`). 🟡 Window key (needs real input) and the iPad sidebar not seen
+  (the iPad has the same reveal and fix; the debug login did not take on a plain `simctl launch`). 🟡 The final Mac build
+  (strip with content margins) was built but not looked at: the screen locked before the last launch.
+- ✅ Photos without a server preview: `PreviewFailureLog` in `ImagePipeline` (asked again after a sync and a backoff of
+  2 min → daily; a new ETag at once; network errors do not count); tiles show symbol, name, "No preview" (VoiceOver
+  too); the viewer page says so (`ViewerNoPreview`). Unit tests: log rules, pipeline asks the server once for a 404 file
+  across shows, sizes, prefetch and a sync within the backoff (`PreviewFailureTests`), tile states (`GridCoreTests`).
+  Seen on the Mac with the test library's `evil.jpg`/`party.jpg` (shots 07, 08). 🟡 iPhone/iPad tiles: built and run in
+  the UI tours, not looked at in a shot.
+- ✅ Previews made on the device (polish, SPEC §20.1 item 7): images from the original (≤ 50 MB, ImageIO, downscaled),
+  videos from one frame read in byte ranges through the account's DAV client (≤ 16 MB, never the whole file), stored
+  once for every bucket up to 1024 px under the preview's key; `has-preview: false` skips the 404; Low Data Mode
+  downloads nothing and retries when it ends; the viewer says why a file has none (`NoPreviewReason`). Unit tests
+  (`DevicePreviewTests`, 10 + 1 in `PreviewFailureLogTests`): HEIC decoded once and on disk at 64/256/1024 with no
+  request for a cover at 1024; a TIFF with `has-preview: false` asks no preview; a cover without URL finds its original;
+  the 24-byte JPEG stays unreadable and is not asked again; an 80 MB original is not downloaded ("too large"); Low Data
+  Mode; a 6 MB QuickTime movie gives its frame after reading 1.06 MB (index at the end) / 1.3–1.6 MB (fast start);
+  a 64 KB limit stops after ≤ 64 KB in < 3 s; WebM is not read. iPhone 17 simulator on 8089: `NoPreviewTourTests`
+  (uploads its own HEIC and QuickTime clip, which the server has no preview of: no HEIC/Movie provider) 2 of 2 passed,
+  both tiles and the viewer show the pictures (shots `ios-fix-shots/r10-polish/nopreview-01/02`). Why the test
+  library's two files have none: they are 24 bytes (JPEG header, no image data; SPEC §20.1 item 7) — they stay "No
+  preview", correctly. 🟡 Mac, iPad, Vision Pro: built, not run with such files; a real 4K HEVC clip from a phone not
+  tried (the frame of an H.264 1080p 30 MB clip was not measured against a server: the PHP test server keeps no access
+  log).
+- ✅ Places card caption (polish, item 6): not truncated but covered by the floating tab bar's glass (the card is the
+  last of the iPhone's first screen of Collections); now at the top of the map. Album rows are plain `HStack`s: titles
+  at accessibility sizes are no longer cut to the first card's height. `ScreensTourTests.testCollectionsCaptionsIn
+  GermanAndLargeText` (German, English and German at AccessibilityXXXL, first screen and scrolled): passed 2 of 2 (the
+  first run, before the `HStack` fix, showed "Fa- vo…"/"r7- grid-…" in its shots: that is how the cut titles were found);
+  shots `screens-30/31-*` (before: `before-screens-01-collections.png`, "411 phot…" under the bar; the r10-combined
+  XXXL shot had "r7-gr…").
+- ✅ Favorites cover (polish, item 8): newest favourite (`LibraryStore.observeNewest(.favorites)`), small heart on the
+  caption, a heart badge at accessibility sizes, the gradient without favourites. Seen in the shots above (8089:
+  newest favourite of the test library). 🟡 The empty case (no favourites) not looked at: the test library has 59.
+  Sidebars (iPad, Mac) keep their heart symbol rows, as Apple's; no other Favorites cover exists. Unit tests
+  `FavoritesCoverTests` (follows the newest favourite, nil without favourites, hidden folders and archive left out).
+  Polish round on the iPhone 17 simulator, 8089, final code: `SmokeTests` 7 of 7, `ScreensTourTests` 4 of 4,
+  `NoPreviewTourTests` 1 of 1 in one run.
+- ✅ Story snapping on iPhone/iPad without a scroll target behaviour: on the scroll phase's end the strip scrolls
+  (`ScrollViewReader`) to the card `MemoryStorySnap` picks (compact: one card on in the swipe's direction if flung or
+  dragged ⅓, else back; wider and stray rests: nearest); cards rest at the 12 pt content margin. Unit tests
+  (`MemoryStorySnapTests`); iPhone 17 simulator, 8089: `StorySnapTourTests` (short drag back, fling, 3 × fast/slow/back
+  swipes, each checked to rest at the margin) passed 2 of 2 (final code; an earlier run without a proxy found the missed snaps); the trap does not return: `CacheMeasureTests/test1Grid`
+  3 of 3 passed (and 3 of 3 with the first version), `GridMotionTourTests` 7 of 7 passed (twice). 🟡 iPad and Vision Pro (wide layout: nearest card) not run.
+- ✅ Undo of a delete whose DELETE failed after reaching the server (timeout/5xx): `DeleteWithdrawal.maybeSent`, restored
+  from the trash bin (unit tests `OutboxBulkAndUndoTests.aDeleteThatFailedAfterReachingTheServerIsMaybeSent`,
+  `SessionUndoTests.undoOfADeleteWhoseAnswerFailedRestoresFromTheTrashBin` — fails without the fix). `UndoDeleteTourTests`
+  (own uploaded photos, checks the server): NC 35.0.3 (port 8099, own throw-away server) 3 of 3 passed (also before the fix: not reproduced); 8089 3 of 3 passed.
+  The reported failure (photos left in the trash on NC 35 in the health tour) was not reproduced here; the trash bin API
+  answers the same on NC 35.0.3 and 36 (probe with curl: same `oc:fileid`, restore `MOVE` 201). The fix closes the gap that
+  matches it on a loaded server; 🟡 if it shows again, the tour's shots and the server's access log will tell which case.
+- ✅ Mac memories: compact band (128 pt cards, was 210), "› Memories" title line folds it away (remembered,
+  `memoriesCollapsed`), folded line shows the first memory; the line is in a non-scrolling scroll view so the toolbar's
+  scroll edge effect does not blur the grid's first header (seen and fixed). Shots 12 (expanded), 13 (folded), folded and
+  unfolded through the accessibility API.
+- ✅ iPhone: a grid opened from the Collections tab (Favorites, Folders with photos — any place pushed there by value)
+  hung the app at 100 % CPU (found by the servers pass, §20.2). Cause: `RouteView` gave the pushed `DestinationView`
+  `.constant("")` / `.constant([])` search bindings, and SwiftUI counts a constant binding as changed at every update.
+  So the screen ran its body each time its navigation host handed the environment down again, rebuilt the grid screen,
+  and the rebuilt grid laid the stack out again, which handed the environment down again — all inside one Core
+  Animation commit, so the main thread never returned to the run loop. Evidence: `_printChanges` showed
+  `DestinationView: _searchText, _searchFilters changed` ~6000 times in 30 s with nothing above it re-rendering;
+  `-UIViewLayoutFeedbackLoopDebuggingThreshold 100` showed the scene's hosting view re-applying the environment to the
+  pushed grid's host in every pass. Albums, memories and `.folder` routes have no `DestinationView`; the Library's has
+  real bindings — hence only Collections. Bisected in the iPhone 17 simulator (iOS 27.2) on Nextcloud 33 (8095):
+  loop in every run with the constant bindings (9); idle (0.4–0.9 %) with real bindings in the 7 runs of the final
+  builds, and with the folder screen pushed without `DestinationView` (2 of 2). Two early instrumented runs looped
+  with real bindings too, while they had a debug `@Environment(\.self)` in `DestinationView`, which re-renders it at
+  every hand-down the same way. Switched off one at a time, the loop stayed: the grid's focused actions, its toolbar
+  (and, by the servers pass, the folder strip, the tab bar's minimizing and accessory). Fix: `RouteView` owns real
+  (unused) bindings. Favorites opens in
+  the Collections stack again (the Library-filter route of §20.4 was only the workaround; reverted).
+  `UITests/CollectionsGridTests` (folder, Favorites, album, memory from Collections; a tap on a tile must open the
+  viewer within 15 s, idle wait included): 4 of 4 on 8095 and 4 of 4 on 8089 (fresh install; Favorites with 59
+  photos), the folder test fails without the fix (UI query timed out, the app never idle); longest wait for idle 4.4 s
+  (60 s without the fix). CPU after opening Folders (8095) 0.4–0.7 %, Favorites (8089) 1.5–3.4 %; shots
+  `ios-fix-shots/r10-gridloop/`.
+- 🟡 UIKit's "Observation tracking feedback loop detected!" (`com.apple.UIKit:Assert`): not this hang — still logged
+  after the fix (36–200 times per UI-test launch, in the first two seconds after launch, in the Library), never on a
+  plain `simctl launch` (0 in 30 s), so it comes with XCUITest's accessibility automation; the sampled invalidations
+  (66, `UIObservationTrackingInvalidated`) are all UIKit's own `_executeUpdateProperties`, no frame of the app. Plan:
+  catch `UIObservationTrackingFeedbackLoopDetected` with the debugger attached from the first instruction of a UI-test
+  launch (the burst ended before an attach could take). Also logged: SwiftUI's "FocusedValue update tried to update
+  multiple times per frame" (the grid's `GridActions`, a struct of closures that is never equal; harmless on iPhone).
+
+### §20.2 Servers
+- ✅ Test servers: Nextcloud 33.0.11 (Photos 6.0.0) on 8095 and 34.0.6 (Photos 7.0.0) on 8096 from the release archives
+  (`scripts/test-server.sh` with `NEXTCLOUD_ARCHIVE`), each with the sample files, a copy of the 448-photo test library
+  (metadata refreshed per file, docs/TESTING.md) and the albums "Lisbon 2025" and "Rome 2021".
+- ✅ Protocol probe of 8093 (stock), 8091 (extended), 8095 and 8096 (capabilities, initial state, every DAV collection and
+  property the app reads, SEARCH by capture time, PROPPATCH of favourite / metadata / Live Photo link, preview sizes,
+  chunked upload v2, auto-MKCOL, trash and restore, Login Flow v2). The differences are the matrix of SPEC §20.2; the
+  only one that matters for the app is metadata editing (500 before Nextcloud 35), which the app already avoids there.
+- ✅ Integration tests (23 each) pass against 8093, 8095 and 8096; the detection test also against 8091 (11 extended
+  features found, each checked against the server). On 33/34 the metadata round trip skips itself (no `metadataEdit`).
+- ✅ iPhone simulator, stock Photos (the 8093 installation, through a second listener on 8097 that logs every request):
+  launch, Library and date scrubber, selection and context menu, viewer, Collections (no People without Recognize),
+  Settings (Notifications explains that the server has no Notifications app), Search, a memory, every link destination,
+  Clean up (both entry points), Travel globe and Countries ("33 places have no country on your server" + Apple Maps
+  lookup offer), smart album builder (saved, deleted), batch fixes sheet, the editor with undo history (recipe written to
+  and removed from `/.nextcloud-photos/edits/`), Settings › Storage. The request log shows no failing call of the app
+  apart from the expected probes (404 for `timeline/days`, `recognize/`, app data files not made yet) and the previews of
+  the two photos the server has none for (§20.1).
+- ✅ iPhone simulator, Nextcloud 33: smoke tests, the phone tour (8 of 9, see below), Clean up, the Library's top bar and
+  filter menu, Travel and Countries, the editor, the smart album builder, the batch fixes sheet; batch fixes applied to
+  own copies: +1 h and Undo written into the files (see §16.4 above), rename `{date} {place} {counter}` and Undo (MOVE).
+- ✅ iPhone simulator, Nextcloud 34: smoke tests, the phone tour (8 of 9, the same Folders hang), Clean up, the Library's
+  top bar, the editor, the smart album builder, the batch fixes sheet. 🟡 Travel did not open once (the Collections row was
+  not found in time; the same tour passed on 33 and stock) and the batch fixes were not applied there (the run was
+  stopped); 34 answers the metadata PROPPATCH like 33 (500), so the app takes the same file-writing path.
+- ✅ Links to a screen the server cannot fill (People without Recognize, Tags without the tags app, Recently deleted
+  without the trash bin) now explain it in an alert instead of doing nothing (`UnavailableLinkAlert`, unit-tested; seen
+  in the simulator on stock and Nextcloud 33: "People Isn't Available — This needs “Recognize (faces)” …").
+- ✅ Tags screen: empty state "No tags yet" on a server without tagged photos (it showed only its title on 33/34).
+- 🟡 Mac test build against stock: signs in, detects core features only, indexes the 503 items (410 with a place, 501
+  with a BlurHash); the screens were not seen: the Mac's screen was locked during the run (screenshots black, the window
+  has no accessibility tree). Not run against 33/34 (one container per test build).
+- ✅ Found on the way, not server-specific — **iPhone hung (100 % CPU, main thread) on a grid screen pushed in the
+  Collections tab**: Favorites, and Folders on a folder with photos (on 33/34 the root has `Nextcloud.png` and an MP4, so
+  Folders hung there; on a real server any folder with photos would). `Self._printChanges()` showed `FoldersScreen` /
+  `MediaGridScreen` re-created thousands of times a second from `DestinationView` (its bindings "change" each time).
+  Cause and fix in §20.1: the pushed `DestinationView` had constant search bindings. Evidence of this pass in
+  `ios-fix-shots/r10-servers/grid-loop/`.
+- 🟡 UI tour failures that are test isolation, not servers: the app restores the last screen at every launch (scene
+  storage), so tours that expect the Library after another tour left it elsewhere fail (stock run: Toolbars, story cards,
+  viewer, Settings › Storage, Then and now — the same tours pass on a fresh installation, as on Nextcloud 33). The tours
+  should start from the Library (health, §20.5).
+
+### §20.3 Accessibility and German
+- ✅ Accessibility audits (`UITests/AccessibilityAuditTests`, 13 tests): every main screen at the default size and at
+  AX5, iPhone 17 simulator (iOS 27.2) against the 8089 test library: all pass with the policy of SPEC §20.3; the
+  findings per screen (accepted ones with their reason) are in `ios-fix-shots/r10-a11y/run3/*-audit.txt`. iPad: see
+  below.
+- ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`),
+  text on glass in the text colour (caption plates, viewer pill), the viewer's action bar targets (44 points), account
+  avatar, Settings' current-account check mark, the iPad's info inspector (thick material behind the info, prominent
+  section headers), the year in review cards' year (scales with the text size), the close crosses of the weekly prompt and family suggestion cards.
+- ⬜ Memory captions on photos (story cards in the Library, memory cards): the audit measures the white caption against
+  the photo where the scrim is thin, and the story card's text stops at xxLarge (fixed card height; the full text is in
+  its VoiceOver label). Plan: a scrim that reaches higher under the title, and at accessibility sizes the caption below
+  the card as album cards do (SPEC §17.4). Accepted in the test as an open item until then.
+- ⬜ The iPad sidebar's account line (server name) is secondary text on the sidebar's glass, 3.5:1 over the photos
+  behind it. Plan: the text colour at a smaller size, as done for the caption plates (`SidebarViews.swift`, left to the
+  sidebar's rendering work of §20.1 to avoid a conflict). Accepted in the test as an open item.
+- 🟡 VoiceOver walk: element order and labels read from the accessibility trees of every audited screen (tiles "Photo,
+  date, place…", story cards with adjustable action, viewer: close, date pill (header), previous/next, action bar);
+  rotor actions (tile custom actions, viewer's favourite/info/delete) checked in code, not with VoiceOver itself, which
+  the simulator does not run.
+- ✅ German mechanics: no user-visible literal outside the catalogs (scan of all SwiftUI/Foundation calls with literals
+  for `bundle: .module`); no hand-built date or number format in the UI (the fixed formats are file names, EXIF and
+  server values in `en_US_POSIX`); date ranges through `DateRangeLabel`; English plural variations added where a count
+  can be one (`LibraryMomentsTests` checks "1 day in Lisbon"); the iOS- and visionOS-only strings that were missing
+  from the PhotosAppUI catalog added; composite texts verbatim. ✅ German run (iPhone simulator, survey of Library,
+  viewer, Settings, Memories, Collections, Clean up: `ios-fix-shots/r10-a11y/german/`) and doubled texts (`double/`,
+  `double2/`): the zoom picker overflowed and now fits. 🟡 Mac in German: the build was run, its window titles read
+  through the accessibility API; window screenshots failed (screen locked). iPad in German: Library, viewer and info,
+  sidebar (`german/de-ipad-*`), no new findings.
+  "25. Nov 2026 at 15:07" is Foundation's `en_DE` format
+  (English language, German region), correct system behaviour; it becomes "25. Nov. 2026, 15:07" once there is a `de`
+  localization. ⬜ Translations: Transifex (LOCALIZATION.md); the repo has no `de` pattern yet, so none was added.
+
+### §20.4 Screens
+- ✅ Collections on iPhone is an overview of shelves (Albums with Favorites, Memories, People where Recognize is there,
+  Places as a map snapshot with dots, Shared, then Utilities + Backup as compact rows), seen in the iOS 27.2 simulator
+  (iPhone 17 Pro, test library on 8089; shots `ios-fix-shots/r10-screens/screens-0*`). An album opened from its cover is
+  pushed on the overview and Back returns to Collections (`ScreensTourTests.testCollectionsShelves`). Logic unit-tested
+  (`CompactNavigationTests`: shelves, paths, people order, map region, reload key). 🟡 People shelf not seen (the test
+  server has no Recognize); 🟡 narrow iPad window, Vision Pro, Reduce Motion/Transparency and Dynamic Type sizes of the
+  overview not run (compiled; the cards are the ones of Albums/Memories that handle them).
+- ✅ Fixed: Favorites opened from Collections hung the iPhone app at full CPU (also on the base: probe run on a4accfa).
+  First worked around (Favorites as the Library's filter where there is only a tab bar); the cause was the constant
+  search bindings of every place pushed in Collections (§20.1), so Favorites is pushed in the Collections stack again,
+  as SPEC §19.1 has it (`CollectionsGridTests.testFavoritesGrid`).
+- ✅ Settings in pages with search (iPhone): first screen with the account and the pages, every page opens, search
+  "face id" finds the app lock on Privacy & security and opens it (`ScreensTourTests.testSettingsPagesAndSearch`, shots
+  `screens-1*`). Index and Mac tab mapping unit-tested (`SettingsPagesTests`).
+- ✅ Mac Settings window (test build `fixr10screens`, 8089): opened through the app menu (AX press) on each stored tab —
+  General, Accounts, Backup, Storage, Privacy, Desktop, Advanced, About open titled after the tab and sized to their
+  content (488–714 pt high); a stored `server` (the old Server tab) opens Accounts. 🟡 Not looked at: the screen was
+  locked, so no screenshots of the Mac windows (window titles and sizes read through CoreGraphics/AX only).
+- ✅ Advanced features switch (off by default): turning it on lists Stickers and Insights in Collections, off hides them
+  (`ScreensTourTests.testAdvancedFeaturesSwitch`, shots `screens-2*`); rows and gates unit-tested (`SettingsPagesTests`).
+  Menu items behind it (Make Sticker, Send as Postcard, Flag/Rating, Make Collage/Card, culling/Compare/Loupe in the
+  selection menu, Ratings filter) 🟡 compiled, not looked at one by one. The tours of those features launch with
+  `-advancedFeatures YES`.
+
+### §20.5 Code health
+- ✅ Zero warnings: Mac app, generic iOS, visionOS, tvOS and watchOS builds and the PhotosKit tests (macOS) build without
+  a warning with `PHOTOS_WARNINGS_AS_ERRORS=YES` (before: 38 Mac, 50 iOS). Deprecations moved to the 27 SDKs' API
+  (AVFoundation reader/writer, `submitTaskRequest`, `PHAssetResource.filename`, `LanguageModelError`); macOS unit tests
+  green incl. the film export, peek-frame and most-compatible video tests that exercise the new AVFoundation code.
+- ✅ A deliberate warning fails the build, in PhotosKit and in the app target (checked locally); GRDB is not affected.
+- 🟡 CI: `PHOTOS_WARNINGS_AS_ERRORS` in every job and `check-warnings.sh` on the build and unit-test logs; not run on
+  GitHub yet (the round's branches are not pushed).
+- ✅ Album dates are stored as seconds since 1970 (GRDB 7 per-column strategy); older text values still read (tests).
+- 🟡 The AVFoundation migration on iOS (Live Photo effect videos, memory films, beat detection) is built, not seen on a
+  device; the Mac unit tests cover the same code.
+- ✅ UI smoke tests (`SmokeTests`: Library, viewer open/close, Albums, Collections, Settings sheet, filter menu with its
+  chip, Clean up and Large videos) pass, 7 of 7, run like the CI job: a fresh server from `scripts/test-server.sh`
+  (Nextcloud 35.0.3, sample photos), iPhone 17 Pro simulator, iOS 27.2, built with warnings as errors; about 8 minutes
+  with the build. The summary step fails on a failed or skipped test (seen with an earlier failing run).
+- 🟡 The `ui-smoke` job itself has not run on GitHub yet (not pushed).
+- ✅ UI tests that waited 12–16 minutes on the combined branch (`SmokeTests`, `ToolbarsTourTests`, …, 26 Nov 17:33–20:00:
+  "Wait for … to idle" 923 s, "Setting up automation session" 969 s, a screenshot timing out): not the app — the Mac
+  was asleep. `pmset -g log` shows the lid closed and the Mac on battery from 17:33, and every stall is one sleep to the
+  second: 17:49:45→18:05:55 (969 s, `testFilterMenu`), 18:46:52→19:02:20 (920 s, `testLaunchShowsTheTimeline`),
+  19:18:46→19:31:22 (742 s, `testSwitchingToAlbums`), 19:43:22→19:59:50 (987 s, `testLibraryTopBarAndTabs`). In those
+  windows the whole simulator logged nothing (no process at all); the app's requests that were open "took" as long
+  (answers read after the wake), and one launch reached the app's first code 971 890 ms after its process start
+  (spawned just before a sleep). The same tests on the combined code with the Mac awake: `SmokeTests` 7 of 7 and
+  `ToolbarsTourTests/testLibraryTopBarAndTabs` twice in a row (longest wait for idle 4.3 s and 11.8 s, each test 9–38 s, no sleep in between); the whole
+  sequence of that run (accessibility audits, screens, smoke, toolbars; 26 tests) also at normal durations (17–54 s)
+  with a load average up to 166. A server that answers late does not keep the app from idling either (a proxy holding
+  every request of the 8089 server for 240 s: idle after 6.5 s). For UI runs: on power with the lid open (a closed lid
+  on battery sleeps whatever `caffeinate` asks); a run with long gaps is checked against `pmset -g log | grep -E
+  "Sleep|Wake"` before the app is suspected.
+- ✅ `GridMotionTourTests.testActionFeedback` no longer needs photos of "Today" from the tester: it uploads two of its
+  own (dated now), runs, and deletes its folder and the trash bin entries of it afterwards; passed against the fresh
+  server.
+- ⬜ Seen on the way: after "Delete" and "Undo" in the selection bar, the two photos were not back in the Library 8 s
+  later and stayed in the server's trash bin (Nextcloud 35, iPhone simulator). Plan: check the undo of a delete in the
+  outbox (restore from the trash bin) — for the fixes package.
+
+### §20.6 Release readiness
+- 🟡 Performance (item 14), [PERFORMANCE.md](PERFORMANCE.md): `UITests/PerformanceTests` (launch metric, launch → first tile,
+  scroll deceleration/dragging signposts, viewer paging, memory) ✅ run in the iPhone 17 Pro Max simulator (5 iterations,
+  all passed); `LaunchMetrics` (launch → first picture / first screen in the log, every platform) and `FramePacing` unit-tested;
+  `scripts/measure-performance.sh ios|mac` ✅ run. Results are **indicative only: the Mac was 20–40× oversubscribed**
+  (load average 350–840 on 18 cores, six agents); a second run at load 20–110. Viewer 1024 preview p95 50–125 ms ✅
+  (< 150), memory scrolling/paging 95–109 MB peak ✅ (< 300); **launch ⚠️ 9.5 s to the first picture even at low load**
+  (37 s under full load; main thread in dyld, then seconds in the first SwiftUI commit of the Library); scroll hitch
+  ratio ⬜ (the simulator reports no hitches; device D8).
+- 🟡 Launch (phase 2, PERFORMANCE.md "Launch, round 10 phase 2"): profiled (Time Profiler, `sample`, new `LaunchMetrics`
+  steps). Fixed: the Library's items and memories strip are prefetched off the main thread and are in the window's first
+  commit (`LibraryLaunchPrefetch`; before, they came in two more full updates after it, 0.6–1.7 s later on a loaded Mac);
+  the diagnostics log's first copy waits 60 s (it held a pool thread for ~1 s at launch). Measured at load 6–8,
+  alternating builds: iPhone simulator Debug 3.42 → 3.06 s median to the first picture, Release 3.17 → 3.0 s; Mac Debug
+  0.97 → 0.93 s (within the noise; under load the 1.2–1.7 s wait for the data is gone). ⚠️ Still over the 1 s budget in
+  the simulator: 1.8–2.2 s of it is before `main` (dyld, Debug and Release alike; 0.12 s on the Mac), the rest the
+  window's first SwiftUI update. ⬜ Device: Instruments App Launch with a Release build (D8, steps in PERFORMANCE.md);
+  ⬜ the grid header is measured again on every Library update (`PhotoGridController.updateGridHeaderHeight`, left
+  for after the file split).
+  Mac: see PERFORMANCE.md (window stays in the background, its display link is throttled when covered).
+  ⬜ Repeat on an idle Mac and run DEVICE-TEST-PLAN D8 on devices.
+- ✅ Device test plan (item 15): [DEVICE-TEST-PLAN.md](DEVICE-TEST-PLAN.md), D1–D12 with steps, expected results, results
+  table; 🟡 nothing of it has run (needs devices and a signed build).
+- ✅ Privacy manifests (item 16): four undeclared required-reason uses found and declared;
+  `scripts/check-privacy-manifests.py` passes. 🟡 The App Store privacy label and the push-token *Device ID* entry are
+  Nextcloud's decision (RELEASE-CHECKLIST step 3).
+- ✅ App Store screenshots: `UITests/AppStoreScreenshots` + `scripts/app-store-screenshots.sh` ran on iPhone 17 Pro Max
+  (1320 × 2868) and iPad Pro 13" (2064 × 2752) simulators, all seven screens each, against 8089
+  (`ios-fix-shots/r10-release/app-store/`). 🟡 Not store-ready as images: the test library shows other runs' test albums
+  and two photos without previews, and on the overloaded Mac some previews were still blurred (a warm-up test was added
+  after the first run); the iPad map opened over the Pacific. Mac: 3 of 5 window captures (`screencapture -l`, AX
+  resize) at 2846 × 1800 / 2400 × 1600 — not an App Store size yet (the window could not be made 1440 × 900 pt on this
+  display); Library and viewer captures failed. ⬜ visionOS and Apple TV screenshots not made (RELEASE-CHECKLIST step 7).
+- ✅ Metadata draft [APP-STORE-METADATA.md](APP-STORE-METADATA.md) (within Apple's limits), release checklist
+  [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md) for Nextcloud's team. ⬜ Everything in it that needs the developer account,
+  the push proxy, Transifex or a designer.
+
+### §20.7 Smaller files
+- ✅ The six largest files are split into 49 files of 47–403 lines (map in SPEC §20.7). Pure moves, checked by
+  script: every line of each original is in exactly one new file (ignoring `private` and blank lines), nothing else was
+  added but headers, imports, `#if`, `extension X {`/`}` and two `// MARK: Layout`; 202 `private` members became
+  internal.
+- ✅ macOS unit suite green (1621 tests); Mac, generic iOS, visionOS, NextcloudPhotosTV and NextcloudPhotosWatch build
+  with `PHOTOS_WARNINGS_AS_ERRORS=YES` and no warning; swift-format strict clean; `UITests/SmokeTests` 7 of 7 on an
+  iPhone 17 Pro simulator (iOS 27.2) against 8089.
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

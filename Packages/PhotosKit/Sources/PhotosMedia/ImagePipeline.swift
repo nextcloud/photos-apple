@@ -39,6 +39,13 @@ public actor ImagePipeline {
     private nonisolated let etagProvider = Mutex<(@Sendable (FileID) -> String?)?>(nil)
     /// The still of a Live Photo whose effect changes it (long exposure, another key photo), from its motion.
     private var liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
+    /// Files without a preview, and when the server may be asked again (SPEC §20.1).
+    private nonisolated let failures = Mutex(PreviewFailureLog())
+    /// The original (MIME type and URL) of a photo in the library, for requests made without it (covers, memories): a
+    /// preview made on the device needs it (SPEC §20.1).
+    private nonisolated let sourceProvider = Mutex<(@Sendable (FileID) -> (mimeType: String, url: URL)?)?>(nil)
+    /// Whether the device is in Low Data Mode now: originals are then not downloaded for a preview.
+    private nonisolated let constrainedProvider = Mutex<@Sendable () -> Bool>({ NetworkCost.shared.current.isConstrained })
 
     /// How many loads may run at once.
     public struct Limits: Sendable, Equatable {
@@ -146,6 +153,39 @@ public actor ImagePipeline {
         withEdits(Request(fileId: fileId, etag: etag, bucket: 0)).cacheEtag
     }
 
+    /// The server has no preview of the photo and none could be made on the device: the tile and the viewer say so
+    /// (SPEC §20.1). An empty `etag` is looked up in the library.
+    public nonisolated func hasNoPreview(fileId: FileID, etag: String) -> Bool {
+        noPreviewReason(fileId: fileId, etag: etag) != nil
+    }
+
+    /// Why the photo has no preview (the viewer says it), nil when it has one or has not been tried.
+    public nonisolated func noPreviewReason(fileId: FileID, etag: String) -> NoPreviewReason? {
+        let etag: String = resolved(Request(fileId: fileId, etag: etag, bucket: 0)).etag
+        return failures.withLock { $0.reason(fileId: fileId, etag: etag) }
+    }
+
+    /// Where the originals of requests made without one are looked up (`AccountServices`: the library index).
+    public nonisolated func setSourceProvider(_ provider: @escaping @Sendable (FileID) -> (mimeType: String, url: URL)?) {
+        sourceProvider.withLock { $0 = provider }
+    }
+
+    /// Replaces the Low Data Mode check (tests).
+    nonisolated func setConstrainedProvider(_ provider: @escaping @Sendable () -> Bool) {
+        constrainedProvider.withLock { $0 = provider }
+    }
+
+    /// The library synced: photos without a preview whose backoff has passed are asked for again when they are shown.
+    public nonisolated func librarySynced() {
+        failures.withLock { $0.librarySynced() }
+    }
+
+    /// Whether the server may be asked for this preview now (not a file that had none a moment ago).
+    private nonisolated func allowsRequest(_ request: Request) -> Bool {
+        let constrained = constrainedProvider.withLock { $0 }()
+        return failures.withLock { $0.allowsRequest(fileId: request.fileId, etag: request.etag, isConstrained: constrained) }
+    }
+
     /// A preview of this request that is on the device: in the cache or kept by smart offline.
     private func isLocal(_ request: Request) -> Bool {
         if request.edit != nil {
@@ -237,6 +277,8 @@ public actor ImagePipeline {
             return image
         }
         if isShutDown || Task.isCancelled { return nil }
+        // A file without a preview is not asked for on every scroll past it.
+        guard allowsRequest(request) else { return nil }
         let key = request.key
         nextId += 1
         let waiter = nextId
@@ -262,7 +304,7 @@ public actor ImagePipeline {
     ///   from the server, and a disk read when the tile comes on screen is fast enough.
     public func prefetch(_ requests: [Request], decode: Bool = false) {
         guard !isShutDown else { return }
-        for request in requests.map(withEdits) where request.memoryImage(in: cache) == nil {
+        for request in requests.map(withEdits) where request.memoryImage(in: cache) == nil && allowsRequest(request) {
             let key = request.key
             if loads[key] != nil {
                 loads[key]?.isPrefetch = true
@@ -401,7 +443,8 @@ public actor ImagePipeline {
         running[load.lane, default: 0] += 1
         let work = Work(
             api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal,
-            localPreview: localPreview, liveStill: liveStill)
+            localPreview: localPreview, liveStill: liveStill, source: sourceProvider.withLock { $0 },
+            isConstrained: constrainedProvider.withLock { $0 })
         let request = load.request
         let id = load.id
         let lane = load.lane
@@ -430,6 +473,11 @@ public actor ImagePipeline {
             load.waiters.values.forEach { $0.resume(returning: result.image) }
             // A load that was given up is not here any more: what is counted was delivered (or failed).
             metrics.record(result.image == nil ? .failed : result.layer, bucket: load.request.bucket, prefetch: load.waiters.isEmpty)
+        }
+        if let reason = result.noPreview {
+            failures.withLock { $0.recordFailure(fileId: result.fileId, etag: result.etag, reason: reason) }
+        } else if result.image != nil {
+            failures.withLock { $0.recordSuccess(fileId: result.fileId, etag: result.etag) }
         }
         if result.downloaded { didStorePreview() }
         startLoads()
@@ -465,6 +513,12 @@ public actor ImagePipeline {
             var downloaded = false
             /// Where it came from (`CacheMetrics`).
             var layer = CacheLayer.failed
+            /// The server has no preview and none could be made on the device (not a network error or a cancellation),
+            /// and why.
+            var noPreview: NoPreviewReason?
+            /// The photo it was for (`noPreview`).
+            var fileId: FileID = 0
+            var etag = ""
         }
 
         let api: PhotosAPI
@@ -475,8 +529,17 @@ public actor ImagePipeline {
         let localOriginal: (@Sendable (FileID, String) -> URL?)?
         let localPreview: (@Sendable (FileID, String, Int) -> URL?)?
         let liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
+        let source: (@Sendable (FileID) -> (mimeType: String, url: URL)?)?
+        let isConstrained: @Sendable () -> Bool
 
         func load(_ request: Request) async -> Result {
+            var result: Result = await loadPicture(request)
+            result.fileId = request.fileId
+            result.etag = request.etag
+            return result
+        }
+
+        func loadPicture(_ request: Request) async -> Result {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
             dispatchPrecondition(condition: .notOnQueue(.main))
             if Task.isCancelled { return Result() }
@@ -504,7 +567,16 @@ public actor ImagePipeline {
                     image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
                     layer: .offline)
             }
+            // The original, for a preview made on the device; looked up only when the request does not carry it.
+            let original: DevicePreview.Source? = {
+                if let url = request.originalURL { return DevicePreview.Source(url: url, mimeType: request.mimeType) }
+                guard publicToken == nil, let found = source?(request.fileId) else { return nil }
+                return DevicePreview.Source(url: found.url, mimeType: found.mimeType)
+            }()
+            // The server said it has none (`has-preview`): straight to the device, no request that answers 404.
+            let asksServer = request.hasPreview || original == nil
             do {
+                guard asksServer else { throw NetworkError.notFound }
                 let data: Data
                 if let publicToken {
                     data = try await api.dav.get(api.publicPreviewURL(fileId: request.fileId, size: request.bucket, token: publicToken))
@@ -523,14 +595,23 @@ public actor ImagePipeline {
                 }
                 return Result()
             }
-            // No server preview (e.g. HEIC/RAW without a preview provider): thumbnail the original locally.
-            guard MimeTypes.kind(of: request.mimeType) == .image, let url = request.originalURL,
-                let file = try? await originals.original(fileId: request.fileId, etag: request.etag, url: url, maxBytes: 50 * 1024 * 1024),
-                let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)
-            else { return Result() }
-            return Result(
-                image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
-                downloaded: true, layer: .network)
+            // No server preview (a video or HEIC photo without a preview provider, a file above the server's size limit):
+            // made on the device from the original, once, and cached for every size (SPEC §20.1).
+            if Task.isCancelled { return Result() }
+            let outcome = await DevicePreview.render(
+                request, source: original, originals: originals, dav: api.dav, cache: cache, isConstrained: isConstrained(),
+                allowsVideo: publicToken == nil)
+            switch outcome {
+            case .image(let image):
+                return Result(image: image, downloaded: true, layer: .network)
+            case .noPreview(let reason):
+                logger.info(
+                    "no preview of \(request.fileId) (\(request.mimeType, privacy: .public)): \(String(describing: reason), privacy: .public)"
+                )
+                return Result(noPreview: reason)
+            case .failed:
+                return Result()
+            }
         }
 
         /// An edited photo (SPEC §16.3): rendered on the device from its unedited preview (or, for a Live Photo effect,
@@ -544,20 +625,22 @@ public actor ImagePipeline {
             var downloaded = false
             // A rendition counts where its base came from (a Live Photo still: the network).
             var layer = CacheLayer.network
+            var noPreview: NoPreviewReason?
             if edit.live?.changesStill == true, let liveStill {
                 base = await liveStill(request.fileId, edit, request.bucket)
             }
             if base == nil {
                 var unedited = request.unedited
                 unedited.maxPixelSize = nil
-                let result = await load(unedited)
+                let result = await loadPicture(unedited)
                 base = result.image
                 downloaded = result.downloaded
                 layer = result.layer
+                noPreview = result.noPreview
             }
             guard let base, !Task.isCancelled,
                 let rendered = EditRendering.rendition(of: base, recipe: edit, maxPixelSize: request.bucket)
-            else { return Result(downloaded: downloaded) }
+            else { return Result(downloaded: downloaded, noPreview: noPreview) }
             return Result(
                 image: cache.store(
                     rendered, fileId: request.fileId, etag: etag, bucket: request.bucket, maxPixelSize: request.maxPixelSize),
@@ -645,7 +728,7 @@ public actor OriginalStore {
             if let maxBytes {
                 let head = try await dav.head(url)
                 if let length = head.header("content-length").flatMap(Int64.init), length > maxBytes {
-                    throw NetworkError.http(status: 413, message: "File too large to preview locally")
+                    throw OriginalTooLarge(bytes: length)
                 }
             }
             let (file, _) = try await dav.download(url)

@@ -20,21 +20,19 @@ struct PeekFramesTests {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(
             mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 160, AVVideoHeightKey: 96])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
-        writer.add(input)
-        writer.startWriting()
+        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: nil)
+        try writer.start()
         writer.startSession(atSourceTime: .zero)
         for frame in 0..<20 {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
             var buffer: CVPixelBuffer?
             CVPixelBufferCreate(nil, 160, 96, kCVPixelFormatType_32BGRA, nil, &buffer)
             guard let buffer else { throw CocoaError(.featureUnsupported) }
             CVPixelBufferLockBaseAddress(buffer, [])
             memset(CVPixelBufferGetBaseAddress(buffer), Int32(frame * 12), CVPixelBufferGetDataSize(buffer))
             CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 10))
+            try await receiver.append(CVReadOnlyPixelBuffer(unsafeBuffer: buffer), with: CMTime(value: CMTimeValue(frame), timescale: 10))
         }
-        input.markAsFinished()
+        receiver.finish()
         await writer.finishWriting()
         return try Data(contentsOf: url)
     }

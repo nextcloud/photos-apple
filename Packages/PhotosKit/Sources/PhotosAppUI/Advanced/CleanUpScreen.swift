@@ -41,7 +41,7 @@ enum CleanUpSection: String, CaseIterable, Hashable, Sendable, Identifiable {
         }
     }
 
-    var title: String {
+    @MainActor var title: String {
         switch self {
         case .duplicates: String(localized: "Duplicates", bundle: .module)
         case .similarShots:

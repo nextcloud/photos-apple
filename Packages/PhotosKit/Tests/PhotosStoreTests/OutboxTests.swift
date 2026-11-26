@@ -344,6 +344,7 @@ import Testing
         #expect(try albumFiles().isEmpty)
 
         let outcome = await outbox.withdrawDeletes(of: [1, 2], restoring: rows)
+        // Tried while offline, but no DELETE went out: not "maybe sent", undo does not look in the trash bin.
         #expect(outcome == DeleteWithdrawal(withdrawn: [1, 2]))
         #expect(try library.item(1) != nil)
         #expect(try library.item(2) != nil)
@@ -393,6 +394,31 @@ import Testing
         #expect(server.file(2) != nil)
         #expect(try library.item(1) == nil)
         #expect(server.requests(.delete).count == 1)
+    }
+
+    /// The server deleted the file but answered with an error (a lost answer, a 5xx after the move to the trash bin, seen
+    /// on a loaded Nextcloud 35): the delete waits for its retry, and Undo takes it out of the queue. It is "maybe sent",
+    /// so that Undo looks for the file in the trash bin instead of only putting its row back (SPEC §20.1).
+    @Test func aDeleteThatFailedAfterReachingTheServerIsMaybeSent() async throws {
+        let server = server
+        server.statusOverride.withLock {
+            $0 = { request in
+                guard request.kind == .delete else { return nil }
+                // The server does the delete, then fails.
+                server.state.withLock { state in
+                    if let id = state.files.values.first(where: { $0.path == request.path })?.id { state.files[id] = nil }
+                }
+                return 500
+            }
+        }
+        let outbox = outbox()
+        try await outbox.enqueue([.delete(fileId: 1, path: "/Photos/1.jpg")])
+        await outbox.waitUntilIdle()
+        #expect(server.file(1) == nil)
+        #expect(try await outbox.pendingCount() == 1)
+        let outcome = await outbox.withdrawDeletes(of: [1], restoring: DeletedRows(items: [Self.item(1)]))
+        #expect(outcome == DeleteWithdrawal(withdrawn: [1], maybeSent: [1]))
+        #expect(try library.item(1) != nil)
     }
 
     /// A delete the server refused never deleted anything: it is not "deleted", and it leaves the failed operations.

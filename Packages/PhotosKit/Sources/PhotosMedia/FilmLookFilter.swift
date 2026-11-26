@@ -133,8 +133,8 @@ extension FilmLook {
         /// The style's colours on a clip playing in the film (videos, Live Photo motion); nil when the look keeps them.
         public static func videoComposition(for asset: AVAsset, look: FilmLook) async -> AVVideoComposition? {
             guard look.gradesColour else { return nil }
-            return try? await AVVideoComposition.videoComposition(with: asset) { (request: AVAsynchronousCIImageFilteringRequest) in
-                request.finish(with: graded(request.sourceImage, look: look), context: nil)
+            return try? await AVVideoComposition(applyingFiltersTo: asset) { parameters in
+                AVCIImageFilteringResult(resultImage: graded(parameters.sourceImage, look: look))
             }
         }
     }

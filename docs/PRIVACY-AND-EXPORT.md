@@ -22,13 +22,23 @@ need.
 | File timestamps | `3B52.1` (files the user gave the app access to) | `PhotosNetworking/Uploader.fingerprint`: size and modification time of a file being uploaded identify an interrupted upload that can be continued |
 | User defaults | `1C8F.1` (App Group of the app) | `PhotosCore/AppLock`, `PhotosAppUI` settings: the app lock setting lives in the app's own App Group, where the widgets and the share extension read it |
 | File timestamps | `C617.1` (files in the app's containers) | `PhotosAppUI/ShareExtension`: the share extension removes its own temporary copies older than an hour |
-| System boot time | `35F9.1` (time between events inside the app) | `PhotosAppUI/Grid/PhotoGrid+AppKit`: `ProcessInfo.systemUptime` as the timestamp of a synthesized key event, macOS only |
+| System boot time | `35F9.1` (time between events inside the app) | `PhotosAppUI/Grid/GridCollectionView+AppKit`: `ProcessInfo.systemUptime` as the timestamp of a synthesized key event, macOS only |
 | Disk space | `E174.1` (check for enough space before writing files) | `PhotosBackup/BackupEngine`: `volumeAvailableCapacityForImportantUsage` (and `volumeAvailableCapacity` as fallback) before a photo is exported for upload; backup stops with "free up space" instead of filling the device |
+| Disk space | `E174.1` | `PhotosMedia/CacheBudgets`: the caches' size limits follow the free space (`volumeAvailableCapacityForOpportunisticUsage`), so a nearly full device gets smaller caches; `PhotosBackup/Import/LibraryImporter` checks the space before it copies an import |
+| Disk space | `85F4.1` (shown to the user) | `PhotosAppUI/Advanced/CleanUpScreen`: the free space of the device next to what Clean Up can free (iPhone, iPad); never leaves the device |
+| File timestamps | `C617.1` | `PhotosCore/SmartOfflineManager` (last use of smart offline's files), `PhotosMedia/FilmExporter` (age of its work folders), `PhotosAppUI/Advanced/EditWith` (working copies in the app's temporary folder, Mac) |
+| File timestamps | `3B52.1` | `PhotosAppUI/Import/CardDevices` (Mac): the date of a file on a memory card the user imports from, when the photo has no capture date |
+| System boot time | `35F9.1` | `PhotosAppUI/Grid/GridMotion`, `PhotoGridScrolling+UIKit`: time between touches and frames for the grid's motion (all platforms) |
 
-The disk-space entry is in the app's manifest, in `PhotosBackup`'s, and in every extension's (they link PhotosCore and with
-it PhotosBackup statically, so the API is in their binaries too).
+The disk-space entry (`E174.1`) is in the app's manifest, in `PhotosBackup`'s and `PhotosMedia`'s, and in every extension's
+that links PhotosCore (with it PhotosMedia and PhotosBackup, statically, so the API is in their binaries too); `85F4.1` is in
+`PhotosAppUI`'s, the app's and the share extension's (the only extension that links PhotosAppUI).
 
-Not used (checked with grep, round 3): active keyboards. `ContinuousClock` (PhotosStore) is a Swift clock, not one of the
+`scripts/check-privacy-manifests.py` checks this mechanically (round 10): it finds the uses of every category in the Swift
+sources and fails when a module's manifest, or the manifest of an app or extension that links the module, does not declare
+the category. Run it after adding one of these APIs; the reasons in the table above stay a judgement.
+
+Not used (checked with grep, round 3, and the script, round 10): active keyboards. `ContinuousClock` (PhotosStore) is a Swift clock, not one of the
 listed boot-time APIs; the diagnostics log rotates by size (`fileSizeKey`), not by date.
 
 **Collected data**

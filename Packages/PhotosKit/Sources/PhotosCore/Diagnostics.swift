@@ -221,6 +221,10 @@ public enum Diagnostics {
         }
     }
 
+    /// How long after launch the app first copies its log entries (`persistLog`), and how often after that.
+    static let firstPersistDelay = Duration.seconds(60)
+    static let persistInterval = Duration.seconds(300)
+
     /// Copies new log entries into the log that survives restarts (`PersistentLog`).
     @MainActor public static func persistLog(app: AppModel) async {
         await DiagnosticsLogWriter.shared.flush(secrets: secrets(of: app.accounts))

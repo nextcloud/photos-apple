@@ -331,7 +331,7 @@ public enum DeviceCleanup {
             modifiedAt: asset.modificationDate, pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight)
         let described = resources.map { resource in
             BackupAssetInfo.Resource(
-                type: resource.type, name: resource.originalFilename, uniformTypeIdentifier: resource.uniformTypeIdentifier,
+                type: resource.type, name: PhotoLibrarySource.fileName(of: resource), uniformTypeIdentifier: resource.uniformTypeIdentifier,
                 byteSize: PhotoLibrarySource.byteSize(of: resource))
         }
         let required = PhotoLibrarySource.select(info, resources: described, settings: all).map {

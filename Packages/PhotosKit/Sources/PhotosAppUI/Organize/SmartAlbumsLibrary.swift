@@ -162,8 +162,8 @@ struct SmartAlbumCard: View {
                     CaptionPlate(cornerRadius: Design.coverCornerRadius - 3) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(album.name).font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold)).lineLimit(1)
-                            Text(count.map(AccessibilityText.items) ?? " ").font(compact ? .caption2 : .caption).foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            // The text colour: the glass draws the secondary one too faint over light photos (SPEC §20.3).
+                            Text(count.map(AccessibilityText.items) ?? " ").font(compact ? .caption2 : .caption).lineLimit(1)
                         }
                     }
                     .padding(compact ? 4 : 6)

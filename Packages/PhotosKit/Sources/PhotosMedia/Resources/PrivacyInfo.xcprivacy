@@ -4,7 +4,8 @@
   SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
   SPDX-License-Identifier: MIT
 
-  Privacy manifest of PhotosMedia: cache limits from UserDefaults, last-use times of cached files.
+  Privacy manifest of PhotosMedia: cache limits from UserDefaults, last-use times of cached files, free space on the
+  device to size the caches (CacheBudgets).
   The reasons are explained in docs/PRIVACY-AND-EXPORT.md; keep both in step with the code.
 -->
 <plist version="1.0">
@@ -31,6 +32,14 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
 			</array>
 		</dict>
 	</array>

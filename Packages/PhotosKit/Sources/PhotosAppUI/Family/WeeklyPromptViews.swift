@@ -125,9 +125,13 @@ struct WeeklyPromptCard: View {
                 Button {
                     invitationDismissed = true
                 } label: {
+                    // A target of 44 points around the small cross (SPEC §20.3).
                     Image(systemName: "xmark").foregroundStyle(.secondary)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .padding(-10)
                 .accessibilityLabel(Text("Not now", bundle: .module, comment: "Hides the weekly prompts invitation."))
             }
             .padding()

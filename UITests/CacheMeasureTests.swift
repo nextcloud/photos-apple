@@ -68,10 +68,12 @@ import XCTest
             XCTAssertTrue(app.collectionViews.cells.firstMatch.waitForExistence(timeout: 240), "No photos in the timeline")
         }
 
-        /// Opens Settings › Server › Cache performance (or stays there).
+        /// Opens Settings › Storage & cache › Cache performance (or stays there).
         func openMetrics() {
             // Settings is a sheet from the account button (SPEC §19.2).
-            if !app.buttons["settings-done"].firstMatch.exists { app.openSettings() }
+            if !app.buttons["settings-done"].firstMatch.exists && !app.navigationBars["Cache performance"].exists {
+                app.openSettings(page: "storage")
+            }
             pause(1.5)
             if app.navigationBars["Cache performance"].exists { return }
             let link = app.buttons["Cache performance"].firstMatch
@@ -107,6 +109,11 @@ import XCTest
         /// Closes the Settings sheet, back to the tabs.
         func closeSettings() {
             let done = app.buttons["settings-done"].firstMatch
+            // Done is on the first screen of Settings (SPEC §20.4): back from Cache performance and Storage first.
+            for _ in 0..<3 where !done.exists && app.navigationBars.buttons.firstMatch.exists {
+                app.navigationBars.buttons.firstMatch.tap()
+                pause(0.7)
+            }
             if done.exists { done.tap() }
             pause(1)
         }

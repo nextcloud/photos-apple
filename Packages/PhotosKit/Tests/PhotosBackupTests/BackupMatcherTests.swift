@@ -3,6 +3,7 @@
 
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 
 @testable import PhotosBackup
 @testable import PhotosModel
@@ -260,6 +261,15 @@ import Testing
         #expect(PhotoLibrarySource.validSize(0) == nil)
         #expect(PhotoLibrarySource.validSize(-1) == nil)
         #expect(PhotoLibrarySource.validSize(123) == 123)
+    }
+
+    /// `PHAssetResource.filename` may be nil (27 SDKs): every resource still gets a usable file name.
+    @Test func aResourceWithoutAFileNameGetsOne() {
+        let id = "4E5F6A7B-1111-2222-3333-444455556666/L0/001"
+        #expect(PhotoLibrarySource.fileName("IMG_0001.HEIC", assetIdentifier: id, type: .heic) == "IMG_0001.HEIC")
+        #expect(PhotoLibrarySource.fileName(nil, assetIdentifier: id, type: .heic) == "4E5F6A7B-1111-2222-3333-444455556666.heic")
+        #expect(PhotoLibrarySource.fileName("", assetIdentifier: id, type: .quickTimeMovie) == "4E5F6A7B-1111-2222-3333-444455556666.mov")
+        #expect(PhotoLibrarySource.fileName(nil, assetIdentifier: id, type: .data) == "4E5F6A7B-1111-2222-3333-444455556666")
     }
 
     @Test func numberMustBeAWholeDigitRun() {

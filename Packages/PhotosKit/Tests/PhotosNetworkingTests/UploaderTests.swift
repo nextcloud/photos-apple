@@ -156,7 +156,7 @@ import Testing
         defer { cleanUp() }
         let file = try makeFile(size: 8)
         let other = Data("somebody else's photo".utf8)
-        server.state.withLock { $0.folders.insert("/Photos") }
+        server.state.withLock { _ = $0.folders.insert("/Photos") }
         server.appear("/Photos/a.jpg", content: other)
         let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
         // The other file is untouched; this one got the next free name.
@@ -171,7 +171,7 @@ import Testing
     @Test func aFileOfTheSameSizeThatAppearedMeanwhileIsThisUpload() async throws {
         defer { cleanUp() }
         let file = try makeFile(size: 8)
-        server.state.withLock { $0.folders.insert("/Photos") }
+        server.state.withLock { _ = $0.folders.insert("/Photos") }
         server.appear("/Photos/a.jpg", content: try Data(contentsOf: file))
         let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
         #expect(uploaded.path == "/Photos/a.jpg")
@@ -184,7 +184,7 @@ import Testing
         defer { cleanUp() }
         let file = try makeFile(size: 25)
         let other = Data("somebody else's video".utf8)
-        server.state.withLock { $0.folders.insert("/Photos") }
+        server.state.withLock { _ = $0.folders.insert("/Photos") }
         server.appear("/Photos/a.jpg", content: other)
         let uploaded = try await server.uploader.upload(file: file, fileName: "a.jpg", folder: "/Photos", capturedAt: nil)
         #expect(server.file("/Photos/a.jpg") == other)

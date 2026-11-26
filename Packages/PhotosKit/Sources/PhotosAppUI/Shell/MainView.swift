@@ -3,6 +3,7 @@
 
 import PhotosCore
 import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import PhotosStore
 import SwiftUI
@@ -155,6 +156,8 @@ struct MainView: View {
         @State private var editingSidebar = false
         @FocusState private var searchFocused: Bool
     #endif
+    /// Settings › Advanced › "Advanced features": niche places have no row while it is off (SPEC §20.4).
+    @AppStorage(AdvancedFeatures.storageKey) private var advancedFeatures = AdvancedFeatures.defaultValue
     @State private var searchText = ""
     @State private var searchFilters: [SearchFilter] = []
     /// Return in this window's search field (see `SearchScreen.submissions`).
@@ -162,6 +165,8 @@ struct MainView: View {
     @State private var creatingAlbum = false
     @State private var importingFiles = false
     @State private var openingLink = false
+    /// A link led to a screen this server cannot fill (`unavailableLinkAlert`).
+    @State private var unavailableLink: AppDestination?
     /// File › Import Library… (SPEC §15.7).
     @State private var importingLibrary = false
     /// File › Import from Camera or Card… (SPEC §15.2).
@@ -186,6 +191,16 @@ struct MainView: View {
         return nil
     }
 
+    /// Debug builds signed in by `PHOTOS_DEBUG_LOGIN` (UI tests) start in the Library instead of the place the last run
+    /// left: a tour must not depend on which tour ran before it. `PHOTOS_DEBUG_DESTINATION` still wins.
+    static var skipsRestoredNavigation: Bool {
+        #if DEBUG
+            return ProcessInfo.processInfo.environment["PHOTOS_DEBUG_LOGIN"] != nil
+        #else
+            return false
+        #endif
+    }
+
     /// There is no sidebar: the tab bar has a Collections tab for the places that are sidebar rows elsewhere.
     var usesCollectionsTab: Bool {
         #if os(iOS)
@@ -201,6 +216,12 @@ struct MainView: View {
         return session.features.has(feature)
     }
 
+    /// Has a row in the sidebar: offered by the server and, for a niche place, with Advanced features on (SPEC §20.4).
+    /// A place without a row still opens (links, Shortcuts, the command palette, the Go menu): `go` asks `visible`.
+    func listed(_ destination: AppDestination) -> Bool {
+        visible(destination) && AdvancedFeatures.lists(destination, isOn: advancedFeatures)
+    }
+
     var body: some View {
         navigation
             .environment(\.showInFolder, ShowInFolderAction { directory in showFolder(directory) })
@@ -211,6 +232,7 @@ struct MainView: View {
                 restoreOnce()
                 openRequested()
             }
+            .onAppear { LaunchMetrics.shared.reached(.mainView) }
             // A link that came in while the app was locked is opened once it is unlocked.
             .onChange(of: lock.isLocked) { _, _ in openRequested() }
             .onChange(of: selection) { _, _ in remember() }
@@ -233,6 +255,7 @@ struct MainView: View {
             #endif
             // A link for another account, an unknown account or a public album asks first (not while locked).
             .linkPrompts(isLocked: lock.requiresUnlock)
+            .unavailableLinkAlert($unavailableLink)
             .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
                 guard case .success(let urls) = result else { return }
                 session.transfers.upload(UploadSources.copies(of: urls))
@@ -332,6 +355,10 @@ struct MainView: View {
     }
 
     func open(_ link: DeepLink) {
+        if let screen = AppDestination.unavailableScreen(of: link, has: session.features.has) {
+            unavailableLink = screen
+            return
+        }
         switch link {
         case .destination(let raw):
             if let destination = AppDestination(rawValue: raw) { go(destination) }
@@ -390,7 +417,8 @@ struct MainView: View {
         if let destination = Self.debugDestination {
             // Before the server's features are known.
             show(SidebarLayout.entry(for: destination, visible: { _ in true }))
-        } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),
+        } else if !Self.skipsRestoredNavigation, let snapshot = NavigationSnapshot(stored: storedNavigation),
+            snapshot.belongs(to: session.account.id.rawValue),
             let destination = AppDestination(rawValue: snapshot.destination),
             visible(destination)
         {
@@ -473,7 +501,7 @@ struct MainView: View {
         var sidebar: some View {
             List(selection: sidebarSelection) {
                 Section {
-                    ForEach(customization.wrappedValue.shownPinned(visible: visible)) { row in
+                    ForEach(customization.wrappedValue.shownPinned(visible: listed)) { row in
                         sidebarRow(row)
                     }
                     .onMove { source, destination in movePinned(source, to: destination) }
@@ -491,7 +519,7 @@ struct MainView: View {
                         Text("Albums", bundle: .module)
                     }
                 }
-                let utilities: [AppDestination] = customization.wrappedValue.shownUtilities(visible: visible)
+                let utilities: [AppDestination] = customization.wrappedValue.shownUtilities(visible: listed)
                 if !utilities.isEmpty {
                     Section(isExpanded: $utilitiesExpanded) {
                         ForEach(utilities) { row in
@@ -515,7 +543,7 @@ struct MainView: View {
                 }
             }
             .sheet(isPresented: $editingSidebar) {
-                EditSidebarSheet(customization: customization, visible: visible)
+                EditSidebarSheet(customization: customization, visible: listed)
             }
         }
 
@@ -527,7 +555,7 @@ struct MainView: View {
 
         func movePinned(_ source: IndexSet, to destination: Int) {
             let current = customization.wrappedValue
-            var shown = current.shownPinned(visible: visible)
+            var shown = current.shownPinned(visible: listed)
             shown.move(fromOffsets: source, toOffset: destination)
             // Hidden rows and rows the server does not offer keep their place after the shown ones.
             let rest = current.pinned.filter { !shown.contains($0) }
@@ -627,7 +655,7 @@ struct MainView: View {
                 // (`TabViewCustomization`), and "Restore Default Sidebar" in the account header's menu undoes that.
                 if !usesCollectionsTab {
                     TabSection {
-                        ForEach(SidebarLayout.pinnedByDefault.filter { $0 != .library && visible($0) }) { destination in
+                        ForEach(SidebarLayout.pinnedByDefault.filter { $0 != .library && sidebarTab($0) }) { destination in
                             tab(destination)
                         }
                     } header: {
@@ -648,7 +676,7 @@ struct MainView: View {
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
-                        ForEach(SidebarLayout.utilities.filter(visible) + [.backup]) { destination in
+                        ForEach(SidebarLayout.utilities.filter(sidebarTab) + [.backup]) { destination in
                             tab(destination)
                         }
                     } header: {
@@ -695,6 +723,12 @@ struct MainView: View {
             #endif
         }
 
+        /// A tab of the iPad's sidebar: a place with a row, or a niche one while it is shown (opened by a link), so the
+        /// tab view has a tab to select (SPEC §20.4).
+        func sidebarTab(_ destination: AppDestination) -> Bool {
+            listed(destination) || (selection == destination && visible(destination))
+        }
+
         #if os(iOS)
             /// A tap on the tab bar's accessory: the screen of what it shows.
             func openActivity(_ kind: ChromeActivity.Kind) {
@@ -730,8 +764,8 @@ struct MainView: View {
                         return
                     }
                     if CompactNavigation.isInCollectionsTab(selection) {
-                        // A tap on the tab that is already shown goes back to its list.
-                        if selection != .collections { paths[selection] = nil }
+                        // A tap on the tab that is already shown goes back to its overview.
+                        paths[selection] = nil
                         selection = .collections
                     } else {
                         // Coming from another tab: back to where the user was.
@@ -755,7 +789,8 @@ struct MainView: View {
                     let previous: AppDestination = shown ? selection : collectionsPlace
                     // Back in the list: the place that was left starts from its root next time.
                     if previous != place.destination { paths[previous] = nil }
-                    if place.destination != .collections { paths[place.destination] = place.routes.isEmpty ? nil : place.routes }
+                    // An album or person opened from a shelf of the overview is on the overview's own path (SPEC §20.4).
+                    paths[place.destination] = place.routes.isEmpty ? nil : place.routes
                     if shown { selection = place.destination } else { collectionsPlace = place.destination }
                 })
         }
@@ -774,6 +809,12 @@ struct MainView: View {
 struct RouteView: View {
     let route: AppRoute
     @Environment(\.routeTransitionNamespace) private var transitions
+    /// The search field's text and chips a destination pushed by value is given (only the Mac's search screen uses
+    /// them). Real bindings, never `.constant`: SwiftUI counts a constant binding as changed at every update, so the
+    /// screen was rebuilt each time its navigation host handed the environment down again, and a grid rebuilt that way
+    /// laid out the stack again, which handed the environment down again — a loop at full CPU (STATUS §20.1).
+    @State private var searchText = ""
+    @State private var searchFilters: [SearchFilter] = []
 
     var body: some View {
         // An album zooms out of its card (SPEC §17.4). Only routes that cards open: a list row has no card to zoom from.
@@ -791,7 +832,7 @@ struct RouteView: View {
         case .destination(let raw):
             // Pushed from the Collections list (the search tab has its own stack and field).
             if let destination = AppDestination(rawValue: raw) {
-                DestinationView(destination: destination, searchText: .constant(""), searchFilters: .constant([]))
+                DestinationView(destination: destination, searchText: $searchText, searchFilters: $searchFilters)
             }
         }
     }

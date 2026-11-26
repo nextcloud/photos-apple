@@ -40,7 +40,8 @@ occ status
 
 PHP_CLI_SERVER_WORKERS=8 "$PHP" -d memory_limit=1G -S "127.0.0.1:$PORT" -t . &
 SERVER=$!
-trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+# With PHP_CLI_SERVER_WORKERS the server forks workers that outlive it: stop them first.
+trap 'kill $(pgrep -P "$SERVER") "$SERVER" 2>/dev/null || true' EXIT
 trap 'exit 130' INT TERM
 
 URL="http://127.0.0.1:$PORT"

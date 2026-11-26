@@ -21,7 +21,7 @@ import Testing
         library = LibraryStore(database: database)
         engine = SyncEngine(
             api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36)), reconcileInterval: 0)
-        server.state.withLock { $0.folders.insert("/Anna photos") }
+        server.state.withLock { _ = $0.folders.insert("/Anna photos") }
         server.put(
             file(1, "/Photos/a.jpg", time: 1000), file(2, "/Photos/b.jpg", time: 2000),
             file(10, "/Anna photos/x.jpg", time: 1500), file(11, "/Anna photos/2025/y.jpg", time: 2500),
@@ -68,7 +68,7 @@ import Testing
     }
 
     @Test func aPartnerFolderInsideTheTimelineFoldersOnlyChangesTheBadge() async throws {
-        server.state.withLock { $0.folders.insert("/Photos/Shared by Ben") }
+        server.state.withLock { _ = $0.folders.insert("/Photos/Shared by Ben") }
         server.put(file(30, "/Photos/Shared by Ben/p.jpg", time: 1200))
         await engine.sync()
         #expect(try ids() == [1, 2, 30])

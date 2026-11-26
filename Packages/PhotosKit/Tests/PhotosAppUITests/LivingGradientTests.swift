@@ -129,7 +129,7 @@ import Testing
         #expect(LivingPalette.blend(.red, .blue).colors(dark: true, increasedContrast: false).count == 9)
     }
 
-    @Test func otherCardDotsAreBrighterWithIncreaseContrast() {
+    @MainActor @Test func otherCardDotsAreBrighterWithIncreaseContrast() {
         #expect(YearInReviewScreen.otherDotOpacity(increasedContrast: true) > YearInReviewScreen.otherDotOpacity(increasedContrast: false))
         // 60 % white on black: well over the 3:1 a non-text element needs (35 % was right at the limit).
         let gray = 0.6

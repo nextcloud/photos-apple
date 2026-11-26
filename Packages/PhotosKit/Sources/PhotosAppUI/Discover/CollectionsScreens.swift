@@ -511,9 +511,18 @@ struct TagsScreen: View {
     @Environment(SessionModel.self) private var session
     @State private var tags: [SystemTag] = []
     @State private var error: String?
+    @State private var loaded = false
 
     var body: some View {
         ScrollView {
+            // A server without tagged photos (a new or older one) showed only the title.
+            if loaded && tags.isEmpty && error == nil {
+                ContentUnavailableView(
+                    String(localized: "No tags yet", bundle: .module), systemImage: "tag",
+                    description: Text(
+                        "Tags you give photos here or in Nextcloud appear here.", bundle: .module,
+                        comment: "Tags screen: empty state when no photo has a tag."))
+            }
             LazyVGrid(columns: tileColumns, spacing: 20) {
                 ForEach(tags) { tag in
                     NavigationLink {
@@ -531,6 +540,7 @@ struct TagsScreen: View {
         }
         .navigationTitle(String(localized: "Tags", bundle: .module))
         .task {
+            defer { loaded = true }
             do {
                 tags = try await session.services?.api.tagsInUse() ?? []
             } catch {

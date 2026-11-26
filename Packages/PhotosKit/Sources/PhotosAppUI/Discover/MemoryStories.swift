@@ -64,14 +64,47 @@ enum MemoryStory {
         return rightToLeft ? fraction < 2.0 / 3.0 : fraction > 1.0 / 3.0
     }
 
-    /// Height of the band; fixed, so the cards never leave an empty band above the grid (round 4's strip fix).
+    /// Height of the band; fixed, so the cards never leave an empty band above the grid (round 4's strip fix). The Mac
+    /// keeps the band above its grid all the time: compact there (it took a third of a small window, SPEC §20.1).
     @MainActor static func height(compact: Bool) -> CGFloat {
         #if os(macOS)
-            210
+            128
         #else
             compact ? 184 : 220
         #endif
     }
+}
+
+/// Where a swipe through the story cards comes to rest (iPhone, iPad, Vision Pro; SPEC §20.1).
+///
+/// There the strip lives in the Library's UIKit grid, where a scroll target behaviour (`.viewAligned`) trapped SwiftUI
+/// (STATUS §M8). Instead the strip watches its scroll phase: when the finger lifts, one large card at a time (compact)
+/// moves on by one card in the swipe's direction; where several cards fit, the strip glides out and then settles on the
+/// nearest card. Both go through the scroll position, as going on to the next story does.
+enum MemoryStorySnap {
+    /// The card whose leading edge is nearest to the leading edge of the strip at `offset` (the content offset).
+    static func nearest(offset: Double, leadingInset: Double, stride: Double, count: Int) -> Int {
+        guard stride > 0, count > 0 else { return 0 }
+        let index = Int(((offset - leadingInset) / stride).rounded())
+        return min(max(index, 0), count - 1)
+    }
+
+    /// One card at a time: the card after or before the one the swipe began on, in the direction the strip was moved —
+    /// when it was flung (`speed`, the size of the scroll velocity) or dragged a third of a card; otherwise back to where
+    /// it began. The direction comes from the offsets alone, so it does not depend on the velocity's sign convention.
+    static func paged(startIndex: Int, startOffset: Double, endOffset: Double, speed: Double, stride: Double, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let moved = endOffset - startOffset
+        let flung = abs(speed) > flickSpeed && abs(moved) >= minimumFlick
+        let dragged = stride > 0 && abs(moved) > stride / 3
+        let direction = flung || dragged ? (moved > 0 ? 1 : -1) : 0
+        return min(max(startIndex + direction, 0), count - 1)
+    }
+
+    /// Below this the lift is a release, not a fling (points per second and per millisecond alike: a resting finger).
+    static let flickSpeed = 0.5
+    /// A fling must have moved the strip this far (points): a tap that wobbled is not a swipe.
+    static let minimumFlick = 8.0
 }
 
 /// The memories as story cards: one large card at a time on iPhone (the next one peeks in), several side by side where
@@ -89,6 +122,8 @@ struct MemoryStories: View {
     @State private var front: String?
     @State private var width: CGFloat = 0
     @State private var opened: Memory?
+    /// Where the swipe began: the card in front and the content offset (snapping, `MemoryStorySnap`).
+    @State private var swipeStart: (index: Int, offset: Double)?
     /// A memory zooms out of its story card (SPEC §17.4).
     @Namespace private var zoom
 
@@ -99,6 +134,10 @@ struct MemoryStories: View {
         compact ? max(width - 24 - 28, 200) : min(height * 1.6, max(width - 24, 200))
     }
 
+    /// Space between the cards and before the first one.
+    static let spacing: CGFloat = 10
+    static let inset: CGFloat = 12
+
     static let allMemoriesId = "all-memories"
     static let reviewId = "year-in-review"
 
@@ -107,8 +146,23 @@ struct MemoryStories: View {
     }
 
     var body: some View {
+        // The reader scrolls to the card a swipe comes to rest on: setting the scroll position to the card it already
+        // holds (a short drag back) would not move the strip.
+        ScrollViewReader { (proxy: ScrollViewProxy) in
+            strip(proxy)
+        }
+        // Fixed: a horizontal scroll view takes all the height it is offered (see `MemoriesStrip`).
+        .frame(height: height + 2 * MemoriesStrip.verticalPadding)
+        .navigationDestination(item: $opened) { memory in
+            MemoryScreen(memory: memory).cardTransitionDestination(id: memory.id, in: zoom)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Memories", bundle: .module))
+    }
+
+    func strip(_ proxy: ScrollViewProxy) -> some View {
         ScrollView(.horizontal) {
-            LazyHStack(spacing: 10) {
+            LazyHStack(spacing: Self.spacing) {
                 if let seasonalYear {
                     NavigationLink {
                         YearInReviewScreen(year: seasonalYear)
@@ -136,30 +190,33 @@ struct MemoryStories: View {
                 allMemoriesLink.id(Self.allMemoriesId)
             }
             .scrollTargetLayout()
-            .padding(.horizontal, 12)
             .padding(.vertical, MemoriesStrip.verticalPadding)
         }
+        // A margin, not padding: a card brought to the leading edge (snapping, the next story) rests at the margin, as
+        // the first one does, not flush with the screen's edge.
+        .contentMargins(.horizontal, Self.inset, for: .scrollContent)
         .scrollIndicators(.hidden)
         #if os(macOS)
             .scrollTargetBehavior(.viewAligned)
         #endif
         // iPhone, iPad and Vision Pro: no scroll target behaviour. There the strip is hosted in the Library's UIKit grid,
         // and `.viewAligned` trapped in SwiftUI (`ResolvedScrollBehavior.updateTarget`, during accessibility updates —
-        // UI tests, VoiceOver) in most UI-test runs; without it, none (STATUS §M8). Going on to the next story and the
-        // taps still bring a card to the leading edge through the scroll position.
+        // UI tests, VoiceOver) in most UI-test runs; without it, none (STATUS §M8). The strip snaps through its scroll
+        // position instead, when a swipe ends (`MemoryStorySnap`, SPEC §20.1).
         .scrollPosition(id: $front, anchor: .leading)
+        #if !os(macOS)
+            .onScrollPhaseChange { (old: ScrollPhase, new: ScrollPhase, context: ScrollPhaseChangeContext) in
+                // Card n rests at offset n × stride − the leading inset.
+                let offset: Double = Double(context.geometry.contentOffset.x + context.geometry.contentInsets.leading)
+                guard let id = snapTarget(from: old, to: new, offset: offset, velocity: context.velocity) else { return }
+                withAnimation(.smooth) { proxy.scrollTo(id, anchor: .leading) }
+            }
+        #endif
         .onGeometryChange(for: CGFloat.self) {
             $0.size.width
         } action: {
             width = $0
         }
-        // Fixed: a horizontal scroll view takes all the height it is offered (see `MemoriesStrip`).
-        .frame(height: height + 2 * MemoriesStrip.verticalPadding)
-        .navigationDestination(item: $opened) { memory in
-            MemoryScreen(memory: memory).cardTransitionDestination(id: memory.id, in: zoom)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Memories", bundle: .module))
     }
 
     @ViewBuilder func menu(_ memory: Memory) -> some View {
@@ -178,6 +235,35 @@ struct MemoryStories: View {
         } label: {
             Label(MemoriesStrip.hideTitle, systemImage: "eye.slash")
         }
+    }
+
+    /// Stride from one card to the next.
+    var stride: Double { Double(cardWidth + Self.spacing) }
+
+    /// Snaps the cards when a swipe ends (`MemoryStorySnap`): compact, by one card as soon as the finger lifts; wider (and
+    /// a compact strip that still came to rest between cards), on the nearest card once the strip has glided out.
+    func snapTarget(from old: ScrollPhase, to new: ScrollPhase, offset: Double, velocity: CGVector?) -> String? {
+        let count: Int = ids.count
+        if new == .interacting {
+            if old != .interacting {
+                let index: Int = MemoryStorySnap.nearest(offset: offset, leadingInset: 0, stride: stride, count: count)
+                swipeStart = (index, offset)
+            }
+            return nil
+        }
+        var target: Int?
+        if old == .interacting, compact, let start = swipeStart {
+            let speed: Double = abs(Double(velocity?.dx ?? 0))
+            target = MemoryStorySnap.paged(
+                startIndex: start.index, startOffset: start.offset, endOffset: offset, speed: speed, stride: stride, count: count)
+        } else if new == .idle, old == .decelerating || old == .interacting {
+            // Wider: where the glide ended. Compact as well, should a swipe have come to rest between two cards.
+            let nearest: Int = MemoryStorySnap.nearest(offset: offset, leadingInset: 0, stride: stride, count: count)
+            if abs(offset - Double(nearest) * stride) > 1 { target = nearest }
+        }
+        if new == .idle { swipeStart = nil }
+        guard let target, ids.indices.contains(target) else { return nil }
+        return ids[target]
     }
 
     /// The next card comes to the front once a card has shown its last photo.
@@ -388,6 +474,8 @@ struct StoryCard: View {
             .foregroundStyle(.white)
             .shadow(radius: 3)
             .multilineTextAlignment(.leading)
+            // UI tests: captions on photos, measured against the photo (SPEC §20.3).
+            .accessibilityIdentifier("memory-caption")
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

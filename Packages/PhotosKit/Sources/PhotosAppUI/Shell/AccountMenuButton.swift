@@ -111,6 +111,9 @@ struct AccountMenuButton: View {
 }
 
 /// The account's initials in a circle of the accent colour, the way Apple's apps show an account without a picture.
+/// White on the accent (6.1:1, SPEC §20.3), like the sidebar's `AccountBadge`; the pale tint it had was too faint. Hidden
+/// from VoiceOver: the button around it says whose account it is. It keeps its size in the toolbar, where the system
+/// shows bar buttons enlarged (Large Content Viewer) instead.
 struct AccountAvatar: View {
     let name: String
     var size: CGFloat = 28
@@ -118,17 +121,18 @@ struct AccountAvatar: View {
     var body: some View {
         let initials: String = AccountInitials.initials(of: name)
         ZStack {
-            Circle().fill(.tint.opacity(0.18))
+            Circle().fill(Design.accent)
             if initials.isEmpty {
-                Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(.tint)
+                Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(.white)
             } else {
                 Text(verbatim: initials)
                     .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(.white)
                     .minimumScaleFactor(0.5)
             }
         }
         .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 

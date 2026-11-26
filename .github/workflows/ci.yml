@@ -11,6 +11,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Warnings fail the build in our own code (SPEC §20.5): PhotosKit reads this from the environment (Package.swift), the app
+  # targets get it as a build setting on the xcodebuild command line (Config/Base.xcconfig). Dependencies are not affected.
+  PHOTOS_WARNINGS_AS_ERRORS: "YES"
+
 jobs:
   lint:
     # swift-format comes with Xcode and its rules change between versions, so the job uses the Xcode the code is
@@ -60,6 +65,8 @@ jobs:
           fi
           xcodebuild test -scheme PhotosKit-Package -destination 'platform=macOS' -skipPackagePluginValidation \
             | tee "$RUNNER_TEMP/unit-tests.log"
+      - name: No warnings
+        run: .github/scripts/check-warnings.sh "$RUNNER_TEMP/unit-tests.log"
       - name: Test summary
         # A green job must mean that tests ran: count them and fail when there were none.
         if: always()
@@ -105,6 +112,8 @@ jobs:
           set -o pipefail
           xcodebuild test -scheme PhotosKit-Package -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -skipPackagePluginValidation | tee "$RUNNER_TEMP/unit-tests-ios.log"
+      - name: No warnings
+        run: .github/scripts/check-warnings.sh "$RUNNER_TEMP/unit-tests-ios.log"
       - name: Test summary
         if: always()
         run: |
@@ -138,8 +147,11 @@ jobs:
         run: brew install xcodegen && xcodegen generate
       - name: Build
         run: |
+          set -o pipefail
           xcodebuild -project NextcloudPhotos.xcodeproj -scheme '${{ matrix.scheme }}' -destination '${{ matrix.destination }}' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=- build
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=- PHOTOS_WARNINGS_AS_ERRORS=YES build | tee "$RUNNER_TEMP/build.log"
+      - name: No warnings
+        run: .github/scripts/check-warnings.sh "$RUNNER_TEMP/build.log"
   release-build:
     # The Release configuration differs from Debug (optimisation, entitlements, no debug-only code): archive it without
     # signing so that it keeps compiling. Signed archives are made by the release workflow.
@@ -156,4 +168,87 @@ jobs:
         run: |
           xcodebuild archive -project NextcloudPhotos.xcodeproj -scheme NextcloudPhotos -configuration Release \
             -destination '${{ matrix.destination }}' -archivePath "$RUNNER_TEMP/NextcloudPhotos.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO PHOTOS_WARNINGS_AS_ERRORS=YES
+  ui-smoke:
+    # The app itself in an iPhone simulator, against a throw-away Nextcloud with the sample photos of a new account
+    # (scripts/test-server.sh, as in the nightly integration job): launch and Library, the viewer, Albums, Collections,
+    # the Settings sheet, the filter menu and Clean up (UITests/SmokeTests.swift). Screenshots and the result bundle are
+    # kept as an artifact. The tours only look and navigate; the server is gone with the runner.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      SERVER_URL: http://127.0.0.1:8089
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: ctype, curl, dom, exif, fileinfo, gd, intl, mbstring, openssl, pdo_sqlite, posix, session, simplexml, sqlite3, xmlreader, xmlwriter, zip, zlib
+          coverage: none
+      - name: Start Nextcloud
+        run: |
+          scripts/test-server.sh "$RUNNER_TEMP/nextcloud" 8089 > "$RUNNER_TEMP/nextcloud.log" 2>&1 &
+          for _ in $(seq 1 120); do
+            if [ -f "$RUNNER_TEMP/nextcloud/ready" ]; then break; fi
+            sleep 5
+          done
+          tail -n 40 "$RUNNER_TEMP/nextcloud.log"
+          if [ ! -f "$RUNNER_TEMP/nextcloud/ready" ]; then
+            echo "::error::The test server did not come up within 10 minutes."
+            exit 1
+          fi
+          curl -fsS "$SERVER_URL/status.php"
+      - name: Boot an iPhone simulator
+        id: simulator
+        run: |
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick-simulator.py "$SDK")
+          if [ -z "$UDID" ]; then
+            echo "::error::No iPhone simulator with an iOS 27 runtime on this runner (SDK $SDK)."
+            exit 1
+          fi
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+      - name: UI smoke tests
+        env:
+          # xcodebuild hands variables with this prefix to the test runner (without the prefix).
+          TEST_RUNNER_PHOTOS_UITEST_LOGIN: nc://login/server:${{ env.SERVER_URL }}&user:admin&password:admin
+          TEST_RUNNER_PHOTOS_UITEST_SHOTS: ${{ runner.temp }}/ui-smoke-shots
+        run: |
+          set -o pipefail
+          # A bundle id of its own (the tests refuse the official one); entitlements on, or the keychain cannot keep the
+          # login in the simulator.
+          xcodebuild test -project NextcloudPhotos.xcodeproj -scheme NextcloudPhotosUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -only-testing:NextcloudPhotosUITests/SmokeTests -resultBundlePath "$RUNNER_TEMP/ui-smoke.xcresult" \
+            PHOTOS_BUNDLE_ID=com.nextcloud.photos.ci PHOTOS_DEBUG_ENTITLEMENTS=YES PHOTOS_WARNINGS_AS_ERRORS=YES \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= | tee "$RUNNER_TEMP/ui-smoke.log"
+      - name: Test summary
+        # Green must mean that the tours ran: a skipped test (no login reached the runner) fails the job too.
+        if: always()
+        run: |
+          if [ ! -d "$RUNNER_TEMP/ui-smoke.xcresult" ]; then
+            echo "::error::No result bundle: the UI tests did not run."
+            exit 1
+          fi
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/ui-smoke.xcresult" --compact \
+            | python3 .github/scripts/ui-test-summary.py >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-smoke
+          path: |
+            ${{ runner.temp }}/ui-smoke-shots
+            ${{ runner.temp }}/ui-smoke.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Server log
+        if: failure()
+        run: |
+          tail -n 100 "$RUNNER_TEMP/nextcloud.log" || true
+          tail -n 50 "$RUNNER_TEMP/nextcloud/nextcloud/data/nextcloud.log" || true

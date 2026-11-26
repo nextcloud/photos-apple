@@ -14,8 +14,8 @@ import SwiftUI
 
 /// Design tokens (SPEC §6.5).
 public enum Design {
-    /// Nextcloud blue.
-    public static let accent = Color(red: 0, green: 130 / 255, blue: 201 / 255)
+    /// Nextcloud blue, legible as text and on tinted buttons (SPEC §20.3): see `AccentPalette`.
+    public static let accent = AccentPalette.color
 
     @MainActor public static var tileSpacing: CGFloat {
         #if os(macOS)
@@ -113,6 +113,10 @@ extension View {
                 content()
                     .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
                     #if os(iOS)
+                        // The iPad's inspector column is clear glass over the photo: its secondary text (section
+                        // headers, row titles) came out below 3:1 on light photos (SPEC §20.3). A thick material
+                        // behind the info keeps the glass look and the text legible.
+                        .background(.thickMaterial)
                         // iPhone (and narrow iPad windows), where the inspector is a sheet: half height first, so the
                         // photo stays in view above the info as in Photos, and the photo can still be paged meanwhile.
                         .presentationDetents([.medium, .large])
@@ -558,6 +562,8 @@ struct CaptionPlate<Content: View>: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let label = content()
+            // UI tests: text on the plate's glass, which the audit measures against the cover behind it (SPEC §20.3).
+            .accessibilityIdentifier("caption-plate")
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)

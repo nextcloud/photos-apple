@@ -5,8 +5,25 @@
 | Unit tests | `Packages/PhotosKit/Tests` (Swift Testing) | macOS 27 or an iOS 27 simulator | every pull request (macOS and iOS simulator) |
 | Performance tests | `LargeLibraryPerformanceTests` | a few minutes | pushes to `main`, nightly; skipped on pull requests |
 | Integration tests | suites named `…Integration…Tests` | a Nextcloud server | nightly |
-| UI smoke tests | `UITests` (XCUITest) | a Nextcloud server, a Debug build | no |
+| UI smoke tests | `UITests/SmokeTests.swift` (XCUITest) | a Nextcloud server, a Debug build | every pull request (iPhone simulator, throw-away server) |
+| UI tours | the other `UITests` | a Nextcloud server with the test library, a Debug build | no |
 | Device tests | [test-plan.md](test-plan.md) | devices | no |
+
+## Warnings
+
+The code builds without warnings, and CI keeps it so (SPEC §20.5): every job sets `PHOTOS_WARNINGS_AS_ERRORS=YES`. In the
+environment it makes PhotosKit treat its warnings as errors (`Package.swift`); as a build setting
+(`xcodebuild … PHOTOS_WARNINGS_AS_ERRORS=YES`) it does the same for the app's targets (`Config/Base.xcconfig`,
+`project.yml`). Dependencies keep their own settings. `.github/scripts/check-warnings.sh <log>` then fails on any warning
+left in the log: the compiler does not turn warnings inside macro expansions (`#expect`) into errors, and other tools
+(asset catalogs, the linker) have warnings too. Locally, builds only warn; to build like CI:
+
+```sh
+PHOTOS_WARNINGS_AS_ERRORS=YES xcodebuild … PHOTOS_WARNINGS_AS_ERRORS=YES build
+```
+
+A deprecation that has no replacement is silenced for that one declaration with `@diagnose(DeprecatedDeclaration, as:
+ignored)` and a comment saying why (so far only `UIApplication.canOpenURL` for the Files app check).
 
 ## Unit tests
 
@@ -29,6 +46,11 @@ target); suites with such tests have a `.timeLimit`, so a hang fails instead of 
 `LargeLibraryPerformanceTests` measure the store on a synthetic library of 100 000 items against the budgets of SPEC §10
 and print lines starting with `PERF`. Skip them with `PHOTOS_SKIP_PERFORMANCE=1`; another size:
 `PHOTOS_PERFORMANCE_ITEMS=250000`.
+
+The app itself (launch, scrolling, viewer paging, memory) is measured by `UITests/PerformanceTests` in a simulator and,
+without XCUITest, on the Mac: `scripts/measure-performance.sh ios <simulator udid>` or `mac <Debug app>`. Method and
+baselines: [PERFORMANCE.md](PERFORMANCE.md). `UITests/AppStoreScreenshots` makes the App Store screenshots
+(`scripts/app-store-screenshots.sh`, RELEASE-CHECKLIST.md step 7). Both need `PHOTOS_UITEST_LOGIN` like the tours below.
 
 ## Integration tests
 
@@ -61,10 +83,32 @@ same account, and one of them counts its files while another uploads. The nightl
 To test the features of newer Photos versions, point the variables at a server that has them; the tests check that
 what the app detected matches what the server answers.
 
+**Older Nextcloud versions** (the oldest supported is 33, SPEC §2): the same script with the release archive of that
+version and the Photos app it bundles, e.g.
+
+```sh
+NEXTCLOUD_ARCHIVE=https://download.nextcloud.com/server/releases/latest-33.tar.bz2 scripts/test-server.sh /tmp/nc33 8095
+NEXTCLOUD_ARCHIVE=https://download.nextcloud.com/server/releases/latest-34.tar.bz2 scripts/test-server.sh /tmp/nc34 8096
+```
+
+To give such a server a larger library, copy photos into `nextcloud/data/admin/files/Photos/…`, run `occ files:scan
+--path=admin/files/Photos` and then `occ metadata:get <fileId> admin --refresh` for each new file (the file ids are in
+`oc_filecache` of `nextcloud/data/owncloud.db`). On Nextcloud 33 and 34, `files:scan --generate-metadata` stops after the
+first file of a newly copied folder without saying so, and leaves the rest without capture time, place and BlurHash.
+SPEC §20.2 lists what differs between the versions.
+
 ## UI smoke tests
 
-`UITests/SmokeTests.swift` starts the app, signs in with the debug login and checks three things: the timeline shows
-photos; the first photo opens in the viewer and closes again; the Albums screen opens. They only look and navigate.
+`UITests/SmokeTests.swift` starts the app, signs in with the debug login and checks: the timeline shows photos; the first
+photo opens in the viewer and closes again; the Albums screen opens; and on iPhone the Collections tab, the Settings sheet,
+the filter menu (Favorites and its chip) and Clean up with a section's review screen. They only look and navigate.
+
+CI runs them on every pull request (`ui-smoke` in `.github/workflows/ci.yml`): `scripts/test-server.sh` installs the latest
+Nextcloud release with the sample photos of a new account, an iPhone simulator boots, and the job keeps the screenshots
+(`PHOTOS_UITEST_SHOTS`) and the result bundle as the artifact `ui-smoke`. A skipped test fails the job (it means the login
+did not reach the runner). So they must not depend on the day they run nor on the shared test library; a tour that needs
+photos of its own uploads them first (`UITests/TestServer.swift`, a folder of its own under `/Photos`, deleted again with
+its trash bin entries).
 
 - They need a **Debug** build (the debug login does not exist in Release) and a test server with photos, and run only
   when `PHOTOS_UITEST_LOGIN` holds a login link.
@@ -129,13 +173,14 @@ the server's values while it runs (PROPFIND of `nc:metadata-photos-original_date
 
 `UITests/GridMotionTourTests.swift` (iPhone) tours SPEC §17.2: the Library edge to edge with its date pill, selecting
 tiles, the viewer's zoom out of a tile and back, an album's grid (`TEST_RUNNER_PHOTOS_UITEST_ALBUM`, default
-"r7-grid-album") and — opt-in, only when the Library has a "Today" section of your own uploaded photos — a favourite's
-heart, a delete and its undo. `TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX` names the screenshots (before/after pairs), and
+"r7-grid-album") and a favourite's heart, a delete and its undo on two photos the test uploads first (dated now, so
+they are the newest of the library on any day) and removes at the end. `TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX` names the screenshots (before/after pairs), and
 `TEST_RUNNER_PHOTOS_UITEST_REDUCE_MOTION=1` / `TEST_RUNNER_PHOTOS_UITEST_REDUCE_TRANSPARENCY=1` launch the app with those
 settings. For motion, record the simulator meanwhile (`xcrun simctl io <udid> recordVideo --codec h264 <file>`).
 
 The app has no accessibility identifiers yet (apart from `librarySummary`, the zoom levels' scroll view); the tests find elements by role and by their English labels, and start
-the app in English. They are not part of CI because they need a server. They have run in the iOS 27.2 simulator (iPhone).
+the app in English. The tours other than `SmokeTests` are not part of CI: they need the shared test library and take
+long. They have run in the iOS 27.2 simulator (iPhone).
 
 `UITests/SearchTourTests.swift` (SPEC §16.2) types a search in words and changes a chip, and finds a place in the
 command palette by a typo; like the other tours it needs `PHOTOS_UITEST_LOGIN` and a library with favourite photos taken
@@ -180,6 +225,19 @@ when run with `TEST_RUNNER_PHOTOS_POSTCARD_PHOTO=<jpeg>` and `TEST_RUNNER_PHOTOS
 
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
+
+`UITests/AccessibilityAuditTests.swift` (iPhone and iPad, SPEC §20.3) runs Xcode's accessibility audit
+(`performAccessibilityAudit`: contrast, hit areas, labels, traits, Dynamic Type, clipped text) on every main screen —
+Library, viewer and its info, Collections (the iPad's sidebar), Albums, Settings, Search, Clean up, Memories — and on
+Library, Settings, Collections and Search at the largest accessibility text size. A finding fails the test unless
+`AccessibilityAuditPolicy.accepts` names it with a reason (a photo's own colours, the system's bars and search field,
+the system's secondary text colours at 3:1 or more, content under the tab bar's glass, findings without an element).
+With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` every screen's screenshot, accessibility tree and findings
+(`…-audit.txt`, accepted ones with their reason) are written there; `TEST_RUNNER_PHOTOS_UITEST_A11Y_SURVEY=1` only
+writes them, for a look at a new screen. `TEST_RUNNER_PHOTOS_UITEST_LANGUAGE=de` runs the same screens in German with a
+German region, `=double` in English with every text doubled (`NSDoubleLocalizedStrings`), to see where longer
+translations would be cut off. Every test starts at a destination (`PHOTOS_DEBUG_DESTINATION`), because the app
+otherwise reopens the place where the previous test ended.
 
 `UITests/PhoneTourTests.swift` walks through the iPhone screens (library and date scrubber, selection and context menu,
 viewer, Collections, Settings, Search, a memory, and every screen a link leads to). It runs only on an iPhone simulator,

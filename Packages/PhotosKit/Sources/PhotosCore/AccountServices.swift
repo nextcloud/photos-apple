@@ -76,6 +76,11 @@ public final class AccountServices: Sendable {
         images.setEditProvider { [edits] fileId in edits.recipe(for: fileId) }
         // One cache key per photo (SPEC §18.1.1): covers and memories asked for without an ETag use the grid's files.
         images.setEtagProvider { [library] fileId in try? library.etag(of: fileId) }
+        // A preview made on the device for a cover or memory of a file the server has none of (SPEC §20.1).
+        images.setSourceProvider { [library, connection] fileId in
+            guard let item = try? library.item(fileId) else { return nil }
+            return (item.mimeType, connection.originalURL(path: item.path))
+        }
         let library = library
         Task { [weak images] in
             await images?.setLiveStillProvider { [library, originals, connection] fileId, recipe, bucket in

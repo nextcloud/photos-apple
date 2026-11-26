@@ -44,7 +44,7 @@ import Testing
         #expect(ShareRole(permissions: [.read, .create], kind: .user, isFolder: true) == .edit)
     }
 
-    @Test func editorSendsOnlyChanges() {
+    @MainActor @Test func editorSendsOnlyChanges() {
         let link = FileShare(
             id: "3", kind: .link, path: "/a", isFolder: true, permissions: .read, expirationDay: "2026-12-31", hasPassword: true,
             label: "Family")
@@ -73,7 +73,7 @@ import Testing
         #expect(edit.hideDownload == nil)
     }
 
-    @Test func linksOverHTTPAreFlagged() throws {
+    @MainActor @Test func linksOverHTTPAreFlagged() throws {
         #expect(SharedLinkView.isUnencrypted(try #require(URL(string: "http://cloud.example.org/s/abc"))))
         #expect(!SharedLinkView.isUnencrypted(try #require(URL(string: "https://cloud.example.org/s/abc"))))
     }

@@ -186,6 +186,8 @@ struct ShareableMedia: Transferable {
 /// Share button for originals.
 struct ShareMediaButton: View {
     let items: [MediaItem]
+    /// The side of the square that takes the taps, for an icon in a plain bar (SPEC §20.3); nil: the label's own size.
+    var target: CGFloat? = nil
     @Environment(SessionModel.self) private var session
 
     var body: some View {
@@ -194,6 +196,8 @@ struct ShareMediaButton: View {
                 SharePreview(items.count == 1 ? items[0].name : String(localized: "\(items.count) items", bundle: .module))
             } label: {
                 Label(String(localized: "Share", bundle: .module), systemImage: "square.and.arrow.up")
+                    .frame(width: target, height: target)
+                    .contentShape(.rect)
             }
         }
     }

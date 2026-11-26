@@ -125,6 +125,8 @@ public final class CacheMetrics: Sendable {
         }
         let components = elapsed.components
         record(timer.timing, milliseconds: Double(components.seconds) * 1000 + Double(components.attoseconds) / 1e15)
+        // Launch → first pictures of the Library (SPEC §10, §20.6); only the app's metrics, not a test's own.
+        if timer.timing == .tile, self === Self.shared { LaunchMetrics.shared.tileShown() }
     }
 
     /// Starts counting again from zero.

@@ -266,7 +266,7 @@ struct ImportFindings {
 }
 
 /// A source adapter: recognises the files of one service's export and turns them into items and albums.
-protocol ExportAdapter {
+protocol ExportAdapter: SendableMetatype {
     static var source: ImportSourceKind { get }
     /// Reads the files not claimed by an adapter before it.
     static func read(_ files: ExportFiles, unclaimed: [Int]) throws -> ImportFindings

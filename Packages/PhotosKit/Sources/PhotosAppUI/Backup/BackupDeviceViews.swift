@@ -300,8 +300,8 @@ struct LocalAssetThumbnail: View {
     }
 #endif
 
-/// Texts that name this device.
-enum DeviceWording {
+/// Texts that name this device (on the main actor: they ask UIDevice, which is the main actor's).
+@MainActor enum DeviceWording {
     enum Kind { case iPhone, iPad, mac }
 
     static var kind: Kind {

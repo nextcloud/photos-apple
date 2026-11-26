@@ -181,7 +181,8 @@ struct LibraryFilterMenu: View {
                 Text("Show", bundle: .module)
             }
             .pickerStyle(.inline)
-            if offersCulling { cullingMenu }
+            // An advanced feature (SPEC §20.4); kept while a ratings filter is on, so it can be turned off.
+            if offersCulling, AdvancedFeatures.shows(.culling) || culling != .all { cullingMenu }
             if let partners = session.partners, partners.hasPartners {
                 Toggle(
                     LibraryFilterWording.hidePartnersTitle,

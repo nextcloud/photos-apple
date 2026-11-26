@@ -20,6 +20,8 @@ public struct RootView: View {
     public init() {}
 
     public var body: some View {
+        // Before the first screen is built: the Library's first items, off the main thread (`LibraryLaunchPrefetch`).
+        let _ = LibraryLaunchPrefetch.shared.start(app.session)
         Group {
             if app.needsLogin || WelcomeDebug.showsLogin {
                 LoginView()

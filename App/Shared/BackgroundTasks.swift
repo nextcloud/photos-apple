@@ -3,6 +3,7 @@
 
 #if os(iOS)
     import BackgroundTasks
+    import OSLog
     import PhotosCore
     import UIKit
 
@@ -10,6 +11,7 @@
     enum BackgroundTasks {
         static let refresh = "com.nextcloud.photos.refresh"
         static let processing = "com.nextcloud.photos.processing"
+        static let logger = Logger(subsystem: "com.nextcloud.photos", category: "background")
 
         /// The work of both background tasks: a sync, then a backup pass.
         ///
@@ -63,11 +65,11 @@
         static func schedule() {
             let refreshRequest = BGAppRefreshTaskRequest(identifier: refresh)
             refreshRequest.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-            try? BGTaskScheduler.shared.submit(refreshRequest)
+            BGTaskScheduler.shared.submitLoggingErrors(refreshRequest, logger: logger)
             let processingRequest = BGProcessingTaskRequest(identifier: processing)
             processingRequest.requiresNetworkConnectivity = true
             processingRequest.requiresExternalPower = false
-            try? BGTaskScheduler.shared.submit(processingRequest)
+            BGTaskScheduler.shared.submitLoggingErrors(processingRequest, logger: logger)
         }
     }
 

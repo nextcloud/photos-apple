@@ -258,6 +258,7 @@ import Testing
         var blur: CGImage?
         var result: CGImage?
         var gate: AsyncStream<Void>.Continuation?
+        var noPreview = false
 
         func attach(to picture: GridTilePicture) {
             picture.show = { [unowned self] display in
@@ -265,7 +266,7 @@ import Testing
                 case .clear: shown.append("clear")
                 case .blur: shown.append("blur")
                 case .picture(let image): shown.append("picture \(image.width)")
-                case .placeholder(let symbol): shown.append("placeholder \(symbol)")
+                case .placeholder(let value): shown.append("placeholder \(value.symbol)" + (value.noPreview ? " no preview" : ""))
                 }
             }
         }
@@ -279,7 +280,8 @@ import Testing
                     gate = continuation
                     for await _ in stream { break }
                     return result
-                })
+                },
+                noPreview: { [unowned self] _ in noPreview })
         }
 
         /// Lets the running load return and waits until the tile has handled it.
@@ -362,5 +364,39 @@ import Testing
         #expect(picture.fileId == nil)
         await recorder.finishLoad()
         #expect(recorder.shown == ["clear", "placeholder video", "clear", "clear"])
+    }
+
+    @Test func aFileTheServerHasNoPreviewOfSaysSoAtOnce() async {
+        let picture = GridTilePicture()
+        let recorder = Recorder()
+        recorder.attach(to: picture)
+        recorder.blur = image(8)
+        let item = media(5, date(2026, 11, 22))
+        // The first load finds out: the tile says "No preview", not just a grey square.
+        picture.configure(item: item, request: request(item, pixels: 256), source: recorder.source)
+        recorder.noPreview = true
+        await recorder.finishLoad()
+        #expect(recorder.shown == ["clear", "blur", "placeholder photo no preview"])
+        // Shown again later: no blur and no grey square while the pipeline decides whether to ask again.
+        let other = GridTilePicture()
+        let again = Recorder()
+        again.attach(to: other)
+        again.blur = image(8)
+        again.noPreview = true
+        other.configure(item: item, request: request(item, pixels: 256), source: again.source)
+        #expect(again.shown == ["clear", "placeholder photo no preview"])
+        await again.finishLoad()
+        #expect(again.shown.last == "placeholder photo no preview")
+    }
+
+    @Test func theNameAndNoPreviewOnlyOnTilesLargeEnough() {
+        let missing = GridTileNoPicture(symbol: "photo", name: "party.jpg", noPreview: true)
+        #expect(missing.showsText(tileSide: 120))
+        #expect(!missing.showsText(tileSide: 60))
+        #expect(missing.accessibilityText == GridTileNoPicture.caption)
+        // Not loaded now (offline): only the symbol, nothing claimed.
+        let offline = GridTileNoPicture(symbol: "photo", name: "party.jpg", noPreview: false)
+        #expect(!offline.showsText(tileSide: 300))
+        #expect(offline.accessibilityText == nil)
     }
 }

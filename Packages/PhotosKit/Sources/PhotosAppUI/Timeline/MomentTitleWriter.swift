@@ -25,7 +25,7 @@ final class MomentTitleWriter {
             let answer = try await session.respond(
                 to: MomentTitleWording.prompt(facts), options: GenerationOptions(temperature: 0.5, maximumResponseTokens: 24))
             return MomentTitleWording.cleaned(answer.content, facts: facts)
-        } catch LanguageModelSession.GenerationError.guardrailViolation {
+        } catch LanguageModelError.guardrailViolation {
             // This moment's facts only: the rule title stays, the next moment is asked.
             return nil
         }

@@ -512,7 +512,7 @@ struct StickerPackSheet: View {
             let model = StickerModel()
             await model.make(from: item, services: services, face: face)
             guard let image = model.styled[.outline], let png = StickerMaker.pngData(image) else { continue }
-            try? book.add(
+            _ = try? book.add(
                 png: png, width: image.width, height: image.height, source: item.fileId, pack: person, style: StickerStyle.outline.rawValue)
             withAnimation(reduceMotion ? .default : .spring(response: 0.45, dampingFraction: 0.65)) { made.append(image) }
         }

@@ -278,7 +278,7 @@ public struct PhotosCommands: Commands {
         }
     }
 
-    static var exportTitle: String {
+    nonisolated static var exportTitle: String {
         PlatformWording.title(
             mac: LocalizedStringResource("Export…", bundle: .module), other: LocalizedStringResource("Save to Photos", bundle: .module))
     }

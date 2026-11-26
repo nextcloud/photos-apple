@@ -21,6 +21,8 @@ final class PreviewStubServer: Sendable {
         var maxActive = 0
         var isHolding = false
         var held: [CheckedContinuation<Void, Never>] = []
+        /// Files the server has no preview of: they answer 404.
+        var missing: Set<FileID> = []
     }
 
     let host = "previews-\(UUID().uuidString.lowercased()).test"
@@ -110,10 +112,12 @@ final class PreviewStubProtocol: URLProtocol, @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(5))
             guard finish() else { return }
             server.end(fileId, cancelled: false)
+            let missing: Bool = server.state.withLock { $0.missing.contains(fileId) }
             let response = HTTPURLResponse(
-                url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "image/jpeg"])!
+                url: url, statusCode: missing ? 404 : 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": missing ? "application/json" : "image/jpeg"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: server.image)
+            client?.urlProtocol(self, didLoad: missing ? Data("[]".utf8) : server.image)
             client?.urlProtocolDidFinishLoading(self)
         }
     }

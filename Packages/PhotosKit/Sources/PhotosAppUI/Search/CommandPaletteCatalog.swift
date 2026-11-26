@@ -139,10 +139,29 @@ enum PaletteDestinations {
 #if os(macOS)
     /// The tabs of the Mac's Settings window, which the palette can open (`MacSettingsView`).
     enum MacSettingsPage: String, CaseIterable {
-        case general, accounts, backup, storage, desktop, server, about
+        case general, accounts, backup, storage, privacy, desktop, advanced, about
 
         /// `@AppStorage` key of the selected tab.
         static let storageKey = "macSettingsTab"
+
+        /// The tab `stored` names; Server, a tab of earlier versions, is part of Accounts now (SPEC §20.4).
+        init(stored: String) {
+            self = stored == "server" ? .accounts : MacSettingsPage(rawValue: stored) ?? .general
+        }
+
+        /// The Settings page the tab shows.
+        var page: SettingsPage {
+            switch self {
+            case .general: .general
+            case .accounts: .accounts
+            case .backup: .backup
+            case .storage: .storage
+            case .privacy: .privacy
+            case .desktop: .desktop
+            case .advanced: .advanced
+            case .about: .about
+            }
+        }
 
         var paletteTitle: String {
             switch self {
@@ -155,32 +174,26 @@ enum PaletteDestinations {
                 String(localized: "Storage Settings", bundle: .module, comment: "Command palette: opens Settings › Storage (Mac).")
             case .desktop:
                 String(localized: "Desktop Settings", bundle: .module, comment: "Command palette: opens Settings › Desktop (Mac).")
-            case .server: String(localized: "Server Settings", bundle: .module, comment: "Command palette: opens Settings › Server (Mac).")
+            case .privacy:
+                String(localized: "Privacy Settings", bundle: .module, comment: "Command palette: opens Settings › Privacy (Mac).")
+            case .advanced:
+                String(localized: "Advanced Settings", bundle: .module, comment: "Command palette: opens Settings › Advanced (Mac).")
             case .about:
                 String(localized: "About Nextcloud Photos", bundle: .module, comment: "Command palette: opens Settings › About (Mac).")
             }
         }
 
-        var systemImage: String {
-            switch self {
-            case .general: "gearshape"
-            case .accounts: "person.crop.circle"
-            case .backup: "icloud.and.arrow.up"
-            case .storage: "internaldrive"
-            case .desktop: "menubar.dock.rectangle"
-            case .server: "server.rack"
-            case .about: "info.circle"
-            }
-        }
+        var systemImage: String { page.systemImage }
 
         var keywords: [String] {
             switch self {
-            case .general: ["search", "descriptions", "similar", "app lock", "notifications"]
-            case .accounts: ["login", "logout", "sign in", "sign out"]
+            case .general: ["library", "folders", "notifications", "appearance", "partner", "family"]
+            case .accounts: ["login", "logout", "sign in", "sign out", "server", "features", "nextcloud", "sync"]
             case .backup: ["upload", "camera roll", "auto upload"]
             case .storage: ["cache", "offline", "space"]
             case .desktop: ["wallpaper", "desktop picture"]
-            case .server: ["features", "nextcloud"]
+            case .privacy: ["app lock", "touch id", "password", "search", "descriptions", "similar"]
+            case .advanced: ["advanced features", "stickers", "insights", "folder rules", "diagnostics", "log", "menu bar"]
             case .about: ["version", "licences", "licenses"]
             }
         }

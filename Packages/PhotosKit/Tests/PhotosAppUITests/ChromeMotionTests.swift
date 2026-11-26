@@ -152,7 +152,7 @@ import Testing
 
     // MARK: Symbols
 
-    @Test func statusSymbolsEndInACheckMark() {
+    @MainActor @Test func statusSymbolsEndInACheckMark() {
         for kind in [ChromeStatusSymbol.Kind.upload, .backup, .sync, .importing] {
             #expect(ChromeStatusSymbol.symbolName(kind, .done) == "checkmark.circle.fill")
             #expect(ChromeStatusSymbol.symbolName(kind, .working) == ChromeStatusSymbol.symbolName(kind, .idle))

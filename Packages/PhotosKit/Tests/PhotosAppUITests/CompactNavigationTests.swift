@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import Foundation
 import PhotosBackup
 import PhotosDomain
+import PhotosModel
+import PhotosStore
 import Testing
 
 @testable import PhotosAppUI
@@ -17,9 +20,10 @@ import Testing
         #expect(!CompactNavigation.usesCollectionsTab(isPhone: false, isCompact: false))
     }
 
-    @Test func everyDestinationIsATabOrListedInCollections() {
+    @Test func everyDestinationIsATabOrReachedFromCollections() {
         let visible: (AppDestination) -> Bool = { _ in true }
-        let listed = Set(CompactNavigation.sections(visible: visible).flatMap(\.destinations))
+        // With Advanced features on, every row is there.
+        let listed = CompactNavigation.reachable(visible: visible, listed: visible)
         for destination in AppDestination.allCases {
             if CompactNavigation.tabs.contains(destination) {
                 #expect(!listed.contains(destination), "\(destination) has a tab of its own")
@@ -37,23 +41,65 @@ import Testing
         }
     }
 
-    @Test func listFollowsTheSidebarAndEndsWithBackup() {
-        let sections = CompactNavigation.sections(visible: { _ in true })
-        #expect(sections.map(\.kind) == [.browse, .collections, .utilities])
-        #expect(sections[0].destinations == [.favorites, .memories, .people, .places])
-        #expect(sections[1].destinations == [.albums, .sharedAlbums])
-        #expect(sections[2].destinations == SidebarLayout.utilities + [.backup])
+    @Test func shelvesComeFirstThenTheUtilitiesWithBackup() {
+        let all: (AppDestination) -> Bool = { _ in true }
+        #expect(CompactNavigation.shelves(visible: all) == [.albums, .memories, .people, .places, .shared])
+        #expect(CompactNavigation.destination(of: .albums, visible: all) == .albums)
+        #expect(CompactNavigation.destination(of: .shared, visible: all) == .sharedAlbums)
+        #expect(CompactNavigation.utilities(listed: all) == SidebarLayout.utilities + [.backup])
+    }
+
+    @Test func advancedPlacesStepBackFromTheList() {
+        let all: (AppDestination) -> Bool = { _ in true }
+        let off: (AppDestination) -> Bool = { AdvancedFeatures.lists($0, isOn: false) }
+        let rows = CompactNavigation.utilities(listed: off)
+        #expect(!rows.contains(.stickers))
+        #expect(!rows.contains(.insights))
+        #expect(rows.contains(.cleanUp) && rows.contains(.backup))
+        // Still destinations: a link opens them in Collections.
+        #expect(CompactNavigation.path(to: .stickers, routes: []) == [.destination("stickers")])
+        #expect(CompactNavigation.reachable(visible: all, listed: all).isSuperset(of: [.stickers, .insights]))
     }
 
     @Test func placesTheServerDoesNotOfferAreLeftOut() {
-        let hidden: Set<AppDestination> = [.people, .places, .tags, .recentlyDeleted]
-        let sections = CompactNavigation.sections(visible: { !hidden.contains($0) })
-        let listed = sections.flatMap(\.destinations)
-        #expect(hidden.isDisjoint(with: listed))
-        #expect(listed.contains(.albums))
-        // A group without rows has no header either.
-        let none = CompactNavigation.sections(visible: { !SidebarLayout.albums.contains($0) && $0 != .sharedWithYou })
-        #expect(none.map(\.kind) == [.browse, .utilities])
+        let hidden: Set<AppDestination> = [.people, .tags, .recentlyDeleted]
+        let visible: (AppDestination) -> Bool = { !hidden.contains($0) }
+        #expect(!CompactNavigation.shelves(visible: visible).contains(.people))
+        let rows = CompactNavigation.utilities(listed: visible)
+        #expect(hidden.isDisjoint(with: rows))
+        // Without the Photos DAV API: Favorites alone on the first shelf, "Shared with you" stands for Shared.
+        let noAlbums: (AppDestination) -> Bool = { !SidebarLayout.albums.contains($0) }
+        #expect(CompactNavigation.destination(of: .albums, visible: noAlbums) == .favorites)
+        #expect(CompactNavigation.destination(of: .shared, visible: noAlbums) == .sharedWithYou)
+        let nothingShared: (AppDestination) -> Bool = { !SidebarLayout.albums.contains($0) && $0 != .sharedWithYou }
+        #expect(!CompactNavigation.shelves(visible: nothingShared).contains(.shared))
+    }
+
+    @Test func shelfPeopleAreNamedFirstThenByPhotos() {
+        let people = [
+            Person(name: "17", itemCount: 900), Person(name: "Ada", itemCount: 12), Person(name: "Bo", itemCount: 40),
+        ]
+        #expect(CollectionsOverview.shelfPeople(people).map(\.name) == ["Bo", "Ada", "17"])
+    }
+
+    @Test func theMapCardHasRoomAroundThePhotos() {
+        let city = MapRegion(minLatitude: 48.1, maxLatitude: 48.2, minLongitude: 11.5, maxLongitude: 11.6)
+        let padded = CollectionsOverview.paddedRegion(city)
+        #expect(padded.maxLatitude - padded.minLatitude >= 2)
+        #expect(padded.minLatitude < 48.1 && padded.maxLongitude > 11.6)
+        let world = MapRegion(minLatitude: -40, maxLatitude: 70, minLongitude: -120, maxLongitude: 150)
+        let clamped = CollectionsOverview.paddedRegion(world)
+        #expect(clamped.minLatitude >= -90 && clamped.maxLatitude <= 90)
+        #expect(clamped.minLongitude >= -180 && clamped.maxLongitude <= 180)
+    }
+
+    @Test func theOverviewReloadsAfterASyncAndOnANewDay() {
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = CollectionsOverview.LoadKey(.idle(lastSync: day), account: "a", now: day)
+        #expect(first == CollectionsOverview.LoadKey(.idle(lastSync: day), account: "a", now: day.addingTimeInterval(60)))
+        #expect(first != CollectionsOverview.LoadKey(.idle(lastSync: day.addingTimeInterval(5)), account: "a", now: day))
+        #expect(first != CollectionsOverview.LoadKey(.idle(lastSync: day), account: "a", now: day.addingTimeInterval(86_400)))
+        #expect(first != CollectionsOverview.LoadKey(.idle(lastSync: day), account: "b", now: day))
     }
 
     @Test func tabsKeepTheirOwnSelection() {
@@ -83,8 +129,14 @@ import Testing
         #expect(CompactNavigation.path(to: .library, routes: []).isEmpty)
     }
 
+    @Test func anAlbumOpenedFromAShelfIsOnTheOverviewsPath() {
+        let place = CompactNavigation.place(of: [.album(id: "own:Trip")])
+        #expect(place?.destination == .collections)
+        #expect(place?.routes == [.album(id: "own:Trip")])
+        #expect(CompactNavigation.path(to: .collections, routes: [.person(name: "Ada")]) == [.person(name: "Ada")])
+    }
+
     @Test func pathsTheStackCannotHaveAreIgnored() {
-        #expect(CompactNavigation.place(of: [.album(id: "own:Trip")]) == nil)
         #expect(CompactNavigation.place(of: [.destination("library")]) == nil)
         #expect(CompactNavigation.place(of: [.destination("collections")]) == nil)
         #expect(CompactNavigation.place(of: [.destination("nonsense")]) == nil)

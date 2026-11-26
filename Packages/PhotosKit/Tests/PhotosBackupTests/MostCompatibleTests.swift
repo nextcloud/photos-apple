@@ -24,26 +24,19 @@ import Testing
         writer.metadata = [date]
         let input = AVAssetWriterInput(
             mediaType: .video, outputSettings: [AVVideoCodecKey: codec, AVVideoWidthKey: 160, AVVideoHeightKey: 120])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: 160,
-                kCVPixelBufferHeightKey as String: 120,
-            ])
-        writer.add(input)
-        #expect(writer.startWriting())
+        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: nil)
+        try writer.start()
         writer.startSession(atSourceTime: .zero)
         for frame in 0..<10 {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
             var buffer: CVPixelBuffer?
             CVPixelBufferCreate(nil, 160, 120, kCVPixelFormatType_32BGRA, nil, &buffer)
             guard let buffer else { throw CocoaError(.fileWriteUnknown) }
             CVPixelBufferLockBaseAddress(buffer, [])
             memset(CVPixelBufferGetBaseAddress(buffer), Int32(frame * 20), CVPixelBufferGetDataSize(buffer))
             CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 10))
+            try await receiver.append(CVReadOnlyPixelBuffer(unsafeBuffer: buffer), with: CMTime(value: CMTimeValue(frame), timescale: 10))
         }
-        input.markAsFinished()
+        receiver.finish()
         await writer.finishWriting()
         #expect(writer.status == .completed)
         return url

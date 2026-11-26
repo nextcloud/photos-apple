@@ -24,6 +24,8 @@ struct ZoomablePhoto: View {
     @State private var developing = false
     /// The largest bucket shown so far (0: only a smaller picture or the BlurHash).
     @State private var shownBucket = 0
+    /// The server has no preview and none could be made here: the page says so (SPEC §20.1).
+    @State private var noPreview = false
     /// Time to show while this is the current page (SPEC §18.1.3).
     @State private var showTimers = ShowTimers()
     @Environment(SessionModel.self) private var session
@@ -93,6 +95,7 @@ struct ZoomablePhoto: View {
                 image: shown ?? BlurHashCache.image(item.blurhash), contentSize: contentSize, command: command, isCurrent: isCurrent,
                 animates: !reduceMotion, pressEnabled: item.isLivePhoto, liveText: analysesLiveText, events: surfaceEvents)
             motion
+            if noPreview && shown == nil { ViewerNoPreview(item: item) }
         }
         .overlay(alignment: .topLeading) {
             if item.isLivePhoto {
@@ -181,11 +184,16 @@ struct ZoomablePhoto: View {
             originalURL: services.originalURL(for: item))
         async let loaded: CGImage? = images.preview(request)
         if image == nil, let placeholder = await images.placeholder(for: request), image == nil { show(placeholder, bucket: 0) }
-        if let loaded = await loaded { show(loaded, bucket: bucket) }
+        if let loaded = await loaded {
+            show(loaded, bucket: bucket)
+        } else if image == nil, !Task.isCancelled {
+            noPreview = images.hasNoPreview(fileId: item.fileId, etag: item.etag)
+        }
     }
 
     func show(_ picture: CGImage, bucket: Int) {
         image = picture
+        noPreview = false
         shownBucket = max(shownBucket, bucket)
         finishTimers()
     }

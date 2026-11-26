@@ -128,9 +128,13 @@ struct FamilySuggestionCard: View {
                     Button {
                         family.dismiss(suggestion.fileIds)
                     } label: {
+                        // A target of 44 points around the small cross (SPEC §20.3).
                         Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.secondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .padding(-10)
                     .accessibilityLabel(
                         Text(
                             "Don't suggest these photos again", bundle: .module, comment: "Dismisses a family library suggestion for good.")

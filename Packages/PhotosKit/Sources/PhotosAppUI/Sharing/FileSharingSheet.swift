@@ -173,7 +173,7 @@ final class FileSharingModel {
     @discardableResult
     func createLink(role: ShareRole, password: String?, expirationDay: String?, label: String?) async -> FileShare? {
         var created: FileShare?
-        await perform {
+        _ = await perform {
             let share = try await self.api.createShare(
                 path: self.target.path, kind: .link,
                 permissions: role.permissions(isFolder: self.target.isFolder, resharing: false), password: password,
