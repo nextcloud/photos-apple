@@ -266,7 +266,7 @@ extension BackupWording {
         String(localized: "Back up your photos to Nextcloud", bundle: .module)
     }
 
-    static var offerTitle: String {
+    @MainActor static var offerTitle: String {
         #if os(macOS)
             // The Mac sets up backup in its Settings window only; there is no offer after the login.
             setupTitle
@@ -283,7 +283,7 @@ extension BackupWording {
         #endif
     }
 
-    static func onThisDevice(_ count: Int) -> String {
+    @MainActor static func onThisDevice(_ count: Int) -> String {
         #if os(macOS)
             String(
                 localized: "\(count) photos and videos in the Photos library of this Mac", bundle: .module,

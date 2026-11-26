@@ -25,6 +25,8 @@ final class FamilyTourTests: XCTestCase {
         app = XCUIApplication()
         app.launchEnvironment["PHOTOS_DEBUG_LOGIN"] = login
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // Stickers, Insights, collages, postcards and culling are behind Advanced features (SPEC §20.4).
+        app.launchArguments += ["-advancedFeatures", "YES"]
     }
 
     override func tearDown() async throws {
@@ -174,7 +176,7 @@ final class FamilyTourTests: XCTestCase {
         func testFamilyLibrary() throws {
             app.launch()
             waitForTimeline()
-            app.openSettings()
+            app.openSettings(page: "library")
             let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Family Library")).firstMatch
             scroll(to: row)
             shot("20-settings-family-rows")
@@ -209,7 +211,7 @@ final class FamilyTourTests: XCTestCase {
         func testLockScreenAlbum() throws {
             app.launch()
             waitForTimeline()
-            app.openSettings()
+            app.openSettings(page: "library")
             let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lock Screen Album")).firstMatch
             scroll(to: row)
             pause(1)

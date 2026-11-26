@@ -130,17 +130,10 @@ public struct FilmExporter: Sendable {
             ],
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: Int(size.width), kCVPixelBufferHeightKey as String: Int(size.height),
-                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
-            ])
         guard writer.canAdd(input) else { throw CocoaError(.fileWriteUnknown) }
-        writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+        let receiver = writer.inputPixelBufferReceiver(
+            for: input, pixelBufferAttributes: VideoFrames.attributes(width: Int(size.width), height: Int(size.height)))
+        try writer.start()
         writer.startSession(atSourceTime: .zero)
 
         let renderer = FilmFrameRenderer(plan: plan, material: material, size: size, still: still)
@@ -148,18 +141,13 @@ public struct FilmExporter: Sendable {
         do {
             for frame in 0..<frames {
                 try Task.checkCancellation()
-                while !input.isReadyForMoreMediaData {
-                    try await Task.sleep(for: .milliseconds(5))
-                }
-                guard let pool = adaptor.pixelBufferPool else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-                var buffer: CVPixelBuffer?
-                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-                guard let buffer else { throw CocoaError(.fileWriteUnknown) }
+                guard let pool = receiver.pixelBufferPool else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+                let buffer = try pool.makeMutablePixelBuffer()
                 let time = Double(frame) / Double(frameRate)
                 try await renderer.render(at: time, into: buffer)
-                guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: frameRate)) else {
-                    throw writer.error ?? CocoaError(.fileWriteUnknown)
-                }
+                // Waits while the encoder is busy (what `isReadyForMoreMediaData` was polled for).
+                try await receiver.append(
+                    CVReadOnlyPixelBuffer(buffer), with: CMTime(value: CMTimeValue(frame), timescale: frameRate))
                 if frame % 15 == 0 { progress(Double(frame) / Double(max(frames, 1))) }
             }
         } catch {
@@ -168,7 +156,7 @@ public struct FilmExporter: Sendable {
             throw error
         }
         renderer.close()
-        input.markAsFinished()
+        receiver.finish()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
     }
@@ -288,7 +276,7 @@ final class FilmFrameRenderer {
     var frame: CGRect { CGRect(origin: .zero, size: size) }
     var aspect: Double { size.width / size.height }
 
-    func render(at time: Double, into buffer: CVPixelBuffer) async throws {
+    func render(at time: Double, into buffer: borrowing CVMutablePixelBuffer) async throws {
         var image = CIImage(color: .black).cropped(to: frame)
         let layers = plan.layers(at: time)
         let onScreen = Set(layers.map(\.segment))
@@ -304,7 +292,7 @@ final class FilmFrameRenderer {
         if look.vignette > 0 || look.isAnimated { image = FilmLookFilter.frame(image, look: look, time: time, size: size) }
         let brightness = plan.brightness(at: time)
         if brightness < 1 { image = Self.dimmed(image, brightness) }
-        context.render(image, to: buffer, bounds: frame, colorSpace: colorSpace)
+        buffer.withUnsafeBuffer { context.render(image, to: $0, bounds: frame, colorSpace: colorSpace) }
         // Clips of segments that are over are closed.
         for (shot, reader) in clips where !onScreen.contains(where: { plan.shotIndex(of: plan.segments[$0]) == shot }) {
             reader.close()
@@ -375,7 +363,7 @@ final class FilmFrameRenderer {
         if case .livePhoto(let motion) = kind, elapsed > motion { return nil }
         if case .photo = kind { return nil }
         if clips[shot] == nil { clips[shot] = try await ClipReader(url: url) }
-        return clips[shot]?.frame(at: max(0, elapsed))
+        return await clips[shot]?.frame(at: max(0, elapsed))
     }
 
     /// The picture through the camera's window, over its blurred fill when it is shown whole.
@@ -488,7 +476,7 @@ final class FilmFrameRenderer {
 /// Reads a clip's frames in order (upright: the track's orientation applied), holding the last frame at its end.
 final class ClipReader {
     let reader: AVAssetReader
-    let output: AVAssetReaderTrackOutput
+    let provider: AVAssetReaderOutput.Provider<CMReadySampleBuffer<CMSampleBuffer.DynamicContent>>
     let orientation: CGAffineTransform
     var current: CIImage?
     var pending: (time: Double, image: CIImage)?
@@ -499,30 +487,34 @@ final class ClipReader {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw CocoaError(.fileReadCorruptFile) }
         orientation = try await track.load(.preferredTransform)
         reader = try AVAssetReader(asset: asset)
-        output = AVAssetReaderTrackOutput(
+        let output = AVAssetReaderTrackOutput(
             track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
-        output.alwaysCopiesSampleData = false
-        reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadCorruptFile) }
+        provider = reader.outputProvider(for: output)
+        try reader.start()
     }
 
     /// The latest frame at or before `time` (seconds from the clip's start).
-    func frame(at time: Double) -> CIImage? {
+    func frame(at time: Double) async -> CIImage? {
         while !finished {
             if let pending {
                 guard pending.time <= time else { break }
                 current = pending.image
                 self.pending = nil
             }
-            guard let sample = output.copyNextSampleBuffer() else {
+            // A clip that cannot be read any further holds its last frame, as at its end.
+            guard let sample = try? await provider.next() else {
                 finished = true
                 break
             }
-            guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
-            let raw = CIImage(cvPixelBuffer: buffer).transformed(by: orientation)
-            // The orientation may move the picture off the origin; put it back.
-            let upright = raw.transformed(by: CGAffineTransform(translationX: -raw.extent.minX, y: -raw.extent.minY))
-            pending = (CMSampleBufferGetPresentationTimeStamp(sample).seconds, upright)
+            let orientation = orientation
+            let upright = sample.withUnsafeSampleBuffer { sample -> CIImage? in
+                guard let buffer = CMSampleBufferGetImageBuffer(sample) else { return nil }
+                let raw = CIImage(cvPixelBuffer: buffer).transformed(by: orientation)
+                // The orientation may move the picture off the origin; put it back.
+                return raw.transformed(by: CGAffineTransform(translationX: -raw.extent.minX, y: -raw.extent.minY))
+            }
+            guard let upright else { continue }
+            pending = (sample.presentationTimeStamp.seconds, upright)
         }
         return current ?? pending?.image
     }

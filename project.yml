@@ -19,6 +19,10 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    # CI passes PHOTOS_WARNINGS_AS_ERRORS=YES (Config/Base.xcconfig): a warning in the app's own targets fails the build.
+    # Project settings do not reach the Swift packages; PhotosKit reads the same name from the environment (Package.swift).
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: $(PHOTOS_WARNINGS_AS_ERRORS)
+    GCC_TREAT_WARNINGS_AS_ERRORS: $(PHOTOS_WARNINGS_AS_ERRORS)
 packages:
   PhotosKit:
     path: Packages/PhotosKit

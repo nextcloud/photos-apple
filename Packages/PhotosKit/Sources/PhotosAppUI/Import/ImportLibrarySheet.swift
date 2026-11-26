@@ -540,8 +540,11 @@ struct ImportRunningView: View {
                         GridRow {
                             Text("Data", bundle: .module, comment: "Import progress: amount of data handled so far.").foregroundStyle(
                                 .secondary)
-                            Text("\(Formatters.bytes(Int64(progress.bytesDone))) / \(Formatters.bytes(Int64(progress.bytesTotal)))")
-                                .monospacedDigit()
+                            // Two formatted sizes: nothing to translate (SPEC §20.3).
+                            Text(
+                                verbatim: "\(Formatters.bytes(Int64(progress.bytesDone))) / \(Formatters.bytes(Int64(progress.bytesTotal)))"
+                            )
+                            .monospacedDigit()
                         }
                     }
                 }

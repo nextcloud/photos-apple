@@ -92,7 +92,7 @@
             withObservationTracking {
                 _ = app?.session?.syncStatus
                 _ = app?.session?.account.id
-            } onChange: {
+            } onChange: { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     if case .idle = self.app?.session?.syncStatus { self.scheduleUpdate() }

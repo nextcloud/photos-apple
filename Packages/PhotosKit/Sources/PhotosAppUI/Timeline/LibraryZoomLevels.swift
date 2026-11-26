@@ -442,6 +442,23 @@ struct LibraryZoomPicker: View {
     var gridStep: Int
 
     var body: some View {
+        // As wide as its titles, unless longer translations would make it wider than the screen: then as wide as the
+        // screen, the titles shortened (SPEC §20.3; seen with doubled texts on the iPhone).
+        ViewThatFits(in: .horizontal) {
+            picker.fixedSize()
+            picker
+        }
+        #if os(iOS)
+            // Liquid Glass, floating over the photos (SPEC §17.5); solid with Reduce Transparency, as the system does it.
+            .padding(4)
+            .glassEffect(.regular, in: .capsule)
+        #elseif os(visionOS)
+            .padding(4)
+            .background(.regularMaterial, in: .capsule)
+        #endif
+    }
+
+    var picker: some View {
         Picker(
             selection: Binding(get: { model.level }, set: { model.select($0, currentStep: gridStep) })
         ) {
@@ -452,15 +469,6 @@ struct LibraryZoomPicker: View {
             Text("Zoom level", bundle: .module, comment: "Accessibility label of the Years/Months/Days/All Photos picker.")
         }
         .pickerStyle(.segmented)
-        .fixedSize()
-        #if os(iOS)
-            // Liquid Glass, floating over the photos (SPEC §17.5); solid with Reduce Transparency, as the system does it.
-            .padding(4)
-            .glassEffect(.regular, in: .capsule)
-        #elseif os(visionOS)
-            .padding(4)
-            .background(.regularMaterial, in: .capsule)
-        #endif
     }
 
     static func title(_ level: LibraryZoomLevel) -> String {

@@ -83,9 +83,12 @@ struct AlbumDetailScreen: View {
                 do { try await session.refreshAlbumContent(album) } catch { self.error = error.localizedDescription }
             }
             Task {
-                for try await value in services.collections.observeAlbum(id: albumId) {
-                    if let value { album = value }
-                }
+                // A failed observation keeps the album shown as it was.
+                do {
+                    for try await value in services.collections.observeAlbum(id: albumId) {
+                        if let value { album = value }
+                    }
+                } catch {}
             }
             let order = photoOrder
             feed.observe(
@@ -297,10 +300,12 @@ struct AlbumDetailScreen: View {
                 Label(DesktopPictureAction.rotateTitle, systemImage: DesktopPictureAction.systemImage)
             }
         #endif
-        Button {
-            Task { collage = await CollageRequest.album(album, session: session) }
-        } label: {
-            Label(CollageRequest.menuTitle, systemImage: "rectangle.3.group")
+        AdvancedFeatureGate(.collages) {
+            Button {
+                Task { collage = await CollageRequest.album(album, session: session) }
+            } label: {
+                Label(CollageRequest.menuTitle, systemImage: "rectangle.3.group")
+            }
         }
         AlbumLookMenuItems(album: album, sheet: $cardSheet)
         Picker(String(localized: "Order", bundle: .module), selection: $photoOrder) {

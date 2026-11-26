@@ -1,12 +1,17 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
 import PackageDescription
 
-let swiftSettings: [SwiftSetting] = [
-    .enableUpcomingFeature("ExistentialAny")
-]
+// CI builds with PHOTOS_WARNINGS_AS_ERRORS=YES in the environment: then a warning in the package's own code fails the build
+// (dependencies keep their own settings). Local builds only warn.
+let warningsAsErrors = Context.environment["PHOTOS_WARNINGS_AS_ERRORS"] == "YES"
+
+let swiftSettings: [SwiftSetting] =
+    [
+        .enableUpcomingFeature("ExistentialAny")
+    ] + (warningsAsErrors ? [.treatAllWarnings(as: .error)] : [])
 
 let package = Package(
     name: "PhotosKit",

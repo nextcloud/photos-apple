@@ -155,6 +155,7 @@ struct TimelineScreen: View {
         }
         .task(id: query) { observe() }
         .onAppear {
+            seedFromLaunchPrefetch()
             zoom.setGridStep = { [columns = $columns] step in columns.wrappedValue = step }
             zoom.openMoment = { [moments, opened = $openedMoment] id in opened.wrappedValue = moments.memory(id) }
         }
@@ -270,10 +271,31 @@ struct TimelineScreen: View {
         #endif
     }
 
+    /// The folders the Library leaves out: `.nomedia` folders and, while partner photos are hidden, the partners' folders.
+    static func excludedFolders(_ session: SessionModel) -> [String] {
+        session.excludedFolders + (session.partners?.hiddenFolders ?? [])
+    }
+
+    /// At launch: the Library's first items and its memories, read while the window was built
+    /// (`LibraryLaunchPrefetch`), so that the first frame shows them instead of waiting for `observe()` and the strip's
+    /// `.task`, which run only after it.
+    func seedFromLaunchPrefetch() {
+        guard filter == .all else { return }
+        let prefetch = LibraryLaunchPrefetch.shared
+        if mediaKind == .all, cullingFilter == .all, skeleton == nil, !feed.loaded {
+            let key = LibraryLaunchPrefetch.Key(
+                account: session.account.id.rawValue, excludedFolders: Self.excludedFolders(session), stacksCopies: stackCopies)
+            if let model = prefetch.take(key) { feed.seed(model) }
+        }
+        if showsMemories, memories.isEmpty, let cards = prefetch.takeMemories(account: session.account.id.rawValue) {
+            memories = cards
+        }
+    }
+
     func observe() {
         guard let services = session.services else { return }
         let library = services.library
-        let excluded = session.excludedFolders + (session.partners?.hiddenFolders ?? [])
+        let excluded = Self.excludedFolders(session)
         let kind = mediaKind
         let culling = cullingFilter
         // Coalesced: a running sync commits page after page; a single change (a favourite) still arrives at once.

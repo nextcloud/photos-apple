@@ -552,7 +552,7 @@ import Testing
                 arguments: [album.id])
         }
 
-        server.state.withLock { $0.folders.insert("/Pictures") }
+        server.state.withLock { _ = $0.folders.insert("/Pictures") }
         server.put(file(50, "/Pictures/x.jpg", time: 9000))
         var changed = features
         changed.userConfig.photosSourceFolders = ["/Pictures"]

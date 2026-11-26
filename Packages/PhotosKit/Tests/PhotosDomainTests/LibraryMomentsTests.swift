@@ -77,6 +77,8 @@ import Testing
         let stay = (16...19).flatMap { photos(3, day: $0, place: "Lisbon", country: "Portugal", startId: Int64($0 * 100)) }
         let moments = LibraryMoments.build(homeDays() + stay, calendar: calendar)
         #expect(titles(moments).first == "4 days in Lisbon")
+        // The catalog's plural variations (SPEC §20.3): never "1 days".
+        #expect(MomentTitle.daysIn(days: 1, place: "Lisbon").text(locale: locale, calendar: calendar) == "1 day in Lisbon")
 
         let twoPlaces =
             photos(4, day: 16, place: "Lisbon", country: "Portugal", startId: 1)

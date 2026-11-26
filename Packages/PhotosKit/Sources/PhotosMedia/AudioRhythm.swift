@@ -40,19 +40,21 @@ public enum AudioRhythm {
                 AVLinearPCMIsBigEndianKey: false,
             ])
         guard reader.canAdd(output) else { return [] }
-        reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadCorruptFile) }
+        let provider = reader.outputProvider(for: output)
+        try reader.start()
         var samples: [Float] = []
         samples.reserveCapacity(Int(sampleRate * analysedSeconds))
-        while let buffer = output.copyNextSampleBuffer() {
+        while let sample = try await provider.next() {
             try Task.checkCancellation()
-            guard let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
-            let length = CMBlockBufferGetDataLength(block)
-            var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
-            chunk.withUnsafeMutableBytes { bytes in
-                _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: bytes.baseAddress!)
+            samples += sample.withUnsafeSampleBuffer { buffer -> [Float] in
+                guard let block = CMSampleBufferGetDataBuffer(buffer) else { return [] }
+                let length = CMBlockBufferGetDataLength(block)
+                var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+                chunk.withUnsafeMutableBytes { bytes in
+                    _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: bytes.baseAddress!)
+                }
+                return chunk
             }
-            samples += chunk
         }
         if reader.status == .failed { throw reader.error ?? CocoaError(.fileReadCorruptFile) }
         return samples

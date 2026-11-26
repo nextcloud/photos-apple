@@ -94,7 +94,7 @@ public enum ContentLabeling {
             let request = BGProcessingTaskRequest(identifier: taskIdentifier)
             request.requiresExternalPower = true
             request.requiresNetworkConnectivity = false
-            try? BGTaskScheduler.shared.submit(request)
+            BGTaskScheduler.shared.submitLoggingErrors(request, logger: logger)
         }
     #elseif os(macOS)
         /// The scheduler of the Mac app; created by `schedule()` while the feature is on.

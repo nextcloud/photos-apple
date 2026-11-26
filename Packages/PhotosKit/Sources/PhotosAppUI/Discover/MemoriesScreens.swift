@@ -182,6 +182,8 @@ struct MemoryCard: View {
                     Text(memory.title).font(.footnote.bold()).lineLimit(2)
                     if let dateLine { Text(dateLine).font(.caption2).lineLimit(1) }
                 }
+                // UI tests: captions on photos, measured against the photo (SPEC §20.3).
+                .accessibilityIdentifier("memory-caption")
                 .foregroundStyle(.white)
                 .shadow(radius: 3)
                 .padding(8)
@@ -197,6 +199,8 @@ struct MemoryCard: View {
             Text(memory.title).font(Typography.overlayTitle).lineLimit(2)
             if let dateLine { Text(dateLine).font(Typography.overlaySubtitle).lineLimit(1) }
         }
+        // UI tests: captions on photos, measured against the photo (SPEC §20.3).
+        .accessibilityIdentifier("memory-caption")
     }
 
     /// A deep shade of the cover's colour (SPEC §16.8.1); black with Increase Contrast or Reduce Transparency.

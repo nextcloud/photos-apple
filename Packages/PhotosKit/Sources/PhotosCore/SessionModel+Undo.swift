@@ -487,14 +487,23 @@ extension SessionModel {
         let outcome = await services.outbox.withdrawDeletes(of: Set(items.map(\.fileId)), restoring: rows)
         if !outcome.refused.isEmpty { await refreshFailedOperations() }
         let deleted = items.filter { outcome.deleted.contains($0.fileId) }
-        guard !deleted.isEmpty else { return 0 }
-        return await restoreFromTrash(deleted, rows: rows)
+        // Taken back after an attempt that failed: the server may have deleted them all the same (an answer that was
+        // lost, an error after the move to the trash bin — seen on a loaded Nextcloud 35). Restored if they are there.
+        let maybe = items.filter { outcome.maybeSent.contains($0.fileId) }
+        guard !deleted.isEmpty || !maybe.isEmpty else { return 0 }
+        let restored = await restoreFromTrash(deleted + maybe, rows: rows)
+        return Self.undeleteFailures(deleted: deleted.map(\.fileId), restored: restored)
     }
 
-    /// Restores deleted items from the server's trash bin, with their places in albums. Returns how many could not be
-    /// restored.
-    func restoreFromTrash(_ items: [MediaItem], rows: DeletedRows) async -> Int {
-        guard let services, !items.isEmpty else { return items.count }
+    /// How many of the deleted items did not come back. Items that only maybe reached the server never count: not in
+    /// the trash bin means they were not deleted.
+    nonisolated static func undeleteFailures(deleted: [FileID], restored: Set<FileID>) -> Int {
+        deleted.filter { !restored.contains($0) }.count
+    }
+
+    /// Restores deleted items from the server's trash bin, with their places in albums. Returns the files restored.
+    func restoreFromTrash(_ items: [MediaItem], rows: DeletedRows) async -> Set<FileID> {
+        guard let services, !items.isEmpty else { return [] }
         // A file shared with the user is not in the user's trash bin.
         let wanted = Set(items.filter(UndoableChange.goesToOwnTrash).map(\.fileId))
         var restored: Set<FileID> = []
@@ -511,7 +520,7 @@ extension SessionModel {
         } catch {
             Self.undoLogger.error("undo: could not read the trash bin: \(error.localizedDescription, privacy: .public)")
         }
-        guard !restored.isEmpty else { return items.count }
+        guard !restored.isEmpty else { return [] }
         // The restored files come back into the index (or with the next sync, if that fails) …
         do {
             try await services.sync.restore(fileIds: restored)
@@ -521,7 +530,7 @@ extension SessionModel {
         // … and into their albums: the server takes a deleted file out of every album.
         await enqueue(
             Self.albumAdditions(restoring: items.filter { restored.contains($0.fileId) }, rows: rows, albums: services.collections))
-        return items.count - restored.count
+        return restored
     }
 
     /// The album additions that put restored photos back where they were. Photos an album's filters chose come back by

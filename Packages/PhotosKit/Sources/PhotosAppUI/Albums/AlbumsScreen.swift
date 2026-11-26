@@ -236,7 +236,9 @@ struct AlbumCard: View {
                     CaptionPlate(cornerRadius: Design.coverCornerRadius - 3) {
                         VStack(alignment: .leading, spacing: 1) {
                             if showsTitleOnPlate { Text(album.title).font(Typography.cardTitle).lineLimit(1) }
-                            Text(subtitle).font(Typography.cardSubtitle).foregroundStyle(.secondary).lineLimit(1)
+                            // In the text colour, not the secondary one: the glass draws that too faint over light
+                            // photos (accessibility audit, SPEC §20.3); the smaller type sets it apart.
+                            Text(subtitle).font(Typography.cardSubtitle).lineLimit(1)
                         }
                     }
                     .padding(6)

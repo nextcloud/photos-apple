@@ -19,8 +19,30 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "Added %1$lld photos to “%2$@”."
+            "state" : "translated",
+            "value" : "Added %#@photos@ to “%2$@”."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -50,7 +72,27 @@
       "comment" : "Shortcuts action title."
     },
     "Archived %lld items." : {
-      "comment" : "Shortcuts action result: number of archived items."
+      "comment" : "Shortcuts action result: number of archived items.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Archived %lld item."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Archived %lld items."
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "Back Up Now" : {
       "comment" : "Shortcuts/Control Center: title of the action that starts a photo backup."

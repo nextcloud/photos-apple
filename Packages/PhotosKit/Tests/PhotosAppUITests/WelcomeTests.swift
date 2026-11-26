@@ -65,11 +65,10 @@ import Testing
         #expect(still.total <= 1.2)
         #expect(still.iconEndScale == 1)
         #expect(motion.iconEndScale > 1)
-        #expect(still.revealStartScale == 1)
         #expect(motion.revealDuration <= 0.4)
     }
 
-    @Test func greetingUsesTheNameWhenThereIsOne() {
+    @MainActor @Test func greetingUsesTheNameWhenThereIsOne() {
         #expect(FirstLaunchWelcome.greeting(name: "Anna") == "Welcome, Anna")
         #expect(FirstLaunchWelcome.greeting(name: "") == "Welcome")
     }

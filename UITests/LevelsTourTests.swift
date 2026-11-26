@@ -25,6 +25,8 @@ final class LevelsTourTests: XCTestCase {
         app = XCUIApplication()
         app.launchEnvironment["PHOTOS_DEBUG_LOGIN"] = login
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-libraryZoomLevel", "all"]
+        // Stickers, Insights, collages, postcards and culling are behind Advanced features (SPEC §20.4).
+        app.launchArguments += ["-advancedFeatures", "YES"]
         app.launch()
     }
 

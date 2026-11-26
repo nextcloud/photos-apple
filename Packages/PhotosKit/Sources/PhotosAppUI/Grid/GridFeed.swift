@@ -4,6 +4,7 @@
 import Foundation
 import Observation
 import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import PhotosStore
 
@@ -53,6 +54,17 @@ final class GridFeed {
                 }
             } catch {}
         }
+    }
+
+    /// The sectioning of the Library's timeline before the zoom is applied (`setZoom(step:)` changes it).
+    nonisolated static let librarySectioning = GridSectioning.timeline(.day)
+
+    /// Shows a model read before the observation started (`LibraryLaunchPrefetch`), unless the feed has items already.
+    /// The observation's first result replaces it; an equal one changes nothing.
+    func seed(_ model: GridModel) {
+        guard !loaded, worker == nil else { return }
+        let sectioned = model.resectioned(sectioning(flat: false), skeleton: skeleton)
+        publish(sectioned, change: sectioned.change(from: update.model))
     }
 
     func apply(_ items: [GridMedia], flat: Bool) {
@@ -124,6 +136,7 @@ final class GridFeed {
     }
 
     private func publish(_ model: GridModel, change: GridModel.Change) {
+        if !model.items.isEmpty { LaunchMetrics.shared.reached(.libraryData) }
         if change != .none || !loaded {
             update = Update(model: model, revision: update.revision + 1, change: change)
         }

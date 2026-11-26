@@ -424,6 +424,55 @@ import Testing
         await app.session?.shutdown(closeDatabase: true)
     }
 
+    /// Undo while the delete waits for a retry after its DELETE failed (a 500 on a loaded Nextcloud 35): the server may
+    /// have deleted the file all the same. Undo takes the delete out of the queue and restores the file from the trash
+    /// bin, where it is (SPEC §20.1); before, only its row came back and the file stayed in the trash.
+    @Test func undoOfADeleteWhoseAnswerFailedRestoresFromTheTrashBin() async throws {
+        defer { sandbox.remove() }
+        let (app, session) = try await makeSession()
+        let services = try #require(session.services)
+        session.features.enabled.insert(.trashbin)
+        var item = MediaItem(fileId: 9, path: "/Photos/9.jpg", mimeType: "image/jpeg")
+        item.etag = "e9"
+        try services.library.upsert([item])
+        let trash = """
+            <?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">\
+            <d:response><d:href>/remote.php/dav/trashbin/alice/trash/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+            <d:response><d:href>/remote.php/dav/trashbin/alice/trash/9.jpg.d1790000000</d:href><d:propstat><d:prop><oc:fileid>9</oc:fileid>\
+            <d:getcontenttype>image/jpeg</d:getcontenttype><oc:size>10</oc:size><nc:trashbin-filename>9.jpg</nc:trashbin-filename>\
+            <nc:trashbin-original-location>Photos/9.jpg</nc:trashbin-original-location><nc:trashbin-deletion-time>1790000000</nc:trashbin-deletion-time>\
+            <d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>
+            """
+        server.set {
+            // The server moved the file to its trash bin, then failed.
+            $0.responses["DELETE /remote.php/dav/files/alice/Photos/9.jpg"] = StubServer.Stub(status: 500, body: "")
+            $0.responses["PROPFIND /remote.php/dav/trashbin/alice/trash/"] = StubServer.Stub(status: 207, body: trash)
+            $0.responses["PROPFIND /remote.php/dav/trashbin/alice/trash"] = StubServer.Stub(status: 207, body: trash)
+            $0.responses["MOVE /remote.php/dav/trashbin/alice/trash/9.jpg.d1790000000"] = StubServer.Stub(status: 201, body: "")
+        }
+
+        await session.perform(.delete([item]), undoManager: nil)
+        await services.outbox.waitUntilIdle()
+        #expect(server.lines(containing: "/files/alice/Photos/9.jpg").filter { $0.hasPrefix("DELETE") }.count == 1)
+        #expect(try await services.outbox.pendingCount() == 1)
+
+        await session.undo(try #require(session.lastChange))
+        #expect(session.lastChange?.isReverted == true)
+        #expect(session.lastChange?.failures == 0)
+        #expect(
+            server.lines(containing: "/trashbin/alice/trash/9.jpg.d1790000000") == [
+                "MOVE /remote.php/dav/trashbin/alice/trash/9.jpg.d1790000000"
+            ])
+        #expect(try await services.outbox.pendingCount() == 0)
+        await app.session?.shutdown(closeDatabase: true)
+    }
+
+    @Test func onlyDeletedFilesCountAsNotRestored() {
+        #expect(SessionModel.undeleteFailures(deleted: [1, 2], restored: [1, 3]) == 1)
+        // A file that only maybe reached the server and is not in the trash bin was never deleted: no failure.
+        #expect(SessionModel.undeleteFailures(deleted: [], restored: []) == 0)
+    }
+
     /// A refused certificate becomes account state, and trusting it ends that state.
     @Test func aRefusedCertificateIsAccountState() async throws {
         defer { sandbox.remove() }

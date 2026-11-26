@@ -340,8 +340,8 @@ final class GridTilePicture {
         /// The BlurHash, until the preview is there.
         case blur(CGImage)
         case picture(CGImage)
-        /// No preview to be had (no server preview, broken or unsupported file): an SF Symbol says what the file is.
-        case placeholder(symbol: String)
+        /// No picture: what the file is, and (on a tile large enough) its name and "No preview" when the server has none.
+        case placeholder(GridTileNoPicture)
     }
 
     /// Where pictures come from; the grid uses the account's image pipeline, tests their own.
@@ -350,14 +350,19 @@ final class GridTilePicture {
         var cached: @MainActor (GridMedia) -> CGImage?
         var blur: @MainActor (GridMedia) -> CGImage?
         var load: @MainActor (ImagePipeline.Request) async -> CGImage?
+        /// The server has no preview of the file (`ImagePipeline.hasNoPreview`): the tile says so at once and the
+        /// pipeline asks again only after a sync and a backoff (SPEC §20.1).
+        var noPreview: @MainActor (GridMedia) -> Bool
 
         init(
             cached: @escaping @MainActor (GridMedia) -> CGImage?, blur: @escaping @MainActor (GridMedia) -> CGImage?,
-            load: @escaping @MainActor (ImagePipeline.Request) async -> CGImage?
+            load: @escaping @MainActor (ImagePipeline.Request) async -> CGImage?,
+            noPreview: @escaping @MainActor (GridMedia) -> Bool = { _ in false }
         ) {
             self.cached = cached
             self.blur = blur
             self.load = load
+            self.noPreview = noPreview
         }
 
         init(services: AccountServices) {
@@ -368,7 +373,8 @@ final class GridTilePicture {
                         fileId: $0.fileId, etag: images.displayedEtag(fileId: $0.fileId, etag: $0.etag), upTo: 4096)
                 },
                 blur: { BlurHashCache.image($0.blurhash) },
-                load: { await images.preview($0) })
+                load: { await images.preview($0) },
+                noPreview: { images.hasNoPreview(fileId: $0.fileId, etag: $0.etag) })
         }
     }
 
@@ -405,6 +411,9 @@ final class GridTilePicture {
                 isLoading = false
                 return
             }
+        } else if !hasPicture, source.noPreview(item) {
+            // Known to have none: no grey square while the pipeline decides whether to ask the server again.
+            show(.placeholder(GridTileNoPicture(item: item, noPreview: true)))
         } else if !hasPicture, let blur = source.blur(item) {
             show(.blur(blur))
         }
@@ -420,7 +429,7 @@ final class GridTilePicture {
                 self.show(.picture(image))
                 self.isDelivering = false
             } else if !self.hasPicture {
-                self.show(.placeholder(symbol: GridTile.placeholderSymbol(for: item)))
+                self.show(.placeholder(GridTileNoPicture(item: item, noPreview: source.noPreview(item))))
             }
         }
     }

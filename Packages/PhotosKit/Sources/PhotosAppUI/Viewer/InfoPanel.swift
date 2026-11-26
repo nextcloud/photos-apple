@@ -105,6 +105,11 @@ struct InfoPanel: View {
             }
         }
         .formStyle(.grouped)
+        #if os(iOS)
+            // Section headers in the text colour: the system's grey ones came out at 3.4:1 on the inspector's material
+            // (accessibility audit, SPEC §20.3).
+            .headerProminence(.increased)
+        #endif
         .modifier(InfoPanelTitle(inInspector: inInspector))
         .toolbar {
             if !inInspector {

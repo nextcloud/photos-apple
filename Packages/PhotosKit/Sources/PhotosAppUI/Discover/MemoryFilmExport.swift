@@ -30,7 +30,7 @@ import UniformTypeIdentifiers
     func start(_ make: @escaping @MainActor (_ report: @escaping @MainActor (Double, String) -> Void) async throws -> URL) {
         cancel()
         state = .working(progress: 0, step: FilmExportJob.preparingStep)
-        task = Task {
+        task = Task { [self] in
             do {
                 let url = try await make { [weak self] progress, step in
                     guard let self, self.isWorking else { return }

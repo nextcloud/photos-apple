@@ -102,7 +102,7 @@ final class ImportController {
         options.destination = session.features.userConfig.photosLocation
         options.captionsAsComments = session.features.has(.comments)
         let scratch = FileManager.default.temporaryDirectory.appending(path: "ImportScratch")
-        task = Task {
+        task = Task { [self] in
             do {
                 await downloadFromICloudDrive(urls)
                 try Task.checkCancellation()
@@ -187,7 +187,8 @@ final class ImportController {
         let title = String(
             localized: "Importing photos to Nextcloud", bundle: .module,
             comment: "Title of the system's progress panel while an import runs in the background (iPhone, iPad).")
-        task = Task {
+        // The task holds the controller while the import runs; the closures handed to the runner do not.
+        task = Task { [self] in
             await ImportBackgroundRunner.shared.run(
                 title: title,
                 status: { [weak self] in
@@ -197,7 +198,7 @@ final class ImportController {
                 stop: { [weak self] in self?.cancel() },
                 work: { [weak self] in
                     guard let self else { return false }
-                    let running = Task {
+                    let running = Task { [self] in
                         await importer.run { progress in
                             Task { @MainActor [weak self] in self?.update(progress) }
                         }

@@ -134,7 +134,9 @@ struct WelcomeHomeView: View {
     @ViewBuilder var chips: some View {
         ForEach(summary.sources) { entry in
             Label {
-                Text("\(ImportSummary.title(of: entry.source)) \(entry.count.formatted())")
+                // A service's name and a number: nothing to translate (a LocalizedStringKey here was looked up in the
+                // app's bundle as "%@ %@", SPEC §20.3).
+                Text(verbatim: "\(ImportSummary.title(of: entry.source)) \(entry.count.formatted())")
                     .lineLimit(1)
             } icon: {
                 Image(systemName: ImportSourceStyle.symbol(entry.source))

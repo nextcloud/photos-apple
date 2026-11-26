@@ -173,37 +173,30 @@ public enum LivePhotoEffects {
                 AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: width * height * 6],
             ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width,
-                kCVPixelBufferHeightKey as String: height, kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
-            ])
         guard writer.canAdd(input) else { throw CocoaError(.fileWriteUnknown) }
-        writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+        let receiver = writer.inputPixelBufferReceiver(
+            for: input, pixelBufferAttributes: VideoFrames.attributes(width: width, height: height))
+        try writer.start()
         writer.startSession(atSourceTime: .zero)
         do {
             for (index, frame) in order.enumerated() {
                 try Task.checkCancellation()
-                while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-                guard let pool = adaptor.pixelBufferPool else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-                var buffer: CVPixelBuffer?
-                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-                guard let buffer else { throw CocoaError(.fileWriteUnknown) }
-                PhotoEditor.context.render(
-                    CIImage(cgImage: frames[frame]), to: buffer, bounds: CGRect(x: 0, y: 0, width: width, height: height),
-                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
-                guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: videoFrameRate)) else {
-                    throw writer.error ?? CocoaError(.fileWriteUnknown)
+                guard let pool = receiver.pixelBufferPool else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+                let buffer = try pool.makeMutablePixelBuffer()
+                buffer.withUnsafeBuffer { buffer in
+                    PhotoEditor.context.render(
+                        CIImage(cgImage: frames[frame]), to: buffer, bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                        colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
                 }
+                // Waits while the encoder is busy (what `isReadyForMoreMediaData` was polled for).
+                try await receiver.append(
+                    CVReadOnlyPixelBuffer(buffer), with: CMTime(value: CMTimeValue(index), timescale: videoFrameRate))
             }
         } catch {
             writer.cancelWriting()
             throw error
         }
-        input.markAsFinished()
+        receiver.finish()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
     }

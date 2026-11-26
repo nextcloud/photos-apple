@@ -7,8 +7,7 @@ import PhotosModel
 
 extension MediaItem: FetchableRecord, PersistableRecord {
     public static let databaseTableName = "media"
-    public static let databaseDateEncodingStrategy: DatabaseDateEncodingStrategy = .timeIntervalSince1970
-    public static let databaseDateDecodingStrategy: DatabaseDateDecodingStrategy = .timeIntervalSince1970
+    // Dates are written and read as seconds since 1970 by `encode(to:)` and `init(row:)` below.
 
     public func encode(to container: inout PersistenceContainer) throws {
         container["fileId"] = fileId
@@ -83,8 +82,11 @@ extension MediaItem: FetchableRecord, PersistableRecord {
 /// Album row ↔ model.
 struct AlbumRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "album"
-    static let databaseDateEncodingStrategy: DatabaseDateEncodingStrategy = .timeIntervalSince1970
-    static let databaseDateDecodingStrategy: DatabaseDateDecodingStrategy = .timeIntervalSince1970
+
+    /// Seconds since 1970, like every other date column (GRDB 7 asks per column; the static properties used before were
+    /// not GRDB's requirement any more, so the dates were written as text).
+    static func databaseDateEncodingStrategy(for column: String) -> DatabaseDateEncodingStrategy { .timeIntervalSince1970 }
+    // Reading keeps GRDB's default: it takes seconds since 1970 and the text that older versions wrote.
 
     var id: String
     var kind: String

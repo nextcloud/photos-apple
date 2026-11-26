@@ -148,7 +148,7 @@ import Testing
         #expect(AccountInitials.of("  ") == "?")
     }
 
-    @Test func goMenuKeepsItsShortcutsAndEveryPlace() {
+    @MainActor @Test func goMenuKeepsItsShortcutsAndEveryPlace() {
         #expect(PhotosCommands.goShortcut(.library) == "1")
         #expect(PhotosCommands.goShortcut(.photos) == "2")
         #expect(PhotosCommands.goShortcut(.map) == "6")

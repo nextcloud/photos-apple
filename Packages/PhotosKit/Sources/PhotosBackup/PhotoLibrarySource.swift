@@ -185,7 +185,7 @@ public struct PhotoLibrarySource: Sendable, BackupLibrary {
             latitude: asset.location?.coordinate.latitude, longitude: asset.location?.coordinate.longitude)
         let resources = all.map { resource in
             BackupAssetInfo.Resource(
-                type: resource.type, name: resource.originalFilename, uniformTypeIdentifier: resource.uniformTypeIdentifier,
+                type: resource.type, name: Self.fileName(of: resource), uniformTypeIdentifier: resource.uniformTypeIdentifier,
                 byteSize: Self.byteSize(of: resource))
         }
         return Self.select(info, resources: resources, settings: settings).map { ($0.resource, all[$0.index]) }
@@ -259,6 +259,20 @@ public struct PhotoLibrarySource: Sendable, BackupLibrary {
         validSize(resource.dataSize)
     }
 
+    /// The resource's file name (`PHAssetResource.filename`, which replaced `originalFilename` in the 27 SDKs and may be
+    /// nil): without one, a name made of the asset's identifier and the type's extension, so that every file has a name.
+    static func fileName(of resource: PHAssetResource) -> String {
+        fileName(resource.filename, assetIdentifier: resource.assetLocalIdentifier, type: resource.contentType)
+    }
+
+    static func fileName(_ name: String?, assetIdentifier: String, type: UTType) -> String {
+        if let name, !name.isEmpty { return name }
+        // "4E5F…/L0/001": the part before the first slash is unique per asset and safe in a file name.
+        let base = assetIdentifier.split(separator: "/").first.map(String.init) ?? "Asset"
+        guard let ext = type.preferredFilenameExtension else { return base }
+        return base + "." + ext
+    }
+
     /// Only a positive number is a size.
     static func validSize(_ size: Int?) -> Int64? {
         guard let size, size > 0 else { return nil }
@@ -280,7 +294,7 @@ public struct PhotoLibrarySource: Sendable, BackupLibrary {
     public func export(_ resource: PHAssetResource, allowNetwork: Bool) async throws -> URL {
         let directory = Self.exportDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appending(path: resource.originalFilename)
+        let file = directory.appending(path: Self.fileName(of: resource))
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = allowNetwork
         do {

@@ -203,9 +203,9 @@ extension EnvironmentValues {
                 VStack(spacing: 1) {
                     Text(lines.title)
                         .font(.subheadline.weight(.semibold))
+                    // The text colour: the glass draws the secondary one too faint (accessibility audit, SPEC §20.3).
                     Text(lines.detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -232,8 +232,9 @@ extension EnvironmentValues {
         func actionBar(_ item: MediaItem) -> some View {
             GlassEffectContainer {
                 HStack(spacing: 2) {
-                    ShareMediaButton(items: [item])
-                        .frame(width: 44, height: 44)
+                    // Plain buttons take taps only on their icon: each label is a 44-point square that takes them all
+                    // (accessibility audit, SPEC §20.3).
+                    ShareMediaButton(items: [item], target: 44)
                     Button {
                         toggleFavorite(item)
                     } label: {
@@ -242,11 +243,13 @@ extension EnvironmentValues {
                         )
                         .contentTransition(.symbolEffect(.replace))
                         .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                     }
                     .symbolEffect(.bounce, value: item.isFavorite)
                     Button(action: toggleInfo) {
                         Label(String(localized: "Info", bundle: .module), systemImage: "info.circle")
                             .frame(width: 44, height: 44)
+                            .contentShape(.rect)
                     }
                     .keyboardShortcut("i", modifiers: .command)
                     if item.kind == .image {
@@ -255,6 +258,7 @@ extension EnvironmentValues {
                         } label: {
                             Label(String(localized: "Edit", bundle: .module), systemImage: "slider.horizontal.3")
                                 .frame(width: 44, height: 44)
+                                .contentShape(.rect)
                         }
                     }
                     Menu {
@@ -262,10 +266,12 @@ extension EnvironmentValues {
                     } label: {
                         Label(String(localized: "More", bundle: .module), systemImage: "ellipsis")
                             .frame(width: 44, height: 44)
+                            .contentShape(.rect)
                     }
                     Button(role: .destructive, action: delete) {
                         Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
                             .frame(width: 44, height: 44)
+                            .contentShape(.rect)
                     }
                     .disabled(!item.permissions.canDelete)
                 }

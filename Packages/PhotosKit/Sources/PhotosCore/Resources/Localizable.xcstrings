@@ -61,7 +61,27 @@
       }
     },
     "%lld items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more." : {
-      "comment" : "Text of a notification: %lld is the number of shared items that could not be uploaded after the share sheet was closed."
+      "comment" : "Text of a notification: %lld is the number of shared items that could not be uploaded after the share sheet was closed.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item you shared to Nextcloud Photos could not be uploaded. Share it again to try once more."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items you shared to Nextcloud Photos could not be uploaded. Share them again to try once more."
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "%lld left" : {
       "comment" : "Backup Live Activity: number of photos and videos still to upload. Plural variations in the catalog.",

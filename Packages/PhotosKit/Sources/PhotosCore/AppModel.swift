@@ -4,6 +4,7 @@
 import Foundation
 import OSLog
 import Observation
+import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import Security
@@ -56,6 +57,7 @@ public final class AppModel {
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "app")
 
     public convenience init(appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0") {
+        LaunchMetrics.shared.reached(.appCode)
         self.init(
             appVersion: appVersion, layout: AppPaths.layout, keychain: Keychain(), defaults: .standard,
             backgroundUploads: AppModel.systemBackgroundUploads, system: .live)
@@ -75,12 +77,16 @@ public final class AppModel {
             #endif
         }
         // The log that survives restarts gets this run's entries every few minutes (and when the app goes to the
-        // background, `RootView`), so a crash loses at most the last few minutes.
+        // background, `RootView`), so a crash loses at most the last few minutes. Not at once: reading the system log
+        // waits for the log daemon for up to a second, and at launch that held a thread the first screen needed
+        // (SPEC §20.6).
         Task { [weak self] in
+            var delay = Diagnostics.firstPersistDelay
             while !Task.isCancelled {
-                guard let self else { return }
+                try? await Task.sleep(for: delay)
+                delay = Diagnostics.persistInterval
+                guard let self, !Task.isCancelled else { return }
                 await Diagnostics.persistLog(app: self)
-                try? await Task.sleep(for: .seconds(300))
             }
         }
         #if DEBUG
@@ -102,6 +108,7 @@ public final class AppModel {
                 }
             }
         #endif
+        LaunchMetrics.shared.reached(.appModel)
     }
 
     /// Everything the model touches is passed in, so tests can run it in a temporary directory against a stubbed server.

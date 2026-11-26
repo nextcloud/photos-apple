@@ -100,11 +100,16 @@ public struct DeleteWithdrawal: Sendable, Equatable {
     public var refused: Set<FileID> = []
     /// Reached the server: the files are in its trash bin (or were deleted elsewhere already).
     public var deleted: Set<FileID> = []
+    /// Withdrawn after an attempt that failed with a transient error (timed out, 5xx, offline): the server may have
+    /// deleted the file all the same — an answer lost, an error after the move to the trash bin. A subset of
+    /// `withdrawn`; undo looks for these in the trash bin too (SPEC §20.1).
+    public var maybeSent: Set<FileID> = []
 
-    public init(withdrawn: Set<FileID> = [], refused: Set<FileID> = [], deleted: Set<FileID> = []) {
+    public init(withdrawn: Set<FileID> = [], refused: Set<FileID> = [], deleted: Set<FileID> = [], maybeSent: Set<FileID> = []) {
         self.withdrawn = withdrawn
         self.refused = refused
         self.deleted = deleted
+        self.maybeSent = maybeSent
     }
 }
 
@@ -127,6 +132,9 @@ public actor Outbox {
     private var inFlight: [Int64: PendingOperation] = [:]
     /// Waiting for an operation in flight to finish (`withdrawDeletes`).
     private var finishWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Files whose DELETE request went out in this process (`DeleteWithdrawal.maybeSent`); cleared when their delete
+    /// is done. After a relaunch a failed attempt counts as not sent: undo then only puts the row back, as before.
+    private var deleteRequestsSent: Set<FileID> = []
     /// A connection problem: no operation starts before this.
     private var pausedUntil: Date?
     /// Timer that kicks the outbox when the next retry is due.
@@ -358,6 +366,8 @@ public actor Outbox {
                 let (withdrawn, refused) = try takeBackDeletes(of: open.subtracting(sending), restoring: rows)
                 result.withdrawn.formUnion(withdrawn)
                 result.refused.formUnion(refused)
+                // Their DELETE went out before, and failed: the server may have done it all the same.
+                result.maybeSent.formUnion(withdrawn.intersection(deleteRequestsSent))
                 open.subtract(withdrawn.union(refused))
             } catch {
                 logger.error("could not take back queued deletes: \(error.localizedDescription, privacy: .public)")
@@ -512,6 +522,7 @@ public actor Outbox {
         do {
             try await execute(operation, etag: ready.etag)
             remove(ready.id)
+            if case .delete(let fileId, _) = operation { deleteRequestsSent.remove(fileId) }
         } catch  where Task.isCancelled {
             return  // shut down: the operation stays pending
         } catch let error as NetworkError where Self.shouldRetry(error, lockedAttempts: ready.lockedAttempts) {
@@ -622,10 +633,15 @@ public actor Outbox {
         case .favorite(let fileId, let path, let value):
             try await atCurrentPath(fileId, path) { try await self.api.setFavorite(userPath: $0, value) }
         case .delete(let fileId, let path):
-            if let etag, try await ifUnchanged({ try await self.api.delete(userPath: path, ifMatch: etag) }) { return }
+            if let etag,
+                try await sendingDelete(
+                    fileId, { try await self.ifUnchanged({ try await self.api.delete(userPath: path, ifMatch: etag) }) })
+            {
+                return
+            }
             // No such file any more: deleted elsewhere, which is what was asked for.
             guard let current = try await api.currentPath(fileId: fileId) else { return }
-            try await api.delete(userPath: current)
+            try await sendingDelete(fileId) { try await self.api.delete(userPath: current) }
         case .archive(let fileId, let path):
             if let etag, !Self.isArchivePath(path) {
                 let target = Self.archivePrefix + path
@@ -668,6 +684,19 @@ public actor Outbox {
 
     /// Sends a request that carries `If-Match`. False when the file at the path is not the one with that ETag (any more):
     /// it was moved, changed or replaced, and has to be looked up by its id.
+    /// Sends a DELETE and remembers that it went out (`DeleteWithdrawal.maybeSent`), unless the device was offline:
+    /// then nothing reached the server.
+    private func sendingDelete<T>(_ fileId: FileID, _ request: () async throws -> T) async throws -> T {
+        let sentBefore = deleteRequestsSent.contains(fileId)
+        deleteRequestsSent.insert(fileId)
+        do {
+            return try await request()
+        } catch NetworkError.offline {
+            if !sentBefore { deleteRequestsSent.remove(fileId) }
+            throw NetworkError.offline
+        }
+    }
+
     private func ifUnchanged(_ request: () async throws -> Void) async throws -> Bool {
         do {
             try await request()

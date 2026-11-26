@@ -17,4 +17,8 @@ CURRENT_PROJECT_VERSION = $(PHOTOS_BUILD_NUMBER)
 // (App Group, keychain group, push), which needs an App ID that has all of this: see "Signing" in the README.
 PHOTOS_DEBUG_ENTITLEMENTS = NO
 
+// YES turns warnings of the app's own targets into errors (CI: `xcodebuild … PHOTOS_WARNINGS_AS_ERRORS=YES`, with the same
+// variable in the environment for the PhotosKit package, see Package.swift). Local builds only warn.
+PHOTOS_WARNINGS_AS_ERRORS = NO
+
 #include? "Local.xcconfig"

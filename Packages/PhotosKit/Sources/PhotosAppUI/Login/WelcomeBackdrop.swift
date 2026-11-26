@@ -299,13 +299,17 @@ struct WelcomeTiming: Equatable {
         }
     }
 
-    /// The Library's first appearance on a normal launch: a quick fade (and a hint of scale without Reduce Motion) that
-    /// starts with the first frame and delays nothing.
+    /// The Library's first appearance on a normal launch: a quick fade that starts with the first frame and delays
+    /// nothing.
     var revealDuration: Double { reduceMotion ? 0.2 : 0.35 }
-    var revealStartScale: CGFloat { reduceMotion ? 1 : 0.985 }
 }
 
 /// The gentle first appearance of the app on a normal launch (SPEC §17.6.3): once per process, not on an account switch.
+///
+/// The content is never animated: a cover in the window's background colour fades away above it, animated on its own.
+/// Fading (or scaling) the split view in one animated transaction made the Mac sidebar's rows that were built in it
+/// keep their symbols at the opacity of that moment — Library's half drawn, Favorites, Memories, Places and the albums
+/// invisible (SPEC §20.1).
 struct LaunchReveal: ViewModifier {
     /// Already shown in this process (or replaced by the welcome).
     @MainActor static var done = false
@@ -316,12 +320,20 @@ struct LaunchReveal: ViewModifier {
     func body(content: Content) -> some View {
         let timing = WelcomeTiming(reduceMotion: reduceMotion)
         content
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(revealed ? 1 : timing.revealStartScale)
+            .overlay {
+                Rectangle()
+                    .fill(.background)
+                    .opacity(revealed ? 0 : 1)
+                    // Only the cover's opacity animates; the content's transaction stays without an animation.
+                    .animation(.easeOut(duration: timing.revealDuration), value: revealed)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             .onAppear {
                 guard !revealed else { return }
                 LaunchReveal.done = true
-                withAnimation(.easeOut(duration: timing.revealDuration)) { revealed = true }
+                revealed = true
             }
     }
 }

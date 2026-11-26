@@ -29,18 +29,12 @@ public struct SettingsView: View {
     @AppStorage(OfflineManager.wifiOnlyKey) private var offlineWifiOnly = true
     @AppStorage(AppLockSettings.timeoutKey, store: AppLockSettings.defaults) private var appLockTimeout = AppLockSettings.defaultTimeout
 
-    /// A Settings page. iOS shows all pages in one list; the macOS Settings window shows one per tab.
-    public enum Page: Hashable, Sendable {
-        case all, general, accounts, storage, server, about
-    }
+    /// The page shown: one of the pages, or the list of pages (SPEC §20.4).
+    let page: SettingsPage
 
-    let page: Page
-
-    public init(page: Page = .all) {
+    public init(page: SettingsPage = .all) {
         self.page = page
     }
-
-    func shows(_ section: Page) -> Bool { page == .all || page == section }
 
     /// "1.2 GB, up to 2 GB".
     private var cacheUsage: String {
@@ -52,246 +46,39 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+            form
+        #else
+            if page == .all { SettingsHome() } else { form }
+        #endif
+    }
+
+    /// The page's sections.
+    @ViewBuilder var sections: some View {
+        switch page {
+        case .all:
+            // A link to Settings opened in a window (Mac): the list of pages.
+            ForEach(SettingsPage.shown) { (page: SettingsPage) in
+                NavigationLink(page.title) { SettingsPageView(page: page) }
+            }
+        case .accounts: accountsSections
+        case .library: librarySections
+        case .notifications: notificationsSections
+        case .general:
+            librarySections
+            notificationsSections
+        case .backup: EmptyView()
+        case .storage: storageSections
+        case .privacy: privacySections
+        case .desktop: EmptyView()
+        case .advanced: advancedSections
+        case .about: aboutSection
+        }
+    }
+
+    var form: some View {
         Form {
-            if shows(.accounts) {
-                Section(String(localized: "Accounts", bundle: .module)) {
-                    ForEach(app.accounts) { account in
-                        HStack {
-                            // Name and server are read together, then whether it is the account shown.
-                            VStack(alignment: .leading) {
-                                Text(account.displayName)
-                                Text(account.hostDisplayName).font(.caption).foregroundStyle(.secondary)
-                            }
-                            .accessibilityElement(children: .combine)
-                            Spacer()
-                            if account.id == session.account.id {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
-                                    .accessibilityLabel(Text("Current account", bundle: .module))
-                            } else {
-                                Button(String(localized: "Switch", bundle: .module)) { app.switchTo(account.id) }
-                                    .buttonStyle(.borderless)
-                            }
-                            // Visible, not only in the context menu or behind a swipe. Asks before anything happens.
-                            Button(String(localized: "Log out…", bundle: .module), role: .destructive) { removeAccount = account }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel(Text("Log out \(account.displayName)", bundle: .module))
-                        }
-                        .contextMenu {
-                            Button(String(localized: "Remove account", bundle: .module), role: .destructive) { removeAccount = account }
-                        }
-                        .swipeActions {
-                            Button(String(localized: "Remove", bundle: .module), role: .destructive) { removeAccount = account }
-                        }
-                    }
-                    if app.canAddAccount {
-                        Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
-                    }
-                }
-            }
-
-            if shows(.general) {
-                Section {
-                    ForEach(session.features.userConfig.photosSourceFolders, id: \.self) { folder in
-                        HStack {
-                            Label(folder, systemImage: "folder")
-                            Spacer()
-                            Button(role: .destructive) {
-                                removeFolder(folder)
-                            } label: {
-                                Image(systemName: "minus.circle")
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(session.features.userConfig.photosSourceFolders.count <= 1)
-                            .accessibilityLabel(Text("Remove \(folder)", bundle: .module))
-                            .help(String(localized: "Remove \(folder)", bundle: .module))
-                        }
-                    }
-                    // A picker over the server's folders, not a path to type.
-                    Button(
-                        PlatformWording.title(
-                            mac: LocalizedStringResource("Add Folder…", bundle: .module),
-                            other: LocalizedStringResource("Add folder…", bundle: .module))
-                    ) { pickingFolder = true }
-                    if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
-                } header: {
-                    Text("Timeline folders", bundle: .module)
-                } footer: {
-                    Text("Photos and videos in these folders of your Nextcloud appear in the library.", bundle: .module)
-                }
-                PartnerSharingSection()
-                Section {
-                    LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
-                    #if !os(macOS)
-                        Button {
-                            importingLibrary = true
-                        } label: {
-                            Label(
-                                String(
-                                    localized: "Import from Other Services…", bundle: .module,
-                                    comment: "Settings row that opens the import of Google Photos, iCloud, Facebook and Instagram exports."),
-                                systemImage: "square.and.arrow.down.on.square")
-                        }
-                        .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
-                    #endif
-                } header: {
-                    Text("Library", bundle: .module)
-                } footer: {
-                    Text("These settings are shared with the Photos app on the web.", bundle: .module)
-                }
-                TimelineDisplaySection()
-                #if os(macOS)
-                    // The menu bar extra (SPEC §16.5.4).
-                    MenuBarExtraSection()
-                #endif
-                // Colour from photos, moving covers (SPEC §16.8).
-                LookSettingsSection()
-                // Folder rules, smart albums, GPS track (SPEC §16.4).
-                OrganizeSettingsSection()
-            }
-
-            if shows(.general) {
-                Section {
-                    // Off unregisters this device on the server and the push service; on asks for permission and registers.
-                    Toggle(
-                        String(localized: "Notifications", bundle: .module),
-                        isOn: Binding(get: { app.pushEnabled }, set: { value in Task { await app.setPushEnabled(value) } }))
-                    if session.features.has(.onThisDayNotifications) {
-                        Toggle(
-                            String(localized: "On this day", bundle: .module),
-                            isOn: Binding(
-                                get: { session.features.userConfig.onThisDayNotifications ?? true },
-                                set: { value in
-                                    Task { try? await session.setUserConfig(.onThisDayNotifications) { $0.onThisDayNotifications = value } }
-                                }))
-                    }
-                } header: {
-                    Text("Notifications", bundle: .module)
-                } footer: {
-                    if session.features.has(.notifications) {
-                        Text("Notifications are delivered through Nextcloud's push service.", bundle: .module)
-                    } else {
-                        Text(
-                            "Notifications are delivered through Nextcloud's push service. This server has no Notifications app, so it doesn't send any.",
-                            bundle: .module)
-                    }
-                }
-            }
-
-            if shows(.general) { PhotoOfTheDaySettingsSection() }
-
-            // Sharing and family (SPEC §16.7).
-            if shows(.general) { WeeklyPromptSettingsSection() }
-            if shows(.general) { FamilyLibrarySettingsSection() }
-            if shows(.general) { LockScreenAlbumSettingsSection() }
-
-            if shows(.general) { SearchAndActivitySettings() }
-
-            if shows(.general) {
-                Section {
-                    Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
-                        // Required by the organisation (SPEC §5.1.9): on, and it can't be turned off.
-                        .disabled(app.managed.enforcesAppLock)
-                        // Widgets show a placeholder instead of photos while app lock is on.
-                        .onChange(of: appLock) { _, _ in
-                            AppLock.shared.settingChanged()
-                            app.reloadWidgets()
-                            // Nothing in Spotlight while app lock is on; indexed again when it is turned off.
-                            Task { await session.updateSpotlight(force: true) }
-                            // The photo of the day shows no photo while app lock is on.
-                            Task { await session.photoOfTheDaySettingsChanged() }
-                        }
-                    if appLock {
-                        Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
-                            Text("Immediately", bundle: .module).tag(0.0)
-                            Text("1 minute", bundle: .module).tag(60.0)
-                            Text("5 minutes", bundle: .module).tag(300.0)
-                            Text("15 minutes", bundle: .module).tag(900.0)
-                        }
-                    }
-                } header: {
-                    Text("Privacy", bundle: .module)
-                } footer: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if app.managed.enforcesAppLock { Text(ManagedWording.appLockRequired) }
-                        Text(DeviceLockWording.current.archiveNote)
-                    }
-                }
-            }
-
-            if shows(.storage) {
-                Section(String(localized: "Storage", bundle: .module)) {
-                    LabeledContent(String(localized: "Preview cache", bundle: .module), value: cacheUsage)
-                    Button(String(localized: "Clear cache", bundle: .module)) {
-                        session.services?.images.cache.removeAll()
-                        Task { await session.services?.images.originals.removeAll() }
-                        cacheSize = 0
-                    }
-                }
-            }
-
-            if shows(.storage) { LibraryThumbnailsSettingsSection() }
-
-            if shows(.storage) { SmartOfflineSettingsSection() }
-
-            if shows(.storage) {
-                Section(String(localized: "Available offline", bundle: .module)) {
-                    Toggle(String(localized: "Download only on Wi-Fi", bundle: .module), isOn: $offlineWifiOnly)
-                        .onChange(of: offlineWifiOnly) { _, _ in Task { await session.offline?.syncPins() } }
-                    if pins.isEmpty {
-                        Text("Albums you make available offline appear here.", bundle: .module).foregroundStyle(.secondary)
-                    }
-                    ForEach(pins) { pin in
-                        LabeledContent(
-                            pin.title,
-                            value: String(localized: "\(pin.fileCount) files · \(Formatters.bytes(pin.bytes))", bundle: .module))
-                    }
-                    if !pins.isEmpty {
-                        Button(String(localized: "Remove all offline files", bundle: .module), role: .destructive) {
-                            Task {
-                                try? await session.offline?.removeAll()
-                                pins = []
-                            }
-                        }
-                    }
-                }
-            }
-
-            if shows(.server) {
-                Section(String(localized: "Server", bundle: .module)) {
-                    LabeledContent(String(localized: "Nextcloud", bundle: .module), value: session.features.serverVersion.string)
-                    if let photos = session.features.photosAppVersion {
-                        LabeledContent(String(localized: "Photos app", bundle: .module), value: photos)
-                    }
-                    LabeledContent(
-                        String(localized: "Photos features", bundle: .module),
-                        value: session.features.hasExtendedFeatures
-                            ? String(localized: "Extended", bundle: .module) : String(localized: "Standard", bundle: .module))
-                    NavigationLink(String(localized: "Server features", bundle: .module)) { ServerFeaturesView() }
-                    NavigationLink(CacheDiagnosticsView.title) { CacheDiagnosticsView() }
-                    Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
-                        .disabled(session.syncStatus.isWorking)
-                    syncStatusRow
-                    accountStateRows
-                }
-                DiagnosticsSection()
-            }
-
-            if shows(.about) {
-                Section(String(localized: "About", bundle: .module)) {
-                    LabeledContent(String(localized: "Version", bundle: .module), value: app.appVersion)
-                    Link(
-                        String(localized: "Source code", bundle: .module),
-                        destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
-                    Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
-                    NavigationLink(String(localized: "Licences", bundle: .module)) { LicensesView() }
-                    Text(
-                        "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT).",
-                        bundle: .module
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-            }
+            sections
         }
         .formStyle(.grouped)
         .navigationTitle(title)
@@ -325,6 +112,251 @@ public struct SettingsView: View {
             Text(
                 "The app's access to the account is revoked and all its data is removed from this device. Nothing is deleted on the server.",
                 bundle: .module)
+        }
+    }
+
+    // MARK: Pages
+
+    /// Accounts, then the server of the account shown and its sync.
+    @ViewBuilder var accountsSections: some View {
+        Section(String(localized: "Accounts", bundle: .module)) {
+            ForEach(app.accounts) { account in
+                HStack {
+                    // Name and server are read together, then whether it is the account shown.
+                    VStack(alignment: .leading) {
+                        Text(account.displayName)
+                        Text(account.hostDisplayName).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    // The check mark is part of this element, not a tiny one of its own (SPEC §20.3).
+                    .accessibilityValue(
+                        account.id == session.account.id ? Text("Current account", bundle: .module) : Text(verbatim: "")
+                    )
+                    .accessibilityAddTraits(account.id == session.account.id ? .isSelected : [])
+                    Spacer()
+                    if account.id == session.account.id {
+                        Image(systemName: "checkmark").foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                    } else {
+                        Button(String(localized: "Switch", bundle: .module)) { app.switchTo(account.id) }
+                            .buttonStyle(.borderless)
+                    }
+                    // Visible, not only in the context menu or behind a swipe. Asks before anything happens.
+                    Button(String(localized: "Log out…", bundle: .module), role: .destructive) { removeAccount = account }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(Text("Log out \(account.displayName)", bundle: .module))
+                }
+                .contextMenu {
+                    Button(String(localized: "Remove account", bundle: .module), role: .destructive) { removeAccount = account }
+                }
+                .swipeActions {
+                    Button(String(localized: "Remove", bundle: .module), role: .destructive) { removeAccount = account }
+                }
+            }
+            if app.canAddAccount {
+                Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+            }
+        }
+        Section(String(localized: "Server", bundle: .module)) {
+            LabeledContent(String(localized: "Nextcloud", bundle: .module), value: session.features.serverVersion.string)
+            if let photos = session.features.photosAppVersion {
+                LabeledContent(String(localized: "Photos app", bundle: .module), value: photos)
+            }
+            LabeledContent(
+                String(localized: "Photos features", bundle: .module),
+                value: session.features.hasExtendedFeatures
+                    ? String(localized: "Extended", bundle: .module) : String(localized: "Standard", bundle: .module))
+            NavigationLink(String(localized: "Server features", bundle: .module)) { ServerFeaturesView() }
+            Button(String(localized: "Sync now", bundle: .module)) { Task { await session.syncNow(forceReconcile: true) } }
+                .disabled(session.syncStatus.isWorking)
+            syncStatusRow
+            accountStateRows
+        }
+    }
+
+    /// What the library shows and how, and with whom it is shared.
+    @ViewBuilder var librarySections: some View {
+        Section {
+            ForEach(session.features.userConfig.photosSourceFolders, id: \.self) { folder in
+                HStack {
+                    Label(folder, systemImage: "folder")
+                    Spacer()
+                    Button(role: .destructive) {
+                        removeFolder(folder)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(session.features.userConfig.photosSourceFolders.count <= 1)
+                    .accessibilityLabel(Text("Remove \(folder)", bundle: .module))
+                    .help(String(localized: "Remove \(folder)", bundle: .module))
+                }
+            }
+            // A picker over the server's folders, not a path to type.
+            Button(
+                PlatformWording.title(
+                    mac: LocalizedStringResource("Add Folder…", bundle: .module),
+                    other: LocalizedStringResource("Add folder…", bundle: .module))
+            ) { pickingFolder = true }
+            if let configError { Text(configError).foregroundStyle(.red).font(.footnote) }
+        } header: {
+            Text("Timeline folders", bundle: .module)
+        } footer: {
+            Text("Photos and videos in these folders of your Nextcloud appear in the library.", bundle: .module)
+        }
+        Section {
+            LabeledContent(String(localized: "Upload folder", bundle: .module), value: session.features.userConfig.photosLocation)
+            #if !os(macOS)
+                Button {
+                    importingLibrary = true
+                } label: {
+                    Label(
+                        String(
+                            localized: "Import from Other Services…", bundle: .module,
+                            comment: "Settings row that opens the import of Google Photos, iCloud, Facebook and Instagram exports."),
+                        systemImage: "square.and.arrow.down.on.square")
+                }
+                .sheet(isPresented: $importingLibrary) { ImportLibrarySheet() }
+            #endif
+        } header: {
+            Text("Library", bundle: .module)
+        } footer: {
+            Text("These settings are shared with the Photos app on the web.", bundle: .module)
+        }
+        TimelineDisplaySection()
+        // Colour from photos, moving covers (SPEC §16.8).
+        LookSettingsSection()
+        // Sharing and family (SPEC §16.7).
+        PartnerSharingSection()
+        FamilyLibrarySettingsSection()
+        LockScreenAlbumSettingsSection()
+    }
+
+    @ViewBuilder var notificationsSections: some View {
+        Section {
+            // Off unregisters this device on the server and the push service; on asks for permission and registers.
+            Toggle(
+                String(localized: "Notifications", bundle: .module),
+                isOn: Binding(get: { app.pushEnabled }, set: { value in Task { await app.setPushEnabled(value) } }))
+            if session.features.has(.onThisDayNotifications) {
+                Toggle(
+                    String(localized: "On this day", bundle: .module),
+                    isOn: Binding(
+                        get: { session.features.userConfig.onThisDayNotifications ?? true },
+                        set: { value in
+                            Task { try? await session.setUserConfig(.onThisDayNotifications) { $0.onThisDayNotifications = value } }
+                        }))
+            }
+        } header: {
+            Text("Notifications", bundle: .module)
+        } footer: {
+            if session.features.has(.notifications) {
+                Text("Notifications are delivered through Nextcloud's push service.", bundle: .module)
+            } else {
+                Text(
+                    "Notifications are delivered through Nextcloud's push service. This server has no Notifications app, so it doesn't send any.",
+                    bundle: .module)
+            }
+        }
+        SearchAndActivitySettings(part: .sharedAlbums)
+        PhotoOfTheDaySettingsSection()
+        WeeklyPromptSettingsSection()
+    }
+
+    @ViewBuilder var storageSections: some View {
+        Section(String(localized: "Storage", bundle: .module)) {
+            LabeledContent(String(localized: "Preview cache", bundle: .module), value: cacheUsage)
+            Button(String(localized: "Clear cache", bundle: .module)) {
+                session.services?.images.cache.removeAll()
+                Task { await session.services?.images.originals.removeAll() }
+                cacheSize = 0
+            }
+            NavigationLink(CacheDiagnosticsView.title) { CacheDiagnosticsView() }
+        }
+        LibraryThumbnailsSettingsSection()
+        SmartOfflineSettingsSection()
+        Section(String(localized: "Available offline", bundle: .module)) {
+            Toggle(String(localized: "Download only on Wi-Fi", bundle: .module), isOn: $offlineWifiOnly)
+                .onChange(of: offlineWifiOnly) { _, _ in Task { await session.offline?.syncPins() } }
+            if pins.isEmpty {
+                Text("Albums you make available offline appear here.", bundle: .module).foregroundStyle(.secondary)
+            }
+            ForEach(pins) { pin in
+                LabeledContent(
+                    pin.title,
+                    value: String(localized: "\(pin.fileCount) files · \(Formatters.bytes(pin.bytes))", bundle: .module))
+            }
+            if !pins.isEmpty {
+                Button(String(localized: "Remove all offline files", bundle: .module), role: .destructive) {
+                    Task {
+                        try? await session.offline?.removeAll()
+                        pins = []
+                    }
+                }
+            }
+        }
+    }
+
+    /// App lock, and what the app works out about the photos on this device.
+    @ViewBuilder var privacySections: some View {
+        Section {
+            Toggle(DeviceLockWording.current.toggleTitle, isOn: $appLock)
+                // Required by the organisation (SPEC §5.1.9): on, and it can't be turned off.
+                .disabled(app.managed.enforcesAppLock)
+                // Widgets show a placeholder instead of photos while app lock is on.
+                .onChange(of: appLock) { _, _ in
+                    AppLock.shared.settingChanged()
+                    app.reloadWidgets()
+                    // Nothing in Spotlight while app lock is on; indexed again when it is turned off.
+                    Task { await session.updateSpotlight(force: true) }
+                    // The photo of the day shows no photo while app lock is on.
+                    Task { await session.photoOfTheDaySettingsChanged() }
+                }
+            if appLock {
+                Picker(String(localized: "Lock after", bundle: .module), selection: $appLockTimeout) {
+                    Text("Immediately", bundle: .module).tag(0.0)
+                    Text("1 minute", bundle: .module).tag(60.0)
+                    Text("5 minutes", bundle: .module).tag(300.0)
+                    Text("15 minutes", bundle: .module).tag(900.0)
+                }
+            }
+        } header: {
+            Text("App lock", bundle: .module, comment: "Settings › Privacy & security: section of the app lock.")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                if app.managed.enforcesAppLock { Text(ManagedWording.appLockRequired) }
+                Text(DeviceLockWording.current.archiveNote)
+            }
+        }
+        SearchAndActivitySettings(part: .analysis)
+    }
+
+    /// The niche features, the tools that change the server's files, and what helps when something goes wrong.
+    @ViewBuilder var advancedSections: some View {
+        AdvancedFeaturesSection()
+        // Folder rules, smart albums, GPS track (SPEC §16.4).
+        OrganizeSettingsSection()
+        #if os(macOS)
+            // The menu bar extra (SPEC §16.5.4).
+            MenuBarExtraSection()
+        #endif
+        DiagnosticsSection()
+    }
+
+    var aboutSection: some View {
+        Section(String(localized: "About", bundle: .module)) {
+            LabeledContent(String(localized: "Version", bundle: .module), value: app.appVersion)
+            Link(
+                String(localized: "Source code", bundle: .module),
+                destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
+            Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
+            NavigationLink(String(localized: "Licences", bundle: .module)) { LicensesView() }
+            Text(
+                "Nextcloud Photos is free software under the MIT licence. It uses GRDB (MIT).",
+                bundle: .module
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -378,17 +410,8 @@ public struct SettingsView: View {
         }
     }
 
-    /// The Mac's Settings window is titled after the selected tab; elsewhere this is the Settings screen.
-    var title: String {
-        switch page {
-        case .all: String(localized: "Settings", bundle: .module)
-        case .general: String(localized: "General", bundle: .module)
-        case .accounts: String(localized: "Accounts", bundle: .module)
-        case .storage: String(localized: "Storage", bundle: .module)
-        case .server: String(localized: "Server", bundle: .module)
-        case .about: String(localized: "About", bundle: .module)
-        }
-    }
+    /// The Mac's Settings window is titled after the selected tab; elsewhere this is the page's title.
+    var title: String { page.title }
 
     func addFolder(_ folder: String) {
         Task {
@@ -627,6 +650,21 @@ struct ServerFolderList: View {
 
         public init() {}
 
+        /// The selected tab; a tab of an earlier version (Server) opens the one that has its settings now.
+        var selection: Binding<String> {
+            Binding(get: { MacSettingsPage(stored: page).rawValue }, set: { page = $0 })
+        }
+
+        @ViewBuilder func content(_ tab: MacSettingsPage) -> some View {
+            switch tab {
+            case .backup: NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
+            // Desktop pictures from the library (SPEC §15.4).
+            case .desktop: DesktopPictureSettingsPane()
+            // In a stack: Server features, Cache diagnostics and Licences are pushed.
+            default: NavigationStack { SettingsView(page: tab.page) }
+            }
+        }
+
         public var body: some View {
             // The Settings window is a window of its own: it needs the lock too, and shows nothing in Guest Mode.
             AppLockGate {
@@ -636,39 +674,11 @@ struct ServerFolderList: View {
 
         @ViewBuilder var settings: some View {
             if let session = app.session {
-                TabView(selection: $page) {
-                    Tab(String(localized: "General", bundle: .module), systemImage: "gearshape", value: MacSettingsPage.general.rawValue) {
-                        SettingsView(page: .general)
-                    }
-                    Tab(
-                        String(localized: "Accounts", bundle: .module), systemImage: "person.crop.circle",
-                        value: MacSettingsPage.accounts.rawValue
-                    ) {
-                        SettingsView(page: .accounts)
-                    }
-                    Tab(
-                        String(localized: "Backup", bundle: .module), systemImage: "icloud.and.arrow.up",
-                        value: MacSettingsPage.backup.rawValue
-                    ) {
-                        NavigationStack { BackupScreen() }.frame(width: MacSettingsLayout.width, height: 440)
-                    }
-                    Tab(
-                        String(localized: "Storage", bundle: .module), systemImage: "internaldrive", value: MacSettingsPage.storage.rawValue
-                    ) {
-                        SettingsView(page: .storage)
-                    }
-                    // Desktop pictures from the library (SPEC §15.4).
-                    Tab(
-                        String(localized: "Desktop", bundle: .module), systemImage: "menubar.dock.rectangle",
-                        value: MacSettingsPage.desktop.rawValue
-                    ) {
-                        DesktopPictureSettingsPane()
-                    }
-                    Tab(String(localized: "Server", bundle: .module), systemImage: "server.rack", value: MacSettingsPage.server.rawValue) {
-                        NavigationStack { SettingsView(page: .server) }
-                    }
-                    Tab(String(localized: "About", bundle: .module), systemImage: "info.circle", value: MacSettingsPage.about.rawValue) {
-                        NavigationStack { SettingsView(page: .about) }
+                TabView(selection: selection) {
+                    ForEach(MacSettingsPage.allCases, id: \.self) { (tab: MacSettingsPage) in
+                        Tab(tab.page.title, systemImage: tab.page.systemImage, value: tab.rawValue) {
+                            content(tab)
+                        }
                     }
                 }
                 .environment(session)

@@ -102,10 +102,12 @@ struct MemoryActionsMenu: View {
             } label: {
                 Label(MemoryFilmExportSheet.menuTitle, systemImage: "film")
             }
-            Button {
-                Task { model.collage = await CollageRequest.memory(memory, session: session) }
-            } label: {
-                Label(CollageRequest.cardTitle, systemImage: "rectangle.3.group")
+            AdvancedFeatureGate(.collages) {
+                Button {
+                    Task { model.collage = await CollageRequest.memory(memory, session: session) }
+                } label: {
+                    Label(CollageRequest.cardTitle, systemImage: "rectangle.3.group")
+                }
             }
             if let showToGuest {
                 Button(action: showToGuest) {

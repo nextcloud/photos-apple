@@ -32,7 +32,7 @@ import Testing
         #expect(filters.clearingAll() == LibraryFilters())
     }
 
-    @Test func theMenuOffersTheKindsTheSidebarRowsWere() {
+    @MainActor @Test func theMenuOffersTheKindsTheSidebarRowsWere() {
         #expect(LibraryFilters.kinds == [.all, .photos, .videos, .favorites])
         // The culling choices of the old ratings menu, unchanged.
         #expect(LibraryFilterMenu.cullingChoices.flatMap { $0 }.count == 11)

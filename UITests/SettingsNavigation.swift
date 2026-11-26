@@ -22,4 +22,15 @@ extension XCUIApplication {
         XCTAssertTrue(
             buttons["settings-done"].firstMatch.waitForExistence(timeout: 10), "Settings did not open", file: file, line: line)
     }
+
+    /// Opens a page of Settings (SPEC §20.4): `accounts`, `library`, `notifications`, `backup`, `storage`, `privacy`,
+    /// `advanced` or `about`.
+    @MainActor func openSettings(page: String, file: StaticString = #filePath, line: UInt = #line) {
+        openSettings(file: file, line: line)
+        let row = buttons["settings-page-\(page)"].firstMatch
+        for _ in 0..<4 where !(row.exists && row.isHittable) { swipeUp(velocity: .slow) }
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "No Settings page \(page)", file: file, line: line)
+        row.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
 }

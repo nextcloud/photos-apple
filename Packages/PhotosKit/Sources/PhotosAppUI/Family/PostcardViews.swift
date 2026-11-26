@@ -410,9 +410,17 @@ private struct FlipSide: @MainActor ViewModifier, @MainActor Animatable {
 
     func body(content: Content) -> some View {
         let facing = isBack ? angle > 90 : angle <= 90
-        content
-            .rotation3DEffect(.degrees(isBack ? angle - 180 : angle), axis: (x: 0, y: 1, z: 0), perspective: 0.45)
-            .opacity(facing ? 1 : 0)
+        turned(content).opacity(facing ? 1 : 0)
+    }
+
+    private func turned(_ content: Content) -> some View {
+        let turn: Angle = .degrees(isBack ? angle - 180 : angle)
+        #if os(visionOS)
+            // Real depth on Vision Pro: no perspective to imitate.
+            return content.rotation3DEffect(turn, axis: .y)
+        #else
+            return content.rotation3DEffect(turn, axis: (x: 0, y: 1, z: 0), perspective: 0.45)
+        #endif
     }
 }
 

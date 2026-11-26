@@ -224,9 +224,9 @@ import Testing
         let bob = makeAccount("bob", server: server.url.absoluteString)
         try seed([alice, bob], active: alice)
         let app = makeApp()
-        weak var oldSession = app.session
-        weak var oldServices = app.session?.services
-        weak var oldOffline = app.session?.offline
+        weak let oldSession = app.session
+        weak let oldServices = app.session?.services
+        weak let oldOffline = app.session?.offline
         #expect(oldSession?.account.id == alice.id)
         #expect(oldServices != nil)
 

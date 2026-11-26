@@ -203,7 +203,7 @@ final class OrganizeTourTests: XCTestCase {
         func testFolderRules() {
             app.launch()
             waitForTimeline()
-            app.openSettings()
+            app.openSettings(page: "advanced")
             let rules = element("Folder Rules")
             scroll(to: rules)
             pause(1)
@@ -284,7 +284,7 @@ final class OrganizeTourTests: XCTestCase {
                 app.navigationBars.buttons.firstMatch.tap()
                 pause(1)
             }
-            app.openSettings()
+            app.openSettings(page: "advanced")
             let rules = element("Folder Rules")
             scroll(to: rules)
             rules.tap()

@@ -749,6 +749,11 @@ Measured on iPhone 15 / M1 iPad Air / M1 MacBook Air, 100 000-item library:
 
 Add XCTest performance tests for the store queries and domain algorithms with a synthetic 100k index.
 
+*Status (round 10, see §20.6 and [PERFORMANCE.md](PERFORMANCE.md)):* store budgets met on the synthetic 100 000-item
+index; viewer and memory met in the simulator; cold launch to the cached timeline measured 0.9 s on an idle Mac (Debug)
+and 3.1 s in the iPhone simulator, of which 1.8–2.2 s is the simulator's dyld before `main` — the 1 s budget is judged on
+a device (DEVICE-TEST-PLAN D8); scroll hitches need a device.
+
 ## 11. Testing
 
 ### 11.1 Automated
@@ -2837,6 +2842,482 @@ utility rows Duplicates and Free up server space with one entry point; their scr
   in shows the sizes of all sections and Back never leads somewhere unexpected; the detail is one click or tap away.
   Device storage stays a row that opens Backup's screen (it needs the photo library and a server check that takes a
   while), not a number computed up front.
+
+## 20. M11 — Stabilization
+
+Goal (the owner's words, after a fresh look at the app): "implement all the issues you found". No new features: fix
+what is visibly wrong, verify what was built (stock server, older servers, accessibility, German), simplify the
+screens that grew too much, raise code health, and prepare a release that Nextcloud's team can take to TestFlight.
+
+### 20.1 Visible bugs: sidebar icons, photos without a preview, story snapping, the Mac memories strip [fixes]
+
+1. **Sidebar symbols.** On the Mac only Library showed its symbol (half drawn); Favorites, Memories, Places and every
+   album row kept the space but showed none. Cause: the launch reveal (§17.6.3) faded the whole split view in with an
+   animated `opacity` and scale in one animated transaction; sidebar rows built in it kept their symbols at the opacity
+   of that moment (it came and went with the launch's timing: about one launch in four). The content is now never
+   animated: a cover in the window's background colour fades away above it, animated on its own (same look and
+   timing; the hint of scale is gone). The iPad's sidebar has the same reveal and gets the same fix.
+2. **Photos without a server preview** (a truncated JPEG, a format no preview provider reads: the server answers 404
+   and the original cannot be thumbnailed on the device either — item 7 makes one on the device whenever it can) no
+   longer stay grey squares. The tile shows a symbol of
+   what the file is and, from 96 pt up, its name and "No preview" (VoiceOver: "…, No preview"); a photo page in the
+   viewer says the same with a line that it is asked for again. `PreviewFailureLog` in the image pipeline remembers
+   such files per version (file id + ETag): they are asked for again only after the library synced since **and** a
+   backoff passed (2 min, 10 min, 1 h, 6 h, then daily), a new version at once; network errors and cancellations do not
+   count. Scrolling past, other sizes, prefetches and the viewer cost no request in between. In memory per account and
+   launch (a launch asks once more), at most 5000 entries.
+3. **Story snapping without a scroll target behaviour** (iPhone, iPad, Vision Pro, where the strip lives in the UIKit
+   grid and `.viewAligned` trapped SwiftUI, STATUS §M8). The strip watches its scroll phase (`onScrollPhaseChange`) and
+   scrolls to the card `MemoryStorySnap` picks with a `ScrollViewReader` (setting the scroll position to the card it
+   already holds would not move it): compact (one large card), when the finger lifts, one card on in the direction it
+   was moved if it was flung or dragged a third of a card, else back; wider (and a compact strip that still came to rest
+   between cards), the strip glides out and settles on the nearest card. The inset is a content margin, so a snapped
+   card rests 12 pt in, like the first one. The Mac keeps `.viewAligned` (its strip is not in a grid).
+4. **The Mac memories strip** is compact (story cards 128 pt high instead of 210, strip cards 150 × 128) under a title
+   line "› Memories" that folds the cards away (a click; the state is remembered on this Mac, key `memoriesCollapsed`);
+   folded, the line shows the first memory's title. Its context menu keeps "Show as Stories" and "Hide Memories". The
+   title line sits in a scroll view that does not scroll: the toolbar's scroll edge effect goes to the first scroll view
+   under it, and with a plain row there it went to the grid's and blurred the grid's first header.
+5. **Undo of a delete** (found in the round's tours on a Nextcloud 35.0.3 server: the two photos stayed in the trash
+   bin). Undo takes deletes still queued out of the queue and puts their rows back, and restores from the trash bin
+   only what reached the server. A delete whose DELETE request went out but failed (a timeout, a 5xx — the server may
+   have moved the file to its trash bin all the same, as a loaded server does) waited for its retry, was taken out of
+   the queue, and only its row came back: the file stayed in the trash bin and left the library with the next sync.
+   The queue now remembers whose DELETE went out (`DeleteWithdrawal.maybeSent`); Undo looks for those in the trash bin
+   too and restores them, without counting a file that is not there as a failure. The trash bin API itself behaves
+   the same on Nextcloud 35.0.3 and 36 (`oc:fileid` kept, `<name>.d<time>` names, `MOVE …/restore/` with
+   `Overwrite: T` → 201).
+6. **The Places card's caption** ("411 photos") sat at the bottom of the map. On the iPhone the card is the last one
+   of Collections' first screen, and its lower 40 pt rest under the floating tab bar: the bar's glass covered the
+   caption's right half ("411 phot…"; the caption was never truncated, it was covered). It now sits at the top of the
+   map, one line, its own width. Every card caption of Collections keeps to its card at the default and the largest
+   accessibility text size and in German (album and Favorites captions move below the cover at accessibility sizes,
+   memory cards stop growing at xxLarge). The shelves' rows are plain `HStack`s (at most 12 cards): a `LazyHStack`
+   took its height from the cards it measured first and cut the other titles at accessibility sizes ("r7-grid-…" in
+   two of its four lines).
+7. **Previews made on the device** (`DevicePreview`, polish). Apple's and Google's apps always show a picture; a
+   Nextcloud with the default preview providers has none for videos (Movie provider off), HEIC/TIFF photos (HEIC and
+   TIFF providers off) and for images above `preview_max_filesize_image` (50 MB). When the server answers 404 — or says
+   `has-preview: false`, then without asking — the app makes the preview itself:
+   - **Images**: the original is downloaded once into the originals cache (at most **50 MB**; a larger file is not
+     downloaded and the viewer says "… at 72 MB the file is too large to make one here") and decoded downscaled with
+     ImageIO. Types ImageIO does not read are not downloaded.
+   - **Videos**: one frame (1 s in, or a third of a short clip; the next key frame within 2 s) through `AVURLAsset` fed
+     by `StreamingAssetLoader`/`MediaByteSource`, i.e. byte-range GETs of the DAV original through the account's own
+     HTTP client (its authentication, trusted and client certificates), 256 KB per range, at most **16 MB** per frame
+     (counted before each request; at the limit, loading and generation stop at once), 30 s at most. Formats
+     AVFoundation cannot play (WebM, Matroska, AVI) are not read.
+   - **Stored once for every size**: made at least 1024 px large and stored in the preview cache under the preview's
+     own key (file id, ETag, bucket) for every bucket up to that size, each downscaled from it; grid, viewer, covers,
+     memories find it there and cost no request. Requests made without the original's URL (covers, memories) find it
+     in the library index (`ImagePipeline.setSourceProvider`).
+   - **Not hammering the server**: the backoff of item 2 applies to a file the device could not draw either; the
+     reason is kept (`NoPreviewReason`: unreadable, too large, Low Data Mode) and the viewer says it. In **Low Data
+     Mode** nothing is downloaded for a preview (an original already on the device is used); such a file is tried as
+     soon as Low Data Mode is off, without waiting for a sync. The background cache fill only fills files with a server
+     preview, so nothing is rendered behind the user's back. No server change.
+   - **The two files of the 8089 test library** that have no preview (`Garden party 89421 – guest uploads/evil.jpg` and
+     `party.jpg`, written 2026-11-22 into a folder that by its name belongs to a guest-upload test, not into `Test
+     library`) are **24-byte files**: the JPEG start marker,
+     the JFIF header and the first four bytes of a quantisation table, no image data. `has-preview` is true (the JPEG
+     provider claims the MIME type), the provider's decode fails and the preview endpoint answers 404. Not the format,
+     the size or a missing provider: there is nothing to draw, on the server or on a device (Apple's Photos would
+     show them as unreadable too). They keep "No preview", and the viewer now says "Neither the server nor this app
+     can read the file: it may be damaged…".
+8. **The Favorites card** of Collections shows the newest favourite as its cover, as Apple's Photos does, with a small
+   heart before "Favorites" on its caption (at accessibility sizes, where the title is below the cover, the heart is a
+   small glass badge on the cover, so that the word keeps the card's width); the gradient with the large heart stays
+   for a library without favourites.
+   The cover follows the index (`LibraryStore.observeNewest(.favorites)`: one row from the favourites' partial index,
+   hidden folders excluded like the Favorites grid). The iPad and Mac sidebars list Favorites as a row with its heart
+   symbol, as Apple's sidebar does (no cover there); the Apple TV shows a row of the favourites themselves; there is
+   no other Favorites cover.
+
+### 20.2 Servers: stock Photos, Nextcloud 33 and 34 [servers]
+
+The app was run against four servers (2026-11-26), each with the 448-photo test library in `Photos/Test library` and the
+sample files of a new account:
+
+| Name | Nextcloud | Photos app | How it was set up |
+|---|---|---|---|
+| **stock** (8093) | 36.0.0 dev | 9.0.0-dev.0, upstream master | local install (`photos-srv6`) |
+| **extended** (8091) | 36.0.0 dev | 9.0.0-dev.3, `deploy/devel-all` (all feature branches) | local install (`photos-srv3`) |
+| **NC 33** (8095) | 33.0.11 | 6.0.0, bundled | `scripts/test-server.sh` with the release archive (docs/TESTING.md) |
+| **NC 34** (8096) | 34.0.6 | 7.0.0, bundled | the same |
+
+None of them has Recognize, an Assistant provider or a `photos` capability (companion API S1).
+
+**How.** (1) A raw protocol probe per server (curl: capabilities, the Photos page's initial state, every DAV collection
+and property the app reads, SEARCH by capture time, PROPPATCH of favourite, metadata and Live Photo link, preview sizes,
+chunked upload v2, trash and restore). (2) The integration tests (`PHOTOS_IT_SERVER`, 23 tests: detection, sync, changes
+made elsewhere, albums, public links, uploads including an interrupted chunked one and a background session, trash,
+tags, folders, partner folders, app data files, camera details, link shares). (3) The iPhone simulator with the UI
+tours of rounds 1–9 (`PhoneTourTests`, `SmokeTests`, `ToolbarsTourTests`, `CleanUpTourTests`, `PlacesTourTests`,
+`FeelTourTests`, `OrganizeTourTests`, `EditTourTests`, `CacheEvictTourTests`, `LibraryTourTests`) with the server's
+request log open beside it (for the stock server a second PHP listener on the same installation logged every request).
+(4) The Mac test build against stock (signed in, detected, indexed; its screens could not be looked at, STATUS §20.2).
+What was seen and what failed is in STATUS §20.2.
+
+**Server matrix.** ✅ works · — not offered by the server, the app hides it or explains it · (n) note below.
+
+| Feature (screens) | stock | extended | NC 33 | NC 34 |
+|---|---|---|---|---|
+| Login Flow v2, app password, login links | ✅ | ✅ | ✅ | ✅ |
+| Detection (Settings › Server features) | core | core + 11 extended (1) | core | core |
+| Library sync: SEARCH by capture time (keyset paging), changes, reconciliation | ✅ | ✅ | ✅ | ✅ |
+| Previews 256/1024/full (`/apps/photos/api/v1/preview`), BlurHash placeholders | ✅ | ✅ | ✅ | ✅ |
+| First-sync total and skeleton (`timeline/days`) | — (no total) | ✅ | — | — |
+| Favourites, move, delete with `If-Match`, Recently Deleted + restore | ✅ | ✅ | ✅ | ✅ |
+| Albums: create, rename, add/remove, public link, shared albums, collaborators | ✅ | ✅ | ✅ | ✅ |
+| Album cover, description, comments, "last changed" from the server | — (2) | ✅ | — (2) | — (2) |
+| Places (server places), Map, Travel and Countries | ✅ | ✅ | ✅ (3) | ✅ (3) |
+| Places by country (`place-country`) | — (4) | ✅ | — (4) | — (4) |
+| Tags: list, filter, assign, Tags screen | ✅ | ✅ | ✅ | ✅ |
+| People (Recognize) | — (5) | — (5) | — (5) | — (5) |
+| Smart albums, folder rules, edits, album covers (`/.nextcloud-photos/*.json`, app data files) | ✅ | ✅ | ✅ | ✅ |
+| Batch fixes of date and place | ✅ metadata PROPPATCH | ✅ metadata PROPPATCH | ✅ written into the files (6) | written into the files (6), not applied in the UI run |
+| Imports (Takeout, iCloud, Facebook…): place of a file without one | ✅ PROPPATCH | ✅ PROPPATCH | — (7) | — (7) |
+| Upload: PUT with `X-NC-WebDAV-Auto-Mkcol`, chunked v2, background session, backup | ✅ | ✅ | ✅ | ✅ |
+| Live Photo pairing (`metadata-files-live-photo` PROPPATCH) | ✅ | ✅ | ✅ | ✅ |
+| Folders (PROPFIND, previews by SEARCH) | ✅ (8) | ✅ (8) | ✅ (8) | ✅ (8) |
+| Shared with you (`/apps/photos/api/v1/shared`), partner folders | ✅ | ✅ | ✅ (old JSON shape) | ✅ (old JSON shape) |
+| Link shares, sharee search, file comments | ✅ | ✅ | ✅ | ✅ |
+| Notifications (On this day, shared albums) | — no app (Settings says so) | — no app | detected (push not tested) | detected (push not tested) |
+| Captions, caption search, unified search of albums/places, On this day notifications setting | — | ✅ | — | — |
+| Clean up (duplicates, similar shots, large videos, screenshots), memories, stories, film, search, cache fill | ✅ (on the device) | ✅ | ✅ | ✅ |
+| Assistant (OCR, text, image analysis) | — no provider | — | — | — |
+
+1. `albumComments`, `albumCover`, `albumDescription`, `albumLastModified`, `captions`, `captionsSearchable`,
+   `configAPI` (from the initial state), `onThisDayNotifications`, `placeCountry`, `timelineDays`, `unifiedSearchPhotos`.
+2. Covers chosen in the app are kept in `/.nextcloud-photos/album-covers.json` (§16.8) on every server; descriptions and
+   album comments are hidden without the server's properties.
+3. Photos 6 and 7 name some places by their district ("el Raval", "Eixample") where Photos 9 says "Barcelona": the place
+   names come from the server's reverse geocoding, the app shows what it gets (moment titles too).
+4. `place-country` comes only from the extended Photos (`PlaceMetadataProvider`); elsewhere the countries of Travel and the
+   scratch map come from the opt-in Apple Maps lookup of the positions (§15.6), and Places is one flat list.
+5. No test server has Recognize. People is not in the sidebar or Collections; a link to it (widget, Shortcut, another
+   app) now explains that the server needs Recognize instead of doing nothing (`UnavailableLinkAlert`).
+6. Nextcloud 33 and 34 answer a PROPPATCH of `nc:metadata-photos-original_date_time` / `-gps` with **500**
+   (`FilesMetadataException: you do not have enough rights to update 'photos-original_date_time'`): metadata editing
+   (`MetadataPropPatchPlugin`) arrived in Nextcloud 35. The app does not try it there (`metadataEdit` only from major
+   version 35) and writes date and position into the file instead (`MetadataRewriter`, new version with `If-Match`).
+7. The import keeps the file unchanged and notes in its sheet that places can only be added on Nextcloud 35 or later.
+8. Not a server difference: on iPhone a grid pushed in the Collections tab (Favorites, a folder with photos) re-rendered
+   without end and hung the app. It showed up on 33/34 because their root folder holds sample photos; the folder listing
+   itself works on every server. Fixed: constant search bindings of the pushed screen (STATUS §20.1).
+
+**Other differences found, none of which needs a change in the app:** the Photos page of Photos 6/7 has no
+`gridDensity` initial state (the app's default applies); `nc:metadata-photos-place-country` is a 404 propstat (index
+without it); the `shared` API answers in the old JSON shape (`fileid` as a number, `etag` at the top level), which the
+parser already reads; the SEARCH properties, preview sizes (the largest preview is the original's size, here 1920 px),
+chunked upload v2, auto-MKCOL, trash restore and Login Flow v2 behave the same on 33, 34 and 36.
+
+### 20.3 Accessibility and German [a11y]
+
+**Audits.** `UITests/AccessibilityAuditTests` runs Xcode's accessibility audit (`performAccessibilityAudit`: contrast,
+element detection, hit areas, descriptions, traits, Dynamic Type, clipped text) on every main screen on iPhone and iPad:
+Library, viewer and its info, Collections (iPad: the sidebar), Albums, Settings, Search, Clean up, Memories, and Library,
+Settings, Collections and Search again at the largest accessibility text size (AX5). A finding fails the test unless
+`AccessibilityAuditPolicy` accepts it with a stated reason; the accepted kinds are:
+- a photo's own colours (tiles, the viewer);
+- the system's chrome: content under the tab bar's glass, bar buttons that keep their size (the system shows them
+  enlarged with the Large Content Viewer) and whose text the audit measures against the bar's glass (the accent itself
+  is checked by `AccentPaletteTests`), the search field's prompt cut short at large sizes;
+- "contrast nearly passed" (3:1 or more): the system's secondary label colours in headers, footers and subtitles, as
+  Apple's apps use them; Increase Contrast makes them darker;
+- findings for which the audit names no element (nothing to act on; they stay in the written report);
+- at the default size, "partially unsupported" Dynamic Type and "may be clipped": the audit only guesses there; every
+  screen is audited again at the largest size, where these fail;
+- Search's start screen on the animated living wash, which the audit cannot sample (it reports even the black title;
+  measured in the screenshot: 18.8:1 and 5.3:1), and the viewer's date pill, capped at accessibility2 on purpose;
+- the iPad Library dimmed behind the sidebar that overlays it in portrait; text "clipped" only because its row is at
+  the edge of a scroll area; text on glass and materials, which the audit measures against what is behind them (the
+  cover under a caption plate, the photo under the iPad's info inspector): there the test measures the element's own
+  pixels in the screenshot and accepts 7:1 or more, but only on an even background, never on a photo;
+- the sidebar's account line (server name, secondary colour on the sidebar's glass, 3.5:1) — an open item for the
+  sidebar's rendering, see STATUS §20.3;
+- memory captions on photos (story and memory cards, marked `memory-caption` for the tests) — an open item, see
+  STATUS §20.3.
+The audit is run in three parts (contrast; elements, hit areas, descriptions, traits; Dynamic Type and clipping) and
+retried after a pause when it runs out of time, which it does on a loaded Mac; the handler only records.
+
+**Accent colour.** Nextcloud blue #0082c9 has 4.2:1 on white, below WCAG AA (4.5:1) for the text, symbols and tinted
+buttons drawn in it. In light mode the app uses the Nextcloud server's own default primary colour (theming, `default.css`),
+#00679e (6.1:1 on white, 4.9:1 on a tinted button), and #00507a with Increase Contrast; in dark mode #0082c9 stays
+(5.0:1 on black). `AccentPalette` (PhotosAppUI) and the app's `AccentColor` asset have these variants.
+
+**Other fixes from the audits.** Text on Liquid Glass in the secondary colour came out at about 3:1 over light photos
+(the glass draws every hierarchical style vibrant): the count line of album and smart album caption plates and the time
+in the viewer's date pill use the text colour, set apart by size. The viewer's action bar: plain buttons took taps only
+on their icons (17×23 points), each label is now a 44-point square that takes them. The account avatar: white initials
+on the accent, hidden from VoiceOver (the button says whose account it is). Settings › Accounts: the current account's
+check mark is the account element's value and selected trait, not a 14-point element of its own. The iPad's info inspector, clear glass over the photo, has a thick material behind the info
+(its section headers and row titles were below 3:1 on light photos), and the info's section headers use the
+prominent style (the system's grey ones measured 3.4:1 there). The year in review cards' year grows with the text size.
+The close crosses of the weekly prompt invitation
+and the family suggestion: 44-point targets.
+
+**German and locales.** There are no translations yet (Transifex, LOCALIZATION.md), so with German as the preferred
+language the app runs in English with the German region. Checked: every user-visible string in the packages goes
+through `bundle: .module` (a scan of all SwiftUI and Foundation calls with literals found none without it); dates,
+numbers, sizes and durations use Foundation's formatters (the hand-made formats are file names, EXIF and server values,
+in `en_US_POSIX` on purpose); date ranges use `DateRangeLabel`; counts that can be one now have plural variations in the
+catalogs ("Archived 1 item", "Share 1 photo", "1 of 1 item could not be uploaded", "1 day in Lisbon"). Strings behind
+`#if os(iOS)` / `os(visionOS)` had never been extracted into the PhotosAppUI catalog (it is synced from Mac builds):
+"Take Photo", "Scan Documents", the sticker hint and two Smart offline footers are added; a scan of every `bundle:
+.module` literal against its catalog finds no other gap. Texts that only join a name and a number or two sizes are
+verbatim instead of `LocalizedStringKey`s looked up in the app's bundle ("%@ %@", "%@ / %@"). Longer translations are
+simulated with `NSDoubleLocalizedStrings` (the tests' `PHOTOS_UITEST_LANGUAGE=double`): the Library's zoom picker ran
+off both screen edges and now shrinks its titles to the screen's width; other screens wrap. (Doubling breaks strings
+with plural substitutions, which show their raw format then; that is the tool, not the app.)
+
+"25. Nov 2026 at 15:07" is correct system behaviour, not a bug: it is CLDR's format for English with a German region
+(`en_DE`: German day-month order and 24-hour time, English words), exactly what Foundation's
+`formatted(date: .abbreviated, time: .shortened)` gives and what Apple's own apps show with that setting. A German
+user sees it today only because the app has no German yet; with a `de` localization the same call gives "25. Nov. 2026,
+15:07". The app builds no date format by hand that could mix the two. Seen in the Mac build started with
+`-AppleLanguages (de) -AppleLocale de_DE`: the viewer window is titled "25. Nov 2026 at 15:07" (the viewer's
+`navigationTitle`, `formatted(date: .abbreviated, time: .shortened)`); in the iPhone simulator the same settings give
+"25. November 2026 at 15:07", "1.200 × 800 (1,0 MP)", "1,5 MB" — English words, German numbers and dates.
+
+### 20.4 Screens: a visual Collections, Settings in pages, Advanced features [screens]
+
+Three screens had grown into lists after nine rounds. Nothing is removed; what is rarely used steps back.
+
+#### 20.4.1 Collections (iPhone, narrow iPad windows)
+
+The Collections tab was a text list that looked like Settings. It is now an overview of **shelves**, like a photo app
+(`CollectionsList`, `CollectionsShelfView`, `CompactNavigation.shelves`):
+
+1. **Albums** — Favorites as the first card, then the albums used last in this app and the most recently changed
+   (`RecentAlbums.pick`, at most 12), as the usual album cards (cover, glass caption plate, zoom transition into the
+   album). The title "Albums ›" opens all albums (smart albums are there, §19.1). Without the server's albums the shelf is
+   Favorites alone.
+2. **Memories** — the Library strip's cards (On this day, year recap, trips; `MemoriesStrip.load`), a card opens the
+   memory, "Memories ›" all of them.
+3. **People** — circular faces, named people first, then by number of photos (`CollectionsOverview.shelfPeople`), only
+   where the server has Recognize. A face opens the person.
+4. **Places** — a small map of where the photos were taken: one `MKMapSnapshotter` image of the photos' area (padded,
+   at least a few degrees wide) with a dot per area (about 8×8 cells of `mapCells`, sized by the number of photos),
+   light or dark like the app, with "N photos" on a caption plate. It opens Places.
+5. **Shared** — shared albums as cards (on servers without shared albums the title is "Shared with you").
+6. **Utilities** — the sidebar's Utilities and Backup (with its state, breathing icon while it runs) as compact rows.
+
+*Fast:* the shelves' data is kept in a model that lives with the tab (`CollectionsOverviewModel`) and is loaded again
+only after a sync, on a new day or for another account (`CollectionsOverview.LoadKey`); albums come from the local index
+as they change; the map image is cached per size and appearance; shelves show placeholders of the covers' size while
+loading, so nothing jumps. *Accessible:* every shelf title is a header and a button ("Albums"), every shelf a container
+named after it; cards keep their VoiceOver labels; Reduce Motion stops the parallax (as everywhere), Reduce Transparency
+and Increase Contrast give the caption plates their solid form.
+
+*Navigation:* an album, a person or a memory opened from a shelf is pushed on the overview itself, so Back returns to
+Collections (`CompactNavigation.path(to: .collections, routes:)`; `place(of:)` reads a path that starts with an album as
+the overview's). Deep links still open an album under Albums (Back → Albums), as before.
+
+*Favorites* opens in the Collections stack, as every place of the overview does (§19.1 keeps it a pinned place and a
+filter of the Library's menu). Favorites opened from Collections once hung the iPhone app at full CPU; for a while it
+opened the Library with its filter instead. The cause was not a second timeline but the pushed screen's constant
+search bindings, which made every grid pushed by value re-render in a loop (STATUS §20.1); with that fixed the
+workaround was taken out again.
+
+#### 20.4.2 Settings in pages
+
+Settings was one long form. It is now a list of pages (`SettingsPage`, `SettingsHome`) on iPhone, iPad and Vision Pro,
+with a search field (`searchable`) over every setting (`SettingsIndex`: the setting's title as the page shows it, its
+page, and other words people type — "face id", "takeout", "log out"); a result opens its page. The Mac's Settings window
+keeps one tab per page, as Mac apps do (no search; the command palette finds the tabs).
+
+| Page (iPhone, iPad, Vision Pro) | Mac tab | What is on it |
+|---|---|---|
+| Accounts (the account shown, as the first row) | Accounts | accounts, log out, add; server version, Photos features, Server features, Sync now, sync state, certificate and signed-out state |
+| Library | General | timeline folders, upload folder, import from other services, On this device (memories, moments, square tiles, stacks), Appearance, partner sharing, family library, Lock Screen album |
+| Notifications | General | notifications, On this day, new photos in shared albums, Photo of the Day, weekly prompts |
+| Backup | Backup | the backup screen |
+| Storage & cache | Storage | preview cache, Cache performance, thumbnails of the whole library, smart offline, available offline |
+| Privacy & security | Privacy | app lock, and the analysis made on this device (recognition, similar photos, descriptions) |
+| — | Desktop | desktop pictures |
+| Advanced | Advanced | Advanced features switch, Organize (folder rules, smart albums, GPS track), Show in Menu Bar (Mac), Diagnostics |
+| About | About | version, source code, privacy, licences |
+
+The Mac's old Server tab is part of Accounts; a stored or palette value `server` opens Accounts
+(`MacSettingsPage(stored:)`). `nextcloudphotos://settings`, the account button and the command palette open Settings as
+before (the first screen; pages have no links of their own).
+
+#### 20.4.3 Feature audit and the Advanced features switch
+
+Every feature of §15–§19 with its entry points and how central it is (★★★ everyday, ★★ regular, ★ niche). **A** = its
+entry points need Settings › Advanced › "Show advanced features" (`AdvancedFeature`). The owner adjusts the list by
+moving a case in or out of `AdvancedFeature.hiddenByDefault`.
+
+| Feature (SPEC) | Entry points | Central | Advanced |
+|---|---|---|---|
+| Memories, films, Year in Review (§15.1, §16.6) | Library strip, Memories row/shelf, memory menu | ★★★ | |
+| Memory card from a memory (§15.8.3) | memory ⋯ › Make Card | ★ | **A** |
+| Film styles, through the years, SharePlay (§16.6) | memory film player, memory menu | ★★ | |
+| Import from camera/card, Takeout (§15.2, §15.7) | File menu, Settings › Library | ★★ | |
+| Culling: flag, rate, Compare, Loupe (§15.2, §16.5) | viewer ⋯ › Flag/Rating, selection menu, Library filter › Ratings | ★ | **A** (keys P/X/0–5 and menu bar stay) |
+| External editors, Edit With (§15.2) | selection menu (Mac) | ★★ | |
+| Apple TV, Watch (§15.3) | own apps | ★★ | |
+| Wallpaper, StandBy, Live Activity, Controls, memory room (§15.4) | system surfaces, Desktop tab | ★★ | |
+| Zoom levels, haptics, similar photos (§15.5) | Library pinch, viewer ⋯ › Show Similar | ★★★ | |
+| Then and now (§15.6) | viewer ⋯ (only for photos with a matching spot) | ★ | (contextual, kept) |
+| Travel globe (§15.6) | Travel card in Places, map toolbar | ★★ | |
+| Smart offline (§15.8.1) | Settings › Storage & cache | ★★ | |
+| Stickers (§15.8.2) | Stickers row, viewer ⋯ › Make Sticker | ★ | **A** |
+| Collage (§15.8.3) | album ⋯, selection menu | ★ | **A** |
+| Photo of the day (§15.8.4) | Settings › Notifications, widget | ★★ | |
+| Moments, scrub to peek, range select, story cards (§16.1) | Library | ★★★ | |
+| Command palette, natural search, descriptions (§16.2) | ⌘K, Search | ★★★ | |
+| Non-destructive edits, RAW, Live Photo effects, undo history (§16.3) | viewer Edit, Edit menu | ★★★ | |
+| Smart album builder (§16.4.1) | Albums "+" | ★★ | |
+| Batch time/place/rename, GPX (§16.4.2–3) | selection menu | ★★ | |
+| Folder rules (§16.4.4) | Settings › Advanced › Organize | ★ | (in Advanced page) |
+| Shortcuts (§16.4.5) | system | ★★ | |
+| Insights (§16.5.1) | Insights row | ★ | **A** |
+| Continuity Camera, menu bar extra (§16.5) | File menu, Settings › Advanced (Mac) | ★ | (opt-in already) |
+| Postcards (§16.7.1) | viewer ⋯ › Send as Postcard | ★ | **A** |
+| Family library, weekly prompts, Lock Screen album (§16.7) | Settings › Library / Notifications | ★★ | (opt-in already) |
+| Colour from photos, living covers, guest mode (§16.8) | Settings › Appearance, album ⋯ | ★★ | |
+| Motion, glass, transitions (§17) | everywhere | ★★★ | |
+| Caching (§18) | Settings › Storage & cache | ★★★ | |
+| Slim sidebar, filter menu, Clean up (§19) | sidebar, Library, Clean up row | ★★★ | |
+
+*Decided: off by default.* The app is for everyone with a Nextcloud, not only photographers: the slim default of §19
+continues into the menus (the viewer's ⋯ menu lost four items, the selection menu up to five). The features are one switch
+away, the switch says what it adds, and nothing is lost while it is off: the screens stay `AppDestination`s, so deep
+links (`nextcloudphotos://stickers`), Shortcuts, widgets, the command palette, the Go menu and the Mac's keyboard
+shortcuts open them; a niche place opened that way gets its iPad sidebar tab while it is shown. Only rows
+(`AdvancedFeatures.lists`, used by the Mac and iPad sidebars, Edit Sidebar and the Collections list) and menu items
+(`AdvancedFeatureGate`) step back. A Ratings filter that is on keeps its menu, so it can be turned off. The switch is on
+this device (`advancedFeatures` in `UserDefaults`; `-advancedFeatures YES` for UI tests and screenshots).
+
+### 20.5 Code health: zero warnings, UI smoke tests in CI [health]
+
+**Zero warnings.** The app, its extensions, PhotosKit and its tests build without a warning on macOS, iOS, visionOS, tvOS
+and watchOS (there were 38 on the Mac and 50 for iOS before round 10). How the kinds were fixed, so that new code follows:
+
+- Main-actor API read from nonisolated code (`UIDevice.current.userInterfaceIdiom`, a `Commands` title): the wording that
+  asks is `@MainActor` (its callers are views), or the value that needs no actor is `nonisolated`. No `nonisolated(unsafe)`.
+- `[weak self]` inside a closure whose outer closure captured `self` strongly anyway: the outer capture is spelled out
+  (`Task { [self] in`), which keeps the behaviour and says it; where the outer closure should not hold `self` either
+  (observation callbacks) it captures weakly too.
+- Deprecations of the 27 SDKs are replaced by their successors: `BGTaskScheduler.submitTaskRequest(_:completionHandler:)`
+  (errors logged), `PHAssetResource.filename` (nullable: a name from the asset id and the type's extension), the
+  Swift-concurrency reader and writer API of AVFoundation (`outputProvider(for:)`, `inputPixelBufferReceiver(for:…)`,
+  `start()`, `AVVideoComposition(applyingFiltersTo:)`) and `LanguageModelError`. A deprecation without a replacement
+  (`canOpenURL` to see whether the Files app is installed) is silenced for that declaration only, with
+  `@diagnose(DeprecatedDeclaration, as: ignored)` and a comment.
+- Unused results are discarded with `_ =`; static metatype lists use `SendableMetatype`; one warning showed a real bug:
+  `AlbumRecord`'s date strategy was not GRDB 7's per-column requirement any more, so album dates were written as text
+  into `REAL` columns. They are seconds since 1970 now; reading still takes the text of older databases.
+
+**CI fails on warnings, ours only.** `PHOTOS_WARNINGS_AS_ERRORS=YES` (environment and build setting, see
+docs/TESTING.md) turns PhotosKit's and the app targets' warnings into errors; GRDB is built with its own settings
+(Xcode suppresses a dependency's warnings). Warnings inside macro expansions (`#expect`) and of other tools stay warnings
+for the compiler, so `.github/scripts/check-warnings.sh` also fails a build or test job whose log has one from our code.
+Local builds only warn, so a new SDK's deprecations do not stop anyone's work: CI tells.
+
+**UI smoke tests in CI.** The job `ui-smoke` installs the latest Nextcloud release with `scripts/test-server.sh` (the
+sample photos of a new account), boots an iPhone simulator and runs `UITests/SmokeTests`: launch and Library, the viewer
+opened and closed, Albums, Collections, the Settings sheet, the filter menu with its chip, Clean up and a section's
+review. Screenshots and the result bundle are the artifact `ui-smoke`; 60 minutes at most; a skipped test fails the job.
+The tours must not depend on the day: `GridMotionTourTests.testActionFeedback` uploads its own two photos (dated now, so
+under "Today" on any day) into a folder of its own and removes them, also from the trash bin, at the end
+(`UITests/TestServer.swift`); the smoke tests need nothing but the sample photos.
+
+### 20.6 Release readiness: performance measured, device test plan, App Store material [release]
+
+**Performance against §10 (item 14).** Measured as far as possible without a device; method and all baselines in
+[PERFORMANCE.md](PERFORMANCE.md), re-run with `scripts/measure-performance.sh ios <simulator>` / `mac <app>`.
+
+- *Launch → first pictures, every platform:* `LaunchMetrics` (PhotosMedia) logs, once per process, the time from the
+  process start (read from the kernel, so it includes pre-`main`) to the first grid tile with a real picture and to the
+  24th ("first screen"), category `performance`. Cheap enough for release builds; on a device Console.app shows it.
+- *iPhone/iPad simulator:* `UITests/PerformanceTests` — `XCTApplicationLaunchMetric` (to the first responsive frame), an
+  XCUITest launch-to-first-tile clock (upper bound), `XCTOSSignpostMetric.scrollDecelerationMetric` and
+  `scrollDraggingMetric` (hitch time ratio, frame rate) for fast flicks through the Library and for viewer paging,
+  `XCTMemoryMetric` for both, and the app's own "Tile"/"Viewer" signpost intervals. The viewer's time to the 1024 preview
+  comes from the cache metrics (§18.1.3).
+- *Mac:* XCUITest would take over the owner's pointer, so the script launches a Debug build in the background and
+  `PHOTOS_DEBUG_GRID_SCROLL=<pt/s>,<s>` makes the grid scroll itself with the window's display link; `FramePacing`
+  counts late frames (a frame more than 1.5 refresh intervals after the last; hitch time = lateness beyond one interval).
+  It sees the app's late commits, not frames the render server drops on its own. Memory: `footprint`.
+- Simulator numbers are indicative (Mac CPU/GPU, no 120 Hz, no phone memory limit); the store tests run unoptimised
+  (Debug). The device run is DEVICE-TEST-PLAN D8.
+
+Results of round 10 (details and the overload caveat in PERFORMANCE.md — the Mac ran at a load average of 150–840 on 18
+cores, so the launch numbers say little):
+
+| §10 budget | iPhone simulator | Mac (Debug) | Verdict |
+|---|---|---|---|
+| Cold launch → cached timeline < 1 s | first picture median 37 s under full load, 9.5 s at load 20–110 (first responsive frame 11 s); at load 6–8: 3.4 s → **3.1 s** with the launch fixes below (1.9–2.2 s of it before `main`) | first picture median 2.2 s under load; 0.97 s → 0.93 s idle | ⚠️ simulator dominated by its dyld; device D8 |
+| Scroll hitches < 1 ms/s | not reported by the simulator | window covered → display link throttled | ⬜ device |
+| Viewer 1024 preview (cached) < 150 ms | p95 125 ms (loaded), 50 ms (second run) | 51 ms | ✅ |
+| Memory < 300 MB (iPhone) | scrolling 95–99 MB, viewer 107–109 MB peak; launch peak 73–99 MB (once 383 MB under full load) | 196–222 MB, 316 MB after scrolling everything | ✅ |
+| Search/filter < 100 ms, map < 200 ms (100 000 items) | store tests: 0.2–60 ms, map 4–70 ms | | ✅ |
+
+
+**Launch (phase 2).** Profiled with Time Profiler and `sample` (PERFORMANCE.md, "Launch, round 10 phase 2"):
+`LaunchMetrics` logs the steps "app code", "app model", "main view" and "library data" besides the first picture. The
+Library's first items and its memories strip are read off the main thread as soon as the root view is built
+(`LibraryLaunchPrefetch`) and taken by the Library when it appears, so the window's first commit already has the grid
+and the strip instead of two more full updates after it; the diagnostics log is first copied 60 s after launch, not
+during it (its `OSLogStore` read held a pool thread for a second). What is left: in the simulator 1.8–2.2 s before
+`main` (dyld loading ~1 600 images, Debug and Release alike; 0.12 s on the Mac) and the window's first SwiftUI update.
+
+**Device test plan (item 15).** [DEVICE-TEST-PLAN.md](DEVICE-TEST-PLAN.md): twelve checks only hardware can show — backup
+with and without the Files app's auto upload (duplicates, counts recorded), backup in the background (locked, ended by the
+system, force-quit), background tasks, push (incl. production APNs from TestFlight), share extension (60 items, a 500 MB
+video, app lock), widgets/Live Activity/Controls, feel and the §10 budgets with Instruments, Watch, Apple TV, Vision Pro,
+Mac (Gatekeeper, sandbox). Each with steps, the expected result and a results table to paste into a GitHub issue. The
+long per-screen pass stays in `test-plan.md`.
+
+**App Store and TestFlight (item 16).**
+
+- *Privacy manifests:* audited against the code of rounds 4–9; four uses were undeclared and are now declared — free
+  space shown in Clean Up (`DiskSpace 85F4.1`: app, share extension, PhotosAppUI), cache budgets from free space
+  (`E174.1`: PhotosMedia), smart offline's file times (`FileTimestamp C617.1`: PhotosCore), dates of files on a memory card
+  (`3B52.1`: PhotosAppUI). `scripts/check-privacy-manifests.py` finds the uses of every required-reason category per
+  module and fails when a module's manifest, or that of an app or extension linking it, lacks the category; reasons stay
+  documented in `docs/PRIVACY-AND-EXPORT.md`. No new collected data; the push-token *Device ID* entry stays a decision
+  for Nextcloud (it must match the App Store privacy label).
+- *Screenshots:* `UITests/AppStoreScreenshots` (iPhone, iPad, visionOS) makes seven screens from the real app against a
+  test server — Library, viewer, memories, albums, map, search, backup — reached by deep links so they survive
+  navigation changes, after a warm-up test that fills the caches; `scripts/app-store-screenshots.sh` sets a clean
+  status bar (9:41, full battery), keeps or (`PHOTOS_SHOTS_FRESH=1`) reinstalls the app and collects the PNGs per device. Sizes: iPhone 6.9" (iPhone 17 Pro Max, 1320 × 2868), iPad 13" (2064 × 2752), Vision
+  Pro; the Mac's are window captures. They are not committed (size, and the sample photos' licences): generate them for
+  each release from a library Nextcloud owns.
+- *Metadata:* [APP-STORE-METADATA.md](APP-STORE-METADATA.md) — name, subtitle, promotional text, keywords, description
+  (within Apple's limits, counted), TestFlight "What to Test", a What's New template, URLs, category, age rating.
+- *Release checklist:* [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md) — what Nextcloud's team does: App IDs, App Groups
+  (including the Files app's), capabilities and the entitlements Apple grants on request (PhotoKit background uploads,
+  notification filtering), background task identifiers, CI signing with an App Store Connect key, the App Store record and
+  privacy label, push proxy topic, Transifex, artwork, screenshots, TestFlight review account and App Review notes.
+
+### 20.7 Smaller files [split]
+
+The six largest source files (1150–1800 lines) are split into files of one responsibility each, so that parallel work
+collides less. Pure moves: the code is unchanged, a type's members moved into `extension`s in new files of the same module,
+whole types into files of their own. Old → new, with lines (paths under `Packages/PhotosKit/Sources`):
+
+| Was | Now |
+|---|---|
+| `PhotosAppUI/Grid/PhotoGrid+UIKit.swift` (1808) | `PhotoGrid+UIKit` 393 (the representable, `PhotoGridController`'s state, set-up, layout, pull to refresh, geometry, keyboard, ⌘C) · `PhotoGridUpdates+UIKit` 243 (moments, updates, selection, tile frames) · `PhotoGridHeader+UIKit` 85 (the hosted header above the first section) · `PhotoGridScrolling+UIKit` 235 (scroll position, date scrubber, date pill, year ticks) · `PhotoGridPinch+UIKit` 139 (pinch, `GridPinch`) · `PhotoGridDataSource+UIKit` 95 (data source, drag out, prefetching) · `PhotoGridDelegate+UIKit` 209 (selection, context menu, `GridMenuPreviewController`) · `GridTile+UIKit` 380 (`PhotoCell`) · `GridSectionHeader+UIKit` 142 (`GridHeaderSlot`, `SectionHeader`) |
+| `PhotosAppUI/Grid/PhotoGrid+AppKit.swift` (1504) | `PhotoGrid+AppKit` 240 (`PhotoGrid`, `PhotoGridHost`, `PhotoGridScrollView`'s state, set-up, geometry, layout) · `PhotoGridUpdates+AppKit` 177 (updates, selection, moments) · `PhotoGridScrolling+AppKit` 173 (scroll position, date scrubber) · `PhotoGridEvents+AppKit` 227 (clicks, pinch, keys, menus, copy) · `PhotoGridDataSource+AppKit` 138 (data source, drag out, delegate, prefetching, `FilePromiseDelegate`) · `GridCollectionView+AppKit` 159 (`GridCollectionView`, debug keys and pinch, `MenuActionItem`) · `GridTile+AppKit` 364 (`PhotoTileView`, `TileShadeView`, `PhotoItem`) · `GridSectionHeader+AppKit` 128 (`SectionHeaderView`) |
+| `PhotosBackup/BackupEngine.swift` (1666) | `BackupEngine` 401 (state, set-up, status, conditions, run) · `BackupEngine+Scan` 159 · `BackupEngine+Rounds` 126 (rounds, reconciliation) · `BackupEngine+Upload` 205 · `BackupEngine+BackgroundUploads` 146 (uploads handed to the system) · `BackupEngine+ChunkedUploads` 247 (chunked ones, waiting for the system) · `BackupEngine+Ledger` 245 (ledger, details list, reset) · `BackupEngine+Exports` 98 (kept exports) · `BackupStatus` 101 · `BackupLedgerEntry` 51 |
+| `PhotosAppUI/Timeline/MediaGridScreen.swift` (1323) | `MediaGridScreen` 329 (state, body, content) · `MediaGridScreen+State` 172 (hero, viewer, reveal, empty state, delete confirmation) · `MediaGridScreen+Toolbar` 182 · `MediaGridScreen+Actions` 301 (selection info, grid actions, culling, albums) · `MediaGridScreen+Menus` 221 (context menu) · `MediaGridModels` 47 (`GridSelectionInfo`, `DeleteConfirmation`, `GridEmptyAction`, `ViewerStart`…) · `MediaGridViews` 128 (`GridSkeleton`, `LinkShareSheet`, `SignedOutView`) |
+| `PhotosAppUI/Viewer/MediaViewer.swift` (1228) | `MediaViewer` 403 (state, init, pager, body, page) · `MediaViewer+Actions` 148 (menu bar actions, page changes, `ViewerPageChange`) · `MediaViewer+PageEvents` 137 (taps, swipes, landing, accessibility actions) · `MediaViewer+Navigation` 110 (keys, step buttons) · `MediaViewer+Toolbar` 250 (stage controls, toolbar, More menu) · `MediaViewer+Stacks` 64 · `ViewerPage` 175 |
+| `PhotosStore/Queries/LibraryStore.swift` (1145) | `LibraryStore` 249 (SQL building blocks, grids, coalesced observation) · `LibraryStore+Items` 180 · `+Search` 149 · `+Memories` 80 · `+Map` 146 · `+Writes` 76 · `GridMedia` 148 (`GridMedia`, `TimelineRow`) · `LibraryStoreTypes` 176 (`MediaFilter`, `LibrarySearch`, map types, `SelectionSummary`, `MemoriesSnapshot`) |
+
+Rules the split kept, for the next one: a section moves with its doc comments and `// MARK:`; stored properties and
+`override`s stay in the type's main file (Swift needs the first there; the second keeps the lifecycle in one place); new
+files carry the original's SPDX header, imports and `#if` platform guard. What another file of the type now uses is
+internal instead of `private` (one comment at each type says so) — for `BackupEngine`, `PhotoGridController` and the two
+SwiftUI views that is most of their state. `MediaGridScreen` has no explicit `init`, so its memberwise initializer now
+also takes the widened `@State`/`@Environment` properties as defaulted arguments; no caller passes them. `private` file-scope
+helper types stayed next to their only user (`ViewerPageArea`, `ViewerStepButton`, the viewer page's accessibility
+modifiers). One stored property moved within `BackupEngine.swift` to its stored-property block (`serverCheckChunk`), one
+misplaced doc comment went with the type it documents (`FilePromiseDelegate`).
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

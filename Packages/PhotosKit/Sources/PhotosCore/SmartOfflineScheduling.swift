@@ -114,7 +114,7 @@ public enum SmartOfflineScheduling {
             let request = BGProcessingTaskRequest(identifier: taskIdentifier)
             request.requiresExternalPower = true
             request.requiresNetworkConnectivity = true
-            try? BGTaskScheduler.shared.submit(request)
+            BGTaskScheduler.shared.submitLoggingErrors(request, logger: logger)
         }
     #elseif os(macOS)
         @MainActor static var activity: NSBackgroundActivityScheduler?

@@ -4,7 +4,7 @@
 import XCTest
 
 /// A tour of the grid's glass and motion on iPhone (SPEC §17.2): the Library edge to edge with its floating date pill,
-/// selecting tiles, an album grid, and — on photos named `r7-grid-` the tester uploaded to the top of the library — the
+/// selecting tiles, an album grid, and — on two photos the test uploads first, dated now, and removes at the end — the
 /// heart burst, a delete with its undo. Same requirements as `SmokeTests` (`PHOTOS_UITEST_LOGIN`); screenshots are
 /// attached and, with `PHOTOS_UITEST_SHOTS=<folder>`, also written there, prefixed with `PHOTOS_UITEST_SHOT_PREFIX`.
 @MainActor
@@ -174,15 +174,19 @@ final class GridMotionTourTests: XCTestCase {
         shot("21-album-scrolled")
     }
 
-    /// Favourite, delete and undo on the uploaded test photos at the top of the library (named `r7-grid-`, today's
-    /// date), through the selection bar.
-    func testActionFeedback() throws {
+    /// Favourite, delete and undo through the selection bar, on two photos the test uploads first (dated now, so they are
+    /// the newest of the library and under "Today" whatever day it runs) into a folder of its own, removed at the end.
+    func testActionFeedback() async throws {
+        let login = ProcessInfo.processInfo.environment["PHOTOS_UITEST_LOGIN"] ?? ""
+        let folder = "Photos/UI test actions \(UUID().uuidString.prefix(8))"
+        let server = try XCTUnwrap(TestServer(login: login, folder: folder), "PHOTOS_UITEST_LOGIN is not a login link")
+        addTeardownBlock { try? await server.removeFolder() }
+        _ = try await server.uploadPhotos(2, prefix: "grid-action")
         app.launch()
         waitForTimeline()
-        // Only on the tester's own photos of today, never on anything else of the library.
-        guard app.staticTexts["Today"].firstMatch.waitForExistence(timeout: 20) else {
-            throw XCTSkip("Upload a few photos named r7-grid-… (today's date) to run the action tour.")
-        }
+        // Only on the test's own photos, never on anything else of the library: they are the newest, under "Today".
+        XCTAssertTrue(app.staticTexts["Today"].firstMatch.waitForExistence(timeout: Self.wait), "The uploaded photos did not arrive")
+        guard app.staticTexts["Today"].firstMatch.exists else { return }
         app.buttons["Select"].firstMatch.tap()
         pause(1)
         tiles.element(boundBy: 0).tap()

@@ -272,6 +272,8 @@ public final class SessionModel {
     public func syncNow(reconcile: ReconcileRequest) async {
         guard let services, !isStopped else { return }
         await services.sync.sync(reconcile: reconcile)
+        // Photos without a server preview are asked for again after a sync, with a backoff (SPEC §20.1).
+        services.images.librarySynced()
         await services.outbox.kick()
         // Edits saved on other devices, and edits made here while offline (SPEC §16.3.1).
         await services.edits.sync()

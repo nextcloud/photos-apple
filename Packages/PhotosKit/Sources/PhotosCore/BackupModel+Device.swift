@@ -60,11 +60,21 @@ extension BackupModel {
         }
         if FilesAppLedger.hasData { return .installed }
         #if os(iOS)
-            // Listed in LSApplicationQueriesSchemes.
-            if let url = URL(string: "nextcloud://"), UIApplication.shared.canOpenURL(url) { return .installed }
+            if Self.filesAppIsInstalled() { return .installed }
         #endif
         return .none
     }
+
+    #if os(iOS)
+        /// Whether the Nextcloud Files app is installed (its scheme is listed in LSApplicationQueriesSchemes). iOS 27
+        /// deprecates `canOpenURL` in favour of opening the link and handling a failure, but here nothing is opened: only
+        /// this check, which has no replacement, is exempt from the deprecation warning.
+        @diagnose(DeprecatedDeclaration, as: ignored)
+        private static func filesAppIsInstalled() -> Bool {
+            guard let url = URL(string: "nextcloud://") else { return false }
+            return UIApplication.shared.canOpenURL(url)
+        }
+    #endif
 
     // MARK: Counts and lists
 

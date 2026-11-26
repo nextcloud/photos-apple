@@ -286,6 +286,43 @@ struct GridHeaderMetrics: Equatable, Sendable {
     }
 }
 
+/// What a tile shows when it has no picture (SPEC §20.1): a symbol of what the file is; when the server has no preview of
+/// it, also the file's name and "No preview" — on tiles large enough to read them.
+struct GridTileNoPicture: Equatable {
+    var symbol: String
+    var name: String
+    /// The server has no preview and none could be made here; false: it could not be loaded now (offline, an error).
+    var noPreview: Bool
+
+    init(item: GridMedia, noPreview: Bool) {
+        symbol = GridTile.placeholderSymbol(for: item)
+        name = item.name
+        self.noPreview = noPreview
+    }
+
+    init(symbol: String, name: String, noPreview: Bool) {
+        self.symbol = symbol
+        self.name = name
+        self.noPreview = noPreview
+    }
+
+    /// The smallest tile side (points) that shows the name and "No preview" under the symbol.
+    static let textMinimumSide = 96.0
+
+    /// Whether a tile of this side writes the name and "No preview".
+    func showsText(tileSide: Double) -> Bool { noPreview && tileSide >= Self.textMinimumSide }
+
+    /// "No preview": under the name on the tile, and in the viewer.
+    static var caption: String {
+        String(
+            localized: "No preview", bundle: .module,
+            comment: "Grid tile and viewer: the server has no preview of this file (broken or unsupported).")
+    }
+
+    /// Added to the tile's VoiceOver label.
+    var accessibilityText: String? { noPreview ? Self.caption : nil }
+}
+
 /// What a tile shows besides its picture; the same on every platform.
 enum GridTile {
     /// "Video, 22 November 2026 at 14:03, 1 minute, 5 seconds, Favorite". Selection is a trait of the tile, not text.

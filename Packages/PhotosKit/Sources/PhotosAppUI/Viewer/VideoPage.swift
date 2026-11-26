@@ -299,7 +299,8 @@ struct VideoPage: View {
             }
             .padding(20)
             .frame(maxWidth: 340)
-            .background(.regularMaterial, in: .rect(cornerRadius: 14))
+            // A solid card, not a material: its text keeps its contrast over any video frame (accessibility audit).
+            .background(.background.secondary, in: .rect(cornerRadius: 14))
             .accessibilityElement(children: .combine)
         case .failed(let failure):
             VStack(spacing: 10) {
@@ -312,12 +313,22 @@ struct VideoPage: View {
                 if failure.canRetry {
                     Button(String(localized: "Try again", bundle: .module)) { attempt += 1 }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                         .padding(.top, 4)
+                        .accessibilityHidden(true)
                 }
             }
             .padding(20)
             .frame(maxWidth: 340)
-            .background(.regularMaterial, in: .rect(cornerRadius: 14))
+            .background(.background.secondary, in: .rect(cornerRadius: 14))
+            // One element: the message and its reason are read together, and "Try again" is its action (the lines of
+            // text alone were too small to be targets, above all while the info card shrinks the page).
+            .accessibilityElement(children: .combine)
+            .accessibilityActions {
+                if failure.canRetry {
+                    Button(String(localized: "Try again", bundle: .module)) { attempt += 1 }
+                }
+            }
         }
     }
 

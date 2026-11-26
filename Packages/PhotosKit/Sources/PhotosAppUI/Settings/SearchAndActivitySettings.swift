@@ -7,6 +7,15 @@ import SwiftUI
 
 /// Settings › Search (on-device recognition, SPEC SR-7) and Shared albums (activity notifications, SH-9).
 struct SearchAndActivitySettings: View {
+    /// Settings pages (SPEC §20.4): the analysis is on Privacy & security, the notification on Notifications.
+    enum Part {
+        /// Recognition, similar photos and descriptions, all made on this device.
+        case analysis
+        /// Notifications of new photos in shared albums.
+        case sharedAlbums
+    }
+
+    let part: Part
     @Environment(SessionModel.self) private var session
     @AppStorage(ContentLabeling.enabledKey) private var contentLabeling = false
     @AppStorage(SharedAlbumNotifications.enabledKey) private var sharedAlbumNotifications = true
@@ -17,6 +26,13 @@ struct SearchAndActivitySettings: View {
     @State private var descriptionProgress: (described: Int, total: Int)?
 
     var body: some View {
+        switch part {
+        case .analysis: analysisSections
+        case .sharedAlbums: sharedAlbumsSection
+        }
+    }
+
+    @ViewBuilder var analysisSections: some View {
         if ContentLabeling.isAvailable {
             Section {
                 Toggle(String(localized: "Recognize what's in photos", bundle: .module), isOn: $contentLabeling)
@@ -42,6 +58,9 @@ struct SearchAndActivitySettings: View {
         }
         similarSection
         descriptionsSection
+    }
+
+    var sharedAlbumsSection: some View {
         Section {
             Toggle(String(localized: "New photos in shared albums", bundle: .module), isOn: $sharedAlbumNotifications)
         } header: {

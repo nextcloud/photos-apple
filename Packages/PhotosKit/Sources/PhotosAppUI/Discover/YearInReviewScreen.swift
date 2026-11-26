@@ -291,6 +291,9 @@ struct YearInReviewExportSheet: View {
 struct YearInReviewCard: View {
     let year: Int
     var compact = false
+    /// The year grows with the text size, like the line under it (SPEC §20.3); `minimumScaleFactor` keeps it on one line.
+    @ScaledMetric(relativeTo: .largeTitle) private var yearSize: CGFloat = 52
+    @ScaledMetric(relativeTo: .title) private var compactYearSize: CGFloat = 30
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -301,7 +304,7 @@ struct YearInReviewCard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(compact ? 8 : 14)
             VStack(alignment: .leading, spacing: 0) {
                 // One line: at the card's width the year used to break after its third digit.
-                Text(String(year)).font(.system(size: compact ? 30 : 52, weight: .heavy, design: .rounded))
+                Text(String(year)).font(.system(size: compact ? compactYearSize : yearSize, weight: .heavy, design: .rounded))
                     .lineLimit(1).minimumScaleFactor(0.5)
                 Text("Year in review", bundle: .module, comment: "Under the year on the card that opens the year in review.")
                     .font(compact ? .caption2.bold() : .subheadline.bold())

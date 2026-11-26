@@ -24,6 +24,8 @@ final class ExtrasTourTests: XCTestCase {
         app = XCUIApplication()
         app.launchEnvironment["PHOTOS_DEBUG_LOGIN"] = login
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // Stickers, Insights, collages, postcards and culling are behind Advanced features (SPEC §20.4).
+        app.launchArguments += ["-advancedFeatures", "YES"]
     }
 
     override func tearDown() async throws {
@@ -78,7 +80,7 @@ final class ExtrasTourTests: XCTestCase {
         func testSmartOfflineSettings() {
             app.launch()
             waitForTimeline()
-            app.openSettings()
+            app.openSettings(page: "storage")
             scroll(to: element("Space to use"))
             // Checked before the extra swipe: a list row scrolled off screen is no longer in the accessibility tree.
             XCTAssertTrue(element("Space to use").exists)
@@ -151,7 +153,7 @@ final class ExtrasTourTests: XCTestCase {
             app.launchEnvironment["PHOTOS_DEBUG_PHOTO_OF_THE_DAY_IN"] = "25"
             app.launch()
             waitForTimeline()
-            app.openSettings()
+            app.openSettings(page: "notifications")
             let toggle = app.switches["Photo of the Day"].firstMatch
             scroll(to: toggle)
             let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
