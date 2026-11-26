@@ -148,34 +148,35 @@ enum TestMedia {
                 AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 8_000_000, AVVideoMaxKeyFrameIntervalKey: 30],
             ])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width,
-                kCVPixelBufferHeightKey as String: height,
-            ])
-        writer.add(input)
-        writer.startWriting()
+        // The receiver API of OS 27 (the adaptor, `add`, `startWriting` and `isReadyForMoreMediaData` are deprecated there,
+        // and warnings fail the iOS test build).
+        let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: nil)
+        try writer.start()
         writer.startSession(atSourceTime: .zero)
         var seed: UInt32 = 12345
         for frame in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(2)) }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
-            guard let buffer else { throw CancellationError() }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt32.self)
-            let count = CVPixelBufferGetBytesPerRow(buffer) / 4 * height
-            for index in 0..<count {
-                seed = seed &* 1_664_525 &+ 1_013_904_223
-                base[index] = seed | 0xFF00_0000
-            }
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+            guard let buffer = noiseFrame(width: width, height: height, seed: &seed) else { throw CancellationError() }
+            try await receiver.append(buffer, with: CMTime(value: CMTimeValue(frame), timescale: 30))
         }
-        input.markAsFinished()
+        receiver.finish()
         await writer.finishWriting()
         return try Data(contentsOf: url)
+    }
+
+    /// One frame of noise; a buffer of its own, so it can be sent to the receiver.
+    static func noiseFrame(width: Int, height: Int, seed: inout UInt32) -> CVReadOnlyPixelBuffer? {
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
+        guard let buffer else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt32.self)
+        let count = CVPixelBufferGetBytesPerRow(buffer) / 4 * height
+        for index in 0..<count {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            base[index] = seed | 0xFF00_0000
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        return CVReadOnlyPixelBuffer(unsafeBuffer: buffer)
     }
 }
 

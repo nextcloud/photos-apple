@@ -11,27 +11,31 @@ import Testing
     @Test func everyPageIsListedOnTheFirstScreenOrIsAMacTab() {
         let listed = Set(SettingsPage.listed.flatMap { $0 })
         #expect(listed == [.accounts, .library, .notifications, .backup, .storage, .privacy, .advanced, .about])
-        // General (the Mac's Library and Notifications) and Desktop are Mac tabs.
-        let mac = Set(MacSettingsPage.allCases.map(\.page))
-        #expect(mac == [.general, .accounts, .backup, .storage, .privacy, .desktop, .advanced, .about])
-        for page in SettingsPage.allCases where page != .all {
-            #expect(listed.contains(page) || mac.contains(page), "\(page) cannot be opened")
-        }
+        #if os(macOS)
+            // General (the Mac's Library and Notifications) and Desktop are Mac tabs (`MacSettingsPage` is Mac only).
+            let mac = Set(MacSettingsPage.allCases.map(\.page))
+            #expect(mac == [.general, .accounts, .backup, .storage, .privacy, .desktop, .advanced, .about])
+            for page in SettingsPage.allCases where page != .all {
+                #expect(listed.contains(page) || mac.contains(page), "\(page) cannot be opened")
+            }
+        #endif
     }
 
-    @Test func theMacTabsKeepTheirOldNames() {
-        // Stored by the Settings window and by the command palette of earlier versions.
-        #expect(MacSettingsPage(stored: "general") == .general)
-        #expect(MacSettingsPage(stored: "desktop") == .desktop)
-        #expect(MacSettingsPage(stored: "about") == .about)
-        // Server is part of Accounts now; something unknown opens General.
-        #expect(MacSettingsPage(stored: "server") == .accounts)
-        #expect(MacSettingsPage(stored: "") == .general)
-        #expect(MacSettingsPage(stored: "nonsense") == .general)
-        #expect(SettingsPage.notifications.macTab == .general)
-        #expect(SettingsPage.library.macTab == .general)
-        #expect(SettingsPage.storage.macTab == .storage)
-    }
+    #if os(macOS)
+        @Test func theMacTabsKeepTheirOldNames() {
+            // Stored by the Settings window and by the command palette of earlier versions.
+            #expect(MacSettingsPage(stored: "general") == .general)
+            #expect(MacSettingsPage(stored: "desktop") == .desktop)
+            #expect(MacSettingsPage(stored: "about") == .about)
+            // Server is part of Accounts now; something unknown opens General.
+            #expect(MacSettingsPage(stored: "server") == .accounts)
+            #expect(MacSettingsPage(stored: "") == .general)
+            #expect(MacSettingsPage(stored: "nonsense") == .general)
+            #expect(SettingsPage.notifications.macTab == .general)
+            #expect(SettingsPage.library.macTab == .general)
+            #expect(SettingsPage.storage.macTab == .storage)
+        }
+    #endif
 
     @Test func theSearchFindsSettingsByTitleAndOtherWords() {
         let index = SettingsIndex(entries: SettingsIndex.entries(isMac: false))
