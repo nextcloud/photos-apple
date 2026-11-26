@@ -4,6 +4,7 @@
 import CoreGraphics
 import Foundation
 import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 
@@ -17,7 +18,11 @@ extension SessionModel {
         guard PhotoOfTheDayNotifications.isApp, let smartOffline, !isStopped else { return }
         if extrasState.smartOfflineRunAt.map({ now.timeIntervalSince($0) >= 600 }) ?? true {
             extrasState.smartOfflineRunAt = now
-            Task.detached(priority: .utility) { await smartOffline.run() }
+            // Then the library's thumbnails (SPEC §18.3.1): they go on where they stopped, paced behind the screen.
+            Task.detached(priority: .utility) {
+                await smartOffline.run()
+                if LibraryThumbnailSettings.isEnabled() { await smartOffline.thumbnails.run() }
+            }
         }
         if extrasState.photoOfTheDayScheduledAt.map({ now.timeIntervalSince($0) >= 1800 }) ?? true {
             extrasState.photoOfTheDayScheduledAt = now
@@ -36,6 +41,18 @@ extension SessionModel {
         extrasState.smartOfflineRunAt = Date()
         SmartOfflineScheduling.schedule()
         await smartOffline?.run()
+    }
+
+    /// "Keep thumbnails of the whole library" was turned on or off, or its cellular option changed (SPEC §18.3.1): a pass
+    /// now, or the running one stops.
+    public func libraryThumbnailsSettingChanged() async {
+        SmartOfflineScheduling.schedule()
+        guard let thumbnails = smartOffline?.thumbnails else { return }
+        if LibraryThumbnailSettings.isEnabled() {
+            Task.detached(priority: .utility) { await thumbnails.run() }
+        } else {
+            await thumbnails.stop()
+        }
     }
 
     /// An album was opened: its photos are candidates for smart offline for a while.

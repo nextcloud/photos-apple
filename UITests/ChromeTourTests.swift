@@ -145,12 +145,13 @@ import XCTest
             waitForTimeline()
             tab("Collections")
             shot("chrome-30-collections")
-            for (row, name) in [("People", "people"), ("Places", "places"), ("Memories", "memories"), ("Map", "map")] {
+            // Places opens on its map (SPEC §19.1): no row of its own for the map any more.
+            for (row, name) in [("People", "people"), ("Places", "places"), ("Memories", "memories")] {
                 let link = app.buttons[row].firstMatch
                 guard link.waitForExistence(timeout: 5) else { continue }
                 link.tap()
                 pause(4)
-                if name != "map" { app.swipeUp(velocity: .slow) }
+                if name != "places" { app.swipeUp(velocity: .slow) }
                 pause(1)
                 shot("chrome-31-\(name)")
                 app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -167,7 +168,7 @@ import XCTest
             }
             tab("Search")
             shot("chrome-33-search")
-            tab("Settings")
+            app.openSettings()
             app.swipeUp(velocity: .slow)
             pause(1)
             shot("chrome-34-settings")

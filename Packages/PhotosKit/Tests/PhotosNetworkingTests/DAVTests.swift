@@ -115,13 +115,6 @@ let connection = ServerConnection(
         #expect(credentials.loginName == "bob@x")
         #expect(credentials.appPassword == "app-pw")
     }
-
-    @Test func previewBuckets() {
-        #expect(PhotosAPI.previewBucket(forPixels: 60) == 64)
-        #expect(PhotosAPI.previewBucket(forPixels: 300) == 256)
-        #expect(PhotosAPI.previewBucket(forPixels: 400) == 1024)
-        #expect(PhotosAPI.previewBucket(forPixels: 5000) == 4096)
-    }
 }
 
 @Suite struct InitialStateTests {

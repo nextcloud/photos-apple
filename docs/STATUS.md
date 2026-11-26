@@ -300,7 +300,7 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   cache is emptied on memory pressure and smaller on iPhone. ✅ unit-tested, 🟡 not measured on a device.
 
 ## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
-- Mac: `NavigationSplitView` with a sidebar (Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
+- Mac: `NavigationSplitView` with a sidebar (since M10 the slim, editable one of SPEC §19.1; before: Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
   search field with filter tokens in the window toolbar, Settings window titled and sized per tab ✅ (looked at in the Mac app).
   iPad at regular width and Vision Pro keep `TabView(.sidebarAdaptable)` with the same grouping; iPad ✅ run in the iOS 27.2
   simulator on the iPad Pro 13-inch and the iPad mini (`IPadTourTests`: every sidebar row in landscape, the tab bar in
@@ -575,7 +575,7 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   be written back; "Save as copy" was named after the cache file.
 - Free up space works on the **server** (title "Free up server space"): screenshots by file name or PNG with a phone-screen size and no
   location — never every PNG (`PhotosDomain/Cleanup.swift`); the confirmation names the server, all devices and trash bin vs. permanent.
-  Freeing device storage is §7.18.8 (Backup), 🟡.
+  Freeing device storage is §7.18.8 (Backup), 🟡. Since M10 both are sections of Clean up (§19.3).
 - Duplicates: suggested copy to keep (favorite, own file, oldest upload) with the reason shown, user can pick another one.
   Warning when a deleted copy is in an album 🟡: the confirmation names the albums the deleted copies are in and the kept copy
   is not, from the album content in the local index (albums never opened on the device are counted as "not checked"), and offers
@@ -752,8 +752,8 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   milliseconds. Unit tests with real Vision on the Mac (`SimilarityIndexTests`, `SimilarityMathTests`,
   `SimilarityStoreTests`; search over 100 000 sketches 40 ms); menu and screen run in the iOS simulator with prints made
   on the Mac (the simulator cannot run Vision's models).
-- ⬜ Not done: a "Similar shots" section in Duplicates (series across the whole library) — the series logic
-  (`SimilarSeries.series`) is there and tested, the screen is not; a live cross-fade between grid steps in the middle of
+- Done in M10: "Similar shots" across the whole library is a section of Clean up (§19.3).
+- ⬜ Not done: a live cross-fade between grid steps in the middle of
   an iPhone pinch (the grid scales with the fingers and changes step on release).
 
 ### §15.6 Then and now, travel globe
@@ -1055,10 +1055,17 @@ Combined (branch `feat/r7-combined`): where two packages met on one screen —
 - Notices ("Change undone", "Moved 2 items to the trash bin") stand above the selection bar and above the Library's
   glass zoom picker instead of under them (found in the combined grid tour; `floatingBottomInset`). Under the picker,
   the notice's Undo could not be tapped: a delete in the Library could not be undone from the notice.
-- ⬜ Crash seen once (iPhone 17 simulator, iOS 27.2, `GridMotionTourTests.testLibraryEdgeToEdge`): a SwiftUI trap in
-  `ResolvedScrollBehavior.updateTarget` from the display link while the Library decelerated after fast swipes. Not
-  reproduced in about ten more Library runs nor in `testLibraryHeaderComesBack` (eight round trips to the memories
-  strip, which is now hosted in the grid). Crash log: `~/aloha-work/photos-tools/r7merge/crash-scrolltarget-193447.ips`.
+- ✅ SwiftUI trap in `ResolvedScrollBehavior.updateTarget` (display link, inside `AccessibilityViewGraph.needsUpdate`,
+  so it happened while an accessibility client read the app: UI tests, and possibly VoiceOver, Voice Control or Switch
+  Control): the Library's memory stories strip, hosted in the UIKit grid, with `.scrollTargetBehavior(.viewAligned)`.
+  Round 8/9 combine, iPhone 17 simulator, `CacheMeasureTests.test1Grid`: 3 of 4 runs crashed with it; with the strip's
+  scroll target behaviour and position off, 0 of 3; with only `.viewAligned` off on iPhone, iPad and Vision Pro (the
+  fix), 0 of 3, and the Settings, Library and toolbar tours that had crashed pass. The Mac keeps `.viewAligned` (its strip
+  is not in the grid; never seen there). ⬜ A swipe through the stories no longer snaps to a card on iPhone and iPad
+  (going on to the next story and the taps still align it); plan: a custom snapping that does not use a scroll target
+  behaviour, or the strip outside the collection view. Also kept: the stories play only while the strip is on screen
+  (`GridHeaderVisibility`) and the header slot never gets an empty size. Crash logs in `~/aloha-work/photos-tools/r8r9/`. Crash logs: `~/aloha-work/photos-tools/r7merge/crash-scrolltarget-193447.ips`,
+  `~/Library/Logs/DiagnosticReports/Retired/Nextcloud Photos-2026-11-2*`.
 
 ### §17.1 Viewer as a stage: full-screen photo, glass controls, info glass card, interactive dismissal, viewer colour
 - ✅ Stage (§17.1.1): full-screen photo, glass close button, date pill and action bar (`ViewerStageControls`), tap to
@@ -1251,6 +1258,144 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
   pointer.
 - Note: incremental visionOS-simulator builds of the app fail with "Cycle inside NextcloudPhotos" (CodeSign of the app
   bundle, Xcode 27.2); clean builds (new DerivedData) work.
+
+## M9 Caching for the photos that matter (SPEC §18) — ⬜
+
+### §18.1 Loading and measuring
+- ✅ One cache key per photo (§18.1.1): the pipeline fills an empty ETag from the library (`setEtagProvider`,
+  `LibraryStore.etag(of:)`), so covers, memories, places and the other file-id-only callers read the grid's cache files.
+  Unit tests (`LoadPathTests`: a cover after a grid load is a disk hit, and the reverse; `EtagLookupTests`); measured
+  in the simulator (§18.1.4: covers served from the device 22 % → 45 %). Unused `PhotosAPI.previewBucket` removed.
+- ✅ Viewer neighbours (§18.1.2): 1024 px of n±1 and n±2, the paging direction first, decoded from disk or downloaded,
+  taken back when paging away or closing (`ViewerNeighbourPrefetch`, `ViewerPrefetchPlan`, `prefetch(_:decode:)`);
+  the best picture on the device at once (`placeholder(for:)`). Unit tests for order, cancel, decode and placeholder;
+  measured in the simulator (§18.1.4: without smart offline at 2 s per photo, 1024 px from memory when shown 9 % →
+  58 %, pages sharp while shown 7 → 9 of 9). The 4096 px prefetch ran there (8 loaded, after 1.5 s); its delay is now
+  3 s (not re-measured). 🟡 Zooming into a prefetched 4096 px preview was not exercised in a UI test.
+- ⬜ The SwiftUI scroll-target trap of §M8 (`ResolvedScrollBehavior.updateTarget`) hit 2 of 4 runs of the measurement's
+  first phase while the Library scrolled (crash logs in `~/Library/Logs/DiagnosticReports/Nextcloud Photos-2026-11-2*`);
+  not caused by M9 (also in the build without it), not investigated here.
+- ✅ Measuring (§18.1.3): `CacheMetrics` (layers × buckets, prefetch apart, p50/p95 ring buffers), os_signpost
+  intervals "Preview", "Tile", "Viewer", Settings › Server › Cache performance (shots
+  `ios-fix-shots/r8-load/*-metrics*.png`). Unit tests (`CacheMetricsTests`). 🟡 The signposts were not looked at in
+  Instruments (no interactive Instruments session here); 🟡 Mac and visionOS builds of the screen not run.
+
+### §18.2 Importance-aware cache
+- ✅ Recently viewed (`CacheImportanceStore`, table `recentlyViewed`, newest 2000, migration `v8-cache-importance`): a
+  photo shown ≥ 1 s in the viewer is recorded (`AccountServices.viewerShows`, one `.task` line in `MediaViewer.swift`).
+  Seen in the iPhone 17 simulator against the 8089 library: paging through 31 photos with the UI tour
+  `CacheEvictTourTests.testViewingAndZooming` recorded 31 rows (the tour's "quick" swipes still take 1.1 s each, so
+  "shorter than a second records nothing" is only unit-tested).
+- ✅ `CacheImportance` (PhotosDomain): one scorer for smart offline (old scores unchanged, now also viewed, memory covers,
+  key photos, covers, faces) and for disk eviction (tiers, LRU within a tier). Seen in the simulator: 387 key photos
+  (`LibraryZoomModel`) and 12 memory covers (`MemoriesStrip`) recorded; smart offline then kept 7 photos as memory
+  covers and 2 as viewed besides 34 recent and 2 On this day. Unit tests: ordering; 100 000-photo library tiers + ETags
+  < 3 s in a debug test (1.7 s with inserting the rows); 100 000-file eviction plan 0.26 s (debug).
+- ✅ Per-size pools (thumbnails / screen / large ≤ 300 MB, 15 %), default limit from free space (512 MB – 4 GB), the
+  user's limit is the total, whole-library contract (`CacheLimits.wholeLibraryThumbnailsKey`, unit-tested only until
+  the filler sets it). Seen in the simulator on the real cache after the tour (38 thumbnails 0.63 MB, 24 screen 3.50 MB,
+  6 large 4.61 MB) with `previewCacheLimitBytes` = 5 MB and a relaunch: kept all 38 thumbnails and all 24 viewer
+  previews, removed the 6 zoomed-in previews; the old single LRU (simulated on the same files) would have kept 3
+  thumbnails, 9 viewer previews and 4 large ones. Settings › Storage shows "4.1 MB, up to 4.29 GB"
+  (`ios-fix-shots/r8-evict/settings-20-settings-storage.png`).
+- 🟡 Memory pressure: own LRU (`MemoryImageCache`) and `MemoryPressurePolicy` replace `NSCache` and clear-all; viewer
+  photo ± 1 and covers/key photos protected; on iPhone/iPad/Vision Pro the background does a warning's relief.
+  Unit-tested; not observed under real memory pressure (the simulator's "memory warning" is a UIKit notification, not
+  the dispatch memory-pressure source; plan: Instruments on a device, or a debug hook that calls `relieveMemory`).
+
+### §18.3 Filling the cache
+- ✅ §18.3.1 Thumbnails of the whole library (Settings › Storage › Thumbnails, on by default on the Mac): seen on the Mac
+  (fix build, 8089 test library, Low Power Mode ignored through the debug variable `PHOTOS_DEBUG_FILL_IGNORE_LOW_POWER`
+  because the test Mac is in Low Power Mode, which correctly stopped every fill before). 509 of 513 photos filled
+  (4 previews the server could not render stay "remaining"): 256 px 5.1 MB (10.1 KB a photo), 64 px made on the device
+  1.2 MB (2.3 KB) — 12.4 KB a photo, as estimated. The pass downloaded 383 previews in 576 s while three other agents
+  loaded the same PHP server (1.8 s a preview). Progress row seen filling and nearly done:
+  `ios-fix-shots/r8-fill/mac-settings-thumbnails-filling.png`, `mac-settings-thumbnails-done.png`. Unit tests: filling,
+  resuming, 64 px made offline, cellular/Low Power/off, waiting while the pipeline loads, estimate.
+- 🟡 Estimate row (setting off) and "Use cellular data" (iPhone/iPad): built, unit-tested, not seen (the Mac's default is
+  on; no simulator run in this round). Plan: one look in the `r8-fill` simulator.
+- 🟡 Evict side of the contract (thumbnails not trimmed while on): §18.2's part, to check after merging.
+- 🟡 §18.3.2 Preparation before the app opens: runs and plans as specified in unit tests (two screens at the grid's bucket,
+  album cover and first screen, skipped on cellular and in Low Power Mode, cached files skipped). On the Mac the debug run
+  (`PHOTOS_DEBUG_FILL_NOW=1`) ran it: "33 present of 100" with the timeline already shown and nothing downloaded in Low
+  Power Mode — not yet seen downloading before a launch. iOS: folded into the existing refresh task (no new task
+  identifier); background tasks cannot be triggered here. Plan: in the simulator, `e -l objc -- (void)[[BGTaskScheduler
+  sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.nextcloud.photos.refresh"]`, then open the app with the
+  network off and compare placeholders. Memory covers only hit once §18.1's one-cache-key change is merged.
+- ✅ §18.3.3 HEIC storage, measured: transcoding the server's JPEG previews does not pay (equal size at −0.65 dB, see
+  SPEC); PNG previews are stored as HEIC. Seen on the Mac: 4 PNG photos of the test server kept by smart offline as HEIC,
+  5.34 MB of PNG previews → 0.51 MB (9.6 %); the 134 JPEG previews (60.9 MB) unchanged, so the test library (all JPEG)
+  saves 0 %. Lazy migration of kept PNG previews unit-tested (converted without network, row and lookup updated, old
+  file removed, JPEGs looked at once).
+- ⬜ HEIC for PNG previews in the pipeline's 1024/4096 cache files: plan in SPEC §18.3.3 (background conversion, not on the
+  load path).
+
+## M10 Simpler navigation (SPEC §19) — ⬜
+
+### §19.1 Sidebar
+- ✅ Mac (run, AX only, light and dark; `ios-fix-shots/r9-sidebar/`): slim sidebar — Library, Favorites, Memories, Places
+  (People without Recognize is left out), Albums with the top albums listed and All Albums, Shared, Utilities collapsed
+  (Folders, Tags, Archive, Recently deleted, Clean up, Insights, Stickers); compact account row at the bottom.
+- ✅ Mac: Photos/Videos open the Library with that filter shown in the toolbar (`PHOTOS_DEBUG_DESTINATION=videos`); Map opens
+  Places on its map, "Map | Grid" switches to the place tiles; Shared shows "Shared with you" on top (also over its empty state)
+  and pushes it with Back; Duplicates opens Clean up with Utilities expanded; the album rows open their album.
+- ✅ Mac: Edit Sidebar sheet (`PHOTOS_DEBUG_EDIT_SIDEBAR=1`): hiding a row, pinning a utility and Restore Defaults change the
+  sidebar at once. 🟡 The rows' context menus, dragging pinned rows, View ▸ Edit Sidebar… and the account menu's items were
+  not opened (they need real input or a key window); built and their logic unit-tested.
+- ✅ Logic unit-tested (`SidebarTests`, `CompactNavigationTests`): where every destination opens, the highlight, the request
+  that rebuilds the Library/Places/Clean up, pin/unpin/hide/reorder, storage of the customization (unknown rows dropped), the
+  top albums, initials, the Go menu's fixed ⌘1…⌘9.
+- ✅ iPad (iOS 27.2 simulator, iPad Pro 13-inch, landscape; `IPadTourTests.testSidebarDestinations` passes,
+  `ipad-dest-*.png`): Browse (Favorites, Memories, Places), Albums (All albums, Shared with "Shared with you" on top),
+  Utilities with Clean up, Insights, Stickers, Backup; every row opens its screen. `TabViewCustomization` per device
+  (`@AppStorage`), Restore Default Sidebar in the account header's menu 🟡 (built, not opened). Vision Pro 🟡 (built).
+  The top albums are not listed in the iPad sidebar (tabs need one selection type; album tabs would leave stale ids in the
+  customization) — left for later.
+- 🟡 Clean up row: routes to Duplicates / Free up server space until `CleanUpScreen(initialSection:)` (§19.3, its own branch)
+  is merged; the destination request carries the section (`DestinationRequest.cleanUpSource`).
+
+### §19.2 Toolbars
+- ✅ No ⌘K button in the window toolbar; Go ▸ Quick Actions… ⌘K stays (seen in the Mac's menu bar; the same
+  `PhotosCommands` give iPad, iPhone with a keyboard and Vision Pro the key). The Search tab keeps its ⌘ button.
+- ✅ One filter menu (`LibraryFilterMenu`): Show (All Items/Photos/Videos/Favorites), Ratings and Flags (with
+  Auto-Advance and Delete Rejected…), Hide partner photos (with partner folders; not on the test server, so not seen),
+  Clear all filters; filled symbol + count badge while on; a chip per filter clears it (`LibraryFilterChips`) — seen on
+  the Mac, iPhone 17 and iPad (UI test `ToolbarsTourTests` taps Favorites and the chip). `TimelineScreen(initialKind:)`
+  for §19.1; debug builds: `PHOTOS_DEBUG_LIBRARY_KIND=favorites`. Unit tests: `LibraryToolbarTests`.
+- ✅ One zoom control: the Mac's slider and step buttons removed (⌘+/⌘−, View menu, pinch remain).
+- ✅ Upload only when needed: no upload button in the Library's toolbar; File ▸ Upload Photos… now ⌘U (was ⇧⌘U) and drag
+  and drop on the Mac; the account menu's Upload submenu and the Collections tab's "+" (New album…, Upload) on iPhone and
+  iPad (menus seen; the pickers not opened). 🟡 The uploads indicator only while uploads run or some failed
+  (`TransfersIndicatorState`, unit-tested; no upload run in this round).
+- ✅ Mac viewer: favourite, info, share, edit, More (with Delete…), no ⌘K — seen in the Mac app (AX tree and window
+  shots); ⌫/⌦ delete after asking (unit-tested key routing, not pressed: no real input). 🟡 Vision Pro ornament: same
+  order, Delete in More (built, not seen).
+- ⬜ Mac viewer without the window's search field: `toolbar(removing: .search)` does not remove a split view's
+  `searchable` on macOS 27.2 (tried on the viewer and the detail column; SPEC §19.2). Plan: a toolbar search field of our
+  own that the viewer leaves out, or a later SwiftUI.
+- ✅ Three tabs on iPhone (Library, Collections, Search); Settings is a sheet from the account button
+  (`AccountMenuButton`, initials avatar) after Select in the Library's top bar and in Collections', also on iPad (seen:
+  iPad tab bar is Library + Search). Links and the palette open the sheet (🟡 not run). UI tests use
+  `XCUIApplication.openSettings()` instead of the Settings tab.
+- ⬜ Filters for edited photos or RAW files: need new conditions in the grid query (`LibraryStore.sql`).
+
+### §19.3 Clean up
+- ✅ One Clean up screen (`CleanUpScreen`): headline "Up to X can be freed" (each file counted once), sections Duplicates,
+  Similar shots, Large videos, Screenshots and screen recordings with count, size and small previews, each opening its
+  review screen; on iPhone/iPad "Free up space on this iPhone/iPad" with the device's available storage. Seen on the
+  Mac (light and dark), iPhone 17 and iPad Air simulators (iOS 27.2) with the test server; UI tour
+  `CleanUpTourTests` passes on both (links land in Clean up, rows open their screens, device row present). Shots in
+  `ios-fix-shots/r9-cleanup`. Built for macOS, iOS, visionOS, tvOS and watchOS.
+- 🟡 Similar shots across the library (`SimilarShots`, `SimilarityStore.similarShots()`): series by time and sketch
+  similarity, copies of one shot (HEIC+JPEG, same file twice) never offered against each other, best shot kept with
+  its copies, choose another, delete the rest (server-delete confirmation); compares cached previews while open. Unit
+  tests (`SimilarShotsTests`, `SimilarShotsStoreTests`, `CleanUpTests`). The screen was seen on the Mac with a series
+  of three test shots whose sketches were written into the test build's database: the Mac was in Low Power Mode, so
+  the app (correctly) compared nothing itself. Comparing real previews end to end is not seen yet.
+- ✅ `AppDestination.duplicates`/`.freeSpace` (deep links, palette, Go menu) open Clean up at their section
+  (`CleanUpSection.opened(by:)`), unit-tested; `FreeSpaceScreen(categories:)` shows one section's categories.
+- ⬜ The sidebar row `.cleanUp` comes with §19.1 (sidebar package); until that is merged the Utilities rows Duplicates and
+  Free up server space both open Clean up.
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

@@ -65,6 +65,8 @@ public final class AccountServices: Sendable {
         // Failed for good or discarded: the rows the operation had changed come back from the server.
         self.outbox = Outbox(api: api, database: database, restore: { _ = try? await sync.restoreRows() })
         let cache = PreviewCache(directory: layout.previews(account.id))
+        // Trims evict the least important photos first and honour "Keep thumbnails of the whole library" (SPEC §18.2).
+        cache.setEvictionContextProvider { [database] in Self.evictionContext(database) }
         let originals = OriginalStore(directory: layout.originals(account.id), dav: dav)
         let images = ImagePipeline(
             api: api, cache: cache, originals: originals, pinnedFileIds: { [database] in Self.pinnedFileIds(database) })
@@ -72,6 +74,8 @@ public final class AccountServices: Sendable {
         let edits = EditLibrary(dav: dav, file: layout.accountDirectory(account.id).appending(path: "Edits/recipes.json"))
         self.edits = edits
         images.setEditProvider { [edits] fileId in edits.recipe(for: fileId) }
+        // One cache key per photo (SPEC §18.1.1): covers and memories asked for without an ETag use the grid's files.
+        images.setEtagProvider { [library] fileId in try? library.etag(of: fileId) }
         let library = library
         Task { [weak images] in
             await images?.setLiveStillProvider { [library, originals, connection] fileId, recipe, bucket in
@@ -96,6 +100,11 @@ public final class AccountServices: Sendable {
     /// The app went to the background: trim the caches while nothing is being looked at.
     public func didEnterBackground() {
         Task.detached(priority: .utility) { [images] in await images.trimCaches() }
+        #if !os(macOS)
+            // The memory cache is no `NSCache` any more, which emptied itself in the background: give back the large decodes
+            // (what a warning would) so the suspended app is less likely to be ended (SPEC §18.2).
+            images.cache.relieveMemory(.warning)
+        #endif
     }
 
     /// DAV URL of an item's original: the user's file, or for a file of someone else's shared album, the album's child.

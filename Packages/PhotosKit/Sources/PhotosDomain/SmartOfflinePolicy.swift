@@ -29,16 +29,8 @@ public enum SmartOfflineQuality: String, CaseIterable, Sendable, Codable {
     case original
 }
 
-/// Why a photo is kept: the reason with the highest score.
-public enum SmartOfflineReason: String, Sendable, Codable, Hashable, CaseIterable {
-    /// Its "On this day" comes up in the next days.
-    case onThisDay
-    case favorite
-    /// Taken in the last months.
-    case recent
-    /// In an album that was opened recently.
-    case album
-}
+/// Why a photo is kept: the reason with the highest score (`CacheImportance`, SPEC §18.2).
+public typealias SmartOfflineReason = CacheImportance.Reason
 
 /// A photo that smart offline could keep, as the index knows it.
 public struct SmartOfflineCandidate: Sendable, Hashable {
@@ -51,10 +43,15 @@ public struct SmartOfflineCandidate: Sendable, Hashable {
     public var size: Int64
     /// When an album that contains it was last opened.
     public var albumViewedAt: Date?
+    /// When it was last looked at in the viewer, and how often (SPEC §18.2).
+    public var viewedAt: Date?
+    public var viewCount: Int
+    /// Covers, key photos, memory covers, faces.
+    public var roles: CacheImportance.Roles
 
     public init(
         fileId: FileID, etag: String, timestamp: Date, isFavorite: Bool = false, kind: MediaKind = .image, size: Int64 = 0,
-        albumViewedAt: Date? = nil
+        albumViewedAt: Date? = nil, viewedAt: Date? = nil, viewCount: Int = 0, roles: CacheImportance.Roles = []
     ) {
         self.fileId = fileId
         self.etag = etag
@@ -63,6 +60,16 @@ public struct SmartOfflineCandidate: Sendable, Hashable {
         self.kind = kind
         self.size = size
         self.albumViewedAt = albumViewedAt
+        self.viewedAt = viewedAt
+        self.viewCount = viewCount
+        self.roles = roles
+    }
+
+    /// What `CacheImportance` scores it by.
+    public var signals: CacheImportance.Signals {
+        CacheImportance.Signals(
+            timestamp: timestamp, isFavorite: isFavorite, albumViewedAt: albumViewedAt, viewedAt: viewedAt, viewCount: viewCount,
+            roles: roles)
     }
 }
 
@@ -108,20 +115,17 @@ public struct SmartOfflinePlan: Sendable, Equatable {
 /// Which photos are worth having without network, and which go when room is needed (SPEC §15.8.1). Pure and deterministic,
 /// so the whole policy is unit-tested; `SmartOfflineManager` feeds it from the index and carries it out.
 ///
-/// Every candidate gets a score in 0…1 for each reason that applies; its score is the highest of them:
-/// - **On this day** in the next `upcomingDays` days (today included): 1.0, a bit less each day further away. These are
-///   the memories the app is about to show.
-/// - **Recent**: taken in the last `recentMonths` months: 0.9, halving every `recentHalfLife` days (60 days old: 0.45).
-/// - **Album opened recently** (within `albumWindowDays` days): 0.6, halving every 7 days since it was opened.
-/// - **Favourite**: 0.35 – 0.55, newer favourites a little higher (halving of the extra every two years).
+/// Every candidate is scored by `CacheImportance` (SPEC §18.2), the same ranking the preview cache evicts by: On this day,
+/// recent, recently viewed, memory covers, albums opened recently, key photos, covers, faces, favourites.
 ///
 /// The wanted set is the best-scored candidates whose sizes add up to the budget. Files that are kept but no longer wanted
 /// stay until their room is needed; then the least recently used go first (LRU).
 public enum SmartOfflinePolicy {
-    public static let recentMonths = 12
-    public static let recentHalfLife: Double = 60
-    public static let upcomingDays = 7
-    public static let albumWindowDays: Double = 30
+    public static let recentMonths = CacheImportance.recentMonths
+    public static let recentHalfLife = CacheImportance.recentHalfLife
+    public static let upcomingDays = CacheImportance.upcomingDays
+    public static let albumWindowDays = CacheImportance.albumWindowDays
+    public static let viewedWindowDays = CacheImportance.viewedWindowDays
     /// Long edge of a kept preview in pixels: what fills an iPhone or iPad screen.
     public static let previewSize = 2048
     /// What a preview is assumed to take before real ones were measured.
@@ -133,42 +137,13 @@ public enum SmartOfflinePolicy {
     public static func score(
         _ candidate: SmartOfflineCandidate, now: Date, calendar: Calendar = .current
     ) -> (score: Double, reason: SmartOfflineReason)? {
-        var best: (score: Double, reason: SmartOfflineReason)?
-        func consider(_ score: Double, _ reason: SmartOfflineReason) {
-            if score > (best?.score ?? 0) { best = (score, reason) }
-        }
-        if let days = daysUntilOnThisDay(candidate.timestamp, now: now, calendar: calendar) {
-            consider(1.0 - 0.01 * Double(days), .onThisDay)
-        }
-        let age = now.timeIntervalSince(candidate.timestamp) / 86_400
-        if let start = calendar.date(byAdding: .month, value: -recentMonths, to: now), candidate.timestamp >= start {
-            consider(0.9 * pow(0.5, max(0, age) / recentHalfLife), .recent)
-        }
-        if let viewed = candidate.albumViewedAt {
-            let since = max(0, now.timeIntervalSince(viewed) / 86_400)
-            if since <= albumWindowDays { consider(0.6 * pow(0.5, since / 7), .album) }
-        }
-        if candidate.isFavorite {
-            consider(0.35 + 0.2 * pow(0.5, max(0, age) / 730), .favorite)
-        }
-        return best
+        CacheImportance.score(candidate.signals, now: now, calendar: calendar)
     }
 
     /// In how many days (0 = today, up to `upcomingDays - 1`) the photo's month and day come round in a later year; nil when
     /// that is further away, or the photo is from this year.
     public static func daysUntilOnThisDay(_ date: Date, now: Date, calendar: Calendar = .current) -> Int? {
-        let year = calendar.component(.year, from: now)
-        guard calendar.component(.year, from: date) < year else { return nil }
-        let today = calendar.startOfDay(for: now)
-        for offset in 0..<upcomingDays {
-            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            let parts = calendar.dateComponents([.month, .day], from: day)
-            let photo = calendar.dateComponents([.year, .month, .day], from: date)
-            if photo.month == parts.month && photo.day == parts.day && (photo.year ?? year) < calendar.component(.year, from: day) {
-                return offset
-            }
-        }
-        return nil
+        CacheImportance.daysUntilOnThisDay(date, now: now, calendar: calendar)
     }
 
     /// Candidates with a reason, best first. Ties: newer first, then the higher file id (stable across runs).

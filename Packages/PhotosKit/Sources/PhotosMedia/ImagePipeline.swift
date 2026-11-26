@@ -23,6 +23,8 @@ public actor ImagePipeline {
     public let api: PhotosAPI
     public nonisolated let cache: PreviewCache
     public nonisolated let originals: OriginalStore
+    /// Where previews come from and how long they take (SPEC §18.1.3).
+    public nonisolated let metrics: CacheMetrics
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "images")
     /// Public album token: previews go through `publicPreview`.
     private let publicToken: String?
@@ -33,6 +35,8 @@ public actor ImagePipeline {
     private var isShutDown = false
     /// The edit recipe of a photo (SPEC §16.3): previews of edited photos are rendered on the device and cached.
     private nonisolated let editProvider = Mutex<(@Sendable (FileID) -> EditRecipe?)?>(nil)
+    /// The ETag of a photo in the library, for requests made without one (SPEC §18.1.1).
+    private nonisolated let etagProvider = Mutex<(@Sendable (FileID) -> String?)?>(nil)
     /// The still of a Live Photo whose effect changes it (long exposure, another key photo), from its motion.
     private var liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
 
@@ -72,7 +76,9 @@ public actor ImagePipeline {
     private var loads: [String: Load] = [:]
     /// Keys of loads that have not started, oldest first; the newest is started first.
     private var queued: [Lane: [String]] = [.local: [], .network: []]
-    private var queuedPrefetches: [String] = []
+    /// Prefetches that have not started, per lane, oldest first: the network lane downloads, the local lane decodes
+    /// what is on disk into memory (`prefetch(_:decode:)`).
+    private var queuedPrefetches: [Lane: [String]] = [.local: [], .network: []]
     private var running: [Lane: Int] = [.local: 0, .network: 0]
     /// Every task that has not finished, also those nobody waits for any more (they still hold a slot until they return).
     private var tasks: [UInt64: Task<Void, Never>] = [:]
@@ -104,16 +110,38 @@ public actor ImagePipeline {
         return recipe
     }
 
-    /// The request with the photo's current edit, so that it loads (and caches) the edited version. Requests made
-    /// without it get it in `preview(_:)`; building it in front lets a tile see that its picture changed.
+    /// Where the ETags of requests made without one come from: the library index (SPEC §18.1.1).
+    ///
+    /// Covers, memories, story cards, places and the like know only a file id. Without its ETag such a request would be
+    /// cached under a key of its own and download a preview the grid has on disk already; with it, every screen uses
+    /// the same cache files for a photo.
+    public nonisolated func setEtagProvider(_ provider: @escaping @Sendable (FileID) -> String?) {
+        etagProvider.withLock { $0 = provider }
+    }
+
+    /// The request with the photo's ETag from the library when it was made without one; unchanged when it has one or
+    /// the library does not know the file (then it keeps a key of its own, as before).
+    public nonisolated func resolved(_ request: Request) -> Request {
+        guard request.etag.isEmpty, let provider = etagProvider.withLock({ $0 }), let etag = provider(request.fileId), !etag.isEmpty
+        else { return request }
+        var resolved = request
+        resolved.etag = etag
+        return resolved
+    }
+
+    /// The request with the photo's ETag (`resolved`) and current edit, so that it loads (and caches) the edited
+    /// version. Requests made without them get them in `preview(_:)`; building it in front lets a tile see that its
+    /// picture changed.
     public nonisolated func withEdits(_ request: Request) -> Request {
+        let request = resolved(request)
         guard request.showsEdits, request.edit == nil, let recipe = displayedEdit(request.fileId) else { return request }
         var edited = request
         edited.edit = recipe
         return edited
     }
 
-    /// The ETag under which the memory and disk caches keep what a preview of the photo shows now (`bestMemoryImage`).
+    /// The ETag under which the memory and disk caches keep what a preview of the photo shows now (`bestMemoryImage`);
+    /// an empty `etag` is looked up in the library.
     public nonisolated func displayedEtag(fileId: FileID, etag: String) -> String {
         withEdits(Request(fileId: fileId, etag: etag, bucket: 0)).cacheEtag
     }
@@ -131,9 +159,10 @@ public actor ImagePipeline {
 
     public init(
         api: PhotosAPI, cache: PreviewCache, originals: OriginalStore, publicToken: String? = nil, limits: Limits = Limits(),
-        pinnedFileIds: @escaping @Sendable () -> Set<FileID> = { [] }
+        pinnedFileIds: @escaping @Sendable () -> Set<FileID> = { [] }, metrics: CacheMetrics = .shared
     ) {
         self.pinnedFileIds = pinnedFileIds
+        self.metrics = metrics
         self.api = api
         self.cache = cache
         self.originals = originals
@@ -203,7 +232,10 @@ public actor ImagePipeline {
     /// Cancelling the calling task gives the load up: it stops unless another task or a prefetch still wants it.
     public func preview(_ request: Request) async -> CGImage? {
         let request = withEdits(request)
-        if let image = request.memoryImage(in: cache) { return image }
+        if let image = request.memoryImage(in: cache) {
+            metrics.record(.memory, bucket: request.bucket)
+            return image
+        }
         if isShutDown || Task.isCancelled { return nil }
         let key = request.key
         nextId += 1
@@ -223,8 +255,12 @@ public actor ImagePipeline {
         }
     }
 
-    /// Prefetches previews without waiting. They load after everything that is being waited for.
-    public func prefetch(_ requests: [Request]) {
+    /// Prefetches previews without waiting. They load after everything that is being waited for; the last request of
+    /// a batch starts first (like the newest request on screen).
+    /// - Parameter decode: also decode previews that are on disk into memory, in the local lane (the viewer's
+    ///   neighbours, SPEC §18.1.2). Without it, what is on disk is left there: the grid's prefetching only gets previews
+    ///   from the server, and a disk read when the tile comes on screen is fast enough.
+    public func prefetch(_ requests: [Request], decode: Bool = false) {
         guard !isShutDown else { return }
         for request in requests.map(withEdits) where request.memoryImage(in: cache) == nil {
             let key = request.key
@@ -232,19 +268,37 @@ public actor ImagePipeline {
                 loads[key]?.isPrefetch = true
                 continue
             }
-            // Prefetching exists to get previews from the server onto the disk; what is there already loads fast enough.
-            if isLocal(request) { continue }
+            let lane: Lane = isLocal(request) ? .local : .network
+            if lane == .local && !decode { continue }
             nextId += 1
-            var load = Load(id: nextId, request: request, lane: .network)
+            var load = Load(id: nextId, request: request, lane: lane)
             load.isPrefetch = true
             loads[key] = load
-            queuedPrefetches.append(key)
+            queuedPrefetches[lane, default: []].append(key)
         }
-        while queuedPrefetches.count > limits.queuedPrefetches {
-            let key = queuedPrefetches.removeFirst()
-            if loads[key]?.waiters.isEmpty == true { loads[key] = nil }
+        for lane in [Lane.local, .network] {
+            while queuedPrefetches[lane, default: []].count > limits.queuedPrefetches {
+                let key = queuedPrefetches[lane, default: []].removeFirst()
+                if loads[key]?.waiters.isEmpty == true { loads[key] = nil }
+            }
         }
         startLoads()
+    }
+
+    /// The best picture of the request's photo that is on the device now: decoded in memory (up to the size asked
+    /// for), else a smaller preview on disk (read off the caller's thread). The viewer shows it while the preview it
+    /// asked for loads, so a page is never blank (SPEC §18.1.2). Nil when there is none; nothing is downloaded.
+    public nonisolated func placeholder(for request: Request) async -> CGImage? {
+        let request = withEdits(request)
+        let etag = request.cacheEtag
+        if let image = cache.bestMemoryImage(fileId: request.fileId, etag: etag, upTo: request.bucket) { return image }
+        let cache = cache
+        return await Task.detached(priority: .userInitiated) { () -> CGImage? in
+            for bucket in PhotosAPI.previewBuckets.reversed() where bucket < request.bucket {
+                if let image = cache.diskImage(fileId: request.fileId, etag: etag, bucket: bucket) { return image }
+            }
+            return nil
+        }.value
     }
 
     /// Takes prefetches back (the items left the prefetch window): loads that nobody waits for are cancelled.
@@ -271,7 +325,7 @@ public actor ImagePipeline {
         let waiting = loads.values.flatMap { $0.waiters.values }
         loads = [:]
         queued = [.local: [], .network: []]
-        queuedPrefetches = []
+        queuedPrefetches = [.local: [], .network: []]
         waiting.forEach { $0.resume(returning: nil) }
         let unfinished = Array(tasks.values)
         unfinished.forEach { $0.cancel() }
@@ -291,10 +345,10 @@ public actor ImagePipeline {
             let onDisk = isLocal(request)
             loads[key] = Load(id: nextId, request: request, lane: onDisk ? .local : .network)
             queued[onDisk ? .local : .network, default: []].append(key)
-        } else if loads[key]?.task == nil, let index = queuedPrefetches.firstIndex(of: key) {
+        } else if loads[key]?.task == nil, let lane = loads[key]?.lane, let index = queuedPrefetches[lane]?.firstIndex(of: key) {
             // A prefetch that is now on screen: it joins the loads that are waited for.
-            queuedPrefetches.remove(at: index)
-            queued[.network, default: []].append(key)
+            queuedPrefetches[lane]?.remove(at: index)
+            queued[lane, default: []].append(key)
         } else if loads[key]?.task == nil, let lane = loads[key]?.lane, let index = queued[lane]?.firstIndex(of: key) {
             // Asked for again: it is the newest request once more.
             queued[lane]?.remove(at: index)
@@ -319,7 +373,7 @@ public actor ImagePipeline {
             task.cancel()
         } else {
             queued[load.lane]?.removeAll { $0 == key }
-            queuedPrefetches.removeAll { $0 == key }
+            queuedPrefetches[load.lane]?.removeAll { $0 == key }
         }
     }
 
@@ -328,11 +382,11 @@ public actor ImagePipeline {
         for lane in [Lane.local, .network] {
             let limit = lane == .local ? limits.local : limits.network
             while running[lane, default: 0] < limit {
-                // Newest first; prefetches only when nothing is waited for in the network lane.
+                // Newest first; prefetches only when nothing is waited for in their lane.
                 let key: String
                 if let next = queued[lane]?.popLast() {
                     key = next
-                } else if lane == .network, let next = queuedPrefetches.popLast() {
+                } else if let next = queuedPrefetches[lane]?.popLast() {
                     key = next
                 } else {
                     break
@@ -351,10 +405,16 @@ public actor ImagePipeline {
         let request = load.request
         let id = load.id
         let lane = load.lane
+        let signposter = metrics.signposter
         // Detached: reading, decoding and the request run on the concurrent executor, not on this actor (and never on the
         // main thread). Loads somebody waits for run at user-initiated priority, prefetches below it.
         let task = Task.detached(priority: load.waiters.isEmpty ? .utility : .userInitiated) { [weak self] in
+            // One "Preview" interval per load in Instruments, with the layer it came from.
+            let interval: OSSignpostIntervalState? =
+                signposter.isEnabled
+                ? signposter.beginInterval("Preview", id: signposter.makeSignpostID(), "\(request.bucket)") : nil
             let result = await work.load(request)
+            if let interval { signposter.endInterval("Preview", interval, "\(String(describing: result.layer))") }
             await self?.finished(key: key, id: id, lane: lane, result: result)
         }
         loads[key]?.task = task
@@ -368,6 +428,8 @@ public actor ImagePipeline {
         if let load = loads[key], load.id == id {
             loads[key] = nil
             load.waiters.values.forEach { $0.resume(returning: result.image) }
+            // A load that was given up is not here any more: what is counted was delivered (or failed).
+            metrics.record(result.image == nil ? .failed : result.layer, bucket: load.request.bucket, prefetch: load.waiters.isEmpty)
         }
         if result.downloaded { didStorePreview() }
         startLoads()
@@ -401,6 +463,8 @@ public actor ImagePipeline {
         struct Result: Sendable {
             var image: CGImage?
             var downloaded = false
+            /// Where it came from (`CacheMetrics`).
+            var layer = CacheLayer.failed
         }
 
         let api: PhotosAPI
@@ -419,7 +483,7 @@ public actor ImagePipeline {
             if let edit = request.edit { return await loadEdited(request, edit: edit) }
             let size = request.maxPixelSize
             if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
-                return Result(image: image)
+                return Result(image: image, layer: .disk)
             }
             if Task.isCancelled { return Result() }
             // Smart offline: a kept preview at least as large as the bucket, decoded to the size asked for. It is not copied
@@ -430,14 +494,15 @@ public actor ImagePipeline {
                 cache.remember(
                     image, key: PreviewCache.key(fileId: request.fileId, etag: request.etag, bucket: request.bucket),
                     maxPixelSize: request.decodeSize)
-                return Result(image: image)
+                return Result(image: image, layer: .smartOffline)
             }
             // Offline albums: thumbnail the downloaded original instead of hitting the network.
             if let file = localOriginal?(request.fileId, request.etag),
                 let image = ImageDecoding.decode(url: file, maxPixelSize: request.bucket)
             {
                 return Result(
-                    image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size))
+                    image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
+                    layer: .offline)
             }
             do {
                 let data: Data
@@ -448,7 +513,7 @@ public actor ImagePipeline {
                     data = try await api.preview(fileId: request.fileId, size: request.bucket, etag: request.etag)
                 }
                 if let image = cache.store(data, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
-                    return Result(image: image, downloaded: true)
+                    return Result(image: image, downloaded: true, layer: .network)
                 }
             } catch NetworkError.notFound {
                 // fall through to local thumbnail
@@ -465,7 +530,7 @@ public actor ImagePipeline {
             else { return Result() }
             return Result(
                 image: cache.store(image, fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size),
-                downloaded: true)
+                downloaded: true, layer: .network)
         }
 
         /// An edited photo (SPEC §16.3): rendered on the device from its unedited preview (or, for a Live Photo effect,
@@ -473,10 +538,12 @@ public actor ImagePipeline {
         func loadEdited(_ request: Request, edit: EditRecipe) async -> Result {
             let etag = request.cacheEtag
             if let image = cache.diskImage(fileId: request.fileId, etag: etag, bucket: request.bucket, maxPixelSize: request.maxPixelSize) {
-                return Result(image: image)
+                return Result(image: image, layer: .disk)
             }
             var base: CGImage?
             var downloaded = false
+            // A rendition counts where its base came from (a Live Photo still: the network).
+            var layer = CacheLayer.network
             if edit.live?.changesStill == true, let liveStill {
                 base = await liveStill(request.fileId, edit, request.bucket)
             }
@@ -486,6 +553,7 @@ public actor ImagePipeline {
                 let result = await load(unedited)
                 base = result.image
                 downloaded = result.downloaded
+                layer = result.layer
             }
             guard let base, !Task.isCancelled,
                 let rendered = EditRendering.rendition(of: base, recipe: edit, maxPixelSize: request.bucket)
@@ -493,8 +561,20 @@ public actor ImagePipeline {
             return Result(
                 image: cache.store(
                     rendered, fileId: request.fileId, etag: etag, bucket: request.bucket, maxPixelSize: request.maxPixelSize),
-                downloaded: downloaded)
+                downloaded: downloaded, layer: layer)
         }
+    }
+}
+
+// MARK: - Shared helper of the cache fillers (fill, SPEC §18.3)
+
+extension ImagePipeline {
+    /// Nothing waits for a preview from the server and no prefetch is queued or running: a background filler may use the
+    /// network without slowing what is on screen.
+    public var isNetworkIdle: Bool {
+        // Only the network lane: prefetches decoded from the disk (`prefetch(_:decode:)`, the viewer's neighbours) do not
+        // use the server. `queuedPrefetches` is per lane, so it is never empty as a whole.
+        running[.network, default: 0] == 0 && (queued[.network] ?? []).isEmpty && (queuedPrefetches[.network] ?? []).isEmpty
     }
 }
 
@@ -514,9 +594,10 @@ public struct CacheLimits: Sendable, Equatable {
         self.originalBytes = originalBytes
     }
 
-    /// The limits in effect: the defaults (previews 2 GB, originals 1 GB) unless the settings say otherwise.
-    public static func current(_ defaults: UserDefaults = .standard) -> CacheLimits {
-        var limits = CacheLimits()
+    /// The limits in effect unless the settings say otherwise: previews scaled by the free space
+    /// (`defaultPreviewBytes(availableBytes:)`, SPEC §18.2), originals 1 GB.
+    public static func current(_ defaults: UserDefaults = .standard, availableBytes: Int64? = availableDiskBytes()) -> CacheLimits {
+        var limits = CacheLimits(previewBytes: defaultPreviewBytes(availableBytes: availableBytes))
         if let bytes = defaults.object(forKey: previewLimitKey) as? NSNumber, bytes.int64Value > 0 {
             limits.previewBytes = bytes.int64Value
         }

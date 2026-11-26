@@ -140,7 +140,13 @@ struct MemoryStories: View {
             .padding(.vertical, MemoriesStrip.verticalPadding)
         }
         .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.viewAligned)
+        #if os(macOS)
+            .scrollTargetBehavior(.viewAligned)
+        #endif
+        // iPhone, iPad and Vision Pro: no scroll target behaviour. There the strip is hosted in the Library's UIKit grid,
+        // and `.viewAligned` trapped in SwiftUI (`ResolvedScrollBehavior.updateTarget`, during accessibility updates —
+        // UI tests, VoiceOver) in most UI-test runs; without it, none (STATUS §M8). Going on to the next story and the
+        // taps still bring a card to the leading edge through the scroll position.
         .scrollPosition(id: $front, anchor: .leading)
         .onGeometryChange(for: CGFloat.self) {
             $0.size.width
@@ -227,6 +233,8 @@ struct StoryCard: View {
     @State private var progressAtPause: Double = 0
     @State private var isHovering = false
     @Environment(\.scenePhase) private var scenePhase
+    /// Set when the strip is hosted in the Library's grid (UIKit), which takes it out of the window while scrolled away.
+    @Environment(GridHeaderVisibility.self) private var headerVisibility: GridHeaderVisibility?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.layoutDirection) private var layoutDirection
@@ -235,9 +243,12 @@ struct StoryCard: View {
 
     var photos: [FileID] { MemoryStory.photos(of: memory) }
 
-    /// Plays while in front and the app is active, unless VoiceOver reads it (then the photos are stepped through with
-    /// swipes up and down).
-    var isPlaying: Bool { isFront && scenePhase == .active && !voiceOver && photos.count > 1 }
+    /// Plays while in front, on screen and the app is active, unless VoiceOver reads it (then the photos are stepped
+    /// through with swipes up and down). Off screen it waits: going on to the next card animates the strip's scroll
+    /// position, which trapped in SwiftUI while the grid had taken the strip out of the window (`GridHeaderVisibility`).
+    var isPlaying: Bool {
+        isFront && scenePhase == .active && !voiceOver && photos.count > 1 && (headerVisibility?.isVisible ?? true)
+    }
 
     var body: some View {
         GeometryReader { proxy in

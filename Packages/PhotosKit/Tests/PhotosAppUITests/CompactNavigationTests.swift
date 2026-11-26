@@ -18,16 +18,21 @@ import Testing
     }
 
     @Test func everyDestinationIsATabOrListedInCollections() {
-        let listed = Set(CompactNavigation.sections(visible: { _ in true }).flatMap(\.destinations))
+        let visible: (AppDestination) -> Bool = { _ in true }
+        let listed = Set(CompactNavigation.sections(visible: visible).flatMap(\.destinations))
         for destination in AppDestination.allCases {
             if CompactNavigation.tabs.contains(destination) {
                 #expect(!listed.contains(destination), "\(destination) has a tab of its own")
+            } else if CompactNavigation.sheets.contains(destination) {
+                // Settings: a sheet from the account button (SPEC §19.2).
+                #expect(!listed.contains(destination), "\(destination) is a sheet")
             } else if destination == .onThisDay {
                 // The first section of Memories; reached by links, notifications and widgets.
                 #expect(CompactNavigation.tab(for: destination) == .collections)
             } else {
-                #expect(listed.contains(destination), "\(destination) cannot be reached on iPhone")
-                #expect(CompactNavigation.tab(for: destination) == .collections)
+                // Places without a row (Photos, Map, Smart albums…) open the row they belong to (SPEC §19.1).
+                let row = SidebarLayout.entry(for: destination, visible: visible).destination
+                #expect(listed.contains(row) || CompactNavigation.tabs.contains(row), "\(destination) cannot be reached on iPhone")
             }
         }
     }
@@ -35,8 +40,8 @@ import Testing
     @Test func listFollowsTheSidebarAndEndsWithBackup() {
         let sections = CompactNavigation.sections(visible: { _ in true })
         #expect(sections.map(\.kind) == [.browse, .collections, .utilities])
-        #expect(sections[0].destinations == [.photos, .videos, .favorites, .memories, .map])
-        #expect(sections[1].destinations == SidebarLayout.collections)
+        #expect(sections[0].destinations == [.favorites, .memories, .people, .places])
+        #expect(sections[1].destinations == [.albums, .sharedAlbums])
         #expect(sections[2].destinations == SidebarLayout.utilities + [.backup])
     }
 
@@ -47,14 +52,14 @@ import Testing
         #expect(hidden.isDisjoint(with: listed))
         #expect(listed.contains(.albums))
         // A group without rows has no header either.
-        let none = CompactNavigation.sections(visible: { !SidebarLayout.collections.contains($0) })
+        let none = CompactNavigation.sections(visible: { !SidebarLayout.albums.contains($0) && $0 != .sharedWithYou })
         #expect(none.map(\.kind) == [.browse, .utilities])
     }
 
     @Test func tabsKeepTheirOwnSelection() {
         #expect(CompactNavigation.tab(for: .library) == .library)
         #expect(CompactNavigation.tab(for: .search) == .search)
-        #expect(CompactNavigation.tab(for: .settings) == .settings)
+        #expect(CompactNavigation.tabs == [.library, .collections, .search])
         #expect(CompactNavigation.tab(for: .collections) == .collections)
         #expect(CompactNavigation.tab(for: .albums) == .collections)
         #expect(CompactNavigation.tab(for: .backup) == .collections)

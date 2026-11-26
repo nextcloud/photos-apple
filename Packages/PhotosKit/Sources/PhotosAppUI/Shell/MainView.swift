@@ -13,6 +13,8 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
     case library, photos, videos, favorites, onThisDay, memories, map
     case albums, sharedAlbums, smartAlbums, people, places, tags
     case folders, sharedWithYou, archive, recentlyDeleted, duplicates, freeSpace
+    /// One screen to get space back: duplicates, similar shots, large videos, free space (SPEC §19.3).
+    case cleanUp
     case search, backup, settings
     /// The sticker book (SPEC §15.8.2).
     case stickers
@@ -44,6 +46,9 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .recentlyDeleted: LocalizedStringResource("Recently deleted", bundle: .module)
         case .duplicates: LocalizedStringResource("Duplicates", bundle: .module)
         case .freeSpace: LocalizedStringResource("Free up server space", bundle: .module)
+        case .cleanUp:
+            LocalizedStringResource(
+                "Clean up", bundle: .module, comment: "Sidebar: duplicates, similar shots, large videos and free space in one screen.")
         case .search: LocalizedStringResource("Search", bundle: .module)
         case .backup: LocalizedStringResource("Backup", bundle: .module)
         case .settings: LocalizedStringResource("Settings", bundle: .module)
@@ -76,6 +81,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         case .recentlyDeleted: "trash"
         case .duplicates: "square.on.square"
         case .freeSpace: "externaldrive.badge.minus"
+        case .cleanUp: "sparkles"
         case .search: "magnifyingglass"
         case .backup: "icloud.and.arrow.up"
         case .settings: "gearshape"
@@ -85,10 +91,10 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         }
     }
 
-    /// Server feature needed to show this place, if any.
+    /// Server feature needed to show this place, if any. Places needs none: without the server's places it is the map,
+    /// which is made from the photos' GPS data (SPEC §19.1).
     var requiredFeature: ServerFeature? {
         switch self {
-        case .places: .places
         case .people: .recognize
         case .tags: .systemtags
         case .recentlyDeleted: .trashbin
@@ -102,30 +108,7 @@ public enum AppDestination: String, Hashable, CaseIterable, Identifiable, Sendab
         switch self {
         case .library, .photos, .videos, .favorites, .settings, .albums, .sharedAlbums, .backup, .collections: nil
         case .onThisDay, .memories, .map, .people, .places, .tags, .folders, .sharedWithYou, .smartAlbums, .archive, .search: nil
-        case .recentlyDeleted, .duplicates, .freeSpace, .stickers, .insights: nil
-        }
-    }
-}
-
-/// How the destinations are grouped in the sidebar (SPEC §6.2). "On this day" is the first section of Memories and has no
-/// row of its own; it stays a destination for notifications, widgets and links.
-enum SidebarLayout {
-    static let primary: [AppDestination] = [.library, .photos, .videos, .favorites, .memories, .map]
-    static let collections: [AppDestination] = [
-        .albums, .sharedAlbums, .smartAlbums, .people, .places, .tags, .sharedWithYou, .stickers,
-    ]
-    static let utilities: [AppDestination] = [.folders, .archive, .recentlyDeleted, .duplicates, .freeSpace, .insights]
-
-    /// The row that is highlighted while `destination` is shown.
-    static func row(for destination: AppDestination) -> AppDestination? {
-        switch destination {
-        case .onThisDay: .memories
-        case .search, .settings, .collections: nil
-        #if os(macOS)
-            // On the Mac, backup is a tab of the Settings window.
-            case .backup: nil
-        #endif
-        default: destination
+        case .recentlyDeleted, .duplicates, .freeSpace, .cleanUp, .stickers, .insights: nil
         }
     }
 }
@@ -140,16 +123,22 @@ struct MainView: View {
     @Environment(AppModel.self) private var app
     @State private var selection: AppDestination = .library
     @State private var paths: [AppDestination: [AppRoute]] = [:]
+    /// The Library's filter and the mode of Places that Photos, Videos and Map ask for (SPEC §19.1).
+    @State private var request = DestinationRequest()
     @State private var restored = false
     /// Selected destination and open album of this window (`NavigationSnapshot`), restored with the scene. Owned by `RootView`,
     /// which drops it when its account is removed.
     @Binding var storedNavigation: String
     @State private var lock = AppLock.shared
     #if !os(macOS)
-        @SceneStorage("tabCustomization") private var customization: TabViewCustomization
+        /// The sidebar's rows as the user arranged them (iPad, Vision Pro), on this device for every window. A new key for
+        /// the slimmer sidebar of SPEC §19.1: the arrangement of the earlier rows does not apply to it.
+        @AppStorage("sidebarTabCustomization") private var customization: TabViewCustomization
         @Environment(\.horizontalSizeClass) private var sizeClass
         /// Where the user is inside the Collections tab while another tab is shown.
         @State private var collectionsPlace: AppDestination = .collections
+        /// Settings, from the account button (SPEC §19.2).
+        @State private var showingSettings = false
     #endif
     #if os(iOS)
         @State private var linkedPhoto: ViewerStart?
@@ -158,6 +147,12 @@ struct MainView: View {
     #endif
     #if os(macOS)
         @AppStorage("sidebarUtilitiesExpanded") private var utilitiesExpanded = false
+        @AppStorage("sidebarAlbumsExpanded") private var albumsExpanded = true
+        /// Pinned, hidden and reordered rows (SPEC §19.1), on this device.
+        @AppStorage(SidebarCustomization.storageKey) private var sidebarStored = ""
+        /// The albums listed under Albums, for the highlight.
+        @State private var sidebarAlbumIds: [String] = []
+        @State private var editingSidebar = false
         @FocusState private var searchFocused: Bool
     #endif
     @State private var searchText = ""
@@ -211,6 +206,7 @@ struct MainView: View {
             .environment(\.showInFolder, ShowInFolderAction { directory in showFolder(directory) })
             .environment(\.showInTimeline, ShowInTimelineAction { item in showInTimeline(item) })
             .environment(\.timelineReveal, timelineReveal)
+            .environment(\.destinationRequest, request)
             .onChange(of: app.requestedDestination, initial: true) { _, _ in
                 restoreOnce()
                 openRequested()
@@ -230,6 +226,10 @@ struct MainView: View {
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_CARD_IMPORT=1` opens the import sheet at launch.
                 .task { if ProcessInfo.processInfo.environment["PHOTOS_DEBUG_CARD_IMPORT"] != nil { importingCard = true } }
+                    #if os(macOS)
+                        // `PHOTOS_DEBUG_EDIT_SIDEBAR=1` opens Edit Sidebar at launch.
+                        .task { if ProcessInfo.processInfo.environment["PHOTOS_DEBUG_EDIT_SIDEBAR"] != nil { editingSidebar = true } }
+                    #endif
             #endif
             // A link for another account, an unknown account or a public album asks first (not while locked).
             .linkPrompts(isLocked: lock.requiresUnlock)
@@ -257,7 +257,8 @@ struct MainView: View {
             showUndoHistory: { showingUndoHistory = true },
             openPalette: { grid in palette.open(grid: grid) },
             openLink: { open($0) },
-            search: { filters in showSearch(filters) }
+            search: { filters in showSearch(filters) },
+            editSidebar: editSidebarAction
         )
     }
 
@@ -279,13 +280,30 @@ struct MainView: View {
         Binding(get: { paths[destination] ?? [] }, set: { paths[destination] = $0.isEmpty ? nil : $0 })
     }
 
-    /// Shows a destination from its root, like choosing it in the sidebar.
+    /// View ▸ Edit Sidebar… (Mac).
+    var editSidebarAction: (() -> Void)? {
+        #if os(macOS)
+            { editingSidebar = true }
+        #else
+            nil
+        #endif
+    }
+
+    /// Shows a destination from its root, like choosing it in the sidebar. A destination without a row of its own opens
+    /// its row with the filter, mode or screen it stands for (`SidebarLayout.entry`).
     func go(_ destination: AppDestination) {
         guard visible(destination) else { return }
-        paths[destination] = nil
-        selection = destination
+        let entry = SidebarLayout.entry(for: destination, visible: visible)
+        guard visible(entry.destination) else { return }
+        show(entry)
+    }
+
+    func show(_ entry: SidebarLayout.Entry) {
+        request.apply(entry)
+        paths[entry.destination] = entry.routes.isEmpty ? nil : entry.routes
+        selection = entry.destination
         #if os(macOS)
-            if SidebarLayout.utilities.contains(destination) { utilitiesExpanded = true }
+            revealRow(of: entry.destination)
         #endif
     }
 
@@ -301,7 +319,7 @@ struct MainView: View {
         guard visible(.folders) else { return }
         let trail: [AppRoute] = FolderTrail.folders(to: directory).map { AppRoute.folder(path: $0) }
         #if os(macOS)
-            utilitiesExpanded = true
+            revealRow(of: .folders)
         #endif
         selection = .folders
         paths[.folders] = trail.isEmpty ? nil : trail
@@ -322,6 +340,9 @@ struct MainView: View {
             guard visible(destination) else { return }
             selection = destination
             paths[destination] = [.album(id: id)]
+            #if os(macOS)
+                revealRow(of: destination)
+            #endif
         case .photo(let fileId):
             // Only what the library shows: not archived photos (they need the Archive's unlock) or unknown ids.
             guard DeepLink.mayOpen(try? session.services?.library.item(fileId)) else { return }
@@ -332,7 +353,10 @@ struct MainView: View {
                 let below: [AppRoute] = (paths[selection] ?? []).filter { if case .photo = $0 { false } else { true } }
                 paths[selection] = below + [.photo(fileId: fileId)]
             #endif
-        case .place(let name): show(.place(name: name), in: .places)
+        case .place(let name):
+            // A place's photos come from the server's places; without them Places is only the map.
+            guard session.features.has(.places) else { return }
+            show(.place(name: name), in: .places)
         case .person(let name): show(.person(name: name), in: .people)
         case .tag(let name): show(.tag(name: name), in: .tags)
         case .folder(let path): showFolder(path)
@@ -354,6 +378,9 @@ struct MainView: View {
         guard visible(destination) else { return }
         selection = destination
         paths[destination] = [route]
+        #if os(macOS)
+            revealRow(of: destination)
+        #endif
     }
 
     func restoreOnce() {
@@ -361,17 +388,23 @@ struct MainView: View {
         restored = true
         if ImportLibrarySheet.debugExport != nil { importingLibrary = true }
         if let destination = Self.debugDestination {
-            selection = destination
+            // Before the server's features are known.
+            show(SidebarLayout.entry(for: destination, visible: { _ in true }))
         } else if let snapshot = NavigationSnapshot(stored: storedNavigation), snapshot.belongs(to: session.account.id.rawValue),
             let destination = AppDestination(rawValue: snapshot.destination),
             visible(destination)
         {
-            selection = destination
-            paths[destination] = snapshot.routes.isEmpty ? nil : snapshot.routes
+            // A window of an earlier version may have shown a place that is now a filter or a mode of a row.
+            go(destination)
+            if !snapshot.routes.isEmpty { paths[selection] = snapshot.routes }
         }
+        #if !os(macOS)
+            // Settings was a tab before it became a sheet (SPEC §19.2): a window left on it opens in the Library.
+            if selection == .settings { selection = .library }
+        #endif
         #if os(macOS)
             if selection == .backup || selection == .settings { selection = .library }
-            if SidebarLayout.utilities.contains(selection) { utilitiesExpanded = true }
+            revealRow(of: selection)
         #endif
     }
 
@@ -406,26 +439,8 @@ struct MainView: View {
         /// section that remembers its state, and the window toolbar a search field.
         var navigation: some View {
             NavigationSplitView {
-                List(selection: sidebarSelection) {
-                    Section {
-                        rows(SidebarLayout.primary)
-                    }
-                    Section {
-                        rows(SidebarLayout.collections)
-                    } header: {
-                        Text("Collections", bundle: .module)
-                    }
-                    Section(isExpanded: $utilitiesExpanded) {
-                        rows(SidebarLayout.utilities)
-                    } header: {
-                        Text("Utilities", bundle: .module)
-                    }
-                }
-                .listStyle(.sidebar)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    AccountHeader().padding(.horizontal, 16).padding(.vertical, 8)
-                }
-                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 320)
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 320)
             } detail: {
                 // A new stack per destination; what is open in it comes from `paths`.
                 stack(selection).id(selection)
@@ -436,12 +451,7 @@ struct MainView: View {
                 Label(filter.label, systemImage: filter.systemImage)
             }
             .searchFocused($searchFocused)
-            .toolbar {
-                // The button reads the focused grid itself: read here, every new `GridActions` (a struct of closures,
-                // never equal) re-rendered the whole window, which published new actions again — a loop at 100 % CPU
-                // as soon as the viewer was open.
-                ToolbarItem(placement: .primaryAction) { FocusedCommandPaletteButton() }
-            }
+            // No command palette button in the toolbar: Go ▸ Quick Actions… and ⌘K open it (SPEC §19.2).
             .onSubmit(of: .search) {
                 showSearch()
                 searchSubmissions += 1
@@ -458,19 +468,129 @@ struct MainView: View {
             }
         }
 
-        var sidebarSelection: Binding<AppDestination?> {
+        /// The slim sidebar (SPEC §19.1): the pinned rows, the albums with the top albums listed, Utilities (collapsed),
+        /// and the account at the bottom.
+        var sidebar: some View {
+            List(selection: sidebarSelection) {
+                Section {
+                    ForEach(customization.wrappedValue.shownPinned(visible: visible)) { row in
+                        sidebarRow(row)
+                    }
+                    .onMove { source, destination in movePinned(source, to: destination) }
+                }
+                let albumRows: [AppDestination] = customization.wrappedValue.shownAlbumRows(visible: visible)
+                if !albumRows.isEmpty {
+                    Section(isExpanded: $albumsExpanded) {
+                        if albumRows.contains(.albums) {
+                            SidebarAlbumRows(listed: $sidebarAlbumIds, account: session.account.id.rawValue)
+                        }
+                        ForEach(albumRows.filter { $0 != .albums }) { row in
+                            sidebarRow(row)
+                        }
+                    } header: {
+                        Text("Albums", bundle: .module)
+                    }
+                }
+                let utilities: [AppDestination] = customization.wrappedValue.shownUtilities(visible: visible)
+                if !utilities.isEmpty {
+                    Section(isExpanded: $utilitiesExpanded) {
+                        ForEach(utilities) { row in
+                            sidebarRow(row)
+                        }
+                    } header: {
+                        Text("Utilities", bundle: .module)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            // One menu for the list (a `contextMenu` on each row's label dropped the rows' icons in the sidebar).
+            .contextMenu(forSelectionType: SidebarItem.self) { items in
+                if let item = items.first { rowMenu(item) }
+            }
+            // Compact, at the bottom, like the account of Mail or Music: switch account, Settings (SPEC §19.1).
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    Divider()
+                    SidebarAccountButton()
+                }
+            }
+            .sheet(isPresented: $editingSidebar) {
+                EditSidebarSheet(customization: customization, visible: visible)
+            }
+        }
+
+        var customization: Binding<SidebarCustomization> {
             Binding(
-                get: { SidebarLayout.row(for: selection) },
-                set: { destination in
-                    if let destination { go(destination) }
+                get: { SidebarCustomization(stored: sidebarStored) },
+                set: { value in sidebarStored = value.isStandard ? "" : value.stored })
+        }
+
+        func movePinned(_ source: IndexSet, to destination: Int) {
+            let current = customization.wrappedValue
+            var shown = current.shownPinned(visible: visible)
+            shown.move(fromOffsets: source, toOffset: destination)
+            // Hidden rows and rows the server does not offer keep their place after the shown ones.
+            let rest = current.pinned.filter { !shown.contains($0) }
+            customization.wrappedValue = SidebarCustomization(pinned: shown + rest, hidden: current.hidden)
+        }
+
+        func sidebarRow(_ row: AppDestination) -> some View {
+            Label(String(localized: row.rowTitle), systemImage: row.systemImage)
+                .tag(SidebarItem.destination(row))
+        }
+
+        @ViewBuilder func rowMenu(_ item: SidebarItem) -> some View {
+            switch item {
+            case .destination(let row): rowMenu(row)
+            case .album(let id): SidebarAlbumMenu(albumId: id, account: session.account.id.rawValue)
+            }
+        }
+
+        /// Pin, unpin, hide; and Edit Sidebar… for everything else.
+        @ViewBuilder func rowMenu(_ row: AppDestination) -> some View {
+            let value = customization.wrappedValue
+            if value.canUnpin(row) {
+                Button(SidebarWording.unpin) { customization.wrappedValue.unpin(row) }
+            } else if value.canPin(row) {
+                Button(SidebarWording.pin) { customization.wrappedValue.pin(row) }
+            }
+            // "Shared with you" stands for the Shared row where the server has no shared albums.
+            let hiddenRow: AppDestination = row == .sharedWithYou ? .sharedAlbums : row
+            if value.canHide(hiddenRow) {
+                Button(SidebarWording.hide) { customization.wrappedValue.setHidden(hiddenRow, true) }
+            }
+            Divider()
+            Button(SidebarWording.editTitle) { editingSidebar = true }
+            if !value.isStandard {
+                Button(SidebarWording.restore) { customization.wrappedValue = .standard }
+            }
+        }
+
+        /// The highlighted row: an album listed under Albums while it is open, else the row of the destination.
+        var sidebarSelection: Binding<SidebarItem?> {
+            Binding(
+                get: {
+                    if selection == .albums, case .album(let id) = paths[.albums]?.first, sidebarAlbumIds.contains(id) {
+                        return .album(id)
+                    }
+                    return SidebarLayout.row(for: selection, visible: visible).map(SidebarItem.destination)
+                },
+                set: { item in
+                    switch item {
+                    case .destination(let destination): go(destination)
+                    case .album(let id):
+                        selection = .albums
+                        paths[.albums] = [.album(id: id)]
+                    case nil: break
+                    }
                 })
         }
 
-        func rows(_ destinations: [AppDestination]) -> some View {
-            ForEach(destinations.filter(visible)) { destination in
-                Label(String(localized: destination.title), systemImage: destination.systemImage)
-                    .tag(destination)
-            }
+        /// Opens the collapsed group that holds `destination`'s row, so the highlight can be seen.
+        func revealRow(of destination: AppDestination) {
+            guard let row = SidebarLayout.row(for: destination, visible: visible) else { return }
+            if customization.wrappedValue.utilities.contains(row) { utilitiesExpanded = true }
+            if SidebarLayout.albums.contains(row) || row == .sharedWithYou { albumsExpanded = true }
         }
 
         func showSearch() {
@@ -503,9 +623,11 @@ struct MainView: View {
 
                 // The sidebar's rows (iPad at regular width, Vision Pro). They have no place in a tab bar; where
                 // there is only a tab bar, the Collections tab lists them instead.
+                // The slim sidebar (SPEC §19.1); the user hides and reorders its rows with the sidebar's Edit
+                // (`TabViewCustomization`), and "Restore Default Sidebar" in the account header's menu undoes that.
                 if !usesCollectionsTab {
                     TabSection {
-                        ForEach(SidebarLayout.primary.filter { $0 != .library }) { destination in
+                        ForEach(SidebarLayout.pinnedByDefault.filter { $0 != .library && visible($0) }) { destination in
                             tab(destination)
                         }
                     } header: {
@@ -515,17 +637,18 @@ struct MainView: View {
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
-                        ForEach(SidebarLayout.collections.filter(visible)) { destination in
-                            tab(destination)
+                        // Under the "Albums" header, as on the Mac: All Albums, Shared.
+                        ForEach(SidebarLayout.albumRows(visible: visible)) { destination in
+                            tab(destination, title: destination == .albums ? SidebarWording.allAlbums : nil)
                         }
                     } header: {
-                        Text("Collections", bundle: .module)
+                        Text("Albums", bundle: .module)
                     }
-                    .customizationID("section.collections")
+                    .customizationID("section.albums")
                     .defaultVisibility(.hidden, for: .tabBar)
 
                     TabSection {
-                        ForEach(SidebarLayout.utilities.filter(visible)) { destination in
+                        ForEach(SidebarLayout.utilities.filter(visible) + [.backup]) { destination in
                             tab(destination)
                         }
                     } header: {
@@ -533,29 +656,19 @@ struct MainView: View {
                     }
                     .customizationID("section.utilities")
                     .defaultVisibility(.hidden, for: .tabBar)
-
-                    Tab(value: AppDestination.backup) {
-                        stack(.backup)
-                    } label: {
-                        Label(String(localized: AppDestination.backup.title), systemImage: AppDestination.backup.systemImage)
-                    }
-                    .customizationID(AppDestination.backup.rawValue)
-                    .defaultVisibility(.hidden, for: .tabBar)
                 }
 
-                Tab(value: AppDestination.settings) {
-                    stack(.settings)
-                } label: {
-                    Label(String(localized: AppDestination.settings.title), systemImage: AppDestination.settings.systemImage)
-                }
-                .customizationID(AppDestination.settings.rawValue)
+                // No Settings tab: the account button in the Library's and Collections' top bars opens Settings as a
+                // sheet (SPEC §19.2).
             }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewCustomization($customization)
             // The models are handed over explicitly: when the sidebar first appears during a rotation (portrait → landscape),
             // UIKit sizes the header before SwiftUI has given it the environment, and the app crashed ("No Observable object
             // of type AppModel found").
-            .tabViewSidebarHeader { AccountHeader().environment(app).environment(session) }
+            .tabViewSidebarHeader {
+                AccountHeader(restoreSidebar: { customization = TabViewCustomization() }).environment(app).environment(session)
+            }
             .onChange(of: selection, initial: true) { _, destination in
                 if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
             }
@@ -563,6 +676,15 @@ struct MainView: View {
                 // The Collections list only exists as a tab; with a sidebar its rows are there.
                 if !uses, selection == .collections { selection = .library }
             }
+            // Settings is a sheet, not a place: a link or the command palette that asks for it shows the sheet over the
+            // screen the user is on (SPEC §19.2).
+            .onChange(of: selection, initial: true) { old, destination in
+                guard destination == .settings else { return }
+                selection = old == .settings ? .library : old
+                showingSettings = true
+            }
+            .environment(\.showSettings, ShowSettingsAction { showingSettings = true })
+            .sheet(isPresented: $showingSettings) { SettingsSheet() }
             #if os(iOS)
                 .mediaViewer($linkedPhoto)
                 // iPhone: the tab bar steps back while the content scrolls down, and the accessory above it shows what
@@ -585,11 +707,11 @@ struct MainView: View {
             }
         #endif
 
-        func tab(_ destination: AppDestination) -> some TabContent<AppDestination> {
+        func tab(_ destination: AppDestination, title: String? = nil) -> some TabContent<AppDestination> {
             Tab(value: destination) {
                 stack(destination)
             } label: {
-                Label(String(localized: destination.title), systemImage: destination.systemImage)
+                Label(title ?? String(localized: destination.rowTitle), systemImage: destination.systemImage)
             }
             .customizationID(destination.rawValue)
         }
@@ -691,21 +813,25 @@ struct DestinationView: View {
     @Binding var searchFilters: [SearchFilter]
     /// Return in the window's search field (macOS).
     var searchSubmissions = 0
+    /// The filter or mode Photos, Videos and Map asked for (SPEC §19.1).
+    @Environment(\.destinationRequest) private var request
 
     var body: some View {
         switch destination {
-        case .library: TimelineScreen(filter: .all)
-        case .photos: TimelineScreen(filter: .photos)
-        case .videos: TimelineScreen(filter: .videos)
+        // Photos and Videos are filters of the Library; `MainView.go` opens them there. Kept for links pushed by value.
+        case .library, .photos, .videos:
+            TimelineScreen(initialKind: destination == .library ? request.libraryKind : destination == .photos ? .photos : .videos)
+                .id(request.librarySerial)
         case .favorites: TimelineScreen(filter: .favorites)
         case .settings: SettingsView()
         case .albums: AlbumsScreen(kind: .own)
         case .backup: BackupScreen()
         case .onThisDay: MemoriesScreen(onlyOnThisDay: true)
         case .memories: MemoriesScreen()
-        case .map: MapScreen()
+        // The map is a mode of Places.
+        case .map: PlacesHome(initialMode: .map)
         case .people: PeopleScreen()
-        case .places: PlacesScreen()
+        case .places: PlacesHome(initialMode: request.placesMode).id(request.placesSerial)
         case .tags: TagsScreen()
         case .folders: FoldersScreen()
         case .sharedWithYou: FoldersScreen(sharedWithYou: true)
@@ -718,8 +844,12 @@ struct DestinationView: View {
                 SearchTab()
             #endif
         case .recentlyDeleted: RecentlyDeletedScreen()
-        case .duplicates: DuplicatesScreen()
-        case .freeSpace: FreeSpaceScreen()
+        // Both live in Clean up now (SPEC §19.3); their links and commands open it at their section.
+        case .duplicates, .freeSpace: CleanUpScreen(initialSection: CleanUpSection.opened(by: destination))
+        // The sidebar's row; Duplicates and Free up space requests come here with their section (SPEC §19.1).
+        case .cleanUp:
+            CleanUpScreen(initialSection: request.cleanUpSource.flatMap { CleanUpSection.opened(by: $0) })
+                .id(request.cleanUpSerial)
         case .sharedAlbums: AlbumsScreen(kind: .shared)
         case .stickers: StickerBookScreen()
         case .insights: InsightsScreen()
@@ -734,30 +864,25 @@ struct DestinationView: View {
     }
 }
 
-/// Account name and server in the sidebar header, with the account switcher.
+extension EnvironmentValues {
+    /// What Photos, Videos and Map asked the Library and Places to show (`MainView`).
+    @Entry var destinationRequest = DestinationRequest()
+}
+
+/// Account name and server in the sidebar header, with the account switcher (iPad, Vision Pro; the Mac has a compact
+/// account button at the bottom of its sidebar).
 struct AccountHeader: View {
-    @Environment(AppModel.self) private var app
+    /// "Restore Default Sidebar": the header's menu is the sidebar's (iPad, Vision Pro).
+    var restoreSidebar: (() -> Void)? = nil
     @Environment(SessionModel.self) private var session
     @State private var addingAccount = false
 
     var body: some View {
         Menu {
-            ForEach(app.accounts) { account in
-                Button {
-                    app.switchTo(account.id)
-                } label: {
-                    // A name and a server: nothing to translate.
-                    let title = "\(account.displayName) – \(account.hostDisplayName)"
-                    if account.id == session.account.id {
-                        Label(title, systemImage: "checkmark")
-                    } else {
-                        Text(verbatim: title)
-                    }
-                }
-            }
-            if app.canAddAccount {
+            AccountSwitchItems(addingAccount: $addingAccount)
+            if let restoreSidebar {
                 Divider()
-                Button(String(localized: "Add account…", bundle: .module)) { addingAccount = true }
+                Button(SidebarWording.restore, systemImage: "arrow.counterclockwise") { restoreSidebar() }
             }
         } label: {
             HStack(spacing: 10) {
@@ -776,16 +901,6 @@ struct AccountHeader: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityHint(Text("Switch or add an account", bundle: .module))
-        .sheet(isPresented: $addingAccount) {
-            NavigationStack {
-                LoginView(isAddingAccount: true)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "Cancel", bundle: .module)) { addingAccount = false }
-                        }
-                    }
-            }
-            .frame(minWidth: 420, minHeight: 560)
-        }
+        .sheet(isPresented: $addingAccount) { AddAccountSheet() }
     }
 }

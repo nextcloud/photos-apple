@@ -160,7 +160,10 @@ struct MemoriesStrip: View {
     static func load(_ services: AccountServices) async -> [Memory]? {
         let snapshot: MemoriesSnapshot = (try? await services.library.memories()) ?? MemoriesSnapshot()
         guard !Task.isCancelled else { return nil }
-        return cards(snapshot)
+        let cards = cards(snapshot)
+        // SPEC §18.2: memory covers rank higher for the caches.
+        Task.detached(priority: .utility) { await services.noteCacheRole(.memoryCover, fileIds: Set(cards.map(\.cover))) }
+        return cards
     }
 
     /// Which memories the strip shows, in this order: On this day, the year in review, then trips (newest first).

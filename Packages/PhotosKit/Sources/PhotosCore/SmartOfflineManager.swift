@@ -5,6 +5,7 @@ import Foundation
 import Network
 import OSLog
 import PhotosDomain
+import PhotosMedia
 import PhotosModel
 import PhotosNetworking
 import PhotosStore
@@ -32,6 +33,10 @@ public enum SmartOfflineSettings {
 /// account's SmartOffline folder, outside the caches, so a cache trim never removes them; a file's modification date is
 /// its "last used" for the LRU eviction and is set when the image pipeline reads it (at most once a day).
 ///
+/// Previews come from the server as JPEG, or as PNG for PNG files; a PNG preview is stored as HEIC, a tenth of its size
+/// (`PreviewTranscoding`, SPEC §18.3.3). PNG previews kept by an earlier version are converted in later passes, a few at
+/// a time and without the network; JPEG previews are kept as they are.
+///
 /// Removing is done in every pass. Downloading needs an unmetered network (Wi-Fi, Ethernet; not cellular, a hotspot or Low
 /// Data Mode) and no Low Power Mode; in the foreground a pass downloads at most `foregroundLimit` files, the rest is left to
 /// the background task that runs while the device charges (`SmartOfflineScheduling`).
@@ -39,6 +44,8 @@ public actor SmartOfflineManager {
     let services: AccountServices
     let store: SmartOfflineStore
     public nonisolated let directory: URL
+    /// Thumbnails of the whole library (SPEC §18.3.1); smart offline's scheduling runs it too.
+    public nonisolated let thumbnails: LibraryThumbnailFiller
     private let settings: @Sendable () -> (budget: SmartOfflineBudget, quality: SmartOfflineQuality)
     private let excludedFolders: @Sendable () async -> [String]
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "smart-offline")
@@ -49,12 +56,16 @@ public actor SmartOfflineManager {
     private let index: Mutex<[FileID: Entry]>
     /// Files whose "last used" was set in this process.
     private let touched = Mutex<Set<FileID>>([])
+    /// Kept previews found not worth converting to HEIC in this process (JPEG): not looked at again.
+    private var conversionChecked = Set<FileID>()
     /// Tests set the conditions instead of reading the real ones.
     var networkOverride: NetworkConditions?
     var lowPowerOverride: Bool?
 
     /// Files a pass downloads in the foreground at most (the background task does the rest while the device charges).
     public static let foregroundLimit = 150
+    /// Kept PNG previews a foreground pass converts to HEIC at most (about 0.3 s each for 2048 px).
+    public static let foregroundConversions = 20
 
     struct Entry: Sendable, Equatable {
         var etag: String
@@ -68,6 +79,8 @@ public actor SmartOfflineManager {
         public var evicted = 0
         /// Files that are wanted but not downloaded yet (no Wi-Fi, Low Power Mode, the limit, the budget's real sizes).
         public var remaining = 0
+        /// Kept previews converted to HEIC.
+        public var converted = 0
     }
 
     public init(
@@ -82,6 +95,7 @@ public actor SmartOfflineManager {
         self.settings = settings
         self.excludedFolders = excludedFolders
         directory = services.layout.accountDirectory(services.account.id).appending(path: "SmartOffline")
+        thumbnails = LibraryThumbnailFiller(services: services, excludedFolders: excludedFolders)
         OfflineManager.prepare(directory)
         let rows = (try? SmartOfflineStore(database: services.database).kept()) ?? []
         index = Mutex(
@@ -129,7 +143,7 @@ public actor SmartOfflineManager {
     // MARK: Conditions
 
     var network: NetworkConditions { networkOverride ?? NetworkConditions(pathMonitor.currentPath) }
-    var isLowPowerMode: Bool { lowPowerOverride ?? ProcessInfo.processInfo.isLowPowerModeEnabled }
+    var isLowPowerMode: Bool { lowPowerOverride ?? BackgroundPreparation.isLowPowerMode }
 
     func setConditions(network: NetworkConditions?, lowPower: Bool?) {
         networkOverride = network
@@ -157,18 +171,21 @@ public actor SmartOfflineManager {
     /// - Parameters:
     ///   - limit: downloads at most this many files (nil: no limit).
     ///   - shouldContinue: checked before every download; false stops the pass (the background time is over).
+    ///   - conversions: converts at most this many kept PNG previews to HEIC (nil: no limit).
     @discardableResult
-    public func run(limit: Int? = foregroundLimit, shouldContinue: @escaping @Sendable () -> Bool = { true }) async -> Outcome {
+    public func run(
+        limit: Int? = foregroundLimit, conversions: Int? = foregroundConversions, shouldContinue: @escaping @Sendable () -> Bool = { true }
+    ) async -> Outcome {
         guard !isShutDown else { return Outcome() }
         if let running { return await running.value }
-        let task = Task { await self.pass(limit: limit, shouldContinue: shouldContinue) }
+        let task = Task { await self.pass(limit: limit, conversions: conversions, shouldContinue: shouldContinue) }
         running = task
         let outcome = await task.value
         running = nil
         return outcome
     }
 
-    private func pass(limit: Int?, shouldContinue: @escaping @Sendable () -> Bool) async -> Outcome {
+    private func pass(limit: Int?, conversions: Int?, shouldContinue: @escaping @Sendable () -> Bool) async -> Outcome {
         var outcome = Outcome()
         let (budget, quality) = settings()
         let now = Date()
@@ -201,6 +218,12 @@ public actor SmartOfflineManager {
             try await store.updateReasons(reasons)
 
             var used = rows.filter { !plan.evictions.contains($0.fileId) }.reduce(0) { $0 + $1.bytes }
+            // Needs no network: before the downloads, so that it happens offline too.
+            let evicted = Set(plan.evictions)
+            let (converted, saved) = await convertKept(
+                rows.filter { !evicted.contains($0.fileId) }, limit: conversions, shouldContinue: shouldContinue)
+            outcome.converted = converted
+            used -= saved
             let downloads = plan.downloads
             outcome.remaining = downloads.count
             guard !downloads.isEmpty, mayDownload else { return outcome }
@@ -244,10 +267,11 @@ public actor SmartOfflineManager {
             let target: URL
             switch quality {
             case .screen:
-                name = "\(item.fileId)-\(CacheFileName.etag(item.etag))-\(SmartOfflinePolicy.previewSize).jpg"
-                target = directory.appending(path: name)
                 let data = try await services.api.preview(fileId: item.fileId, size: SmartOfflinePolicy.previewSize, etag: item.etag)
-                try data.write(to: target, options: .atomic)
+                let stored = PreviewTranscoding.storage(for: data)
+                name = Self.previewName(item.fileId, etag: item.etag, heic: stored.isHEIC)
+                target = directory.appending(path: name)
+                try stored.data.write(to: target, options: .atomic)
             case .original:
                 let ext = (item.name as NSString).pathExtension
                 name = "\(item.fileId)-\(CacheFileName.etag(item.etag)).\(ext.isEmpty ? "bin" : ext)"
@@ -262,6 +286,56 @@ public actor SmartOfflineManager {
             if !Task.isCancelled { logger.debug("smart offline download failed: \(error.localizedDescription, privacy: .public)") }
             return nil
         }
+    }
+
+    /// The file name of a kept preview.
+    static func previewName(_ fileId: FileID, etag: String, heic: Bool) -> String {
+        "\(fileId)-\(CacheFileName.etag(etag))-\(SmartOfflinePolicy.previewSize).\(heic ? PreviewTranscoding.heicExtension : "jpg")"
+    }
+
+    /// Converts kept previews that are worth storing as HEIC (PNG previews kept before, SPEC §18.3.3): the HEIC file is
+    /// written and recorded before the old one is removed, so a lookup in between finds one or the other. Returns how
+    /// many were converted and the bytes saved.
+    private func convertKept(_ rows: [SmartOfflineStore.Row], limit: Int?, shouldContinue: @escaping @Sendable () -> Bool) async
+        -> (Int, Int64)
+    {
+        guard PreviewTranscoding.canWriteHEIC else { return (0, 0) }
+        var converted = 0
+        var saved: Int64 = 0
+        for row in rows
+        where row.quality == .screen && !row.localPath.hasSuffix(".\(PreviewTranscoding.heicExtension)")
+            && !conversionChecked.contains(row.fileId)
+        {
+            if let limit, converted >= limit { break }
+            guard shouldContinue(), !Task.isCancelled, !isShutDown else { break }
+            let old = directory.appending(path: row.localPath)
+            let work = Task.detached(priority: .utility) { () -> Data? in
+                // The type comes from the file's first bytes; only a preview worth converting is read whole.
+                guard PreviewTranscoding.shouldStoreAsHEIC(PreviewTranscoding.type(of: old)), let data = try? Data(contentsOf: old) else {
+                    return nil
+                }
+                return PreviewTranscoding.heic(from: data)
+            }
+            guard let heic = await work.value else {
+                conversionChecked.insert(row.fileId)
+                continue
+            }
+            let name = Self.previewName(row.fileId, etag: row.etag, heic: true)
+            do {
+                try heic.write(to: directory.appending(path: name), options: .atomic)
+                var updated = row
+                updated.localPath = name
+                updated.bytes = Int64(heic.count)
+                try await store.insert(updated)
+                index.withLock { $0[row.fileId] = Entry(etag: row.etag, file: name, quality: .screen) }
+                try? FileManager.default.removeItem(at: old)
+                converted += 1
+                saved += max(0, row.bytes - updated.bytes)
+            } catch {
+                try? FileManager.default.removeItem(at: directory.appending(path: name))
+            }
+        }
+        return (converted, saved)
     }
 
     /// What the kept files cover.
@@ -285,5 +359,6 @@ public actor SmartOfflineManager {
         pathMonitor.cancel()
         running?.cancel()
         _ = await running?.value
+        await thumbnails.shutdown()
     }
 }

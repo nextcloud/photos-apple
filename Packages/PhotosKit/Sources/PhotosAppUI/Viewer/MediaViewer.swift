@@ -330,6 +330,10 @@ struct MediaViewer: View {
                 zoomScale = ViewerZoom.minimumScale
                 if let id { currentChanged?(id) }
             }
+            // SPEC §18.2: the photo and its neighbours stay decoded under memory pressure; a second on screen is a view.
+            .task(id: currentFileId) { await session.services?.viewerShows(currentFileId, neighbours: neighbourFileIds) }
+            // The neighbours' previews are loaded ahead (SPEC §18.1.2).
+            .modifier(ViewerNeighbourPrefetch(pages: shownIds.map { fileId(ofPage: $0) }, current: currentFileId))
             .task(id: currentFileId) {
                 guard let current = currentFileId, let library = session.services?.library else { return }
                 do {
@@ -341,7 +345,7 @@ struct MediaViewer: View {
                 if let key = Self.viewerKey(key) {
                     perform(key)
                 } else {
-                    cullingKey(key)
+                    otherKey(key)
                 }
             }
             .viewerCulling(culling, ids: cullingIds, chromeHidden: chromeHidden) { step(1) }
@@ -598,7 +602,7 @@ struct MediaViewer: View {
     /// The viewer's plain keys. On iPhone and iPad the rating keys are among them: the viewer is not focusable there, so
     /// the `onKeyPress` of `viewerCulling` does not get them (see `hardwareKeys`).
     static var hardwareKeys: [KeyEquivalent] {
-        var keys: [KeyEquivalent] = [.leftArrow, .rightArrow, .escape, .space]
+        var keys: [KeyEquivalent] = [.leftArrow, .rightArrow, .escape, .space] + deleteKeys
         #if os(iOS)
             keys += "pxu012345".map { KeyEquivalent($0) }
         #endif
@@ -686,11 +690,12 @@ struct MediaViewer: View {
         }
     #endif
 
+    /// The viewer's toolbar (Mac) and ornament (Vision Pro), calm as in Photos (SPEC §19.2): favourite, info, share, edit
+    /// and More after the date. Delete is in More and on the ⌫ key (and Image ▸ Delete…); the window's search field
+    /// steps aside while a photo is open.
     @ToolbarContentBuilder var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: viewerPlacement) {
             if let item = currentItem {
-                ShareMediaButton(items: [item])
-                    .help(String(localized: "Share", bundle: .module))
                 Button {
                     toggleFavorite(item)
                 } label: {
@@ -705,6 +710,8 @@ struct MediaViewer: View {
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 .help(String(localized: "Info", bundle: .module))
+                ShareMediaButton(items: [item])
+                    .help(String(localized: "Share", bundle: .module))
                 #if os(visionOS)
                     // Spatial photos and panoramas (SPEC §6.2 visionOS specifics).
                     SpatialViewerButton(item: item)
@@ -719,20 +726,36 @@ struct MediaViewer: View {
                 }
                 Menu {
                     moreActions(item)
+                    if item.permissions.canDelete {
+                        Divider()
+                        Button(role: .destructive) {
+                            confirmDelete = true
+                        } label: {
+                            Label(Self.deleteMenuTitle, systemImage: "trash")
+                        }
+                    }
                 } label: {
                     Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
                 }
                 .help(String(localized: "More", bundle: .module))
-                Button(role: .destructive) {
-                    confirmDelete = true
-                } label: {
-                    Label(String(localized: "Delete", bundle: .module), systemImage: "trash")
-                }
-                .help(String(localized: "Delete", bundle: .module))
-                .disabled(!item.permissions.canDelete)
             }
         }
     }
+
+    /// "Delete…" in the toolbar's More menu: it asks first.
+    static var deleteMenuTitle: String { String(localized: "Delete…", bundle: .module) }
+
+    /// The keys that are not paging or culling: ⌫ deletes the photo shown after asking (SPEC §19.2).
+    func otherKey(_ key: KeyEquivalent) {
+        if Self.deleteKeys.contains(key) {
+            if currentItem?.permissions.canDelete == true { confirmDelete = true }
+        } else {
+            cullingKey(key)
+        }
+    }
+
+    /// ⌫ and ⌦, as in Photos.
+    static let deleteKeys: [KeyEquivalent] = [.delete, .deleteForward]
 
     /// The More menu: add to album, save · extract text, edit date and location · archive.
     @ViewBuilder func moreActions(_ item: MediaItem) -> some View {

@@ -64,7 +64,8 @@ enum PhotoTintLookup {
     static func dominant(_ fileId: FileID, services: AccountServices) -> PaletteColor? {
         guard let item = try? services.library.item(fileId) else {
             // Not in the index (a cover of a shared album): a preview in memory, if there is one.
-            return services.images.cache.bestMemoryImage(fileId: fileId, etag: "", upTo: 1024).flatMap(PhotoColors.dominant(image:))
+            let etag: String = services.images.displayedEtag(fileId: fileId, etag: "")
+            return services.images.cache.bestMemoryImage(fileId: fileId, etag: etag, upTo: 1024).flatMap(PhotoColors.dominant(image:))
         }
         return dominant(item, services: services)
     }

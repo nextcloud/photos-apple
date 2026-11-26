@@ -135,9 +135,7 @@ final class LookTourTests: XCTestCase {
     func testSettings() throws {
         pause(5)
         endGuestModeIfOn()
-        let settings = app.tabBars.buttons["Settings"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 20))
-        settings.tap()
+        app.openSettings()
         let backdrop = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Viewer Background'")).firstMatch
         for _ in 0..<12 where !(backdrop.exists && backdrop.isHittable) {
             app.swipeUp(velocity: .slow)

@@ -15,7 +15,7 @@ enum TestEnvironment {
     }()
 
     static let noVision: Comment = "Vision does not run in the simulator; covered by the macOS tests."
-    /// Rendering pictures and writing videos blocked the whole test run in the CI simulator, which has no GPU (a
-    /// blocked call is not stopped by a time limit). Covered by the macOS tests.
+    /// Rendering pictures, writing videos and encoding HEIC blocked the whole test run in the CI simulator, which has no
+    /// GPU (a blocked call is not stopped by a time limit). Covered by the macOS tests.
     static let noGPU: Comment = "Rendering needs a GPU, which the CI simulator lacks; covered by the macOS tests."
 }

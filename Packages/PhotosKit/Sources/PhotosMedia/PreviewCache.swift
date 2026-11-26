@@ -4,10 +4,11 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import PhotosDomain
 import PhotosModel
 import Synchronization
 
-/// Wraps a `CGImage` for `NSCache`.
+/// A decoded preview in the memory cache. `@unchecked`: `CGImage` is immutable and safe to share between threads.
 final class ImageBox: @unchecked Sendable {
     let image: CGImage
     /// The size limit it was decoded with (long edge in pixels). An image smaller than that is the whole preview.
@@ -21,13 +22,16 @@ final class ImageBox: @unchecked Sendable {
 /// Disk + memory cache of preview images keyed by `(fileId, etag, bucket)` (SPEC §5.5.1).
 public final class PreviewCache: @unchecked Sendable {
     public let directory: URL
-    private let memory = NSCache<NSString, ImageBox>()
+    /// Decoded previews (`MemoryImageCache`: LRU within a byte budget, gives back by `MemoryPressurePolicy`).
+    let memory: MemoryImageCache
     private let fileManager = FileManager.default
     private let ioQueue = DispatchQueue(label: "com.nextcloud.photos.previewcache", qos: .utility)
     /// Fires when the system is short of memory (the notification behind `didReceiveMemoryWarning`, also on the Mac).
     private let memoryPressure: any DispatchSourceMemoryPressure
     /// Disk hits whose files' modification dates (the "last used" of `trim`) are not written yet.
     private let touches = Mutex(Touches())
+    /// What a trim needs to know about the photos (SPEC §18.2): set by the account's services, read on the cache's queue.
+    private let evictionContextProvider = Mutex<(@Sendable () -> EvictionContext)?>(nil)
 
     struct Touches {
         /// Keys already noted in this process: a file is touched at most once per run.
@@ -58,17 +62,25 @@ public final class PreviewCache: @unchecked Sendable {
 
     public init(directory: URL, memoryLimitBytes: Int = PreviewCache.defaultMemoryLimit()) {
         self.directory = directory
-        memory.totalCostLimit = memoryLimitBytes
-        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: ioQueue)
+        memory = MemoryImageCache(limit: memoryLimitBytes)
+        let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: ioQueue)
+        memoryPressure = pressure
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        // Decoded previews are the largest thing the app can give back at once; they come back from disk when needed.
-        memoryPressure.setEventHandler { [weak self] in self?.clearMemory() }
-        memoryPressure.activate()
+        // Decoded previews are the largest thing the app can give back at once; they come back from disk when needed. What
+        // is on screen stays (SPEC §18.2): the large decodes go first.
+        pressure.setEventHandler { [weak self] in
+            guard let self else { return }
+            memory.relieve(memoryPressure.data.contains(.critical) ? .critical : .warning)
+        }
+        pressure.activate()
     }
 
     deinit { memoryPressure.cancel() }
 
-    public var memoryLimitBytes: Int { memory.totalCostLimit }
+    public var memoryLimitBytes: Int { memory.limit }
+
+    /// Bytes the decoded previews in memory take.
+    public var memoryCostBytes: Int { memory.totalCost }
 
     static func key(fileId: FileID, etag: String, bucket: Int) -> String {
         "\(fileId)-\(etag.isEmpty ? "0" : CacheFileName.etag(etag))-\(bucket)"
@@ -85,7 +97,7 @@ public final class PreviewCache: @unchecked Sendable {
     /// Previews are decoded no larger than they are shown (`maxPixelSize`), so the image in memory may be smaller than
     /// its bucket: with `minPixelSize` only an image decoded with at least that limit counts.
     public func memoryImage(fileId: FileID, etag: String, bucket: Int, minPixelSize: Int = 0) -> CGImage? {
-        guard let box = memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket) as NSString),
+        guard let box = memory.object(forKey: Self.key(fileId: fileId, etag: etag, bucket: bucket)),
             box.maxPixelSize >= min(minPixelSize, bucket)
         else { return nil }
         return box.image
@@ -177,12 +189,30 @@ public final class PreviewCache: @unchecked Sendable {
 
     func remember(_ image: CGImage, key: String, maxPixelSize: Int) {
         // A larger decode already in memory serves this size too; don't replace it with a smaller one.
-        if let existing = memory.object(forKey: key as NSString), existing.maxPixelSize > maxPixelSize { return }
-        memory.setObject(
-            ImageBox(image, maxPixelSize: maxPixelSize), forKey: key as NSString, cost: image.bytesPerRow * image.height)
+        if let existing = memory.peek(key), existing.maxPixelSize > maxPixelSize { return }
+        memory.setObject(ImageBox(image, maxPixelSize: maxPixelSize), forKey: key, cost: image.bytesPerRow * image.height)
     }
 
-    public func clearMemory() { memory.removeAllObjects() }
+    public func clearMemory() { memory.removeAll() }
+
+    // MARK: Memory pressure (SPEC §18.2)
+
+    /// Gives decoded previews back as if the system had sent a memory warning of this level. Returns the bytes freed.
+    @discardableResult
+    public func relieveMemory(_ level: MemoryPressurePolicy.Level) -> Int { memory.relieve(level) }
+
+    /// The photo the viewer shows and its neighbours: their decodes stay under memory pressure.
+    public func setViewerFocus(current: FileID?, neighbours: [FileID] = []) {
+        memory.setFocus(MemoryPressurePolicy.Focus(current: current, neighbours: Set(neighbours).subtracting(current.map { [$0] } ?? [])))
+    }
+
+    /// Clears the viewer's focus when it is still on `fileId` (the viewer closed; paging on has set the next one already).
+    public func clearViewerFocus(ifCurrent fileId: FileID) {
+        if memory.focus.current == fileId { memory.setFocus(MemoryPressurePolicy.Focus()) }
+    }
+
+    /// Photos whose tile-size decodes stay under memory pressure: covers, key photos, memory covers.
+    public func setProtectedInMemory(_ fileIds: Set<FileID>) { memory.setProtected(fileIds) }
 
     public func totalSize() -> Int64 {
         guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
@@ -193,10 +223,39 @@ public final class PreviewCache: @unchecked Sendable {
         return total
     }
 
-    /// Deletes least-recently-used files until the cache is below `limit` bytes, in the background.
+    // MARK: Disk trim (SPEC §5.5, §18.2)
+
+    /// What a trim knows about the photos besides the files themselves.
+    public struct EvictionContext: Sendable {
+        /// `CacheImportance.tier` of the photos that have a reason to stay; the others count as 0.
+        public var tiers: [FileID: UInt8]
+        /// When the whole library's thumbnails are kept (`CacheLimits.wholeLibraryThumbnailsKey`): every photo in the library
+        /// with its ETag as in file names (`CacheFileName.etag`). Their 64 and 256 px previews are never removed and do not
+        /// count towards the limit. Nil: they are ordinary members of the thumbnail pool.
+        public var libraryEtags: [FileID: String]?
+        /// Photos whose decodes stay under memory pressure (covers, key photos, memory covers).
+        public var prominent: Set<FileID>
+
+        public init(tiers: [FileID: UInt8] = [:], libraryEtags: [FileID: String]? = nil, prominent: Set<FileID> = []) {
+            self.tiers = tiers
+            self.libraryEtags = libraryEtags
+            self.prominent = prominent
+        }
+    }
+
+    /// Where trims get the importance of photos and the whole-library setting from (the account's database). Called on the
+    /// cache's queue, once per trim.
+    public func setEvictionContextProvider(_ provider: @escaping @Sendable () -> EvictionContext) {
+        evictionContextProvider.withLock { $0 = provider }
+    }
+
+    /// Brings the cache below `limit` bytes, in the background.
     ///
-    /// "Used" is the file's modification date: `diskImage` notes every read, and the notes are written in batches (a file
-    /// used again on the same day keeps its date).
+    /// The limit is shared between pools (`CachePoolBudgets`): large previews have a cap of their own, and thumbnails and
+    /// screen-size previews each give back from what they take beyond their share first, so that large previews cannot
+    /// push out the thumbnails. Within a pool the least important photos go first (`CacheImportance`), the least
+    /// recently used among equals. "Used" is the file's modification date: `diskImage` notes every read, and the notes are
+    /// written in batches (a file used again on the same day keeps its date).
     /// - Parameters:
     ///   - protecting: files whose previews are never deleted (offline-pinned items); they still count towards the size.
     ///   - completion: called on the cache's queue when the trim is done.
@@ -207,33 +266,50 @@ public final class PreviewCache: @unchecked Sendable {
         }
     }
 
-    /// The trim itself. Returns the bytes left in the cache.
+    /// The trim itself. Returns the bytes that count towards the limit afterwards.
     @discardableResult
-    func trimNow(toBytes limit: Int64, protecting: Set<FileID> = []) -> Int64 {
+    func trimNow(toBytes limit: Int64, protecting: Set<FileID> = [], context: EvictionContext? = nil) -> Int64 {
         // What was used since the last batch counts as used.
         flushTouches()
-        guard
-            let enumerator = fileManager.enumerator(
-                at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
-        else { return 0 }
-        var files: [(URL, Int64, Date)] = []
-        var total: Int64 = 0
+        let context = context ?? evictionContextProvider.withLock({ $0 })?() ?? EvictionContext()
+        if !context.prominent.isEmpty { memory.setProtected(context.prominent) }
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: keys) else { return 0 }
+        var urls: [URL] = []
+        var files: [CacheEviction.File] = []
         for case let url as URL in enumerator {
-            guard
-                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
-                values.isRegularFile == true, let size = values.fileSize
+            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true, let size = values.fileSize
             else { continue }
-            total += Int64(size)
-            if !protecting.isEmpty, let fileId = Self.fileId(ofCacheFile: url), protecting.contains(fileId) { continue }
-            files.append((url, Int64(size), values.contentModificationDate ?? .distantPast))
+            let name = Self.parse(cacheFile: url)
+            var file = CacheEviction.File(
+                size: Int64(size), lastUsed: values.contentModificationDate ?? .distantPast, pool: CachePool(bucket: name?.bucket ?? 0))
+            if let name {
+                file.isKept = protecting.contains(name.fileId)
+                file.tier = context.tiers[name.fileId] ?? 0
+                if let library = context.libraryEtags, file.pool == .thumbnails, let etag = library[name.fileId] {
+                    file.isExempt = Self.etag(name.etag, isVersionOf: etag)
+                }
+            }
+            urls.append(url)
+            files.append(file)
         }
-        guard total > limit else { return total }
-        for (url, size, _) in files.sorted(by: { $0.2 < $1.2 }) {
-            try? fileManager.removeItem(at: url)
-            total -= size
-            if total <= limit { break }
-        }
-        return total
+        let plan = CacheEviction.plan(files, budgets: CachePoolBudgets(total: limit))
+        for index in plan.removals { try? fileManager.removeItem(at: urls[index]) }
+        return plan.remaining
+    }
+
+    /// The parts of a cache file's name: `<fileId>-<etag>-<bucket>.jpg` (the ETag may contain `-`).
+    static func parse(cacheFile url: URL) -> (fileId: FileID, etag: Substring, bucket: Int)? {
+        let name = url.deletingPathExtension().lastPathComponent
+        guard let first = name.firstIndex(of: "-"), let last = name.lastIndex(of: "-"), first < last,
+            let fileId = FileID(name[..<first]), let bucket = Int(name[name.index(after: last)...])
+        else { return nil }
+        return (fileId, name[name.index(after: first)..<last], bucket)
+    }
+
+    /// A file's ETag part belongs to the photo's current version: the same, its edit (`<etag>_e<digest>`), or none.
+    static func etag(_ part: Substring, isVersionOf etag: String) -> Bool {
+        part == etag || part == "0" || part.hasPrefix(etag + "_e")
     }
 
     /// The file id a cache file belongs to (`<fileId>-<etag>-<bucket>.jpg`).
@@ -242,7 +318,7 @@ public final class PreviewCache: @unchecked Sendable {
     }
 
     public func removeAll() {
-        memory.removeAllObjects()
+        memory.removeAll()
         try? fileManager.removeItem(at: directory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     }

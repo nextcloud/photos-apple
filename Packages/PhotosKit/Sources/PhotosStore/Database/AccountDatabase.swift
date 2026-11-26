@@ -328,6 +328,8 @@ public final class AccountDatabase: Sendable {
         // Family library decisions and the Lock Screen album's copies on the device (SPEC §16.7).
         migrator.registerMigration("v6-family-decisions") { db in try FamilyStore.migrateDecisions(db) }
         migrator.registerMigration("v6-family-device-mirror") { db in try FamilyStore.migrateDeviceMirror(db) }
+        // Recently viewed photos and the roles the cache ranks by (SPEC §18.2).
+        migrator.registerMigration("v8-cache-importance") { db in try CacheImportanceStore.migrate(db) }
         return migrator
     }
 }

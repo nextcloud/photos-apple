@@ -37,6 +37,8 @@ struct MediaGridScreen<Accessory: View>: View {
     var gridHeader: AnyView? = nil
     /// A cover with the title above the first row (an album, a memory, a person; iPhone and iPad, SPEC §17.4).
     var hero: GridHero? = nil
+    /// After Select, a glass button of its own (the Library's account button, SPEC §19.2); not while selecting.
+    var trailingItem: AnyView? = nil
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(SessionModel.self) private var session
@@ -516,6 +518,14 @@ struct MediaGridScreen<Accessory: View>: View {
                 .disabled(feed.items.isEmpty)
             #endif
         }
+        #if !os(macOS)
+            if let trailingItem, !isSelecting {
+                #if os(iOS)
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                #endif
+                ToolbarItem(placement: .primaryAction) { trailingItem }
+            }
+        #endif
         #if !os(iOS)
             selectionGroup
         #endif

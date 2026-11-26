@@ -43,115 +43,147 @@ enum CaptureDate {
     }
 }
 
-/// Toolbar menu to upload from the Photos library or files, plus the transfer progress indicator (SPEC §7.17).
-struct UploadMenu: View {
+/// Where an upload starts from (SPEC §7.17). The menu items are in the account menu and the Collections tab's "+"
+/// (iPhone, iPad, Vision Pro; SPEC §19.2); the Mac has File ▸ Upload Photos… and drag and drop.
+enum UploadStart: String, Identifiable {
+    case photos, files
+    #if os(iOS)
+        /// With the device's own camera, into the same place (SPEC §16.5.3).
+        case camera, scan
+    #endif
+
+    var id: String { rawValue }
+
+    static var menuTitle: String { String(localized: "Upload", bundle: .module) }
+
+    /// Not an arrow out of a box: that is "Share" on Apple platforms.
+    static let systemImage = "icloud.and.arrow.up"
+}
+
+/// The upload menu's items: from the Photos library, from files, and on iPhone and iPad from the camera or scanner.
+struct UploadMenuItems: View {
+    var start: (UploadStart) -> Void
+
+    var body: some View {
+        Button {
+            start(.photos)
+        } label: {
+            Label(String(localized: "Upload from Photos", bundle: .module), systemImage: "photo.on.rectangle")
+        }
+        Button {
+            start(.files)
+        } label: {
+            Label(String(localized: "Upload files…", bundle: .module), systemImage: "folder")
+        }
+        #if os(iOS)
+            if DeviceCapture.canTakePhoto || DeviceCapture.canScan {
+                Divider()
+            }
+            if DeviceCapture.canTakePhoto {
+                Button {
+                    start(.camera)
+                } label: {
+                    Label(DeviceCapture.takePhotoTitle, systemImage: "camera")
+                }
+            }
+            if DeviceCapture.canScan {
+                Button {
+                    start(.scan)
+                } label: {
+                    Label(DeviceCapture.scanTitle, systemImage: "doc.viewfinder")
+                }
+            }
+        #endif
+    }
+}
+
+extension View {
+    /// The pickers of an upload chosen in `UploadMenuItems`. On the view that holds the menu, not inside it: a menu's
+    /// items are gone once it closes, and with them anything they would present.
+    func uploadPresenter(_ start: Binding<UploadStart?>, album: Album? = nil) -> some View {
+        modifier(UploadPresenter(start: start, album: album))
+    }
+}
+
+/// Presents the Photos picker, the file importer, the camera or the scanner and uploads what was chosen.
+private struct UploadPresenter: ViewModifier {
+    @Binding var start: UploadStart?
     var album: Album?
     @Environment(SessionModel.self) private var session
     @State private var pickerItems: [PhotosPickerItem] = []
-    @State private var showingPicker = false
-    @State private var importing = false
-    #if os(iOS)
-        @State private var capture: Capture?
-    #endif
 
-    var body: some View {
-        Menu {
-            Button {
-                showingPicker = true
-            } label: {
-                Label(String(localized: "Upload from Photos", bundle: .module), systemImage: "photo.on.rectangle")
+    func body(content: Content) -> some View {
+        content
+            .photosPicker(
+                isPresented: isPresented(.photos), selection: $pickerItems, matching: .any(of: [.images, .videos]),
+                preferredItemEncoding: .current
+            )
+            .onChange(of: pickerItems) { _, items in
+                guard !items.isEmpty else { return }
+                pickerItems = []
+                Task {
+                    var sources: [UploadSource] = []
+                    for item in items {
+                        if let picked = try? await item.loadTransferable(type: PickedFile.self) {
+                            sources.append(UploadSource(file: picked.url, capturedAt: CaptureDate.read(picked.url)))
+                        }
+                    }
+                    session.transfers.upload(sources, album: album)
+                }
             }
-            Button {
-                importing = true
-            } label: {
-                Label(String(localized: "Upload files…", bundle: .module), systemImage: "folder")
+            .fileImporter(isPresented: isPresented(.files), allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) {
+                result in
+                guard case .success(let urls) = result else { return }
+                session.transfers.upload(UploadSources.copies(of: urls), album: album)
             }
             #if os(iOS)
-                // With the device's own camera, into the same place (SPEC §16.5.3).
-                if DeviceCapture.canTakePhoto || DeviceCapture.canScan {
-                    Divider()
-                }
-                if DeviceCapture.canTakePhoto {
-                    Button {
-                        capture = .photo
-                    } label: {
-                        Label(DeviceCapture.takePhotoTitle, systemImage: "camera")
-                    }
-                }
-                if DeviceCapture.canScan {
-                    Button {
-                        capture = .scan
-                    } label: {
-                        Label(DeviceCapture.scanTitle, systemImage: "doc.viewfinder")
+                .fullScreenCover(item: capture) { (kind: UploadStart) in
+                    switch kind {
+                    case .camera:
+                        CameraPicker { source in
+                            start = nil
+                            if let source { session.transfers.upload([source], album: album) }
+                        }
+                        .ignoresSafeArea()
+                    default:
+                        DocumentScanner { sources in
+                            start = nil
+                            if !sources.isEmpty { session.transfers.upload(sources, album: album) }
+                        }
+                        .ignoresSafeArea()
                     }
                 }
             #endif
-        } label: {
-            // Not an arrow out of a box: that is "Share" on Apple platforms, and the Share button sits next to this one.
-            Label(String(localized: "Upload", bundle: .module), systemImage: "icloud.and.arrow.up")
-        }
-        .help(String(localized: "Upload", bundle: .module))
-        .photosPicker(
-            isPresented: $showingPicker, selection: $pickerItems, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current
-        )
-        .onChange(of: pickerItems) { _, items in
-            guard !items.isEmpty else { return }
-            pickerItems = []
-            Task {
-                var sources: [UploadSource] = []
-                for item in items {
-                    if let picked = try? await item.loadTransferable(type: PickedFile.self) {
-                        sources.append(UploadSource(file: picked.url, capturedAt: CaptureDate.read(picked.url)))
-                    }
-                }
-                session.transfers.upload(sources, album: album)
-            }
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else { return }
-            session.transfers.upload(UploadSources.copies(of: urls), album: album)
-        }
-        #if os(iOS)
-            .fullScreenCover(item: $capture) { kind in
-                switch kind {
-                case .photo:
-                    CameraPicker { source in
-                        capture = nil
-                        if let source { session.transfers.upload([source], album: album) }
-                    }
-                    .ignoresSafeArea()
-                case .scan:
-                    DocumentScanner { sources in
-                        capture = nil
-                        if !sources.isEmpty { session.transfers.upload(sources, album: album) }
-                    }
-                    .ignoresSafeArea()
-                }
-            }
-        #endif
+    }
+
+    func isPresented(_ kind: UploadStart) -> Binding<Bool> {
+        Binding<Bool>(
+            get: { () -> Bool in start == kind },
+            set: { (shown: Bool) in if !shown, start == kind { start = nil } })
     }
 
     #if os(iOS)
-        enum Capture: String, Identifiable {
-            case photo, scan
-            var id: String { rawValue }
+        /// The camera and the scanner are full-screen covers.
+        var capture: Binding<UploadStart?> {
+            Binding<UploadStart?>(
+                get: { () -> UploadStart? in start == .camera || start == .scan ? start : nil },
+                set: { (value: UploadStart?) in if value == nil, start == .camera || start == .scan { start = nil } })
         }
     #endif
 }
 
-/// What the timeline toolbar shows on which platform.
-enum TimelineToolbar {
-    /// The All / Photos / Videos / Favorites menu duplicates sidebar rows; it is only offered where there is no sidebar.
-    static func showsMediaKindPicker(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
-        #if os(iOS)
-            sizeClass == .compact
-        #else
-            false
-        #endif
+/// What the toolbar shows of the uploads (SPEC §19.2): their progress while they run and, until they are cleared, that
+/// some failed. Finished uploads leave the toolbar.
+enum TransfersIndicatorState: Equatable {
+    case hidden, running, failed
+
+    static func state(activeCount: Int, hasFailures: Bool) -> TransfersIndicatorState {
+        if activeCount > 0 { return .running }
+        return hasFailures ? .failed : .hidden
     }
 }
 
-/// Shows upload progress; tap for details.
+/// Shows upload progress while uploads run, or that some failed; tap for details.
 struct TransfersIndicator: View {
     @Environment(SessionModel.self) private var session
     /// The tab bar's accessory shows the uploads already (iPhone, SPEC §17.3).
@@ -160,21 +192,21 @@ struct TransfersIndicator: View {
 
     var body: some View {
         let queue = session.transfers
-        if !queue.transfers.isEmpty && !accessoryKinds.contains(.upload) {
+        let failed: Bool = queue.transfers.contains { if case .failed = $0.state { true } else { false } }
+        let state: TransfersIndicatorState = TransfersIndicatorState.state(activeCount: queue.activeCount, hasFailures: failed)
+        if state != .hidden && !accessoryKinds.contains(.upload) {
             Button {
                 showing = true
             } label: {
-                if queue.activeCount > 0 {
+                if state == .running {
                     Gauge(value: queue.overallProgress) { Text("") }
                         .gaugeStyle(.accessoryCircularCapacity)
                         .scaleEffect(0.5)
                         .frame(width: 28, height: 28)
                         .accessibilityLabel(Text("Uploading \(queue.activeCount) items", bundle: .module))
                 } else {
-                    let failed: Bool = queue.transfers.contains { if case .failed = $0.state { true } else { false } }
-                    Image(systemName: failed ? "exclamationmark.icloud" : "checkmark.icloud")
-                        .accessibilityLabel(
-                            failed ? Text("Some uploads failed", bundle: .module) : Text("Uploads finished", bundle: .module))
+                    Image(systemName: "exclamationmark.icloud")
+                        .accessibilityLabel(Text("Some uploads failed", bundle: .module))
                 }
             }
             .help(String(localized: "Uploads", bundle: .module))

@@ -393,11 +393,15 @@ final class GridTilePicture {
             hasPicture = false
             show(.clear)
         }
+        // Time to show (SPEC §18.1.3): from here to the tile's first real picture.
+        let timer: CacheMetrics.ShowTimer? = hasPicture ? nil : CacheMetrics.shared.begin(.tile)
         if let best = source.cached(item) {
             hasPicture = true
             show(.picture(best))
+            if let timer { CacheMetrics.shared.finish(timer) }
             // Large enough (for instance after zooming out): nothing to load.
             if GridTile.covers(best, pixels: request.decodeSize) {
+                CacheMetrics.shared.record(.memory, bucket: request.bucket)
                 isLoading = false
                 return
             }
@@ -410,6 +414,7 @@ final class GridTilePicture {
             guard !Task.isCancelled, let self, self.request == request else { return }
             self.isLoading = false
             if let image {
+                if !self.hasPicture, let timer { CacheMetrics.shared.finish(timer) }
                 self.hasPicture = true
                 self.isDelivering = true
                 self.show(.picture(image))
