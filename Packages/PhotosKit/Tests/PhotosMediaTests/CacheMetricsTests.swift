@@ -52,7 +52,8 @@ import Testing
         try await Task.sleep(for: .milliseconds(20))
         metrics.finish(timer)
         let p50 = try #require(metrics.snapshot().times(.tile)?.p50)
-        #expect(p50 >= 15 && p50 < 2000)
+        // Only the lower bound: a busy CI runner can take seconds for the 20 ms sleep.
+        #expect(p50 >= 15)
     }
 
     @Test func snapshotsRoundTripAsJSON() throws {

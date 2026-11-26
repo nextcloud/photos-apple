@@ -72,7 +72,9 @@ enum TestPictures {
 }
 
 @Suite struct PreviewTranscodingTests {
-    @Test(.enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"))
+    @Test(
+        .enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"),
+        .disabled(if: TestEnvironment.isSimulator, TestEnvironment.noGPU))
     func aPNGPreviewIsStoredAsASmallHEICThatLooksTheSame() throws {
         let png = TestPictures.png()
         let stored = PreviewTranscoding.storage(for: png)
@@ -98,7 +100,9 @@ enum TestPictures {
         #expect(PreviewTranscoding.shouldStoreAsHEIC(.png))
     }
 
-    @Test(.enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"))
+    @Test(
+        .enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"),
+        .disabled(if: TestEnvironment.isSimulator, TestEnvironment.noGPU))
     func theOrientationIsCarriedOver() throws {
         // A TIFF (lossless) whose pixels are landscape but which is to be shown rotated.
         let data = NSMutableData()
@@ -128,7 +132,9 @@ enum TestPictures {
         #expect(!cache.hasDiskImage(fileId: 7, etag: "new", bucket: 256))
     }
 
-    @Test(.enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"))
+    @Test(
+        .enabled(if: PreviewTranscoding.canWriteHEIC, "HEIC cannot be written here"),
+        .disabled(if: TestEnvironment.isSimulator, TestEnvironment.noGPU))
     func aHEICFileInTheCacheIsReadLikeAJPEG() throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         let cache = PreviewCache(directory: directory)
