@@ -74,6 +74,8 @@ public final class FamilyLibraryModel {
     @ObservationIgnored private let mimeTypes: @MainActor () -> [String]
     @ObservationIgnored private let afterChange: @MainActor () async -> Void
     @ObservationIgnored private let logger = Logger(subsystem: "com.nextcloud.photos", category: "family")
+    /// The options and decisions shared with the user's other devices (`family.json`, SPEC §22.5.1).
+    @ObservationIgnored let shared: FamilySettingsSync
 
     init(
         services: AccountServices, excludedFolders: @escaping @MainActor () -> [String], mimeTypes: @escaping @MainActor () -> [String],
@@ -84,6 +86,7 @@ public final class FamilyLibraryModel {
         self.mimeTypes = mimeTypes
         self.afterChange = afterChange
         settings = FamilyLibrarySettings.load(services.database)
+        shared = FamilySettingsSync(store: services.syncedSettings.store(.family), family: FamilyStore(database: services.database))
     }
 
     var store: FamilyStore { FamilyStore(database: services.database) }
@@ -111,9 +114,15 @@ public final class FamilyLibraryModel {
         var updated = settings
         change(&updated)
         guard updated != settings else { return }
-        if updated.folder?.path != settings.folder?.path { try? store.forgetDecisions() }
+        let forgets = updated.folder?.path != settings.folder?.path
+        if forgets { try? store.forgetDecisions() }
         settings = updated
         try? updated.save(services.database)
+        let shared = shared
+        Task {
+            if forgets { await shared.forgetAll() }
+            await shared.publish(updated)
+        }
         suggestions = []
         refreshedAt = nil
         Task { await refresh(force: true) }
@@ -127,6 +136,8 @@ public final class FamilyLibraryModel {
     /// Lets dismissed photos be suggested again.
     public func showDismissedAgain() {
         try? store.forgetDecisions()
+        let shared = shared
+        Task { await shared.forgetAll() }
         Task { await refresh(force: true) }
     }
 
@@ -174,6 +185,8 @@ public final class FamilyLibraryModel {
     /// Never suggests these photos again.
     public func dismiss(_ fileIds: [FileID]) {
         try? store.record(.dismissed, for: fileIds)
+        let shared = shared
+        Task { await shared.publish(.dismissed, for: fileIds) }
         remove(fileIds)
     }
 
@@ -203,6 +216,7 @@ public final class FamilyLibraryModel {
             progress = (done.count + failed, items.count)
         }
         try? store.record(action == .move ? .moved : .copied, for: done)
+        await shared.publish(action == .move ? .moved : .copied, for: done)
         remove(done)
         await afterChange()
         return failed
@@ -226,6 +240,34 @@ public final class FamilyLibraryModel {
             }
         }
         throw NetworkError.conflict
+    }
+
+    // MARK: Shared with the user's other devices
+
+    /// Before the settings files sync: what this device decided before decisions were shared goes out once.
+    func prepareShared() async {
+        try? await shared.publishUnsynced(settings)
+    }
+
+    /// After the settings files synced: decisions and options made on other devices are taken over.
+    func takeOverShared() {
+        let before = (try? store.decidedFileIds()) ?? []
+        let remote: FamilyLibrarySettings?
+        do {
+            remote = try shared.takeOver(current: settings)
+        } catch {
+            logger.error("family decisions not taken over: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let after = (try? store.decidedFileIds()) ?? []
+        if let remote {
+            settings = remote
+            try? remote.save(services.database)
+        }
+        guard remote != nil || before != after else { return }
+        remove(Array(after.subtracting(before)))
+        refreshedAt = nil
+        Task { await refresh(force: true) }
     }
 
     private func remove(_ fileIds: [FileID]) {

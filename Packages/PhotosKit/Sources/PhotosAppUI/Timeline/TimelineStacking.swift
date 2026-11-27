@@ -101,7 +101,7 @@ enum StackedSelection {
     }
 }
 
-/// The library's options of this device, in Settings.
+/// The library's display options, in Settings (synced to the user's other devices, SPEC §22.5.2).
 struct TimelineDisplaySection: View {
     @AppStorage(TimelineDisplay.stackCopiesKey) private var stackCopies = true
     @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
@@ -128,7 +128,9 @@ struct TimelineDisplaySection: View {
             Toggle(String(localized: "Square tiles", bundle: .module), isOn: $squareTiles)
             Toggle(String(localized: "Stack copies of a photo", bundle: .module), isOn: $stackCopies)
         } header: {
-            Text("On this device", bundle: .module)
+            Text(
+                "Library display", bundle: .module,
+                comment: "Settings section header: how the library shows memories, moments, tiles and stacks.")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(

@@ -304,6 +304,7 @@ public final class SessionModel {
         await services.outbox.kick()
         // Edits saved on other devices, and edits made here while offline (SPEC §16.3.1).
         await services.edits.sync()
+        await syncSettings()
         await refreshFailedOperations()
         // Beside, not before, what the caller does next (a background task's backup pass): labels for search and
         // shared-album activity are throttled extras.
