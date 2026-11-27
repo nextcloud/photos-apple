@@ -35,7 +35,7 @@ struct Acknowledgement: Identifiable, Sendable {
     static let all: [Acknowledgement] = [app, grdb]
 
     static let app = Acknowledgement(
-        name: "Nextcloud Photos", url: URL(string: "https://github.com/nextcloud/photos-ios")!,
+        name: "Nextcloud Photos", url: URL(string: "https://github.com/nextcloud/photos-apple")!,
         text: mit(copyright: "Copyright (c) 2026 Nextcloud"))
 
     /// The SQLite toolkit the app's database is built on (`Packages/PhotosKit/Package.swift`).

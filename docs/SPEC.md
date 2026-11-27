@@ -51,7 +51,7 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 
 | Topic | Decision |
 |---|---|
-| Identity | Official **Nextcloud Photos** app by Nextcloud GmbH, Nextcloud branding, published under Nextcloud's Apple team (`NKUJUXUJ3B`). Repo **github.com/nextcloud/photos-ios**. |
+| Identity | Official **Nextcloud Photos** app by Nextcloud GmbH, Nextcloud branding, published under Nextcloud's Apple team (`NKUJUXUJ3B`). Repo **github.com/nextcloud/photos-apple** (named photos-ios until 2026-11-27: the app is for every Apple platform). |
 | Licence | **MIT** for all of the app's own code (the repo's `LICENSE`). REUSE-compliant SPDX headers in every file. Logos are `LicenseRef-NextcloudTrademarks`. The app does **not** link NextcloudKit or any other GPL library, so the distributed app is MIT as well (*decision 2026-11-23, replaces the earlier plan to link NextcloudKit; the dependency was declared but never used and has been removed*). **Never copy code from nextcloud/ios, NextcloudKit or other GPL projects into this repo** — use them only as a reference and write your own implementation. All dependencies must be MIT-compatible (MIT, BSD, Apache-2.0). |
 | Platforms | iOS, iPadOS, **macOS as a native SwiftUI target (not Catalyst, not "Designed for iPad")**, **visionOS**. |
 | Minimum OS | **27 only** (iOS/iPadOS/macOS/visionOS 27). No availability checks for older OSes. |
@@ -92,7 +92,7 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 ### 4.1 Repository layout
 
 ```
-photos-ios/
+photos-apple/
   project.yml               # XcodeGen: the Xcode project, Info.plists and build settings are generated from it
   Config/                   # Base.xcconfig (team, bundle id, version), Local.xcconfig (git-ignored, your own signing)
   App/
@@ -778,7 +778,7 @@ a device (DEVICE-TEST-PLAN D8); scroll hitches need a device.
 
 ## 12. Engineering conventions
 
-- Repo **https://github.com/nextcloud/photos-ios** (exists, public, default branch `main`, contains only the MIT `LICENSE` as of 2026-11-22). The copy of this spec in the repo (`docs/SPEC.md`) is the one to update.
+- Repo **https://github.com/nextcloud/photos-apple** (public, default branch `main`; created as photos-ios on 2026-11-22 and renamed on 2026-11-27, GitHub redirects the old name). The copy of this spec in the repo (`docs/SPEC.md`) is the one to update.
 - Work in small PRs (one feature or fix each), stacked when they depend on each other; conventional commit subjects (`feat(timeline): …`, `fix(backup): …`); DCO sign-off (`Signed-off-by`); SPDX header in every source file (`SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors`, `SPDX-License-Identifier: MIT`).
 - Deliver all work as PRs against `main`; never push to `main` directly.
 - CI (GitHub Actions on macOS runners): build all four platforms, unit tests, `swift-format lint --strict`, REUSE lint, string catalog checks; integration tests nightly against a Nextcloud installed on the runner (macOS runners have no Docker).
@@ -3739,7 +3739,7 @@ web apps render recipes (EDIT-FORMAT.md), nobody needs it.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
-1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-ios) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".
+1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-apple) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".
 2. Provisioning profiles for the app, extensions and the two Files App Groups under team NKUJUXUJ3B.
 3. **Push proxy**: `push-notifications.nextcloud.com` must know the new app's APNs topic (bundle id) — needed before M4 push works.
 4. **Notification filtering**: either the notifications app supports an app type for this client (only `photos` notifications) or request Apple's notification filtering entitlement.

@@ -77,7 +77,7 @@ First release: Apple does not show "What's New" for version 1.0. For TestFlight,
     • Turning on backup — especially if you also use the Nextcloud Files app's auto upload: tell us if any photo
       ends up twice on your server.
     • Albums, sharing, memories, the map, search, and the widgets.
-    Send feedback with a screenshot from TestFlight, or open an issue at https://github.com/nextcloud/photos-ios.
+    Send feedback with a screenshot from TestFlight, or open an issue at https://github.com/nextcloud/photos-apple.
 
 Template for later versions (170 characters show without "more"):
 
@@ -89,7 +89,7 @@ Template for later versions (170 characters show without "more"):
 
 | Field | Value (to confirm) |
 |---|---|
-| Support URL | https://help.nextcloud.com/ (or the GitHub issues of nextcloud/photos-ios) |
+| Support URL | https://help.nextcloud.com/ (or the GitHub issues of nextcloud/photos-apple) |
 | Marketing URL | https://nextcloud.com/photos/ |
 | Privacy Policy URL | https://nextcloud.com/privacy/ — must say that the app sends a push token to Nextcloud's push proxy |
 | Copyright | 2026 Nextcloud GmbH |
