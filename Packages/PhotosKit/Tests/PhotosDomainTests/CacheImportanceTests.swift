@@ -182,7 +182,7 @@ import Testing
         let elapsed = clock.measure { plan = CacheEviction.plan(files, budgets: CachePoolBudgets(total: total / 2)) }
         #expect(plan.remaining <= total / 2)
         // Debug build on a CI Mac: well under a second (release: a few tens of milliseconds).
-        #expect(elapsed < .seconds(2))
+        #expect(elapsed < timingBudget(.seconds(2)))
         // Within a pool the order holds: no removed file is more important than a kept one of the same pool... unless all of
         // its tier went.
         let removed = Set(plan.removals)

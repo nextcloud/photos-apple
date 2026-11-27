@@ -85,7 +85,7 @@ import Testing
         )
         #expect(summary.days.count > 2900)
         #expect(summary.days.reduce(0) { $0 + $1.count } == 100_000)
-        #expect(build < .milliseconds(800))
+        #expect(build < timingBudget(.milliseconds(800)))
     }
 }
 

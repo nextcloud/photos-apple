@@ -139,12 +139,6 @@ import Testing
         }
         #expect(etags.count == 100_000)
         #expect(tiers.count > 2000)
-        // Three seconds on a Mac (the macOS test job); the CI simulator is several times slower.
-        #if targetEnvironment(simulator)
-            let budget: Duration = .seconds(15)
-        #else
-            let budget: Duration = .seconds(3)
-        #endif
-        #expect(elapsed < budget, "\(elapsed)")
+        #expect(elapsed < timingBudget(.seconds(3)), "\(elapsed)")
     }
 }

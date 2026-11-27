@@ -240,6 +240,6 @@ import Testing
         let elapsed = clock.measure { moments = LibraryMoments.build(items, calendar: calendar) }
         print("PERF moments of 100 000 items: \(elapsed)")
         #expect(moments.reduce(0) { $0 + $1.count } == 100_000)
-        #expect(elapsed < .seconds(3))
+        #expect(elapsed < timingBudget(.seconds(3)))
     }
 }

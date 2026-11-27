@@ -235,9 +235,9 @@ import Testing
             Issue.record("an upload reloads the grid: \(uploadChange)")
         }
         #expect(model.sections.count > 2900)
-        #expect(build < .milliseconds(1500))
-        #expect(resection < .milliseconds(250))
-        #expect(diff < .milliseconds(1500))
+        #expect(build < timingBudget(.milliseconds(1500)))
+        #expect(resection < timingBudget(.milliseconds(250)))
+        #expect(diff < timingBudget(.milliseconds(1500)))
 
         // The first sync's skeleton on top: only months are added, the budget is the same.
         var months: [Int: Int] = [:]
@@ -254,7 +254,7 @@ import Testing
                 })
         }
         print("PERF GridModel skeleton: first page with \(months.count) months \(skeletonBuild), sections \(withSkeleton.sections.count)")
-        #expect(skeletonBuild < .milliseconds(100))
+        #expect(skeletonBuild < timingBudget(.milliseconds(100)))
         #expect(withSkeleton.sections.reduce(0) { $0 + $1.tileCount } >= 300 * (months.count - 120))
     }
 }

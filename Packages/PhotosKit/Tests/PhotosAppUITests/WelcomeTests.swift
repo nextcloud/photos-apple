@@ -90,6 +90,6 @@ import Testing
         await WelcomeTiming.holdCalmly(0.2, limit: 1)
         let took = clock.now - start
         #expect(took >= .milliseconds(200))
-        #expect(took < .seconds(2))
+        #expect(took < timingBudget(.seconds(2)))
     }
 }
