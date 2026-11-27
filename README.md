@@ -168,7 +168,7 @@ Memory Room and its photos hang framed all around you.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/vision-library.jpg" width="420" alt="Apple Vision Pro: the Library window floating in a living room, with memory cards and November's photos"></td>
+    <td><img src="docs/screenshots/vision-albums.jpg" width="420" alt="Apple Vision Pro: the albums Barcelona, Berlin, Lisbon, Prague, Rome and Vienna in a window with a sidebar, floating in a living room"></td>
     <td><img src="docs/screenshots/vision-map.jpg" width="420" alt="Apple Vision Pro: the Places map in a window with a sidebar, floating in a living room"></td>
   </tr>
 </table>

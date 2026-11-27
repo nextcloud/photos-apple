@@ -98,7 +98,8 @@ iphone | ipad)
     ;;
 vision)
     build_app NextcloudPhotos
-    launch_and_shoot "$BUNDLE" vision-library 90 PHOTOS_DEBUG_LOGIN=$LOGIN
+    # The first launch signs in and waits for the library; the albums then need less.
+    launch_and_shoot "$BUNDLE" vision-albums 90 PHOTOS_DEBUG_LOGIN=$LOGIN PHOTOS_DEBUG_DESTINATION=albums
     launch_and_shoot "$BUNDLE" vision-map 30 PHOTOS_DEBUG_DESTINATION=map
     ;;
 tv)
