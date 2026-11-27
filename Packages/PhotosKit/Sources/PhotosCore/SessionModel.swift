@@ -67,6 +67,8 @@ public final class SessionModel {
     @ObservationIgnored private var periodicSync: Task<Void, Never>?
     /// The server's `notify_push` connection, when it has one (`SessionModel+NotifyPush.swift`).
     @ObservationIgnored var notifyPush = NotifyPushState()
+    /// The background build of the Library's tiles (`SessionModel+TileCache.swift`).
+    @ObservationIgnored var tileCacheBuild = TileCacheBuildState()
     /// When a sync last asked for the walk an opened app makes (`ReconcileRequest.opened`).
     @ObservationIgnored private var openedSyncAt: Date?
     /// When the capabilities were last compared with `features.fingerprint` (foreground check, at most every 5 minutes).
@@ -189,6 +191,7 @@ public final class SessionModel {
         tasks.values.forEach { $0.cancel() }
         periodicSync?.cancel()
         stopNotifyPush()
+        tileCacheBuild.task?.cancel()
         organize?.stop()
         // Nothing of this account can be undone any more (account switch, removal).
         clearUndo()
@@ -312,6 +315,8 @@ public final class SessionModel {
         // Beside, not before, what the caller does next (a background task's backup pass): labels for search and
         // shared-album activity are throttled extras.
         if !afterSyncRunning { track { [weak self] in await self?.afterSync() } }
+        // The Library's tiles from what the sync and the scrolling brought into the cache (SPEC §22.4.1).
+        scheduleTileCacheBuild()
     }
 
     /// Called when the app comes to the foreground.
