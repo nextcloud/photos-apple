@@ -22,6 +22,11 @@ final class ImageBox: @unchecked Sendable {
 /// Disk + memory cache of preview images keyed by `(fileId, etag, bucket)` (SPEC §5.5.1).
 public final class PreviewCache: @unchecked Sendable {
     public let directory: URL
+    /// Converts lossless previews of the screen and large pools to HEIC in the background (SPEC §22.4.4).
+    public let compactor: PreviewCompactor
+    /// The Library's pre-rendered tiles (SPEC §22.4.1), in `tiles/` of the cache directory: removed with the cache, not
+    /// part of its trim (the builder keeps them within their own budget, which the trim leaves free).
+    public let tiles: TileCache
     /// Decoded previews (`MemoryImageCache`: LRU within a byte budget, gives back by `MemoryPressurePolicy`).
     let memory: MemoryImageCache
     private let fileManager = FileManager.default
@@ -62,6 +67,8 @@ public final class PreviewCache: @unchecked Sendable {
 
     public init(directory: URL, memoryLimitBytes: Int = PreviewCache.defaultMemoryLimit()) {
         self.directory = directory
+        compactor = PreviewCompactor(directory: directory)
+        tiles = TileCache(directory: directory.appending(path: Self.tilesDirectory))
         memory = MemoryImageCache(limit: memoryLimitBytes)
         let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: ioQueue)
         memoryPressure = pressure
@@ -103,9 +110,10 @@ public final class PreviewCache: @unchecked Sendable {
         return box.image
     }
 
-    /// Best image already in memory with at least `minBucket` (or any smaller one as placeholder).
+    /// Best image already in memory with at least `minBucket` (or any smaller one as placeholder): a decoded tile
+    /// (`tileImage`) counts as the 128 px one.
     public func bestMemoryImage(fileId: FileID, etag: String, upTo bucket: Int) -> CGImage? {
-        for size in [4096, 1024, 256, 64] where size <= bucket {
+        for size in [4096, 1024, 256, TileCache.memoryBucket, 64] where size <= bucket {
             if let image = memoryImage(fileId: fileId, etag: etag, bucket: size) { return image }
         }
         return nil
@@ -172,6 +180,8 @@ public final class PreviewCache: @unchecked Sendable {
         let url = fileURL(key: key)
         try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
+        // A PNG preview of 1024 px or more becomes HEIC a few seconds later, not on the way to the screen.
+        compactor.didStore(url, data: data, bucket: bucket)
         let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
         guard let image = ImageDecoding.decode(data: data, maxPixelSize: limit) else { return nil }
         remember(image, key: key, maxPixelSize: limit)
@@ -277,7 +287,14 @@ public final class PreviewCache: @unchecked Sendable {
         guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: keys) else { return 0 }
         var urls: [URL] = []
         var files: [CacheEviction.File] = []
+        // The tile cache is not trimmed file by file; its bytes are taken off the limit.
+        let tileBytes = tiles.files().values.reduce(0, +)
         for case let url as URL in enumerator {
+            // Cache files sit in two-digit shard folders; "tiles" is the tile cache's.
+            if url.lastPathComponent == Self.tilesDirectory {
+                enumerator.skipDescendants()
+                continue
+            }
             guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true, let size = values.fileSize
             else { continue }
             let name = Self.parse(cacheFile: url)
@@ -293,9 +310,9 @@ public final class PreviewCache: @unchecked Sendable {
             urls.append(url)
             files.append(file)
         }
-        let plan = CacheEviction.plan(files, budgets: CachePoolBudgets(total: limit))
+        let plan = CacheEviction.plan(files, budgets: CachePoolBudgets(total: max(0, limit - tileBytes)))
         for index in plan.removals { try? fileManager.removeItem(at: urls[index]) }
-        return plan.remaining
+        return plan.remaining + tileBytes
     }
 
     /// The parts of a cache file's name: `<fileId>-<etag>-<bucket>.jpg` (the ETag may contain `-`).
@@ -317,7 +334,20 @@ public final class PreviewCache: @unchecked Sendable {
         FileID(url.lastPathComponent.prefix(while: { $0 != "-" }))
     }
 
+    /// The photo's tile (SPEC §22.4.1) from memory, else from the tile cache, decoded on the caller's thread (0.1–0.3 ms)
+    /// and remembered; nil when the tile cache has none for this ETag. `etag` is the displayed one (with an edit's digest).
+    public func tileImage(fileId: FileID, etag: String, timestamp: Double) -> CGImage? {
+        let key = Self.key(fileId: fileId, etag: etag, bucket: TileCache.memoryBucket)
+        if let box = memory.object(forKey: key) { return box.image }
+        guard let image = tiles.image(fileId: fileId, etag: etag, timestamp: timestamp) else { return nil }
+        remember(image, key: key, maxPixelSize: max(image.width, image.height))
+        return image
+    }
+
+    static let tilesDirectory = "tiles"
+
     public func removeAll() {
+        tiles.reset()
         memory.removeAll()
         try? fileManager.removeItem(at: directory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)

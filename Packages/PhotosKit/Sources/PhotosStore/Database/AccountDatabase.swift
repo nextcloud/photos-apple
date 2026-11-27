@@ -338,6 +338,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v_r12_people_device_faces") { db in try DeviceFaceStore.migrate(db) }
         // Birthdays read from the user's Nextcloud Contacts (SPEC §22.3).
         migrator.registerMigration("v_r12_people_contact_birthdays") { db in try ContactBirthdayStore.migrate(db) }
+        // The folder tree of the targeted sync (SPEC §22.4.2).
+        migrator.registerMigration("v_r12_speed_folder_tree") { db in try FolderTree.migrate(db) }
         return migrator
     }
 }

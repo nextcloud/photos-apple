@@ -300,7 +300,8 @@ Triggered at launch, on foreground, pull-to-refresh, every 5 min while the app i
    1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when files below are added, changed, moved or deleted — but **not** when a favourite is set or the server fills in place/caption). Read it once, before anything is fetched, and store that value only after the sync is through, so a change made while syncing is seen by the next sync. Unchanged → only the favourites check: one SEARCH for the file ids with `oc:favorite = 1`, compared with the store.
    2. Changed → SEARCH for items with `d:getlastmodified > lastDeltaSync − 10 min` **or** `nc:upload_time > lastDeltaSync − 10 min` (covers new uploads with old mtimes) → upsert.
    3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h whose place is still unknown when they reach a checkpoint (10 min, 1 h, 6 h, 24 h, 47 h after the upload; looked at no more than every 10 minutes), and run a full **reconciliation** (step 4) after a root ETag changed (the delta SEARCH cannot see deletes and moves) but at most every 10 minutes (longer for large libraries: about one request per thousand items, so 150 000 items once an hour) and not while a backup pass uploads; **at once, without that interval, in the first sync after a launch or after a return to the app (at most every 5 minutes) and on pull-to-refresh when a root ETag changed since the last one** — a file or folder deleted elsewhere is gone after one sync when the app is opened, also when the app ran a few minutes before (the interval alone kept it for up to 10 minutes through any number of launches); on pull-to-refresh also without a change when the last one is 10 minutes old, at once on "Sync now", and otherwise once a day.
-   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due, and it is resumable: the rows it has not met yet are kept in a table and its cursor in the sync state, so the next sync goes on from the page it reached; only one page and its stored rows are in memory. A listing that lacks more than half of an index of more than 20 items, or items on mounted storage (external storage, shares, group folders), is not applied at once (a storage that is not mounted looks the same as a mass delete): those items are kept as suspects, and a later listing removes only the suspects it lacks too, at least an hour after the first, and only when a sample of them answers 404 by path. Smaller removals are checked by file id first.
+   4. **Reconciliation** (since M13 the one a change owes walks only the folders whose ETag changed, §22.4.2; this full
+      walk remains for "Sync now", once a day and where the server has no folder tree): page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due, and it is resumable: the rows it has not met yet are kept in a table and its cursor in the sync state, so the next sync goes on from the page it reached; only one page and its stored rows are in memory. A listing that lacks more than half of an index of more than 20 items, or items on mounted storage (external storage, shares, group folders), is not applied at once (a storage that is not mounted looks the same as a mass delete): those items are kept as suspects, and a later listing removes only the suspects it lacks too, at least an hour after the first, and only when a sample of them answers 404 by path. Smaller removals are checked by file id first.
 3. **Collections**: album list PROPFIND is expensive on the server (every album resolves all its files). Refresh the album list when the Albums view appears if older than 10 min, after own album writes, and in background daily; refresh one album's content when it is opened. Places/tags/people: when their view appears if older than 30 min. If the companion album change tag (`SERVER-COMPANION.md` §S7) exists, use it to skip unchanged albums.
 
 #### 5.4.5 Conflict rules
@@ -2700,8 +2701,8 @@ at 39.3 dB, better than the server's JPEGs. Rules (`PreviewTranscoding`):
   removed. A JPEG file is looked at once per launch (its first bytes) and left alone.
 - The thumbnail filler and the preparation store lossless previews as HEIC too (in the `.jpg`-named cache files; the
   cache reads by content). The pipeline's own 1024 px downloads are not converted: that is the load path, and on the
-  test library it would save nothing (all JPEG). Converting PNG previews of the 1024/4096 pools in the background is
-  possible later (⬜).
+  test library it would save nothing (all JPEG). PNG previews of the 1024/4096 pools are converted in the background
+  since M13 (§22.4.4).
 
 ## 19. M10 — Simpler navigation: sidebar and toolbars
 
@@ -3886,7 +3887,116 @@ the date of birth from Contacts when the user set none. Works without the Contac
 Settings › Privacy & security › *Birthdays from Contacts* (default on; off deletes the birthdays read and the reminders).
 
 ### 22.4 Faster: tile cache, targeted sync and notify_push, smaller preview cache [speed]
-_To be written._
+
+Three ideas (6, 7, 8), each measured before and after (numbers in [PERFORMANCE.md](PERFORMANCE.md), round 12).
+
+#### 22.4.1 Pre-rendered tiles of the Library (`TileCache`, `TileCacheBuilder`)
+
+- *What* — every photo's picture at 128 px on the short edge (the long edge follows the photo, at most 256 px), JPEG at
+  quality 0.7 (about 9 KB for the test library's photos), all tiles of a month (the timeline date in UTC, `2024-05`) in
+  one file `tiles/2024-05.tiles` of the account's preview cache: `NCT1`, the count, an index (file id, FNV-1a hash of the
+  ETag the tile was made for, offset, length; 24 bytes a tile), then the JPEG data. The file is memory-mapped
+  (`Data(contentsOf:options: .alwaysMapped)`) on first use and its index kept as a dictionary: 100 000 photos are 250
+  files and an index of 2.4 MB.
+- *Use* — `GridTilePicture.Source`: a cell whose photo has nothing decoded in memory takes its tile synchronously
+  (`PreviewCache.tileImage`: index lookup, decode of the mapped JPEG on the calling thread, remembered in the memory cache
+  as the 128 px picture, so `bestMemoryImage` finds it too). The cell shows it at once (no BlurHash), counts it as its
+  first picture (`CacheMetrics`, `LaunchMetrics`), and loads the preview as before when the tile is smaller than the cell
+  needs; at the small zoom steps (Months, Years: cells up to 128 px) the tile is the picture and nothing is loaded.
+  No file is opened per photo and nothing waits for the image pipeline: pictures in the first frame of a launch and
+  while flinging through a large library. A tile is valid for the ETag the grid shows (an edited photo's own,
+  `ImagePipeline.displayedEtag`); a changed photo just has none until the next build.
+- *Build* — `TileCacheBuilder` (PhotosMedia, background priority) goes through the timeline newest first in pages of 1000
+  (the cache fillers' query, `CacheFillStore.libraryPage`), month by month. A tile is made from the 256, else 1024, else
+  4096 px preview in the disk cache (nothing is downloaded: a photo without a cached preview gets its tile in a later
+  build). A month's file is written again (atomically; a reader keeps its mapping of the old file) only when a tile was
+  made or more than a tenth of its tiles belong to photos that are gone; tiles that are still right are copied over.
+  Runs after a sync (`SessionModel+TileCache.swift`: the first 20 s after the launch's sync, then at most every 10
+  minutes), not in Low Power Mode, stops at once when the session ends; a stopped pass leaves each month as it was.
+- *Budget* — an eighth of the preview cache's limit, at least 64 MB (about 7 000 photos): 256 MB with the default 2 GB,
+  newest months first; months beyond it and months without photos lose their files. The preview cache's trim leaves the
+  `tiles` folder alone and takes its bytes off the limit; clearing the cache removes it.
+- *Not done* — raw (undecoded) pixels: 64–87 KB a tile at this size instead of 9 KB (6–9 GB for 100 000 photos); a JPEG
+  decode of a tile takes 0.14–0.18 ms on an M-class Mac, small enough for the main thread. Decoding the tiles of the
+  rows the grid prefetches off the main thread is a possible next step if devices show hitches (D20).
+- *Debug* — `PHOTOS_DEBUG_NO_TILES=1` (Debug builds) turns the lookups off for before/after measurements.
+
+#### 22.4.2 Targeted sync (`SyncEngine+Targeted.swift`)
+
+Since §5.4.4's round-11 change a launch after any change walked the whole library (one SEARCH per 2000 items). Now the
+reconciliation a change owes walks only the folders whose ETag changed:
+
+- *Folder tree* — table `syncFolder` (path → recursive ETag as the index last agreed with it). When a **full walk**
+  begins, one SEARCH (`<d:is-collection/>`, limit 50 000) reads every folder below the roots with its ETag into
+  `syncFolderSnapshot`; when that walk is through, the snapshot becomes the tree (`folderTree` = the roots it belongs
+  to). A change made while the walk runs shows up as a different ETag later instead of being missed. A server that
+  does not answer that SEARCH gets no tree: every walk stays a full one, as before.
+- *Targeted walk* — the roots whose ETag (read before anything else, §5.4.4) differs from the tree are queued
+  (`syncFolderQueue`); each queued folder is listed with `PROPFIND Depth: 1` (resource type, ETag, file id, content
+  type) and, in one transaction: files that are new or whose ETag or path differ are read by id (all index properties);
+  rows of files directly in the folder that it no longer lists, and rows below subfolders that are gone, are noted as
+  missing (`syncFolderMissing`); a file listed anywhere in this walk is struck from that list (a move lists it in its new
+  folder); subfolders that are new or whose ETag differs from the tree are queued; unchanged subfolders, and everything
+  below them, are not looked at; the folder's own ETag from this listing is stored. When the queue is empty, the missing
+  rows go through the mass-delete guard (`applyRemovals`; suspects it did not meet stay suspects for the full walk to
+  confirm). Nextcloud changes a folder's ETag for every add, delete, edit, rename or move below it, and a listing's ETag
+  of a folder includes storages mounted below it (shares, external storage), so deletes, moves, renames, folders removed
+  or renamed are all found.
+- *Resumable* — the queue and the missing list are tables; a walk cut off goes on from its queue at the next sync.
+- *Failures* — a folder that cannot be listed (503: an external storage that is not there) counts nothing below it as
+  missing; it and every folder above it lose their stored ETag and the walk owes another one (`reconcileOwed`), which
+  lists it again even when its parents did not change since. A 404 (gone since its parent was listed) counts everything
+  below it as missing.
+- *Which walk* — targeted for the walks a change owes (`opened`, `ifDue`, `refresh` after a change, a notify_push
+  event). Full: "Sync now", pull to refresh without a changed ETag (the user suspects something), the confirming walk of
+  a suspected mass delete once its delay is over, no tree for these roots, and at least once a day
+  (`fullWalkInterval`): what changes no ETag (a place or caption filled in later for an older photo, a storage that does
+  not tell its parents) still arrives. Favourites change no ETag either: after a targeted walk the favourites SEARCH
+  runs as after a sync without a walk. A periodic sync (`ifDue`) waits the plain `reconcileInterval` (10 minutes)
+  before a targeted walk, not the size-scaled one of full walks (a targeted walk costs what changed).
+- *Measured* — 20 160 photos in 261 folders on Nextcloud 36 (8093): a launch after one delete took 1.3 s (4 folders
+  listed, 83 files) where a full walk took 6.3–6.4 s; a launch without a change 0.43 s (unchanged). The work a
+  full walk does grows with the library (about one SEARCH of 2000 items per 0.6 s); the targeted walk's with the change.
+- *Contract with tidy* — orphaned-recipe clean-up belongs at the end of a completed **full** walk (`reconcile(folders:
+  roots:)`, after `finishFullWalk`): a targeted walk does not see the whole library.
+
+#### 22.4.3 notify_push (`NotifyPush.swift`, `SessionModel+NotifyPush.swift`)
+
+- When the capabilities announce `notify_push` (`capabilities.notify_push.endpoints.websocket`), the session opens that
+  WebSocket on the account's `URLSession` (its certificate trust), sends the login name and the app password, waits for
+  `authenticated` and sends `listen notify_file_id`. `notify_file` / `notify_file_id [ids]` start a sync 2 s later (more
+  messages in that time make one sync), at most every 15 s, as `.opened` (a targeted walk at once) unless this device's
+  own backup is uploading (then `.ifDue`, which waits for it as usual); only while a window can be seen (otherwise the
+  return to the app syncs). Activity and notification messages are ignored.
+- Reconnects after 5 s, 30 s, 2 min, then every 10 min when the connection drops; at once when the app comes back to
+  the front (iPhone and iPad close sockets in the background). A refused login (`err: …`) is not tried again in that
+  session. Servers without the app: one capabilities request at session start, nothing else.
+- The file ids are not used to fetch single files: the targeted walk finds what changed, deletes included, in a few
+  requests.
+
+#### 22.4.4 Lossless previews of 1024 px and up as HEIC (`PreviewCompactor`)
+
+§18.3.3's ⬜: the pipeline's own 1024/4096 px downloads were stored as they came, PNG previews of screenshots and
+graphics included (0.1–5 MB each). Now `PreviewCache.store` hands a lossless (PNG, TIFF, BMP: first bytes) preview of
+1024 px or more to the compactor, which converts it a few seconds later, one file at a time at background priority and
+only while the pipeline downloads nothing from the server (not on the scrolling path), to HEIC at quality 0.7 (§18.3.3:
+39.3 dB from the PNG). The file keeps its name (the cache reads by content) and its modification date (the cache's "last
+used"); it is replaced only when the HEIC is smaller; transparency is kept (HEIC with alpha; a PNG whose alpha is opaque
+everywhere may lose the channel; one that is not opaque is left alone if the HEIC lacks alpha). Previews cached before
+are found by one scan of the cache per device (`UserDefaults` marker). Measured on 24 server previews of PNG
+screenshots: 35.3 MB → 3.2 MB (9 %); decoding at 1024 px takes 3–9 ms for a 1024 px PNG and 8–12 ms as HEIC, 17–51 ms
+for a 4096 px PNG and 27–53 ms as HEIC (in total 403 → 551 ms for the 24): a few milliseconds more where the viewer's
+budget is 150 ms.
+
+#### 22.4.5 Found on the way: Nextcloud's SEARCH answers 100 results without a limit
+
+`FileSearchBackend` (Nextcloud 36) returns at most 100 results when the request has no `<d:limit>`. That cut the
+folder SEARCH above (99 of 261 folders), and three searches of the sync engine: the favourites SEARCH (with more than
+100 favourites the others lost their flag at the next sync without a walk), the delta (more than 100 changes waited for
+a walk) and the completion of an index page's boundary second (more than 100 files sharing a second were skipped by
+the initial sync and by walks). They ask for 20 000 / 50 000 now; a full answer counts as possibly incomplete (no
+favourite is taken away, the delta owes a walk). The backup's candidate SEARCH (`BackupDependencies.candidates`) has
+the same cap (space's area; reported).
 
 ### 22.5 Settings synced between devices, orphaned edit recipes cleaned up [tidy]
 _To be written._

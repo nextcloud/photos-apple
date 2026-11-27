@@ -28,6 +28,10 @@ final class FakeDAVServer: Sendable {
 
     enum Kind: Sendable, Equatable {
         case propfind
+        /// PROPFIND with `Depth: 1`: a folder and its direct children (the targeted walk, SPEC §22.4.2).
+        case listing
+        /// SEARCH for the folders below a scope (`<d:is-collection/>`).
+        case folders
         /// Index page ordered by capture time (initial sync) or modification time (reconciliation).
         case indexByCapture, indexByModified
         case changed
@@ -170,7 +174,8 @@ final class FakeDAVServer: Sendable {
         var path = urlPath.hasPrefix(filesPrefix) ? String(urlPath.dropFirst(filesPrefix.count)) : urlPath
         if path.count > 1, path.hasSuffix("/") { path.removeLast() }
         if path.isEmpty { path = "/" }
-        let request = Request(method: method, path: path, body: body, kind: Self.kind(method: method, body: body))
+        let depth = headers.first { $0.key.lowercased() == "depth" }?.value
+        let request = Request(method: method, path: path, body: body, kind: Self.kind(method: method, body: body, depth: depth))
         state.withLock { $0.requests.append(request) }
         if let gate = gate.withLock({ $0 }) { await gate(request) }
         let after = afterResponse.withLock { $0 }
@@ -186,13 +191,14 @@ final class FakeDAVServer: Sendable {
         }
     }
 
-    static func kind(method: String, body: String) -> Kind {
+    static func kind(method: String, body: String, depth: String? = nil) -> Kind {
         switch method {
-        case "PROPFIND": return .propfind
+        case "PROPFIND": return depth == "1" ? .listing : .propfind
         case "PROPPATCH": return .proppatch
         case "DELETE": return .delete
         case "MOVE": return .move
         case "SEARCH":
+            if body.contains("<d:is-collection/>") { return .folders }
             if body.contains("<d:eq><d:prop><oc:favorite/></d:prop><d:literal>1</d:literal></d:eq>") { return .favorites }
             let ids = body.matches(of: /<d:eq><d:prop><oc:fileid\/><\/d:prop><d:literal>(\d+)<\/d:literal><\/d:eq>/).compactMap {
                 FileID($0.1)
@@ -219,6 +225,31 @@ final class FakeDAVServer: Sendable {
             let body =
                 "<d:response><d:href>/remote.php/dav/files/\(user)\(request.path)/</d:href><d:propstat><d:prop><d:getetag>&quot;\(state.rootETag)&quot;</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
             return .http(status: 207, body: Self.multistatus(body))
+        case .listing:
+            if state.unavailable.contains(where: { request.path == $0 || request.path.hasPrefix($0 + "/") }) {
+                return .http(status: 503, body: "")
+            }
+            let all = Self.allFolders(state)
+            guard request.path == "/" || all.contains(request.path) else { return .http(status: 404, body: "") }
+            let etags = Self.folderETags(state)
+            var body = folderXML(request.path, etags)
+            let files = state.files.values.filter { ($0.path as NSString).deletingLastPathComponent == request.path }.sorted {
+                $0.id < $1.id
+            }
+            let folders = all.filter { $0 != request.path && ($0 as NSString).deletingLastPathComponent == request.path }.sorted()
+            body += files.map(xml).joined()
+            body += folders.map { folderXML($0, etags) }.joined()
+            return .http(status: 207, body: Self.multistatus(body))
+        case .folders:
+            let scopes = request.body.matches(of: /<d:scope><d:href>([^<]*)<\/d:href>/).map {
+                String($0.1.dropFirst("/files/\(user)".count))
+            }
+            let etags = Self.folderETags(state)
+            let found = Self.allFolders(state).filter { folder in
+                scopes.contains { $0.isEmpty || folder.hasPrefix($0 + "/") }
+                    && !state.unavailable.contains { folder == $0 || folder.hasPrefix($0 + "/") }
+            }
+            return .http(status: 207, body: Self.multistatus(found.sorted().map { folderXML($0, etags) }.joined()))
         case .proppatch:
             guard let id = state.files.values.first(where: { $0.path == request.path })?.id else { return .http(status: 404, body: "") }
             if request.body.contains("<oc:favorite>1</oc:favorite>") { state.files[id]?.favorite = true }
@@ -273,6 +304,42 @@ final class FakeDAVServer: Sendable {
         }
     }
 
+    // MARK: Folders (the targeted walk)
+
+    /// Folders that exist: the explicit ones and every folder a file is in (with their parents).
+    static func allFolders(_ state: State) -> Set<String> {
+        var result = state.folders
+        for file in state.files.values {
+            var parent = (file.path as NSString).deletingLastPathComponent
+            while parent.count > 1, result.insert(parent).inserted { parent = (parent as NSString).deletingLastPathComponent }
+        }
+        return result
+    }
+
+    /// Like Nextcloud's recursive ETags: an explicit folder (`state.folders`) reports the root ETag, which every change
+    /// made through the fake bumps; any other folder an ETag of what is below it, which changes with any file added,
+    /// removed, moved or edited below it, and with nothing else. All folders at once (one pass over the files).
+    static func folderETags(_ state: State) -> [String: String] {
+        var hashers: [String: Hasher] = [:]
+        for file in state.files.values.sorted(by: { $0.id < $1.id }) {
+            var parent = (file.path as NSString).deletingLastPathComponent
+            while parent.count > 1 {
+                hashers[parent, default: Hasher()].combine(file.id)
+                hashers[parent, default: Hasher()].combine(file.path)
+                hashers[parent, default: Hasher()].combine(file.etag)
+                parent = (parent as NSString).deletingLastPathComponent
+            }
+        }
+        var result = hashers.mapValues { "f\(UInt(bitPattern: $0.finalize()) % 1_000_000_007)" }
+        for folder in state.folders { result[folder] = state.rootETag }
+        result["/"] = state.rootETag
+        return result
+    }
+
+    private func folderXML(_ path: String, _ etags: [String: String]) -> String {
+        "<d:response><d:href>/remote.php/dav/files/\(user)\(path == "/" ? "" : path)/</d:href><d:propstat><d:prop><d:getetag>&quot;\(etags[path] ?? "empty")&quot;</d:getetag><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+    }
+
     /// `If-Match` as Nextcloud answers it: 412 unless the file at the path has that ETag (also when there is no file).
     static func precondition(_ headers: [String: String], _ path: String, _ state: State) -> Response? {
         guard let match = headers.first(where: { $0.key.lowercased() == "if-match" })?.value else { return nil }
@@ -289,7 +356,9 @@ final class FakeDAVServer: Sendable {
                 && !state.unavailable.contains { file.path.hasPrefix($0 + "/") } && !state.hiddenFromSearch.contains(file.id)
         }
         files.sort { (order?($0) ?? $0.modified, $0.id) > (order?($1) ?? $1.modified, $1.id) }
-        if let limit { files = Array(files.prefix(limit)) }
+        // Like Nextcloud's FileSearchBackend: 100 results when the request has no limit.
+        let limit = limit ?? request.body.firstMatch(of: /<d:nresults>(\d+)<\/d:nresults>/).flatMap { Int($0.1) } ?? 100
+        files = Array(files.prefix(limit))
         return .http(status: 207, body: Self.multistatus(files.map(xml).joined()))
     }
 

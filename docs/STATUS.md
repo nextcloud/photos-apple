@@ -2017,7 +2017,34 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   with the Contacts date of birth not opened.
 
 ### §22.4 Tile cache, targeted sync and notify_push, smaller preview cache
-- ⬜ Round 12.
+- ✅ **Pre-rendered tiles** (§22.4.1): 128 px tiles, one memory-mapped file per month, built in the background from the
+  cached previews; the grid takes them synchronously. Mac against 8089 (alternating `PHOTOS_DEBUG_NO_TILES=1`, n=8 each):
+  the first screen (24 pictures) median 1552 ms after the process start instead of 1958 ms, 50 ms after the first
+  picture instead of 463 ms (PERFORMANCE.md, round 12). Per tile 0.18 ms instead of 0.61 ms for the disk cache's file
+  (100 000 photos, `TileCacheTests.measureLookups`). Seen in the running Mac app: `tiles/2026-11.tiles` and five other
+  months written 20 s after the first sync. `TileCacheTests` (format, months, shapes, builder, budget, trim).
+  iPhone 17 Pro Max simulator (n=6/5): first picture median 2671 ms instead of 4067 ms, first screen 2712 instead of
+  4069 ms; `TileCacheTourTests` passed (shots `ios-fix-shots/r12-speed/tiles-*.png`).
+- ⬜ Tiles of the rows the grid prefetches decoded off the main thread, if devices show hitches while flinging (D20);
+  the first picture of a launch still comes about 0.7 s after the grid has its items (the window's first layout, not
+  the pictures; round 10's open question).
+- ✅ **Targeted sync** (§22.4.2): the walk a change owes lists only folders whose ETag changed; resumable, a folder that
+  cannot be listed is listed again, mass-delete guard as before; full walks for "Sync now", pull to refresh without a
+  change, confirmations and once a day. 20 160 photos on 8093: a launch after one delete 1.29 s (4 folders listed)
+  instead of 6.3–6.4 s for a full walk. `TargetedSyncTests` (9, among them 40 random rounds that must end equal to the
+  server), `TargetedSyncIntegrationTests` against 8089 (delete, move, renamed folder, new folder: targeted, no full
+  walk), round-11 sync tests green (assertions that a walk happened now accept a targeted one). In the running Mac app:
+  the folder tree (40 folders) stored after the first full walk.
+- ✅ **SEARCH limit** (§22.4.5): Nextcloud answers 100 results without a limit; favourites (more than 100 lost their
+  flag), the delta and the boundary completion of index pages ask for more now. `SearchLimitTests` fail without the fix.
+- 🟡 **notify_push** (§22.4.3): client, reconnection and the session's debounced sync; `NotifyPushTests` against a local
+  WebSocket server speaking the protocol (login, `listen notify_file_id`, events, refused login, reconnection). Not
+  seen against a real notify_push (it needs its Rust daemon and Redis; none of the test servers has it): D20.
+- iPhone 17 Pro Max simulator on this branch: `SmokeTests` 7 of 7, `AccessibilityAuditTests` 13 of 13,
+  `TileCacheTourTests` 1 of 1 (8089).
+- ✅ **HEIC for lossless 1024/4096 px previews** (§22.4.4): converted in the background after storing, name, date and
+  transparency kept; 24 server previews of PNG screenshots 35.3 MB → 3.2 MB (9 %), decode at 1024 px +3–8 ms for 1024 px
+  files. `PreviewCompactionTests`.
 
 ### §22.5 Settings synced between devices, orphaned edit recipes
 - ⬜ Round 12.
