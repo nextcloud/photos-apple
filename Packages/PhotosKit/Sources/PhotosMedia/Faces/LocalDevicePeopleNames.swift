@@ -6,9 +6,8 @@ import PhotosDomain
 
 /// The names and assignments of People on this device, kept in a file of the account (SPEC §22.3).
 ///
-/// TODO(tidy, SPEC §22.5): share them between the user's devices: the settings code reads `.nextcloud-photos/people.json`,
-/// merges it with this file (`DevicePeopleDocument.merged`) and writes it back ETag-safely, then `load()` returns the
-/// merged document and `update` writes through. Until then the names stay on this device.
+/// The app shares them through `.nextcloud-photos/people.json` (`SyncedDevicePeopleNames` in PhotosCore, SPEC §22.5);
+/// this store keeps them on this device only (tests; the app takes an older file of it in once).
 public actor LocalDevicePeopleNames: DevicePeopleNames {
     let file: URL
     private var cached: DevicePeopleDocument?

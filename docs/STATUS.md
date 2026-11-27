@@ -2035,9 +2035,10 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   unit-tested (`FaceClusteringTests`, `DevicePeopleDocumentTests`, `DevicePeopleTests`). 🟡 Rename/Merge/Not this
   person/Move through the Mac's menus not clicked (no real input; the same calls are unit-tested); iPhone/iPad: Vision
   does not run in the simulator (People shows its note: tour `testPeopleWithoutRecognize` and the new audit
-  `AccessibilityAuditTests.testPeople` pass; `SmokeTests` and `AccessibilityAuditTests` pass on iPhone, 28 tests). ⬜ Sharing through
-  `.nextcloud-photos/people.json` waits for §22.5's settings API: `LocalDevicePeopleNames` keeps the document on the
-  device (TODO for tidy; the format and merge are in place). ⬜ Recall on a library with many photos per person (a real
+  `AccessibilityAuditTests.testPeople` pass; `SmokeTests` and `AccessibilityAuditTests` pass on iPhone, 28 tests). 🟡 Sharing through
+  `.nextcloud-photos/people.json` (`SyncedDevicePeopleNames` on §22.5's store, one record per person): two devices
+  exchanging names and a race on one person's faces, and the one-time take-over of `device-people.json`, unit-tested
+  (`SyncedDevicePeopleNamesTests`); not yet seen across two real devices. ⬜ Recall on a library with many photos per person (a real
   family library) not measured; ⬜ device D22.3: time per photo and battery on an iPhone.
 - ✅ **Birthdays from Contacts**: CardDAV reading against 8089 (`ContactBirthdaysIntegrationTests`: own contact
   `r12-people-…` added, read, removed; 8089 has no Contacts app — the core address book is enough); vCard forms, matching,

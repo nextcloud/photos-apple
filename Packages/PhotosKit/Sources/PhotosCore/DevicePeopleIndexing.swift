@@ -45,10 +45,22 @@ public enum DevicePeopleIndexing {
 
     @MainActor static func engine(_ services: AccountServices) -> DevicePeopleEngine {
         if let known = engines[services.account.id] { return known }
-        let names = LocalDevicePeopleNames(
-            file: services.layout.accountDirectory(services.account.id).appending(path: "device-people.json"))
+        // Shared with the user's other devices through `.nextcloud-photos/people.json` (SPEC §22.5).
+        let shared = services.syncedSettings.store(.people)
+        let names = SyncedDevicePeopleNames(
+            store: shared, legacyFile: services.layout.accountDirectory(services.account.id).appending(path: "device-people.json"))
         let made = DevicePeopleEngine(database: services.database, names: names)
         engines[services.account.id] = made
+        // Names and assignments another device gave show here after the next settings sync, not only after the next run.
+        let database = services.database
+        Task {
+            await shared.observe { keys in
+                guard keys.contains(where: { $0.hasPrefix(SyncedDevicePeopleNames.prefix) }) else { return }
+                Task.detached(priority: .utility) {
+                    if (try? await made.applySharedNames()) == true { try? DeviceFaceStore(database: database).mirrorNamedPeople() }
+                }
+            }
+        }
         return made
     }
 

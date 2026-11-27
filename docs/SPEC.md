@@ -3966,9 +3966,10 @@ Vision only (no model of the app's own, §2/§21):
   A named person carries up to 24 of their clearest faces, so another device can find the same person among its own
   groups (the group with most of them takes the name); faces assigned or rejected are added with their time. Merge
   rule: per person the newer name/deletion/merge wins (`updatedAt`), faces and rejections of both are kept, a face said
-  both ways keeps the newer word; a name is never lost. People goes through the protocol `DevicePeopleNames`; until the
-  settings API of §22.5 reads and writes the file on the server, `LocalDevicePeopleNames` keeps it in the account's
-  folder (`device-people.json`, TODO for tidy to wire).
+  both ways keeps the newer word; a name is never lost. People goes through the protocol `DevicePeopleNames`, which the app
+  answers with `SyncedDevicePeopleNames` on §22.5's store: one record per person (`person/<id>`), versions that lost a
+  race folded back with this merge. Names kept on the device before sharing existed (`device-people.json`) are taken
+  in once. A sync that brings changed people applies them at once (not only at the next run).
 
 **Birthdays from Contacts (idea 11).** Read-only over CardDAV, once a day after a sync: the address books under
 `remote.php/dav/addressbooks/users/<user>/` (not the generated "Accounts" and "Recently contacted" books), one
