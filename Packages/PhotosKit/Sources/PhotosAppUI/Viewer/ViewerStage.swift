@@ -28,6 +28,12 @@ enum ViewerStage {
         return (date.formatted(dayStyle), trimmedPlace.isEmpty ? time : "\(time) · \(trimmedPlace)")
     }
 
+    /// Whether a new measurement of the page is one the info card's placement follows: a change of a whole point or more
+    /// (a rotation, a resized window), not the fractions the placement itself causes.
+    static func isNewPlacementSize(_ size: CGSize, old: CGSize) -> Bool {
+        abs(size.width - old.width) >= 1 || abs(size.height - old.height) >= 1
+    }
+
     /// How the page is scaled and moved so that the photo fits between `top` and `bottom` (page coordinates) — above
     /// the info card on iPhone, as in Photos. A photo that fits already is only moved; it is never enlarged.
     static func infoPlacement(content: CGSize, page: CGSize, top: CGFloat, bottom: CGFloat) -> (scale: CGFloat, offsetY: CGFloat) {

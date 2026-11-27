@@ -43,7 +43,7 @@ extension BackupEngine {
             unchecked = unchecked.dropFirst(chunk.count)
             let notOnServer = try await reconcile(Array(chunk), checkedBefore: checked, total: total)
             checked += chunk.count
-            let round = (ready + notOnServer).sorted(by: BackupPolicy.isOlder)
+            let round = prioritized((ready + notOnServer).sorted(by: BackupPolicy.isOlder))
             ready = []
             toUpload = toUpload || !round.isEmpty
             if dryRun { continue }

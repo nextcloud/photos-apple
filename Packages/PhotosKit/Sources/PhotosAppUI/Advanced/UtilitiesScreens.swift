@@ -639,7 +639,7 @@ struct ExtractTextSheet: View {
             }
             .task { await extract() }
         }
-        .frame(minWidth: 420, minHeight: 400)
+        .sheetMinimumSize(width: 420, height: 400)
     }
 
     /// Server OCR when available, else Vision on the device.

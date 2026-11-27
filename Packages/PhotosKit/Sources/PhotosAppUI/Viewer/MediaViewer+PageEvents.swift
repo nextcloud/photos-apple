@@ -29,20 +29,24 @@ extension MediaViewer {
     /// the finger and shrinks while the grid comes back behind it; let go, it lands in its tile or springs back
     /// (SPEC §17.1). With the info card open, a swipe down closes the card.
     func handleSwipe(_ phase: ViewerSwipe.Phase) {
+        let startedWithInfo: Bool = swipeBeganWithInfo ?? showingInfo
         switch phase {
         case .changed(let translation):
-            guard !showingInfo, translation.height > 0 || dismissPose != .rest else { return }
+            if swipeBeganWithInfo == nil { swipeBeganWithInfo = showingInfo }
+            guard !startedWithInfo, !showingInfo, translation.height > 0 || dismissPose != .rest else { return }
             if dismissPose == .rest { viewerExit?.setTileHidden(landingTile != nil) }
             dismissPose = ViewerDismissal.dragPose(
                 translation: CGSize(width: translation.width, height: max(0, translation.height)), page: pageSize,
                 photo: currentPhotoRect)
         case .ended(let translation, let velocity):
+            swipeBeganWithInfo = nil
             switch ViewerSwipe.outcome(translation: translation.height, velocity: velocity.dy) {
             case .dismiss:
-                if showingInfo {
-                    toggleInfo()
-                } else {
+                if ViewerSwipe.closesViewer(infoShownAtStart: startedWithInfo, infoShown: showingInfo) {
                     land(velocity: velocity)
+                } else {
+                    if showingInfo { toggleInfo() }
+                    settle(velocity: .zero)
                 }
             case .showInfo:
                 settle(velocity: .zero)
@@ -51,6 +55,7 @@ extension MediaViewer {
                 settle(velocity: velocity)
             }
         case .cancelled:
+            swipeBeganWithInfo = nil
             settle(velocity: .zero)
         }
     }

@@ -139,6 +139,6 @@ import Testing
         }
         #expect(etags.count == 100_000)
         #expect(tiers.count > 2000)
-        #expect(elapsed < .seconds(3))
+        #expect(elapsed < timingBudget(.seconds(3)), "\(elapsed)")
     }
 }

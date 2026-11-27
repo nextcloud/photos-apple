@@ -107,6 +107,11 @@ public final class AppModel {
                     }
                 }
             }
+            // PHOTOS_DEBUG_BACKUP=<folder> turns backup on into that folder for the account on screen, whether it was just
+            // logged in or was there already (an earlier UI test logged in) (simulator runs of SPEC §21.1).
+            if let folder = ProcessInfo.processInfo.environment["PHOTOS_DEBUG_BACKUP"] {
+                Task { await self.debugEnableBackup(folder: folder) }
+            }
         #endif
         LaunchMetrics.shared.reached(.appModel)
     }

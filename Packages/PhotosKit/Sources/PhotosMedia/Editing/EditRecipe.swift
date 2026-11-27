@@ -10,7 +10,13 @@ import Foundation
 public struct EditRecipe: Hashable, Sendable {
     /// The newest format this app reads and writes. A recipe of a newer format (written by a newer app) is not applied
     /// and not overwritten without asking (`EditRecipe.Failure.newerFormat`).
-    public static let currentVersion = 1
+    ///
+    /// Version 2 (SPEC §21.6) added curves, the colour mixer, masks, noise reduction and RAW colour noise and detail, and
+    /// removed objects (`retouch`, SPEC §21.5). A
+    /// recipe is written with the lowest version that can show it (`requiredVersion`): an edit that uses none of these is
+    /// still version 1, so older apps keep showing it; one that does is version 2, so an older app shows the original
+    /// and says the photo was edited with a newer version instead of showing half of the edit.
+    public static let currentVersion = 2
     /// `format` of every recipe: what the file is, for anybody who finds it in their files.
     public static let format = "nextcloud-photos-edit"
 
@@ -30,7 +36,8 @@ public struct EditRecipe: Hashable, Sendable {
         }
     }
 
-    public var version = EditRecipe.currentVersion
+    /// The format version the recipe was read with (1 for a new one). What a file gets is `requiredVersion`.
+    public var version = 1
     /// When the user last changed the edit: of two versions of a recipe the newer one wins (`EditLibrary`).
     public var updatedAt: Date
     /// Crop, turns, straighten, mirror, auto-enhance, filter and adjustments.
@@ -39,28 +46,41 @@ public struct EditRecipe: Hashable, Sendable {
     public var raw: RAWAdjustments?
     /// Live Photo effect and key photo (SPEC §16.3.3); nil for none.
     public var live: LivePhotoEffect?
+    /// Objects removed with the Remove tool (SPEC §21.5); nil for none.
+    public var retouch: RetouchSteps?
     public var original: Original?
 
     public init(
         edits: PhotoEdits = PhotoEdits(), raw: RAWAdjustments? = nil, live: LivePhotoEffect? = nil, original: Original? = nil,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(), retouch: RetouchSteps? = nil
     ) {
         self.edits = edits
         self.raw = raw
         self.live = live
+        self.retouch = retouch
         self.original = original
         self.updatedAt = updatedAt
     }
 
     /// Nothing is changed: the recipe would show the original.
     public var isIdentity: Bool {
-        edits.isIdentity && (raw?.isIdentity ?? true) && (live?.isIdentity ?? true)
+        edits.isIdentity && (raw?.isIdentity ?? true) && (live?.isIdentity ?? true) && (retouch?.isIdentity ?? true)
+    }
+
+    /// The lowest format version that shows this edit completely: what `encoded()` writes.
+    public var requiredVersion: Int {
+        let edits = edits.normalized
+        let usesVersion2 =
+            edits.noiseReduction != 0 || edits.colorNoiseReduction != 0 || !edits.curves.isIdentity || !edits.colorMixer.isIdentity
+            || !edits.masks.isEmpty || raw?.colorNoiseReduction != nil || raw?.detail != nil
+            || retouch?.isIdentity == false
+        return usesVersion2 ? 2 : 1
     }
 
     /// The still picture differs from the original (the tile and the viewer show a rendition). Loop and Bounce alone
     /// change only how the motion plays.
     public var changesStill: Bool {
-        !edits.isIdentity || !(raw?.isIdentity ?? true) || live?.changesStill == true
+        !edits.isIdentity || !(raw?.isIdentity ?? true) || live?.changesStill == true || !(retouch?.isIdentity ?? true)
     }
 
     /// A short, stable fingerprint of what the recipe renders (not of when or where it was made): the key of the cached
@@ -121,10 +141,14 @@ public struct RAWAdjustments: Hashable, Sendable, Codable {
     public var shadowBoost: Double = 0
     /// Luminance noise reduction (0 … 1); nil keeps the decoder's default.
     public var noiseReduction: Double?
+    /// Colour noise reduction (0 … 1); nil keeps the decoder's default. Format version 2.
+    public var colorNoiseReduction: Double?
+    /// Detail the decoder brings out (0 … 1, its `detailAmount`); nil keeps the decoder's default. Format version 2.
+    public var detail: Double?
 
     public init(
         exposure: Double = 0, temperature: Double? = nil, tint: Double? = nil, highlightRecovery: Bool = false, shadowBoost: Double = 0,
-        noiseReduction: Double? = nil
+        noiseReduction: Double? = nil, colorNoiseReduction: Double? = nil, detail: Double? = nil
     ) {
         self.exposure = exposure
         self.temperature = temperature
@@ -132,6 +156,8 @@ public struct RAWAdjustments: Hashable, Sendable, Codable {
         self.highlightRecovery = highlightRecovery
         self.shadowBoost = shadowBoost
         self.noiseReduction = noiseReduction
+        self.colorNoiseReduction = colorNoiseReduction
+        self.detail = detail
     }
 
     public var isIdentity: Bool { self == RAWAdjustments() }
@@ -183,9 +209,28 @@ public struct LivePhotoEffect: Hashable, Sendable, Codable {
 ///   "raw": { "exposure": 0.5, "temperature": 5200, "highlightRecovery": true },
 ///   "live": { "effect": "bounce", "keyFrameTime": 1.2 } }
 /// ```
+///
+/// Version 2 adds (docs/EDIT-FORMAT.md):
+///
+/// ```json
+/// { "adjustments": { "noiseReduction": 0.3, "colorNoiseReduction": 0.5 },
+///   "curves": { "rgb": [[0, 0], [0.25, 0.2], [0.75, 0.82], [1, 1]], "blue": [[0, 0.05], [1, 1]] },
+///   "colorMixer": { "blue": { "saturation": 0.3, "luminance": -0.2 }, "orange": { "hue": -0.1 } },
+///   "masks": [ { "target": "sky", "adjustments": { "exposure": -0.4, "saturation": 1.2 } },
+///              { "target": "subject", "inverted": false, "adjustments": { "exposure": 0.3 } } ],
+///   "raw": { "colorNoiseReduction": 0.4, "detail": 0.6 } }
+/// ```
 extension EditRecipe: Codable {
     private enum Keys: String, CodingKey {
-        case format, version, updatedAt, original, geometry, adjustments, filter, raw, live
+        case format, version, updatedAt, original, geometry, adjustments, filter, raw, live, curves, colorMixer, masks, retouch
+    }
+
+    private enum MaskKeys: String, CodingKey {
+        case target, inverted, adjustments
+    }
+
+    private enum MixerKeys: String, CodingKey {
+        case hue, saturation, luminance
     }
 
     private enum GeometryKeys: String, CodingKey {
@@ -202,6 +247,7 @@ extension EditRecipe: Codable {
             ("exposure", \.exposure, 0), ("contrast", \.contrast, 1), ("brightness", \.brightness, 0), ("highlights", \.highlights, 1),
             ("shadows", \.shadows, 0), ("saturation", \.saturation, 1), ("vibrance", \.vibrance, 0), ("warmth", \.warmth, 0),
             ("tint", \.tint, 0), ("sharpness", \.sharpness, 0), ("vignette", \.vignette, 0),
+            ("noiseReduction", \.noiseReduction, 0), ("colorNoiseReduction", \.colorNoiseReduction, 0),
         ]
     }
 
@@ -216,7 +262,7 @@ extension EditRecipe: Codable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: Keys.self)
         try container.encode(Self.format, forKey: .format)
-        try container.encode(version, forKey: .version)
+        try container.encode(requiredVersion, forKey: .version)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(original, forKey: .original)
         let defaults = PhotoEdits()
@@ -239,8 +285,38 @@ extension EditRecipe: Codable {
             try adjustments.encode(edits[keyPath: adjustment.keyPath], forKey: AnyKey(adjustment.name))
         }
         if edits.filter != .none { try container.encode(edits.filter.rawValue, forKey: .filter) }
+        let normalized = edits.normalized
+        if !normalized.curves.isIdentity {
+            var curves = container.nestedContainer(keyedBy: AnyKey.self, forKey: .curves)
+            for channel in ToneCurves.Channel.allCases where !normalized.curves[channel].isIdentity {
+                try curves.encode(normalized.curves[channel].points.map { [$0.x, $0.y] }, forKey: AnyKey(channel.rawValue))
+            }
+        }
+        if !normalized.colorMixer.isIdentity {
+            var mixer = container.nestedContainer(keyedBy: AnyKey.self, forKey: .colorMixer)
+            for band in ColorMixer.Band.allCases where !normalized.colorMixer[band].isIdentity {
+                let adjustment = normalized.colorMixer[band]
+                var nested = mixer.nestedContainer(keyedBy: MixerKeys.self, forKey: AnyKey(band.rawValue))
+                if adjustment.hue != 0 { try nested.encode(adjustment.hue, forKey: .hue) }
+                if adjustment.saturation != 0 { try nested.encode(adjustment.saturation, forKey: .saturation) }
+                if adjustment.luminance != 0 { try nested.encode(adjustment.luminance, forKey: .luminance) }
+            }
+        }
+        if !normalized.masks.isEmpty {
+            var masks = container.nestedUnkeyedContainer(forKey: .masks)
+            for mask in normalized.masks {
+                var nested = masks.nestedContainer(keyedBy: MaskKeys.self)
+                try nested.encode(mask.target.rawValue, forKey: .target)
+                if mask.inverted { try nested.encode(true, forKey: .inverted) }
+                var values = nested.nestedContainer(keyedBy: AnyKey.self, forKey: .adjustments)
+                for adjustment in MaskAdjustment.adjustments where mask[keyPath: adjustment.keyPath] != adjustment.neutral {
+                    try values.encode(mask[keyPath: adjustment.keyPath], forKey: AnyKey(adjustment.name))
+                }
+            }
+        }
         if let raw, !raw.isIdentity { try container.encode(raw, forKey: .raw) }
         if let live, !live.isIdentity { try container.encode(live, forKey: .live) }
+        if let retouch, !retouch.isIdentity { try container.encode(retouch, forKey: .retouch) }
     }
 
     public init(from decoder: any Decoder) throws {
@@ -277,9 +353,57 @@ extension EditRecipe: Codable {
         if let filter = try? container.decodeIfPresent(String.self, forKey: .filter) {
             edits.filter = PhotoEdits.Filter(rawValue: filter) ?? .none
         }
+        edits.noiseReduction = min(1, max(0, edits.noiseReduction))
+        edits.colorNoiseReduction = min(1, max(0, edits.colorNoiseReduction))
+        if let curves = try? container.nestedContainer(keyedBy: AnyKey.self, forKey: .curves) {
+            for channel in ToneCurves.Channel.allCases {
+                guard let pairs = try? curves.decodeIfPresent([[Double]].self, forKey: AnyKey(channel.rawValue)) else { continue }
+                let points = pairs.filter { $0.count >= 2 }.map { CurvePoint(x: $0[0], y: $0[1]) }
+                edits.curves[channel] = ToneCurve(points: points)
+            }
+        }
+        if let mixer = try? container.nestedContainer(keyedBy: AnyKey.self, forKey: .colorMixer) {
+            for band in ColorMixer.Band.allCases {
+                guard let nested = try? mixer.nestedContainer(keyedBy: MixerKeys.self, forKey: AnyKey(band.rawValue)) else { continue }
+                let adjustment = ColorMixer.Adjustment(
+                    hue: (try? nested.decodeIfPresent(Double.self, forKey: .hue)) ?? 0,
+                    saturation: (try? nested.decodeIfPresent(Double.self, forKey: .saturation)) ?? 0,
+                    luminance: (try? nested.decodeIfPresent(Double.self, forKey: .luminance)) ?? 0)
+                edits.colorMixer[band] = adjustment.clamped()
+            }
+        }
+        if var masks = try? container.nestedUnkeyedContainer(forKey: .masks) {
+            while !masks.isAtEnd {
+                // A mask of a kind this version does not know is left out; the others still apply.
+                guard let nested = try? masks.nestedContainer(keyedBy: MaskKeys.self) else {
+                    _ = try? masks.decode(JSONValueSkip.self)
+                    continue
+                }
+                let name = (try? nested.decodeIfPresent(String.self, forKey: .target)) ?? nil
+                guard let target = name.flatMap(MaskAdjustment.Target.init(rawValue:)) else { continue }
+                var mask = MaskAdjustment(target: target, inverted: (try? nested.decodeIfPresent(Bool.self, forKey: .inverted)) ?? false)
+                if let values = try? nested.nestedContainer(keyedBy: AnyKey.self, forKey: .adjustments) {
+                    for adjustment in MaskAdjustment.adjustments {
+                        if let value = try? values.decodeIfPresent(Double.self, forKey: AnyKey(adjustment.name)), value.isFinite {
+                            mask[keyPath: adjustment.keyPath] = value
+                        }
+                    }
+                }
+                if !mask.isIdentity && edits.masks.count < Self.maximumMasks { edits.masks.append(mask) }
+            }
+        }
         self.edits = edits
         raw = try? container.decodeIfPresent(RAWAdjustments.self, forKey: .raw)
         live = try? container.decodeIfPresent(LivePhotoEffect.self, forKey: .live)
+        retouch = (try? container.decodeIfPresent(RetouchSteps.self, forKey: .retouch)).flatMap { $0.isIdentity ? nil : $0 }
+    }
+
+    /// Most masks a recipe applies (each runs a segmentation): more in a file are ignored.
+    public static let maximumMasks = 8
+
+    /// Skips one value of any kind in an unkeyed container.
+    private struct JSONValueSkip: Decodable {
+        init(from decoder: any Decoder) throws {}
     }
 
     /// A crop from a file is kept inside the picture and never smaller than the crop tool allows.
@@ -308,7 +432,9 @@ extension LivePhotoEffect {
 }
 
 extension RAWAdjustments {
-    private enum Keys: String, CodingKey { case exposure, temperature, tint, highlightRecovery, shadowBoost, noiseReduction }
+    private enum Keys: String, CodingKey {
+        case exposure, temperature, tint, highlightRecovery, shadowBoost, noiseReduction, colorNoiseReduction, detail
+    }
 
     /// Missing or broken values keep the camera's development.
     public init(from decoder: any Decoder) throws {
@@ -324,5 +450,7 @@ extension RAWAdjustments {
         highlightRecovery = recovery ?? false
         shadowBoost = value(.shadowBoost) ?? 0
         noiseReduction = value(.noiseReduction)
+        colorNoiseReduction = value(.colorNoiseReduction).map { min(1, max(0, $0)) }
+        detail = value(.detail).map { min(1, max(0, $0)) }
     }
 }

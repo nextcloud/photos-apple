@@ -27,6 +27,8 @@ public enum EditRendering {
         public var supportsHighlightRecovery: Bool
         public var supportsNoiseReduction: Bool
         public var nativeSize: CGSize
+        public var supportsColorNoiseReduction = false
+        public var supportsDetail = false
     }
 
     public static func rawInfo(_ url: URL) -> RAWInfo? {
@@ -34,7 +36,8 @@ public enum EditRendering {
         return RAWInfo(
             temperature: Double(filter.neutralTemperature), tint: Double(filter.neutralTint),
             supportsHighlightRecovery: filter.isHighlightRecoverySupported,
-            supportsNoiseReduction: filter.isLuminanceNoiseReductionSupported, nativeSize: filter.nativeSize)
+            supportsNoiseReduction: filter.isLuminanceNoiseReductionSupported, nativeSize: filter.nativeSize,
+            supportsColorNoiseReduction: filter.isColorNoiseReductionSupported, supportsDetail: filter.isDetailSupported)
     }
 
     /// Develops a RAW file with the recipe's RAW settings, no larger than `maxPixelSize` (long edge) when given.
@@ -56,6 +59,10 @@ public enum EditRendering {
         if let noise = raw.noiseReduction, filter.isLuminanceNoiseReductionSupported {
             filter.luminanceNoiseReductionAmount = Float(min(1, max(0, noise)))
         }
+        if let noise = raw.colorNoiseReduction, filter.isColorNoiseReductionSupported {
+            filter.colorNoiseReductionAmount = Float(min(1, max(0, noise)))
+        }
+        if let detail = raw.detail, filter.isDetailSupported { filter.detailAmount = Float(min(1, max(0, detail))) }
     }
 
     /// The camera's white balance a preview approximation assumes when it does not know the file's own.
@@ -94,6 +101,7 @@ public enum EditRendering {
             filter.sharpness = 0.4
             image = filter.outputImage ?? image
         }
+        if let noise = raw.colorNoiseReduction, noise > 0 { image = NoiseReduction.apply(luminance: 0, color: noise, to: image) }
         return image
     }
 
@@ -101,10 +109,23 @@ public enum EditRendering {
 
     /// The recipe on a picture of any size. `developed`: the RAW settings were applied while decoding (the picture is
     /// the RAW itself); otherwise they are approximated.
-    public static func apply(_ recipe: EditRecipe, to input: CIImage, developed: Bool = false) -> CIImage {
+    ///
+    /// The order (docs/EDIT-FORMAT.md): RAW settings, removed objects (`retouch`), colour and tone (`PhotoEditor.applyColor`: noise, adjustments, curves,
+    /// colour mixer, masks, filter, sharpness, vignette), then straighten, turns, mirror and crop.
+    /// - Parameter crops: false for the crop tool, which shows the whole picture with the crop's frame over it.
+    public static func apply(_ recipe: EditRecipe, to input: CIImage, developed: Bool = false, crops: Bool = true) -> CIImage {
         var image = input
         if let raw = recipe.raw, !raw.isIdentity, !developed { image = approximate(raw, on: image) }
-        return PhotoEditor.apply(recipe.edits, to: image)
+        // Removed objects (SPEC §21.5) before colour: the fill sees the photo's own pixels, and changing colours later never
+        // fills again (the filled areas are cached by the picture they were made from).
+        image = Inpainting.apply(recipe.retouch, to: image)
+        image = PhotoEditor.applyColor(recipe.edits, to: image)
+        var geometry = recipe.edits
+        if !crops {
+            geometry.crop = nil
+            geometry.aspect = .free
+        }
+        return PhotoEditor.applyGeometry(geometry, to: image)
     }
 
     /// The edited version of a preview, no larger than `maxPixelSize`: what the grid and the viewer show.

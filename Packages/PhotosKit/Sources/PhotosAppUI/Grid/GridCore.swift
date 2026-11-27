@@ -303,7 +303,14 @@ struct GridTileBadges: Equatable {
     var showsShade: Bool
     /// The tile stands for several copies of one shot (`TimelineStacking`): a stack badge in the top trailing corner.
     var showsStack = false
+    /// A photo of this device that is not on the server yet (SPEC §21.1): its badge stands where the partner badge does.
+    var deviceBadge: DeviceBackupBadge?
     var accessibilityLabel: String
+
+    /// The symbol in the top trailing corner: the device photo's backup state, or the partner badge.
+    var cornerSymbol: String? {
+        deviceBadge?.systemImage ?? (showsPartner ? Self.partnerSymbol : nil)
+    }
 
     init(item: GridMedia, isPartner: Bool = false) {
         duration = GridTile.durationText(for: item)
@@ -316,12 +323,14 @@ struct GridTileBadges: Equatable {
         accessibilityLabel = GridTile.accessibilityLabel(for: item)
         if showsStack {
             let members: String =
-                TimelineStacks.isBurst(leaderName: item.name)
+                item.stackIsBurst || TimelineStacks.isBurst(leaderName: item.name)
                 ? String(localized: "Burst of \(item.stack.count) photos", bundle: .module)
                 : String(localized: "\(item.stack.count) copies", bundle: .module)
             accessibilityLabel += ", " + members
         }
         if isPartner { accessibilityLabel += ", " + String(localized: "Partner photo", bundle: .module) }
+        deviceBadge = item.deviceBadge
+        if let badge = item.deviceBadge { accessibilityLabel += ", " + DeviceBackupWording.badgeText(badge) }
     }
 
     /// SF Symbol of the partner badge.

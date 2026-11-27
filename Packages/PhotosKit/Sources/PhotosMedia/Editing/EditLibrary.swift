@@ -58,11 +58,14 @@ public actor EditLibrary {
     /// The sync that runs; another one waits for it.
     private var running: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.nextcloud.photos", category: "edits")
+    /// The user's edit presets (SPEC §21.6.5), synced with the recipes.
+    public nonisolated let presets: EditPresetLibrary
 
     /// - Parameter file: where the recipes are kept on the device; nil keeps them in memory (tests, previews).
     public init(dav: DAVClient, file: URL?) {
         self.dav = dav
         self.file = file
+        presets = EditPresetLibrary(dav: dav, file: file?.deletingLastPathComponent().appending(path: "presets.json"))
         var loaded = State()
         if let file, let data = try? Data(contentsOf: file), let decoded = try? JSONDecoder().decode(State.self, from: data) {
             loaded = decoded
@@ -173,6 +176,7 @@ public actor EditLibrary {
     /// leave everything as it is for the next one.
     public func sync() async {
         await sync(pullFirst: true)
+        await presets.syncIfDue()
     }
 
     /// Sends local changes without waiting for the server.

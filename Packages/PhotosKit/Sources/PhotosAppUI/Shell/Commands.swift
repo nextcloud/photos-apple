@@ -66,6 +66,8 @@ public struct GridActions {
     var useAsDesktopPicture: (() -> Void)? = nil
     /// Image ▸ Flag / Rating with the selection (SPEC §15.2); nil when it cannot be rated.
     var cull: ((CullingCommand) -> Void)? = nil
+    /// Image ▸ Flag ▸ Pick Best Shots with the selection (SPEC §21.4); nil when it cannot be rated.
+    var pickBest: (() -> Void)? = nil
     /// Image ▸ Compare (2–4 selected).
     var compare: (() -> Void)? = nil
     /// Image ▸ Culling View: the loupe and filmstrip over the selection or the grid (SPEC §16.5.2).

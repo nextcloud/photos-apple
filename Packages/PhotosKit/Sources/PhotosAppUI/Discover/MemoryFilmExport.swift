@@ -274,7 +274,7 @@ struct FilmExportView: View {
                 }
             }
         }
-        .frame(minWidth: 420, minHeight: 320)
+        .sheetMinimumSize(width: 420, height: 320)
         #if os(iOS)
             .presentationDetents([.medium, .large])
         #endif

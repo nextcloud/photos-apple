@@ -82,7 +82,10 @@ struct ViewerPage: View {
 
     var body: some View {
         Group {
-            if let item {
+            if DeviceMediaID.isDevice(fileId) {
+                // A photo of this device that is not on the server yet (SPEC §21.1).
+                DeviceViewerPage(fileId: fileId, isCurrent: isCurrent, command: zoomCommand, events: photoEvents)
+            } else if let item {
                 if item.kind == .video {
                     // The player's own controls stay reachable inside the page.
                     VideoPage(item: item, isCurrent: isCurrent, playbackToggle: playbackToggle, verticalDrag: events.verticalDrag)

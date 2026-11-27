@@ -339,7 +339,9 @@
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridScrollView) {
             let badges = GridTileBadges(item: item, isPartner: owner.services.partnerPaths.contains(directory: item.directory))
-            partnerIcon.isHidden = !badges.showsPartner
+            // The partner badge, or the backup state of a device photo (SPEC §21.1).
+            partnerIcon.isHidden = badges.cornerSymbol == nil
+            if let symbol = badges.cornerSymbol { partnerIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
             durationLabel.stringValue = badges.duration ?? ""
             durationLabel.isHidden = badges.duration == nil
             videoIcon.isHidden = !badges.showsVideo

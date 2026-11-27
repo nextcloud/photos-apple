@@ -54,6 +54,8 @@ struct AccountMenuButton: View {
                 // A name and a server: nothing to translate.
                 Text(verbatim: "\(account.displayName) – \(account.hostDisplayName)")
             }
+            // "All backed up" or "12 not backed up" (SPEC §21.1).
+            BackupSummaryMenuSection()
             #if !os(macOS)
                 // The Mac uploads from File ▸ Upload Photos… and by dropping files on the window.
                 Section {
@@ -70,6 +72,7 @@ struct AccountMenuButton: View {
         } label: {
             // The avatar itself, not a label with it as icon: a toolbar shows such a label's title.
             AccountAvatar(name: account.displayName)
+                .overlay(alignment: .bottomTrailing) { BackupSummaryBadge() }
         }
         .accessibilityLabel(AccountMenuWording.accessibilityLabel(name: account.displayName, server: account.hostDisplayName))
         .accessibilityHint(AccountMenuWording.accessibilityHint)

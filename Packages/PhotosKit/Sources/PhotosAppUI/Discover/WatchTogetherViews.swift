@@ -190,7 +190,7 @@ struct WatchTogetherProblemView: View {
                 }
             }
         }
-        .frame(minWidth: 420, minHeight: 320)
+        .sheetMinimumSize(width: 420, height: 320)
         .onAppear {
             WatchTogether.shared.report(SharedFilmReport(visible: 0, total: film.pictures.count, problem: .noAccount))
         }

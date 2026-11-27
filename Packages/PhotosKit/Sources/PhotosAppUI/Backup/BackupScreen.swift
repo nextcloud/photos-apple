@@ -107,6 +107,9 @@ struct BackupStatusView: View {
                         Button(String(localized: "Pause", bundle: .module)) { backup.cancel() }
                     }
                 }
+                // Two buttons in one row of a form: without this a tap on either ran both, and "Back up now" during a
+                // pass paused it (found in round 11).
+                .buttonStyle(.borderless)
             } footer: {
                 if backup.settings.filesAppMode == .keepFiles {
                     Text(BackupWording.filesAppNote)

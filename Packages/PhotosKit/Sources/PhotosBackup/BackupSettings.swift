@@ -58,6 +58,9 @@ public struct BackupSettings: Codable, Hashable, Sendable {
     /// Download originals that are only in iCloud ("Optimise Storage"), on Wi-Fi. Off: such items are skipped.
     public var downloadFromICloud = true
     public var filesAppMode: FilesAppMode = .notUsed
+    /// The photos and videos of this device that are not backed up yet stand in the Library next to the server's, with a
+    /// badge (SPEC §21.1). On by default; only while backup is on.
+    public var showsDeviceInLibrary = true
 
     public init() {}
 
@@ -88,6 +91,7 @@ public struct BackupSettings: Codable, Hashable, Sendable {
         pauseInLowPowerMode = try read(.pauseInLowPowerMode, defaults.pauseInLowPowerMode)
         downloadFromICloud = try read(.downloadFromICloud, defaults.downloadFromICloud)
         filesAppMode = try read(.filesAppMode, defaults.filesAppMode)
+        showsDeviceInLibrary = try read(.showsDeviceInLibrary, defaults.showsDeviceInLibrary)
     }
 
     /// The Files app's default folder layout and naming, used when switching from Files (SPEC §7.18.5).

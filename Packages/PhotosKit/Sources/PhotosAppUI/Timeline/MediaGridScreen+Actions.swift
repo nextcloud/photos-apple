@@ -86,6 +86,7 @@ extension MediaGridScreen {
             addToNewAlbum: { withItems(withStacks(Array(selected))) { newAlbumItems = PickedItems(items: $0) } },
             useAsDesktopPicture: desktopPictureAction(single),
             cull: canCull && summary.count > 0 ? { (command: CullingCommand) in cull(command, Array(selected)) } : nil,
+            pickBest: canCull && summary.count > 1 ? { () -> Void in pickBest(Array(selected)) } : nil,
             compare: (2...CompareLayout.maxPhotos).contains(summary.count) ? { () -> Void in compare(Array(selected)) } : nil,
             loupe: feed.items.isEmpty ? nil : { () -> Void in openLoupe(selected) },
             deleteRejected: deleteRejected,
@@ -108,7 +109,10 @@ extension MediaGridScreen {
         var actions: [GridMenuAction] = []
         // Flag, rate, Compare and Loupe are advanced features (SPEC §20.4); their keyboard shortcuts stay.
         if AdvancedFeatures.shows(.culling) {
-            if canCull { actions.append(contentsOf: CullingMenu.actions { command, ids in cull(command, ids) }) }
+            if canCull {
+                let culling = CullingMenu.actions(apply: { command, ids in cull(command, ids) }, pickBest: { ids in pickBest(ids) })
+                actions.append(contentsOf: culling)
+            }
             if (2...CompareLayout.maxPhotos).contains(summary.count) {
                 actions.append(
                     GridMenuAction(id: "compare", title: CompareWording.menuTitle, systemImage: "rectangle.split.2x2") { ids in compare(ids)
@@ -155,6 +159,11 @@ extension MediaGridScreen {
     func cull(_ command: CullingCommand, _ ids: [FileID]) {
         let undoManager = undoManager
         withItems(withStacks(ids)) { items in culling.apply(command, to: items, session: session, undoManager: undoManager) }
+    }
+
+    /// Flag ▸ Pick Best Shots (SPEC §21.4): the best shot of each series among the photos (a stacked tile's photos too).
+    func pickBest(_ ids: [FileID]) {
+        culling.pickBest(ids: withStacks(ids), session: session, undoManager: undoManager)
     }
 
     /// The compare view with 2–4 photos, in the grid's order.

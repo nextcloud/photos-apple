@@ -541,19 +541,34 @@ struct SimilarShotsScreen: View {
     @State private var enabled = SimilarIndexing.isEnabled()
     @State private var progress: (indexed: Int, total: Int)?
     @State private var pending: PendingServerDeletion?
+    /// Series whose best shot is being analysed now, and how many (SPEC §21.4).
+    @State private var analysing: (done: Int, total: Int)?
 
     /// How many series are listed at once; deleting some brings the next ones in.
     static let listed = 100
+    /// How many of the first series are analysed for their best shot while the screen is open; the rest are analysed in
+    /// the background (`BestShotAnalyzer.run`) or when the user scrolls back after a while.
+    static let analysedOnOpen = 24
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 28) {
                 if !sets.isEmpty {
                     Text(
-                        "Photos taken one after the other that look alike. The best shot is suggested: a favorite, else the sharpest and best composed. The other shots can be deleted from your Nextcloud.",
+                        "Photos taken one after the other that look alike. The best shot is suggested: a favorite, else the one with open eyes and smiles that is sharpest and best exposed. The other shots can be deleted from your Nextcloud.",
                         bundle: .module, comment: "Similar shots: explanation above the list."
                     )
                     .font(.callout).foregroundStyle(.secondary)
+                    if let analysing {
+                        Label {
+                            Text(
+                                "Choosing the best shots on this device… \(analysing.done.formatted()) of \(analysing.total.formatted()) series",
+                                bundle: .module, comment: "Similar shots: the on-device best-shot analysis is running.")
+                        } icon: {
+                            ProgressView().controlSize(.small)
+                        }
+                        .font(.footnote).foregroundStyle(.secondary)
+                    }
                     if let progress, progress.indexed < progress.total {
                         Label {
                             Text(
@@ -629,6 +644,7 @@ struct SimilarShotsScreen: View {
             let progress = try? SimilarityStore(database: services.database).progress()
             self.progress = progress
             loaded = true
+            await analyseBestShots(services)
             guard let progress, progress.indexed < progress.total, SimilarIndexing.Conditions.current.allowsForegroundWork else {
                 return
             }
@@ -639,6 +655,28 @@ struct SimilarShotsScreen: View {
             }.value
             // Nothing more can be compared now (the other previews are not on this device yet).
             if indexed == 0 { return }
+        }
+    }
+
+    /// Analyses the shots of the first series that are not analysed yet (SPEC §21.4), a few series at a time, loading
+    /// their 1024 px previews where needed, and lists again after each step so the suggestions follow.
+    func analyseBestShots(_ services: AccountServices) async {
+        let pending = sets.prefix(Self.analysedOnOpen).filter { $0.group.analysed < $0.group.shots.count }
+        guard !pending.isEmpty else { return }
+        let service = BestShotService(services: services)
+        analysing = (0, pending.count)
+        defer { analysing = nil }
+        var done = 0
+        for start in stride(from: 0, to: pending.count, by: 4) {
+            guard !Task.isCancelled else { return }
+            let step = pending[start..<min(start + 4, pending.count)]
+            let shots: [FileID] = step.flatMap { $0.group.shots.compactMap(\.first) }
+            let analysed = await service.signals(of: shots, fetch: true)
+            done += step.count
+            analysing = (done, pending.count)
+            // Nothing could be analysed (the simulator, or offline): no point in going on.
+            if analysed.isEmpty { return }
+            sets = await SimilarShotSet.load(database: services.database, library: services.library)
         }
     }
 
@@ -701,9 +739,15 @@ struct SimilarShotSetView: View {
         if set.group.kept.contains(where: { set.items[$0]?.isFavorite == true }) {
             return String(localized: "The favorite is kept.", bundle: .module)
         }
-        return String(
-            localized: "The sharpest and best composed shot is kept.", bundle: .module,
-            comment: "Similar shots: why a shot is suggested (Vision's aesthetics score, or the middle of a burst).")
+        guard set.group.analysed > 0 else {
+            return String(
+                localized: "The sharpest and best composed shot is kept.", bundle: .module,
+                comment: "Similar shots: why a shot is suggested (Vision's aesthetics score, or the middle of a burst).")
+        }
+        let why = String(
+            localized: "Best shot: \(BestShotWording.summary(set.group.reasons)).", bundle: .module,
+            comment: "Similar shots: why a shot is suggested. The placeholder is a list such as Sharpest, eyes open.")
+        return set.group.analysed < set.group.shots.count ? why + " " + BestShotWording.preliminary : why
     }
 
     var hint: String {

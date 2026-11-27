@@ -83,6 +83,8 @@ struct InfoPanel: View {
                     row(String(localized: "Owner", bundle: .module), owner)
                 }
                 if let duration = item.duration { row(String(localized: "Duration", bundle: .module), Formatters.duration(duration)) }
+                // Uploaded by this device's backup (SPEC §21.1).
+                BackupInfoRow(item: item)
             }
             if item.hasLocation, let latitude = item.latitude, let longitude = item.longitude {
                 Section(String(localized: "Location", bundle: .module)) {

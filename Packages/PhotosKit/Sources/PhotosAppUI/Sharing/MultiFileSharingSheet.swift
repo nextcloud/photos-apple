@@ -157,7 +157,7 @@ struct MultiFileSharingSheet: View {
                 results = await search(query)
             }
         }
-        .frame(minWidth: 440, minHeight: 560)
+        .sheetMinimumSize(width: 440, height: 560)
     }
 
     var jobCount: Int { items.count * recipients.count }

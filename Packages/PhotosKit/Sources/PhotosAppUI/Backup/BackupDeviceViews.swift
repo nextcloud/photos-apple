@@ -44,8 +44,18 @@ struct BackupDeviceSection: View {
                         Label(DeviceWording.freeUpTitle, systemImage: "arrow.up.trash")
                     }
                 #endif
+                if backup.settings.isEnabled {
+                    // Device photos that are not backed up in the Library (SPEC §21.1).
+                    Toggle(
+                        DeviceBackupWording.showInLibrary,
+                        isOn: Binding(
+                            get: { backup.settings.showsDeviceInLibrary },
+                            set: { value in backup.update { $0.showsDeviceInLibrary = value } }))
+                }
             } header: {
                 Text(DeviceWording.sectionTitle)
+            } footer: {
+                if backup.settings.isEnabled { Text(DeviceBackupWording.showInLibraryFooter) }
             }
         }
     }

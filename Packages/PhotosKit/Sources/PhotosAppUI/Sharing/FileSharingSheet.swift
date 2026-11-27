@@ -264,7 +264,7 @@ struct FileSharingSheet: View {
                 ShareEditorSheet(model: model, share: nil)
             }
         }
-        .frame(minWidth: 440, minHeight: 560)
+        .sheetMinimumSize(width: 440, height: 560)
     }
 
     @ViewBuilder var recipientSection: some View {
@@ -512,7 +512,7 @@ struct ShareEditorSheet: View {
             }
             .onAppear(perform: fill)
         }
-        .frame(minWidth: 420, minHeight: 520)
+        .sheetMinimumSize(width: 420, height: 520)
     }
 
     @ViewBuilder var passwordRows: some View {

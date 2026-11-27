@@ -10,6 +10,12 @@ import SwiftUI
 extension MediaGridScreen {
     /// The context menu of the grid for `ids` (the selection, or the item that was clicked).
     func menuActions(for ids: [FileID]) -> [GridMenuAction] {
+        // Device photos in the Library (SPEC §21.1) have actions of their own.
+        if let device = DeviceGridActions.menu(
+            for: ids, session: session, open: { openViewer(at: $0) }, serverActions: { menuActions(for: $0) })
+        {
+            return device
+        }
         if selectionInfo.ids.count == ids.count, selectionInfo.ids == Set(ids) { return menuActions(selectionInfo) }
         guard let library = session.services?.library else { return [] }
         // Not loaded yet (the selection has just changed): read it now. A context menu is opened once, not on every update.
@@ -173,6 +179,7 @@ extension MediaGridScreen {
                     rotate(ids, clockwise: true)
                 })
         }
+        actions += editLookActions(info.items)
         if canEditMetadata(summary) {
             let metadataTitle: String = PlatformWording.title(
                 mac: LocalizedStringResource("Adjust", bundle: .module, comment: "Submenu: adjust date, place, names of the selection."),

@@ -76,6 +76,17 @@ PHOTOS_IT_SERVER=http://127.0.0.1:8089 PHOTOS_IT_USER=admin PHOTOS_IT_PASSWORD=a
   swift test --no-parallel --filter Integration
 ```
 
+`LargeUploadIntegrationTests` (2 GB videos, SPEC §21.1) also need `PHOTOS_IT_LARGE=1`: they write a 2.1 GB file and
+send it twice (with downloads to compare), about four to eight minutes per server.
+
+`UITests/BackupLibraryTourTests` (device photos in the Library, SPEC §21.1) turns backup on in the simulator
+(`PHOTOS_DEBUG_BACKUP`, for the account that is logged in, also one an earlier test logged in) into
+`PHOTOS_UITEST_BACKUP_FOLDER` (default `/Photos/ui-backup-tour`, removed at the end), and empties the backup's ledger
+first (`PHOTOS_DEBUG_BACKUP_RESET`), so it can run again. The app adds four new photos to the simulator's library
+(`PHOTOS_DEBUG_BACKUP_SAMPLES=4`, taken now): the simulator's own sample photos may be on the test server already, and
+a device photo the server has is shown once, as the server's. Without any photo the test skips and says so. Photo library access is granted by the test (the system's alert) or beforehand with
+`xcrun simctl privacy <simulator> grant photos <bundle id>`.
+
 Run them one after the other (`--no-parallel`, with xcodebuild `-parallel-testing-enabled NO`): the suites change the
 same account, and one of them counts its files while another uploads. The nightly workflow
 (`.github/workflows/nightly.yml`) does exactly this on the macOS runner.
@@ -148,6 +159,19 @@ runs it alone. The simulator cannot run Vision's models, so the app analyses not
 with results, compute prints of the simulator's cached previews on the Mac (Vision's `GenerateImageFeaturePrintRequest`
 and `FeatureSketcher` from PhotosDomain) and write them into the `similarity` table of the simulator's account database.
 
+`UITests/VerifyTourTests.swift` (iPhone and iPad, SPEC §21.2) is round 11's proof of the STATUS items that had only been
+compiled: viewer gestures (double tap, pan while zoomed, swipe up/down), Show in folder / Show in library, the slideshow,
+pull to refresh, square tiles off, photo links, adding photos to an album, the share, tag, Share via Nextcloud and album
+sharing sheets, stacks and bursts, the memory slideshow and menu, the map, archive with undo, Edit date and location,
+Recently deleted and app lock behind Face ID. What it changes is its own: photos it uploads (`TestServer`) and albums it
+creates, removed at the end; Settings it touches are set back. Two helpers run on the Mac next to it: Face ID enrolment
+and matches as for `LookTourTests` (held back while the test has written `faceid.hold` into the shots folder, so that
+the app lock's cover can be seen before it opens; `testAppLock` runs only with `TEST_RUNNER_PHOTOS_UITEST_FACEID=1`, set
+where that helper runs, as without it the lock never opens and the tests after it meet a locked app), and, for moments a test cannot screenshot itself (a gesture in progress), a loop that
+takes `xcrun simctl io <udid> screenshot` frames while the test has written `capture.request` into the shots folder
+(`captureFrames(_:during:)`). A failed tap inside an `async` test can leave XCTest waiting for ever in the teardown; the
+tour checks before it taps.
+
 `UITests/LookTourTests.swift` (iPhone and iPad, SPEC §16.8) opens the album `PHOTOS_UITEST_ALBUM` (default "Lisbon
 2025"): its card menu, "Customize Cover…" (cancelled, nothing is saved), the tinted header, Guest Mode from start to end,
 and Settings ▸ Appearance. Ending Guest Mode asks for Face ID: enrol it once
@@ -173,7 +197,7 @@ the server's values while it runs (PROPFIND of `nc:metadata-photos-original_date
 
 `UITests/GridMotionTourTests.swift` (iPhone) tours SPEC §17.2: the Library edge to edge with its date pill, selecting
 tiles, the viewer's zoom out of a tile and back, an album's grid (`TEST_RUNNER_PHOTOS_UITEST_ALBUM`, default
-"r7-grid-album") and a favourite's heart, a delete and its undo on two photos the test uploads first (dated now, so
+"Lisbon 2025" of the shared test library, only looked at) and a favourite's heart, a delete and its undo on two photos the test uploads first (dated now, so
 they are the newest of the library on any day) and removes at the end. `TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX` names the screenshots (before/after pairs), and
 `TEST_RUNNER_PHOTOS_UITEST_REDUCE_MOTION=1` / `TEST_RUNNER_PHOTOS_UITEST_REDUCE_TRANSPARENCY=1` launch the app with those
 settings. For motion, record the simulator meanwhile (`xcrun simctl io <udid> recordVideo --codec h264 <file>`).

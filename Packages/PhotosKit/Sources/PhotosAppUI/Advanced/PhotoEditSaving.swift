@@ -9,11 +9,18 @@ import PhotosModel
 import PhotosNetworking
 import PhotosStore
 
-/// Saving an edited photo as a file (SPEC §7.16.2): the edits are rendered from the original at full resolution and either
-/// replace it — a new version of the file, the previous one stays in Nextcloud's file versions — or are uploaded as
-/// `<name> (edited)` next to it. The editor's own result is an edit recipe (SPEC §16.3); these are its "Save as Copy" and
-/// "Overwrite Original…".
+/// Saving an edited photo as a file (SPEC §7.16.2, §21.6.6): the edits are rendered from the original at full resolution
+/// and either replace it — a new version of the file; the original is kept as a named version first, which Nextcloud never
+/// expires — or are uploaded as `<name> (edited)` next to it. The editor's own result is an edit recipe (SPEC §16.3);
+/// these are its "Save as Copy", "Overwrite Original…" and the "Apply Edits to the File" option.
 enum PhotoEditSaving {
+    /// "Apply Edits to the File" (SPEC §21.6.6): Done and Paste Edits write the edited picture into the file, so the web,
+    /// the Android app and every other app show it. Off by default: an edit recipe can be changed and undone at any time,
+    /// a file edit only by restoring the original.
+    static let applyToFileKey = "editing.applyEditsToFile"
+
+    static var appliesToFile: Bool { UserDefaults.standard.bool(forKey: applyToFileKey) }
+
     enum Failure: LocalizedError, Equatable {
         /// The file is in a share without edit permission.
         case readOnly
@@ -21,6 +28,8 @@ enum PhotoEditSaving {
         case unsupportedFormat
         /// The file changed on the server since the app last synced it: nothing was overwritten.
         case changedOnServer
+        /// The server keeps no (named) file versions: the original could not be kept, so nothing was overwritten.
+        case versionsUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -35,6 +44,11 @@ enum PhotoEditSaving {
                     localized:
                         "The photo was changed on the server in the meantime. Nothing was overwritten; try again after the next sync.",
                     bundle: .module)
+            case .versionsUnavailable:
+                String(
+                    localized:
+                        "Your Nextcloud doesn't keep file versions, so the original couldn't be kept. The file was not changed.",
+                    bundle: .module, comment: "Error: editing into the file needs the Versions app on the server.")
             }
         }
     }
@@ -54,8 +68,9 @@ enum PhotoEditSaving {
         try await overwrite(item, with: EditRecipe(edits: edits), original: original, services: services)
     }
 
-    /// Replaces the original with the recipe rendered on it. The photo's own recipe is removed afterwards: it is part of
-    /// the file now (a new version; the previous one stays in the file versions).
+    /// Replaces the original with the recipe rendered on it. Before, the original is kept as a named file version
+    /// (`FileVersions.keepOriginal`; when the server cannot, nothing is replaced). The photo's own recipe is removed
+    /// afterwards: it is part of the file now.
     /// - Parameter still: a Live Photo effect's still (long exposure, another key photo) at full size, instead of the
     ///   original's picture.
     static func overwrite(
@@ -74,6 +89,12 @@ enum PhotoEditSaving {
         defer { try? FileManager.default.removeItem(at: directory) }
         let rendered = try EditRendering.renderFile(
             recipe, original: file, name: item.name, still: still, replacingOriginal: true, to: directory)
+        // Never lose the original: it is named (kept for good) before anything is replaced.
+        do {
+            try await FileVersions(dav: services.dav).keepOriginal(of: item.fileId)
+        } catch FileVersions.Failure.unavailable {
+            throw Failure.versionsUnavailable
+        }
         var headers: [String: String] = [:]
         if !item.etag.isEmpty { headers["If-Match"] = "\"\(item.etag)\"" }
         do {
@@ -100,6 +121,19 @@ enum PhotoEditSaving {
                 try? await services.api.addToAlbum(album, userPath: uploaded.path)
             }
         }
+    }
+
+    /// Whether the file of `item` has an original the app kept (`FileVersions.originalLabel`).
+    static func hasKeptOriginal(_ item: MediaItem, services: AccountServices) async -> Bool {
+        guard item.permissions.canWrite else { return false }
+        return ((try? await FileVersions(dav: services.dav).original(of: item.fileId)) ?? nil) != nil
+    }
+
+    /// "Restore Original": the kept original becomes the file again (the edited picture stays a version), and the
+    /// photo's edit recipe, if any, is removed.
+    static func restoreOriginal(_ item: MediaItem, services: AccountServices) async throws {
+        try await FileVersions(dav: services.dav).restoreOriginal(of: item.fileId)
+        await services.edits.revert(item.fileId)
     }
 
     private static func workDirectory() throws -> URL {

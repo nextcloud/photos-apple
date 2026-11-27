@@ -113,6 +113,14 @@ import Testing
         #expect(ViewerSwipe.outcome(translation: 60, velocity: 100) == .none)
     }
 
+    @Test func aSwipeDownThatBeganOnTheInfoCardClosesOnlyTheCard() {
+        // The card closed itself on the same swipe (an iPhone sheet): the viewer stays.
+        #expect(!ViewerSwipe.closesViewer(infoShownAtStart: true, infoShown: false))
+        #expect(!ViewerSwipe.closesViewer(infoShownAtStart: true, infoShown: true))
+        #expect(!ViewerSwipe.closesViewer(infoShownAtStart: false, infoShown: true))
+        #expect(ViewerSwipe.closesViewer(infoShownAtStart: false, infoShown: false))
+    }
+
     @Test func swipeUpShowsInfo() {
         #expect(ViewerSwipe.outcome(translation: -200, velocity: 0) == .showInfo)
         #expect(ViewerSwipe.outcome(translation: -30, velocity: -1500) == .showInfo)

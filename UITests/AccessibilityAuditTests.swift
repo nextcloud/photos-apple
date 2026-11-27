@@ -326,7 +326,7 @@ import XCTest
             var identifier: String
             var frame: CGRect?
 
-            init(_ issue: XCUIAccessibilityAuditIssue) {
+            @MainActor init(_ issue: XCUIAccessibilityAuditIssue) {
                 type = issue.auditType
                 description = issue.compactDescription
                 detail = issue.detailedDescription

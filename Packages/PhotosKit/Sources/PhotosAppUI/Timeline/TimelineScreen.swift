@@ -60,11 +60,14 @@ struct TimelineScreen: View {
         var stacksCopies: Bool
         var hiddenPartnerFolders: [String] = []
         var culling: CullingFilter = .all
+        /// The device's photos that are not backed up stand in it (SPEC §21.1).
+        var showsDevice = false
     }
 
     var query: Query {
         Query(
-            kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [], culling: cullingFilter)
+            kind: mediaKind, stacksCopies: stackCopies, hiddenPartnerFolders: session.partners?.hiddenFolders ?? [], culling: cullingFilter,
+            showsDevice: cullingFilter == .all && session.backup.deviceLayer.showsInLibrary(of: session.account.id))
     }
 
     /// While the first sync runs, the whole library's shape from the server's month counts (extended Photos API): the
@@ -224,6 +227,12 @@ struct TimelineScreen: View {
             // While something runs: uploads, a card import, photos open in other apps (SPEC §19.2).
             TransfersIndicator()
             PhotographerStatusItems()
+            #if os(macOS)
+                // Mac: "12 not backed up" while something is (SPEC §21.1); the other platforms have it in the account
+                // menu. Only here: an empty view among the toolbar items changed how iOS built the Library's toolbar,
+                // and the accessibility audit found an element without a description over the grid.
+                if filter == .all { BackupSummaryToolbarItem() }
+            #endif
             // One filter menu on every platform (SPEC §19.2); a timeline of its own (Photos, Videos, Favorites) has none.
             if filter == .all {
                 LibraryFilterMenu(
@@ -302,7 +311,13 @@ struct TimelineScreen: View {
         let query: @Sendable () -> GridStream = {
             library.observeGrid(kind, excludedFolders: excluded, culling: culling, coalescing: .milliseconds(300))
         }
-        feed.observe(stackCopies ? TimelineStacking.stacked(query) : query, flat: false)
+        let evidence = SimilarIndexing.isEnabled() ? StoredBurstEvidence(database: services.database) : nil
+        // The device's photos that are not on the server yet, merged in by capture time (SPEC §21.1), before the stacks
+        // are made: a burst of device photos stacks like the server's.
+        let shown: Bool = self.query.showsDevice
+        let timeline: @Sendable () -> GridStream =
+            shown ? DeviceLibraryTimeline.merged(query, layer: session.backup.deviceLayer, kind: kind) : query
+        feed.observe(stackCopies ? TimelineStacking.stacked(timeline, evidence: evidence) : timeline, flat: false)
     }
 
     var emptyTitle: String {

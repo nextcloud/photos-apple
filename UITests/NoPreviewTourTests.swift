@@ -98,27 +98,33 @@ import XCTest
             let input = AVAssetWriterInput(
                 mediaType: .video,
                 outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 640, AVVideoHeightKey: 360])
-            let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
-            writer.add(input)
-            writer.startWriting()
+            // The receiver API of OS 27 (the adaptor, `add`, `startWriting` and `isReadyForMoreMediaData` are deprecated
+            // there, and warnings fail the UI test build on CI).
+            let receiver = writer.inputPixelBufferReceiver(for: input, pixelBufferAttributes: nil)
+            try writer.start()
             writer.startSession(atSourceTime: .zero)
             for frame in 0..<90 {
-                while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-                var buffer: CVPixelBuffer?
-                CVPixelBufferCreate(nil, 640, 360, kCVPixelFormatType_32BGRA, nil, &buffer)
-                guard let buffer else { throw CancellationError() }
-                CVPixelBufferLockBaseAddress(buffer, [])
-                let pixels = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt32.self)
-                let count = CVPixelBufferGetBytesPerRow(buffer) / 4 * 360
-                // Blue to green over the three seconds, opaque (BGRA in memory).
-                let green = UInt32(min(255, frame * 3))
-                for index in 0..<count { pixels[index] = 0xFF00_0000 | (green << 8) | 0xC0 }
-                CVPixelBufferUnlockBaseAddress(buffer, [])
-                adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+                guard let buffer = colourField(frame: frame) else { throw CancellationError() }
+                try await receiver.append(buffer, with: CMTime(value: CMTimeValue(frame), timescale: 30))
             }
-            input.markAsFinished()
+            receiver.finish()
             await writer.finishWriting()
             return try Data(contentsOf: url)
+        }
+
+        /// One frame: blue to green over the three seconds, opaque (BGRA in memory); a buffer of its own, so it can be
+        /// sent to the receiver.
+        static func colourField(frame: Int) -> CVReadOnlyPixelBuffer? {
+            var buffer: CVPixelBuffer?
+            CVPixelBufferCreate(nil, 640, 360, kCVPixelFormatType_32BGRA, nil, &buffer)
+            guard let buffer else { return nil }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let pixels = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt32.self)
+            let count = CVPixelBufferGetBytesPerRow(buffer) / 4 * 360
+            let green = UInt32(min(255, frame * 3))
+            for index in 0..<count { pixels[index] = 0xFF00_0000 | (green << 8) | 0xC0 }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            return CVReadOnlyPixelBuffer(unsafeBuffer: buffer)
         }
     }
 #endif

@@ -109,6 +109,12 @@ struct MapScreen: View {
                         try await library.mapGridItems(in: area, during: period, limit: limit, offset: offset)
                     }
                 }
+                // The Mac's sheet had no way to close it but Escape (round 11); a swipe down still closes it elsewhere.
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(String(localized: "Done", bundle: .module)) { selected = nil }
+                    }
+                }
             }
             #if os(macOS)
                 // A sheet on the Mac has no size of its own; elsewhere the sheet fills the screen.

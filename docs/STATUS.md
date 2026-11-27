@@ -49,10 +49,10 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
   login page and the poll when the typed address is `https://` (a proxy without `overwriteprotocol` names itself with http);
   the same host returned with `http://` stays on https; a refused http server gets its fresh app password revoked over the
   typed https address ✅ unit-tested (stubbed server), not run against a misconfigured proxy.
-- QR codes and login links show "Log in to <host> as <user>?" before anything is sent ✅ compiled (iOS scanner 🟡 not run).
+- QR codes and login links show "Log in to <host> as <user>?" before anything is sent ✅ compiled (iOS scanner ⬜ device D16.1).
 - Keychain items are `AfterFirstUnlockThisDeviceOnly` (not in backups or on other devices); existing items are switched once
-  at launch 🟡 (signed builds only; unsigned Mac builds use the file store).
-- MDM / AppConfig keys (§5.1.9) 🟡 (round 4): `serverUrl` (address filled in and fixed; logins to other servers refused, also
+  at launch ⬜ device D16.1 (signed builds only; unsigned Mac builds use the file store).
+- MDM / AppConfig keys (§5.1.9) ⬜ device D16.2 (round 4): `serverUrl` (address filled in and fixed; logins to other servers refused, also
   QR codes, links and Files-app suggestions; `addAccount` checks again and revokes the granted app password), `username`
   (proposed on the login page with `?user=`), `disable_multiaccount` ("Add account" hidden, a second login refused, logging in
   again allowed), `enforce_passcode_lock` (app lock on and its switch disabled; written to the App Group so widgets and
@@ -60,7 +60,7 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
   Backup screen says so). Read from `com.apple.configuration.managed` at launch and on every `UserDefaults` change. Existing
   accounts are kept when a restriction arrives. Parsing and policy ✅ unit-tested (`ManagedAndSpotlightTests`); the Mac app
   started with a managed configuration, the managed UI was not looked at (no MDM-delivered configuration on the build Mac).
-- QR code login 🟡: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
+- QR code login ⬜ device D16.1: on iPhone and iPad "Scan QR code" opens the system scanner (VisionKit `DataScannerViewController`,
   only where it is supported; camera access is asked for first, without it the link can be pasted). Compiles for iOS, not
   run (no simulator runtime, no device). The Mac and Vision Pro offer "Log in with a link".
 - A login whose app password the keychain cannot store (an unsigned build without the keychain entitlement) fails with "Your
@@ -89,7 +89,7 @@ accounts/switching ✅, revocation and remote wipe 🟡, feature detection ✅, 
 
 ## M1 Browse and view — mostly ✅
 Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid with day sections, pinch zoom, selection, context menus ✅
-(macOS ✅, iOS 🟡), date scrubber on iOS ✅ run in the iOS 27.2 simulator, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
+(macOS ✅, iOS ✅ round 11 `VerifyTourTests`), date scrubber on iOS ✅ run in the iOS 27.2 simulator, viewer with zoom/video/Live Photos 🟡, info panel ✅, favourite/delete/archive/export ✅.
 - Sync and outbox safety ✅ unit-tested against the stubbed DAV server (`PhotosStoreTests/DataLayerTests.swift`,
   `PhotosCoreTests/DataLayerTests.swift`), 🟡 not exercised against a real server:
   a detection that cannot read the Photos settings keeps the cached timeline folders, MIME types and `.nomedia` folders
@@ -119,9 +119,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   that point, the photo cannot leave the page, two-finger scroll and mouse drag pan a zoomed photo on the Mac, View ▸ Zoom In /
   Zoom Out / Zoom to Fit (⌘+ / ⌘− / ⌘0), the same as actions for assistive technologies. Geometry ✅ unit-tested
   (`ViewerZoomTests`); Mac ✅ run (zoom steps, double click, centring and clamping read from the running app; **not** exercised
-  with a real trackpad: pinch, and paging with a two-finger swipe over a photo that is not zoomed); iOS 🟡 compiled, not run.
-- iPhone/iPad 🟡 (compiled, not run): swipe down closes the viewer (the page follows the finger, the backdrop fades), swipe up
-  shows the info panel; every screen opens the viewer through one modifier (`mediaViewer`), with the navigation stack its
+  with a real trackpad: pinch, and paging with a two-finger swipe over a photo that is not zoomed); iOS ✅ run in the iOS 27.2
+  simulator (round 11, `VerifyTourTests.testViewerGestures`, shots `ios-fix-shots/r11-verify/*-0[1-7]-viewer*`): a double tap
+  zooms in at the point, a swipe on the zoomed photo pans it instead of paging, a second double tap zooms out; pinch not
+  driven (XCUITest's pinch is not a two-finger gesture at a point).
+- iPhone ✅ (round 11, `testViewerGestures`, twice; iPad see §21.2): swipe down closes the viewer (the page following the
+  finger was not caught: the host's frames come too late, `v5-07-…-frame*`), swipe up shows the info panel (name, date,
+  size, type, folder, `ios-fix-shots/r11-verify/v1-05`); a swipe down on the info card closes the card and keeps the viewer (it closed both, and Info left the card
+  on screen — fixed in round 11, `testInfoCardSwipeDown`, `v8-0[89]-info-card*`); every screen opens the viewer through one modifier (`mediaViewer`), with the navigation stack its
   toolbar needs — also from Folders, Shared with you and photo links. Zoom transition from the tile 🟡 (compiled for iOS,
   not run): the grid marks the tapped tile's frame as `matchedTransitionSource` and the cover uses `.navigationTransition(.zoom)`;
   while paging, the grid scrolls the current photo's tile on screen and the transition follows it, so closing zooms back into the
@@ -151,8 +156,11 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   across a relayout, prefetch requests, tile badges and preview loading) are shared by the AppKit and the UIKit grid
   (`Grid/GridCore.swift`) ✅ unit-tested; the Mac grid was compared before and after the extraction (zoom, resize, scrubber, selection).
 - iPhone grid ✅ run in the iOS 27.2 simulator: scrolling, selection mode (the tab bar now makes room for the selection's
-  actions, which were under it), context menu with preview; pull to refresh, pinch and the two-finger drag were not exercised.
-  iPad and visionOS 🟡 (compiled, not run here). Pull to refresh (a refresh control on the collection view, driven
+  actions, which were under it), context menu with preview; pull to refresh ✅ round 11 (`testPullToRefresh`, the refresh
+  control above the memories while the finger holds, frames `ios-fix-shots/r11-verify/v5-30-pull-to-refresh-frame*`; pinch:
+  `FeelTourTests`); the two-finger drag was not exercised.
+  iPad ✅ round 11 for the grid, viewer, info inspector column, albums, map, memories, stacks (`VerifyTourTests` 10 of 12 on
+  the iPad Pro 13-inch, `ios-fix-shots/r11-verify/p1-*`); visionOS 🟡 (compiled, not run here). Pull to refresh (a refresh control on the collection view, driven
   by the screen's `.refreshable`; it ends when the sync or reload has returned), a two-finger drag starts the selection mode,
   the context menu of a photo shows a large preview (a tap opens it), tiles can be dragged into other apps on iPad (the original
   is downloaded on drop), selection mark in the bottom trailing corner, hover effect under the pointer. The logic behind them
@@ -174,23 +182,27 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   servers have no cheap count and show "Loading your library — 12,000" 🟡 (text unit-tested, total read from the extended
   test server; not looked at on screen: the Mac was locked).
 - Keyboard and accessibility in the Mac grid ✅: tiles are buttons (press opens, the context menu actions are accessibility
-  actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape 🟡 (not run).
-- TL-6 stacks, the conservative part 🟡 (unit-tested; Mac UI not checked, the screen was locked): copies of one shot — images in
+  actions), arrow keys, Return/Space, Escape. iOS: hardware-keyboard focus and Escape ⬜ device D16.4.
+- TL-6 stacks, the conservative part ✅ iPhone (round 11, `testStacksAndBursts`: `R11STACK.jpg` + `.jpeg` uploaded by the
+  test are one tile with the stack badge, VoiceOver "2 copies", `ios-fix-shots/r11-verify/v4-100…`); Mac UI 🟡 not checked (screen locked): copies of one shot — images in
   the same folder with the same name apart from extension and case, taken at most 2 s apart (HEIC + JPEG, RAW + JPEG) — are one
   tile in Library, Photos, Videos and Favorites (`CopyStacks`, `TimelineStacking`, off the main actor; 150 000 items ~90 ms in a
   debug build). The tile shows the JPEG (or the copy with a preview), with a stack badge and "2 copies" for VoiceOver; the viewer's
   "Show 2 copies" (bar above the photo and More menu) adds the other copies as pages. Settings › On this device › "Stack copies of a
   photo" (on by default).
-- TL-6 bursts 🟡 (unit-tested, `BurstStacksTests`; not seen on screen, the test servers have no burst): only bursts the camera
+- TL-6 bursts ✅ iPhone (round 11: three frames `R11_BURST00n…` the test uploads are one tile, "Burst of 3 photos", the
+  viewer's strip shows the three, `ios-fix-shots/r11-verify/v4-100/103`; unit-tested, `BurstStacksTests`): only bursts the camera
   named as one are stacked — `…_BURST001_COVER.jpg`/`…_BURST002.jpg` (Google Camera), `00000IMG_00000_BURST<time>_COVER.jpg`
   (Pixel 2), `PXL_….BURST-01.COVER.jpg`: same marker, images, same folder, within 60 s; the `COVER` frame is shown, VoiceOver says
-  "Burst of 5 photos"; copies of burst frames (RAW + JPEG) belong to the burst (`BurstStacks`, `TimelineStacks`). ⬜ iPhone bursts
-  and time-based bursts, by decision: Apple marks a burst only in its maker note (BurstUUID), which stock servers do not hand out
+  "Burst of 5 photos"; copies of burst frames (RAW + JPEG) belong to the burst (`BurstStacks`, `TimelineStacks`). Round 11
+  (§21.4): time-based bursts ✅ (alike photos, ≥ 3 frames, ≥ 2 a second, seen on the Mac) and PhotoKit bursts 🟡 replace
+  the earlier ⬜ — the old reasoning was: Apple marks a burst only in its maker note (BurstUUID), which stock servers do not hand out
   (no EXIF in the timeline's SEARCH; `photos-exif` keeps entries up to 1000 bytes and the maker note only as an opaque blob, if at
   all), and the web's "≤ 3 s apart" rule (`PhotosDomain/Stacks.swift`) also folds quick series of single shots, which Photos never
   does. Would need the server to report the burst identifier (or the client to read EXIF of every photo).
-- Actions on a stacked tile 🟡 (logic unit-tested, `TimelineGridTests`; the confirmation dialog not looked at on screen, the Mac was
-  locked): as in Photos, where RAW + JPEG are one photo and a burst one item, delete, favourite, archive/unarchive, add to album,
+- Actions on a stacked tile ✅ iPhone (round 11: the context menu's Delete… on a 2-copy stack asks "Delete 2 items? This also
+  deletes 1 photo stacked behind the selected ones.", `ios-fix-shots/r11-verify/v4-104-stack-delete-confirmation-host.png`, not confirmed;
+  logic unit-tested, `TimelineGridTests`; Mac 🟡 not looked at): as in Photos, where RAW + JPEG are one photo and a burst one item, delete, favourite, archive/unarchive, add to album,
   tags and date/location apply to everything behind the tile (context menu, selection toolbar, menu bar); the delete confirmation
   counts all items ("Delete 3 items?") and says "This also deletes 2 photos stacked behind the selected ones."; the undo toast
   counts all. Open, Get Info, Edit, Share, Export and Share via Nextcloud stay with the copy the tile shows. (Albums are not
@@ -203,14 +215,15 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   sync are batch updates of the tail. Placeholder tiles cannot be selected, opened or dragged; VoiceOver says "Loading…". Only for
   the unfiltered library (what the counts are of); stock servers (no counts) keep the plain placeholder grid and show what has
   loaded. The counts are UTC days and leave out shared folders: only the tail is estimated, and it is replaced as photos arrive.
-- "Aspect ratio" grid 🟡 (✅ Mac, run: View ▸ Square Tiles ⌥⌘S toggles it, screenshots `01`/`02`; iOS/iPad compiled, not run):
+- "Aspect ratio" grid ✅ (Mac, run: View ▸ Square Tiles ⌥⌘S toggles it, screenshots `01`/`02`; iPhone ✅ round 11, Settings ›
+  Library › Square tiles off, the Library letterboxes wide photos, `ios-fix-shots/r11-verify/v4-32/33`):
   Settings › On this device › "Square tiles" (on by default) and View ▸ Square Tiles (⌥⌘S, also the iPad keyboard shortcut). Off,
   every grid fits each photo whole into its square cell, centred, as Photos' "Aspect Ratio Grid"; badges, the selection ring and
   mark go with the picture, and previews are requested for the long edge (smaller for wide photos). The layout and its budgets are
   unchanged (`GridModelTests`, 100 000 items). Decisions in SPEC §6.4: letterboxed cells, not the web's justified rows, and a
   setting of this device that does not follow or write the web's `croppedLayout`.
 - Undo ✅ (Mac app): favourite, archive, remove from album and delete register with the undo manager of the window they
-  were made in (Edit › Undo/Redo, ⌘Z; shake on iPhone 🟡 not run) and show a confirmation with an Undo button
+  were made in (Edit › Undo/Redo, ⌘Z; shake on iPhone ⬜ device D16.4) and show a confirmation with an Undo button
   ("Archived 3 items · Undo"), in the grids and in the viewer (favourite, archive, delete; an undo there brings the
   page back, Redo takes it out again). The confirmation only undoes its own change (marked in the undo manager), a
   second tap while an undo runs does nothing, and a session that stops (account switch, removal) clears its undo actions.
@@ -230,7 +243,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   "Extract text" stays in the More menu. Policy ✅ unit-tested (`LiveTextPolicy`); Mac ✅ looked at (the Live Text button
   appears on a photo with text, `ios-fix-shots/r4-viewer/04-viewer-livetext.png`), selecting text not tried (needs real
   input); iOS and visionOS 🟡 compiled, not run.
-- VW-5 slideshow of any grid 🟡 (`SlideshowPlayer`; memories keep their own player with title card): "Play Slideshow" (Mac) /
+- VW-5 slideshow of any grid ✅ (iPhone round 11, `testSlideshowFromTheViewer`: from the viewer's More menu, full screen,
+  advances, controls on a tap, Close back to the viewer, `ios-fix-shots/r11-verify/v1-20…24`; Mac ✅ below) (`SlideshowPlayer`; memories keep their own player with title card): "Play Slideshow" (Mac) /
   "Slideshow" in the viewer's More menu (from the photo shown through the viewer's photos), in the grid's context menu and
   the selection's More menu (several selected: those; one: the whole grid from it) and File › Play Slideshow on the Mac
   (selection or whole grid). Options menu: 2/3/5/10/20 s per photo (default 3), Repeat (on by default; off: it stops on
@@ -242,14 +256,17 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   pushed in the window. Order/repeat/interval ✅ unit-tested (`SlideshowPlan`); Mac ✅ run in a window
   (`PHOTOS_DEBUG_SLIDESHOW_WINDOWED=1`, so as not to switch Spaces on the owner's Mac): started from the viewer (the
   grid offers it as a tile action, seen), advanced, interval changed to 10 s, paused, closed, viewer moved to the last photo
-  (`05-slideshow.png`); the full-screen switch itself, videos in a slideshow and AirPlay 🟡 not run.
-- VW-6 stacks 🟡: a stack is one page; a strip of its copies above the photo (small picture and format, "JPG", "HEIC",
+  (`05-slideshow.png`); the full-screen switch itself, videos in a slideshow and AirPlay ⬜ device D16.3.
+- VW-6 stacks ✅: a stack is one page; a strip of its copies above the photo (small picture and format, "JPG", "HEIC",
   "DNG"; VoiceOver "Copy 2 of 3 · IMG_7.DNG", selected trait) chooses the copy the page shows, and every action applies to
   that copy. A copy deleted or archived in the viewer leaves the strip; the page goes with its last copy. ✅ unit-tested
-  (`ViewerStacks`), Mac ✅ looked at and driven (`02-viewer-stack.png`); iOS 🟡 compiled.
-- "Show in folder" 🟡 (VW-3; viewer More menu and the grid's context menu, every platform): opens the app's folder browser at the
+  (`ViewerStacks`), Mac ✅ looked at and driven (`02-viewer-stack.png`); iPhone ✅ round 11 (strip "JPG · JPEG", the second
+  copy chosen, `ios-fix-shots/r11-verify/v4-101/102`).
+- "Show in folder" ✅ iPhone (round 11, `testShowInFolder`, `ios-fix-shots/r11-verify/v1-10/11`: the viewer closes, the folder opens with
+  Back to its parent; Mac 🟡) (VW-3; viewer More menu and the grid's context menu, every platform): opens the app's folder browser at the
   photo's folder with a screen for each folder above it (`AppRoute.folder`, `FolderTrail` ✅ unit-tested), and closes the viewer.
-- "Show in library" 🟡 (VW-3 "Show in timeline", named after the place it opens, as Apple's "Show in All Photos"; viewer More
+- "Show in library" ✅ iPhone (round 11, `testShowInLibrary` from a folder's viewer: the viewer closes and the Library
+  tab shows, `ios-fix-shots/r11-verify/v4-13`; the short ring was not caught on a screenshot; Mac 🟡) (VW-3 "Show in timeline", named after the place it opens, as Apple's "Show in All Photos"; viewer More
   menu and grid context menu next to "Show in folder", not in the Library itself, not for archived photos): closes the
   viewer, opens the Library from its root with all media, scrolls to the photo's tile (or its stack's tile; a photo the
   Library does not show: the tile closest in time) and marks it — selected on the Mac, a short ring elsewhere. Target ✅
@@ -298,7 +315,7 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   are taken back when the grid cancels them (`ImagePipeline.cancelPrefetch`), and previews are decoded at the tile's pixel size
   rather than the size of their bucket (a 400 px tile from the 1024 px bucket holds ~0.6 MB, not 3 MB). Preview and original caches are trimmed
   (LRU; 2 GB / 1 GB) at launch, in the background and every 2000 downloads; previews of offline files are kept; the memory
-  cache is emptied on memory pressure and smaller on iPhone. ✅ unit-tested, 🟡 not measured on a device.
+  cache is emptied on memory pressure and smaller on iPhone. ✅ unit-tested, ⬜ device D8 (not measured on a device).
 
 ## Navigation, menus and windows (SPEC §4.8, §6.2) — 🟡
 - Mac: `NavigationSplitView` with a sidebar (since M10 the slim, editable one of SPEC §19.1; before: Library…Map, Collections, a collapsible "Utilities" section that remembers its state),
@@ -308,18 +325,20 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   portrait shows Library, Settings and Search, turning the device keeps the app running), Vision Pro 🟡. Fixed on the way: Photos/Videos/Favorites hung at 100 % CPU (undo manager,
   `UndoManagerBox`), the sidebar's sections and Backup were tabs of the portrait tab bar, rotating to landscape crashed (the
   sidebar header had no app model).
-- iPhone and narrow iPad windows 🟡 (compiled, logic unit-tested in `CompactNavigationTests`; a narrow iPad window ✅ run in
-  the iOS 27.2 simulator on the iPad Pro 13-inch and the iPad mini with "Windowed Apps": the tab bar with Collections and its
-  list, `testWindowsNarrowWindowIsCompact`): tabs Library,
-  Collections, Search, Settings. The Collections tab lists every place that is a sidebar row elsewhere (server features
+- iPhone and narrow iPad windows ✅ (logic unit-tested in `CompactNavigationTests`; iPhone ✅ round 11: `SmokeTests` 7 of 7 and
+  `VerifyTourTests` reach every Collections row and link destination, `ios-fix-shots/r11-verify/smoke-*`; a narrow iPad
+  window ✅ run in the iOS 27.2 simulator on the iPad Pro 13-inch and the iPad mini with "Windowed Apps": the tab bar with
+  Collections and its list, `testWindowsNarrowWindowIsCompact`): tabs Library, Collections, Search (Settings is in the
+  Library's account menu since §19.2). The Collections tab lists every place that is a sidebar row elsewhere (server features
   respected) and Backup with its state, and pushes it in its own stack; the navigation state stays the selected destination
   and its path, so deep links, state restoration and a change between tab bar and sidebar keep working.
 - Every destination has its own navigation path (`MainView.paths`); selected destination and open album are restored per
   scene (`NavigationSnapshot`) ✅ on the Mac.
 - Deep links `nextcloudphotos://<destination>`, `…/album/<name>` (`…/album/shared/<name>`), `…/photo/<fileId>` ✅ parsing unit-tested,
-  destination and album links ✅ in the Mac app, photo links 🟡. Links wait while the app is locked and open after the
+  destination and album links ✅ in the Mac app, photo links ✅ iPhone (round 11, `testPhotoLink`: a photo the test
+  uploads opens in the viewer, an unknown id opens nothing, `ios-fix-shots/r11-verify/v4-40/41`). Links wait while the app is locked and open after the
   unlock; photo links only open photos the library shows (not archived, not the video half of a Live Photo, not unknown
-  ids) ✅ policy unit-tested, 🟡 not run.
+  ids) ✅ policy unit-tested, the unknown id ✅ run (above).
 - Round 4: the account part and the other routes of §4.8 ✅ parsing unit-tested (`IncomingLink`, `DeepLinkRouteTests`).
   `nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>` names the account; routes `albums/<name>`,
   `sharedalbums/<name>`, `places/<name>`, `faces/<name>`, `tags/<name>`, `folders/<path>`, `shared`, `search/<text>` and the web
@@ -343,7 +362,8 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   the pasteboard 🟡 (compiled, unit-tested wording only). "Add to Album" is a submenu (Image menu, context menu, selection
   menu): New Album… with the selection, the albums used last in this app (`recent-albums.json` in the account folder) then
   the most recently changed, All Albums… 🟡 (Image menu structure ✅ read from the app). Share… in the grid's context menu (the
-  system Share menu on the Mac, share sheet on iPhone/iPad, originals downloaded on demand) 🟡. Albums open in their own window
+  system Share menu on the Mac, share sheet on iPhone/iPad, originals downloaded on demand) ✅ iPhone (round 11, the system
+  share sheet with the photo, `ios-fix-shots/r11-verify/v1-61`; Mac 🟡). Albums open in their own window
   (`WindowGroup(for: AlbumWindowValue)`): File ▸ Open in New Window, the album card's context menu, ⌥-click 🟡 (built for
   macOS/iOS/visionOS, not run on the Mac: Mac locked). iPad ✅ run in the iOS 27.2 simulator: "Open in new window" in the
   album card's context menu opens the album in a window of its own, which is restored at the next launch (it never appeared
@@ -356,10 +376,13 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
 (originals download on Wi-Fi only by default — Settings → Storage; the folder is excluded from device backups).
 - "Add photos" to an album uses the library's grid in selection mode: day headers, zoom, date scrubber, drag and ⇧/⌘ selection,
   a search field (local search index: name, place, caption, folder), the count of picked photos; picks survive a changed
-  search. macOS ✅ (run: search, selection, add), iOS 🟡 (compiled, not run).
+  search. macOS ✅ (run: search, selection, add), iPhone ✅ round 11 (`testAddPhotosToAnAlbum`: three photos the test uploads
+  picked and added, the server's album holds them, `ios-fix-shots/r11-verify/v5-52/53`; the sheet was 720 pt wide on iPhone, its Cancel and Add
+  off the screen — fixed, SPEC §21.2).
 - Album toolbar: the album keeps its title while photos are selected, the count is the subtitle (visionOS: the title). The
   album options menu hides while selecting on iPhone and iPad and has its own symbol on the Mac; at compact width the
-  album's actions are one menu. macOS ✅ (run), iOS 🟡 (compiled, layout rule unit-tested, not run).
+  album's actions are one menu. macOS ✅ (run), iPhone ✅ round 11 (title kept, "3 items" under it, only Done while
+  selecting; the actions in one menu, `ios-fix-shots/r11-verify/v5-54`, `v4-50-album-options`).
 - Uploads repeat a request after a timeout, a lost connection, a 5xx or a 429/503 with a short `Retry-After` (4 attempts,
   1/2/4 s). A chunked upload that still fails keeps its upload folder (named after destination, size, chunk size and
   checksum); the next attempt lists the chunks and continues with the first missing one ✅ unit-tested against a stub
@@ -379,7 +402,8 @@ comments 🟡 (needs extended server), upload (PUT and chunked) ✅, share exten
 - Share via Nextcloud (SH-7): OCS Files Sharing for a photo (grid context menu, selection "More" menu) or a folder (Folders toolbar):
   users, groups, other servers, email, Teams, Talk (when installed), public links with password, expiry, permissions, hide
   download; list, change, remove. API ✅ unit-tested and ✅ against the stock (8093), extended (8091) and default (8089)
-  test servers (create, update, list, delete, sharee search); the sheet 🟡 compiled, not looked at (screen locked). Albums
+  test servers (create, update, list, delete, sharee search); the sheet ✅ iPhone (round 11, from the grid's context menu,
+  `ios-fix-shots/r11-verify/v4-63`; Mac 🟡). Albums
   keep album sharing; the album sheet says what only photos and folders can do. From the viewer's More menu 🟡 (Mac: item
   seen in the menu). Several photos at once 🟡 (grid context menu and selection "More"): one share per photo and recipient
   (Nextcloud shares one file per share), four requests at a time, with progress and the failures listed with the server's
@@ -497,9 +521,11 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
 - 🟡 Acceptance test (device library partly uploaded by Files, zero duplicates) still to run on a device.
 
 ## M4 Discover — 🟡
-Places ✅, map 🟡, people 🟡 (no Recognize on test servers; managing people below), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
-memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock 🟡, push 🟡 (needs proxy registration and provisioning), widgets 🟡.
-- App lock (round 3) 🟡 compiled for iOS, macOS and visionOS, state machine unit-tested, not run: one lock state for the
+Places ✅, map ✅ (iPhone, round 11), people 🟡 (no Recognize on test servers; managing people below), tags ✅ (API), folders ✅, shared with you 🟡, On this day ✅,
+memories ✅, search and smart albums 🟡 (Return searches, recent searches, error state with "Try again": ✅ Mac app), archive and app lock ✅ (iPhone, round 11), push ⬜ device D5 (needs proxy registration and provisioning), widgets 🟡.
+- App lock (round 3) ✅ iPhone (round 11, `testAppLock`: Settings › Privacy › "Lock with Face ID or passcode" on, 70 s in
+  the background, back: the cover with "Unlock Nextcloud Photos" and the system's Face ID prompt, opened by a simulated
+  match, `ios-fix-shots/r11-verify/v5-92…95`); macOS and visionOS 🟡; state machine unit-tested: one lock state for the
   process (`AppLock`), setting in the App Group. Locked windows don't show their content at all (the viewer and sheets close);
   on iPhone and iPad the cover is a window of its own above the app (covers the full-screen viewer, sheets and the app
   switcher snapshot). The Mac Settings window and the share extension need the unlock too. Widgets show a lock placeholder
@@ -507,7 +533,7 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
 - Shared albums: photos of other users are fetched through the album's DAV child (`MediaItem.collectionChildMountType`),
   never by their name in the user's root folder ✅ parsing unit-tested.
 - Push: permission is asked after login (on iPhone/iPad after the backup offer) or when the Notifications switch is turned on, not at first launch; the switch unregisters
-  and registers; the notification extension only shows `photos` notifications and handles delete pushes. All 🟡: hiding the others
+  and registers; the notification extension only shows `photos` notifications and handles delete pushes. All ⬜ device D5: hiding the others
   needs the `com.apple.developer.usernotifications.filtering` entitlement (or the server-side routing of §S5). Silent delete
   pushes reach `AppModel.handleBackgroundPush` through the app delegates (`remote-notification` background mode).
 - Folders and Shared with you show a folder's photos in the app's photo grid (selection, context menu, share, favourite,
@@ -519,12 +545,15 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   the grid of the whole library (not with a filter, not while selecting), "All memories" at the end; loaded off the main actor
   after each finished sync and when the day changes. Context menu "Hide memories"; Settings › On this device › "Show memories".
   Memories stay in the sidebar / Collections.
-- Memory slideshow (ME-4) 🟡: "Play slideshow" in a memory's toolbar and in the cards' context menus. Full screen on iPhone and
+- Memory slideshow (ME-4) ✅ iPhone (round 11, `testMemorySlideshowAndMenu`: "Play slideshow" in the memory's toolbar plays
+  it — since §15.1 as the memory's film, title over the first photo, scrubber, Pause/Previous/Next, Close back to the
+  memory, `ios-fix-shots/r11-verify/v4-82/84`; Mac 🟡): "Play slideshow" in a memory's toolbar and in the cards' context menus. Full screen on iPhone and
   iPad, pushed in the window on the Mac and Vision Pro; the title over the first photo, 4 s per photo, 1.2 s cross-fade with a
   slow zoom, starts over after the last; Pause/Play, Previous, Next and Close (tap shows/hides them; ← → Space Esc on a
   keyboard). Reduce Motion: a 0.4 s dissolve without the zoom. With VoiceOver it starts paused. Videos show their still.
   Stepping ✅ unit-tested; not run (Mac screen locked).
-- Memory menu (ME-4, round 4) 🟡: "More" in a memory's toolbar. "Save as album" makes an own Nextcloud album named after the
+- Memory menu (ME-4, round 4) ✅ iPhone for the menu (round 11: Save as album, Share as link…, Export video…, Show to a
+  guest…, Slideshow music, `ios-fix-shots/r11-verify/v1-81`); its actions 🟡 (below): "More" in a memory's toolbar. "Save as album" makes an own Nextcloud album named after the
   memory (trip and recap titles; for On this day its dates, "1 year ago" says nothing later; " (2)" when taken, "/" becomes
   "-"; a trip's places become the album's location) and adds the user's own photos through the outbox; photos of shared
   folders are left out and counted in the confirmation. "Share as link…" makes an album with a public link named after the
@@ -543,7 +572,10 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   detections). "Hide person" is kept on this device only, per account, in the account's folder (removed on logout): Recognize has
   no way to hide a person, and the People screen says so under the grid ("N people are hidden on this device…", "Show hidden
   people"). Name check and hidden list ✅ unit-tested.
-- Map clustering and time slider (MP-1, round 4) 🟡: the map is an `MKMapView` (SwiftUI's `Map` has no clustering on OS 27).
+- Map clustering and time slider (MP-1, round 4) ✅ iPhone (round 11, `testMapClustersAndTimeRange`: clustered markers
+  with counts over Europe, Time range with From/To and "All time", `ios-fix-shots/r11-verify/v1-86…88`; iPad ✅ `p1-86…88`;
+  Mac ✅ round 11, run through the accessibility API: Places shows the clustered markers, a marker lists its photos in a
+  sheet, `mac-02-places.png`, `mac-03-map-cluster.png` — that sheet had no Done button on the Mac, fixed; visionOS 🟡): the map is an `MKMapView` (SwiftUI's `Map` has no clustering on OS 27).
   The database still adds the located photos up into grid cells, now of power-of-two degrees between a 16th and an 8th of
   the visible span (at most 32 × 32 for the loaded area, cut along cell borders so every marker counts all its photos), and
   MapKit clusters the cells' markers where they overlap (`MKClusterAnnotation`; newest photo, photos of all its cells; a
@@ -556,8 +588,8 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   assignable tags (on all / some / none of the photos), a filter field and "New tag"; changes go through the outbox
   (`PendingOperation.tag`) and show in search at once. Tag browsing falls back to the stored memberships offline and offers
   "Remove tag" for a selection. Outbox, store and refresh ✅ unit-tested and against the stock (8093) and extended (8091)
-  servers (create, assign, refresh, search, remove); the sheet itself 🟡 (compiled for macOS, iOS and visionOS; not looked at:
-  the Mac was locked during this round). A photo whose tag was removed stays in the open tag grid until it is reloaded.
+  servers (create, assign, refresh, search, remove); the sheet itself ✅ iPhone (round 11, from the viewer's More menu: New tag,
+  the tags with their state, Find a tag, `ios-fix-shots/r11-verify/v1-62`; Mac and visionOS 🟡). A photo whose tag was removed stays in the open tag grid until it is reloaded.
 - Activity in shared albums (SH-9) ✅/🟡: album listings are compared (counts) and new photos or newly shared albums become
   entries of "New in shared albums" (row above Albums and Shared albums, list with "Mark all as seen"; opening the album marks
   it seen); a background refresh posts a local notification (Settings › Shared albums). Detection ✅ unit-tested and run in
@@ -566,8 +598,9 @@ memories ✅, search and smart albums 🟡 (Return searches, recent searches, er
   the server (§S5).
 
 ## M5 Advanced — 🟡
-Editor (Core Image) 🟡, metadata editing 🟡, recently deleted ✅ (API; restore sends `Overwrite: T` — it was refused with 412 before; "Delete permanently" asks first and errors are shown; the screen itself 🟡: it is behind the device unlock, not opened in the test run), duplicates 🟡, free up space 🟡, extract text (server OCR or
-Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 🟡, video renditions 🟡, App Intents and App Shortcuts 🟡.
+Editor (Core Image) 🟡, metadata editing ✅ (sheet, iPhone round 11, `ios-fix-shots/r11-verify/v4-120`), recently deleted ✅ (API; restore sends `Overwrite: T` — it was refused with 412 before; "Delete permanently" asks first and errors are shown; the screen itself ✅ iPhone round 11: behind Face ID, enrolled and matched in the simulator, it lists the trash bin
+  with Restore and Empty, `ios-fix-shots/r11-verify/v1-90/91`), duplicates 🟡, free up space 🟡, extract text (server OCR or
+Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 🟡, video renditions 🟡, App Intents and App Shortcuts ⬜ device D16.6.
 - Free-form crop 🟡: the crop tool shows the whole picture with a frame (corner and edge handles, drag inside to move, thirds
   lines, dimmed outside), a lock for the aspect, presets Freeform/Original/Square/4:3/16:9/3:2 (they set the largest centred
   area and lock it); the crop turns and mirrors with the picture; VoiceOver adjusts its size. Geometry ✅ unit-tested
@@ -583,14 +616,14 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   "Keep in albums and move N items to the trash bin" (the kept copy is added first); filter albums are left out, a kept copy
   shared with the user can't be added. Logic ✅ unit-tested with the store (`DuplicateAlbumNoteTests`); the dialog not run (Mac
   locked).
-- Spotlight (round 4) 🟡: albums (own and shared), named people and places are indexed with Core Spotlight, one domain per
+- Spotlight (round 4) ⬜ device D16.6 (signed build): albums (own and shared), named people and places are indexed with Core Spotlight, one domain per
   account (a digest of the account id), the item id is the account link, so a result opens in its account (after asking
   when another one is shown). Updated after every sync when something changed; removed on logout and remote wipe
   (`AccountPurge` path) ✅ unit-tested. Never indexed: anything while app lock is on (all items are deleted when it is turned
   on, also by MDM), people hidden on this device (removed at once when hidden), unnamed people, places that only archived
   photos have, public-link albums; no thumbnails (a cover may be archived since) ✅ policy unit-tested. Not seen in Spotlight:
-  the unsigned test build cannot be checked from the shell (🟡).
-- App Intents (round 4) 🟡: `AlbumEntity` and `PersonEntity` (`EntityStringQuery`, the same entries as Spotlight: nothing hidden,
+  the unsigned test build cannot be checked from the shell (⬜ device D16.6).
+- App Intents (round 4) ⬜ device D16.6 (Shortcuts, Siri): `AlbumEntity` and `PersonEntity` (`EntityStringQuery`, the same entries as Spotlight: nothing hidden,
   nothing while app lock is on), `OpenAlbumIntent` / `OpenPersonIntent` (`OpenIntent`), "Search photos" (`ShowInAppSearchResultsIntent`,
   opens the search with the text), App Shortcuts phrases ("Search photos in …", "Open <album> in …", "Show photos of <person> in …";
   parameters updated after indexing). Compiled for all three platforms, metadata extracted (5 intents, 2 entities); not run in
@@ -687,7 +720,7 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   iPhone app built from the test server. Phone → watch in a paired simulator pair: the digest (application context)
   arrived; the photo files (`transferFile`) were reported sent by the phone but never reached the watch simulator — to be
   checked on devices.
-- 🟡 Complication (accessory families): built and embedded, not seen on a face (the simulator's face editor needs input).
+- ⬜ device D9: Complication (accessory families): built and embedded, not seen on a face (the simulator's face editor needs input).
 - ⬜ Login hand-off from the iPhone app, TV account switcher and search (plan in SPEC §15.3).
 - Needs Nextcloud's team: App IDs `com.nextcloud.photos.tv`, `.tv.topshelf`, `.watchkitapp`, `.watchkitapp.widgets`
   with the App Group, an App Store record decision for the TV app (separate app or universal purchase), tvOS icon and
@@ -709,7 +742,7 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   tried (same controls). Not on the Mac or Vision Pro (decided, SPEC §15.4).
 - ✅ Photo frame widget and backup widget: added to the Home Screen through the widget gallery in the simulator
   (`testPhotoFrameWidget`): the frame shows a favourite with place and day, the backup widget "Backed up · Last backup …".
-  Rotation and sources unit-tested (`AmbientRotationTests`, `AmbientPhotosTests`). 🟡 Not seen: StandBy and its night mode
+  Rotation and sources unit-tested (`AmbientRotationTests`, `AmbientPhotosTests`). ⬜ device D7: StandBy and its night mode
   (the simulator has no StandBy), Lock Screen accessory families, the tinted Home Screen, the album picker of the frame's
   settings, the Mac desktop and Vision Pro widgets; on visionOS the frame builds with paper texture and mounting styles.
 - 🟡 Mac desktop pictures: "Use as Desktop Picture" (grid context menu, viewer More menu, Image menu), rotation in
@@ -722,7 +755,7 @@ Screenshots: `~/aloha-work/photos-tools/ios-fix-shots/r5-ambient/` (not in the r
   the button becomes "Leave Memory Room"; a frame brought close (debug switch for the pinch) comes in front at eye height.
   Layout unit-tested (`MemoryRoomLayoutTests`). Found in the simulator and changed: frames right in front covered the
   window, and the frame brought close filled the view — the front 60° stay free now and the close frame sits 1.5 m away.
-  🟡 Not seen: a real look-and-pinch, the hover glow, a spatial photo shown with depth (no spatial photo in the test
+  ⬜ device D11: a real look-and-pinch, the hover glow, a spatial photo shown with depth (no spatial photo in the test
   library), VoiceOver in the room.
 - Found on the way and fixed (shared, `project.yml`): the app embedded the share and notification-service extensions on
   visionOS, where these extension points do not exist, so it did not install in the visionOS simulator; and
@@ -827,7 +860,7 @@ in the iOS 27.2 simulator against the 504-photo test server; screenshots in `ios
 Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), combined in one branch. Open after combining:
 - ⬜ Camera data is read twice: Insights (`photoExif`, §16.5.1) and the organising rules (`cameraDetails`, §16.4) each read
   the server's EXIF into their own table. Plan: one table and one reader, then a camera chip in the search (§16.2).
-- 🟡 In the iOS simulator a software keyboard appears while some menus are open (the viewer's and editor's More menu, the
+- ⬜ device D16.4: In the iOS simulator a software keyboard appears while some menus are open (the viewer's and editor's More menu, the
   film's Style menu). Making the viewer's keyboard focus conditional did not change it; to be checked on a device.
 - ⬜ Strings of the round-5 import screens (`ImportLibrarySheet`, `WelcomeHomeView`) are not in the PhotosAppUI catalog yet.
 - 🟡 The Memories "On this day" carousel's touch area reaches about 80 pt above its cards (worked around with `zIndex` for
@@ -892,7 +925,10 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   newest-edit-wins conflicts, offline queue, persistence and newer-format handling unit-tested against an in-memory
   WebDAV server (`EditLibraryTests`, `EditRecipeTests`); renditions (turn, crop, size) and "Save as Copy" rendering
   tested on the Mac (`EditRenditionTests`, disabled in the simulator). Editor Done/Save as Copy/Overwrite Original…/Revert,
-  edited tiles, viewer, export and share: built for all platforms, not yet run against a server in the app.
+  edited tiles, viewer, export and share: built for all platforms. Round 11: Done in the Mac test build saved the recipe
+  on 8089 (`ios-fix-shots/r11-edit/recipe-sky.json`; the edit was a subtle sky saturation, not judged by eye in the
+  viewer); Overwrite Original's
+  server path proven by `ApplyEditsToFileIntegrationTests` (§21.6).
 - 🟡 Image ▸ Rotate is now an edit (undoable, works on read-only shares and RAW): unit-tested through the session
   (`UndoHistoryTests`); menu/context menu not run in the app.
 - 🟡 RAW (§16.3.2): `CIRAWFilter` development in the editor (RAW tool) and the viewer's RAW button, RAW+JPEG pairs saved
@@ -914,7 +950,7 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   live), saved, listed with the albums, opened, deleted (`OrganizeTourTests`, shots `ios-fix-shots/r6-organize/01–08`).
 - ✅ Shared between devices through `.nextcloud-photos/smart-albums.json` with ETag-safe merge: merge rules unit-tested;
   conditional writes against 8089 (`AppDataFilesIntegrationTests`, `PHOTOS_IT_SERVER`); the file the simulator wrote
-  was read on the server (album, then its tombstone after deleting). 🟡 Two real devices at once not tried (the merge
+  was read on the server (album, then its tombstone after deleting). ⬜ device D16.5: two real devices at once not tried (the merge
   and the conditional write are what makes it safe).
 - ✅ Camera details: bulk SEARCH of `nc:metadata-photos-exif` checked against 8089 (200 files in 0.25 s), stored per
   ETag, unit-tested; 🟡 the background read of a large library (100 000 photos ≈ 1 100 requests) not timed.
@@ -931,9 +967,9 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   needs real input); ⬜ recording a track in the app — decided against (SPEC §16.4.3).
 - ✅ Folder rules: planner, lease, state and log unit-tested; ✅ in the simulator against 8089: a rule written into
   `.nextcloud-photos/folder-rules.json` from outside (favourite everything in `/Photos/r6-organize-test`) was picked
-  up after the next sync and ran by itself; log shown. 🟡 Two devices competing for the lease not tried live.
+  up after the next sync and ran by itself; log shown. ⬜ device D16.5: two devices competing for the lease not tried live.
 - ✅ Shortcuts: 13 App Intents with `PhotoEntity`/`MemoryEntity`, one App Shortcut; compiled for iOS, macOS,
-  visionOS; 🟡 not run in the Shortcuts app (needs real input).
+  visionOS; ⬜ device D16.6: not run in the Shortcuts app (needs real input).
 - 🟡 Mac and iPad layouts compiled, not looked at (Mac screen locked); Vision Pro compiled only.
 
 ### §16.5 Photographer: stats, loupe and filmstrip culling, Continuity Camera, Mac menu bar extra
@@ -949,9 +985,9 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   iPad simulator (`PHOTOS_DEBUG_LOUPE`, keys through `PHOTOS_DEBUG_LOUPE_KEYS`): filmstrip, peaking, clipping, histogram
   with clipped share, Z to 100 % with the original. Not run: the Mac window (the owner was using the Mac), click/hold
   with a pointer, rating keys (not to change tags on the shared server; they use the tested culling code of §15.2).
-- 🟡 Continuity Camera (Mac: File ▸ Import from iPhone or iPad into Library, own album, folder) and Take Photo / Scan
+- ⬜ device D16.7: Continuity Camera (Mac: File ▸ Import from iPhone or iPad into Library, own album, folder) and Take Photo / Scan
   Documents (iPhone, iPad). Not run: needs a nearby iPhone or a device camera.
-- 🟡 Menu bar extra (Mac; Settings › General › Show in Menu Bar). Not run.
+- ⬜ device D16.7: Menu bar extra (Mac; Settings › General › Show in Menu Bar). Not run.
 - ⬜ Not done: peaking/clipping computed on the visible crop of the original at 100 % (now from a 2048 px version), a
   second-display "loupe on the other screen" mode, tethered shooting, Insights over time (per year) and per album.
 
@@ -983,7 +1019,7 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   explanations for "not shared with you", "other account" and "not signed in", slideshow shared as a film; iPhone, iPad,
   Mac (own window), Vision Pro and Apple TV (`TVSharedFilmView`). Payload, server matching, audience and clock maths ✅
   unit-tested (`SharedFilmTests`); "SharePlay isn't available" without a call ✅ in the simulator
-  (`27-shareplay-without-call`). 🟡 Not run with real participants: needs two devices in a FaceTime call and the Group
+  (`27-shareplay-without-call`). ⬜ device D16.5: not run with real participants: needs two devices in a FaceTime call and the Group
   Activities capability in the provisioning profiles (entitlement `com.apple.developer.group-session` added for the app
   and the TV app).
 - ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`), syncing styles/birthdays between devices (`.nextcloud-photos/`),
@@ -997,7 +1033,7 @@ Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2
   link labelled "Postcard to Grandma" with the message as note; the link was opened anonymously and served both sides
   (08/09). Rendering unit-tested on the Mac (`PostcardRendererTests`, all styles, portrait, long messages; renders with a
   real photo in `render-*.jpg`); sending unit-tested against a stub server (numbered folder name, link, cleanup of a half
-  upload). 🟡 The share sheet itself (Messages/Mail) and the Mac/Vision Pro composer were not seen on screen.
+  upload). ⬜ device D16.3: the share sheet itself (Messages/Mail) and the Mac/Vision Pro composer were not seen on screen.
 - ✅ **Family library** (§16.7.2): shared-folder detection (own shared folders, received shares, Team folders),
   members, move/copy, suggestions by family members (month) and by shared day/place, card in Memories, Review, dismiss,
   remembered decisions. Run in the simulator (`testFamilyLibrary`, shots 20–24): the folder `r6-family-Family` shared by
@@ -1012,7 +1048,7 @@ Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2
   `r6-family-lockscreen` was copied (3 photos) into the simulator's Photos library (32b), and turning it off showed the
   system's "Allow … to delete N photos?" (33; XCUITest cannot press that alert, so the copies waited and Settings listed
   "N removed photos are still on this device"). Plan, hidden
-  people, edits, declined/confirmed deletion and turning off unit-tested with a fake library. 🟡 Photo Shuffle on a real
+  people, edits, declined/confirmed deletion and turning off unit-tested with a fake library. ⬜ device D16.6: Photo Shuffle on a real
   Lock Screen needs a device.
 - ⬜ Family settings and dismissed suggestions are per device; syncing them through `.nextcloud-photos/` is left for
   later (plan: a `family.json` with the folder, members and dismissed file ids, merged as a union).
@@ -1082,7 +1118,7 @@ Combined (branch `feat/r7-combined`): where two packages met on one screen —
   in place; a short drag springs back. ⬜ The grid does not yet show *during* the drag: with the zoom transition UIKit
   removes the presenting view while the cover is up, so the backdrop fades to the system background (plan: present
   the viewer over the grid without removing it — a UIKit `overFullScreen` presentation with a custom zoom animator —
-  or show a snapshot of the grid taken when the viewer opens). 🟡 Not seen on a device (120 Hz) or on iPad.
+  or show a snapshot of the grid taken when the viewer opens). ⬜ device D8: not seen on a device (120 Hz); iPad see §21.2.
 - ✅ Software keyboard with the viewer's, editor's and film's menus fixed (§17.1.5): `testStageAndMoreMenu` fails before
   (a keyboard was shown) and passes after; arrow keys page in the simulator (`testKeys`).
 
@@ -1098,8 +1134,8 @@ Run in the iOS 27.2 simulator (iPhone 17) with the UI tour `GridMotionTourTests`
 - ✅ Physical selection: shrink to 92 %, rounded corners, tick with symbol transition and bounce, rolling count.
 - ✅ Heart burst on new favourites (iPhone, Mac code path built, not run on the Mac); delete collapse and undo
   return as an animated item batch, consistency tested with 300 random changes per mode on a real collection view.
-- 🟡 Archive and Remove from Album slide away: same code path as delete, not run in the simulator (the test library is
-  not to be archived).
+- ✅ Archive slides away (iPhone, round 11, `testArchiveAndUndoOnOwnPhotos` on a photo the test uploads: "Archived 1 item ·
+  Undo", undone, `ios-fix-shots/r11-verify/v1-71…73`); 🟡 Remove from Album: same code path, not run.
 - ✅ Video duration in a glass capsule; 🟡 Live badge animation on long press / hover / peek built, not seen in the
   simulator (the test server has no Live Photos).
 - 🟡 Mac: arrival fade, animated delete batch and heart burst built and compiled, not run (owner's screen).
@@ -1539,7 +1575,8 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
   AX5, iPhone 17 simulator (iOS 27.2) against the 8089 test library: all pass with the policy of SPEC §20.3; the
   findings per screen (accepted ones with their reason) are in `ios-fix-shots/r10-a11y/run3/*-audit.txt`. iPad: see
   below.
-- ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`),
+- ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`;
+  kept by the owner's decision of 2026-11-27),
   text on glass in the text colour (caption plates, viewer pill), the viewer's action bar targets (44 points), account
   avatar, Settings' current-account check mark, the iPad's info inspector (thick material behind the info, prominent
   section headers), the year in review cards' year (scales with the text size), the close crosses of the weekly prompt and family suggestion cards.
@@ -1674,6 +1711,199 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
 - ✅ macOS unit suite green (1621 tests); Mac, generic iOS, visionOS, NextcloudPhotosTV and NextcloudPhotosWatch build
   with `PHOTOS_WARNINGS_AS_ERRORS=YES` and no warning; swift-format strict clean; `UITests/SmokeTests` 7 of 7 on an
   iPhone 17 Pro simulator (iOS 27.2) against 8089.
+
+## M12 Trust, intelligence and editing (SPEC §21) — ⬜
+
+### §21.1 Backup you can see
+- ✅ Device photos that backup covers and that are not on the server stand in the Library, merged by their capture
+  time, with a cloud-with-a-slash badge (arrow while uploading, warning when failed), in the iOS 27.2 iPhone simulator
+  against 8089: `UITests/BackupLibraryTourTests` (11 simulator photos and a video next to the server's 500; shots
+  `ios-fix-shots/r11-backup/tour4-iphone-backup-*.png`). Snapshot, ledger reading (only `uploaded`/`matched` count),
+  merge, filters, ids and the "not shown twice before the first check" rule ✅ unit-tested (`DeviceLayerTests`);
+  100 000 + 100 000 rows: snapshot 0.14 s, merge 0.24 s off the main thread (debug build).
+- ✅ Viewer on a device photo (PhotoKit picture, zoomable) with its state, Back Up Now, Share and Delete from This
+  iPhone; Back Up Now uploads it first and the bar turns to "Backed up" (same tour). 🟡 device videos in the viewer,
+  Share and Delete (system confirmation) compiled, not run; the grid's context menu for device photos compiled, not run.
+- ✅ "Back Up Now" on a selection: the selection goes first and a failed one does not wait for its back-off
+  (`BackUpNowTests`, fails without the change); the status names what is uploading (`uploadingIdentifiers`).
+- ✅ Backup summary in the account menu ("11 not backed up" → "All backed up" after the pass) and the badge on the
+  account button (tour). 🟡 Mac toolbar item and Settings › Backup opening: compiled, not run (enabling backup on this
+  Mac would read the owner's Photos library). 🟡 Info panel row "Backed up from this iPhone": compiled, not looked at.
+- ✅ Checks of the branch: macOS unit suite green (1644 tests, new: `DeviceLayerTests`, `DeviceLayerStackTests`,
+  `BackUpNowTests`); Mac, generic iOS, visionOS, NextcloudPhotosTV and NextcloudPhotosWatch build with
+  `PHOTOS_WARNINGS_AS_ERRORS=YES` and no warning; swift-format strict clean; `UITests/SmokeTests` 7 of 7 and
+  `BackupLibraryTourTests` on an iPhone 17 Pro simulator (iOS 27.2) against 8089.
+- ✅ Settings › Backup › On this iPhone › Show in Library (default on; old settings files keep it on, unit-tested).
+- ✅ Fixed on the way: on the Backup screen "Back up now" and "Pause" shared a form row, so tapping "Back up now"
+  during a pass also paused it (seen in the tour's log: "paused by the user"); the row's buttons are borderless now.
+- ✅ Fixed on the way (combined branch): opening Info on a portrait photo on iPhone kept the main thread busy for ever
+  (the info card's placement and the pager's measurement chased each other by fractions of a point; the viewer
+  accessibility audits failed with "main thread busy for 30 s"). The placement follows whole points only
+  (`ViewerStage.isNewPlacementSize`, unit-tested); both viewer audits passed three times, VerifyTourTests' viewer tests,
+  SmokeTests, EditTourTests, EraseTourTests and BackupLibraryTourTests pass (iPhone 17 simulator, 8089).
+- ✅ Large videos (≥ 2 GB) against 8089 (NC 36 dev), 8095 (NC 33) and 8096 (NC 34): `LargeUploadIntegrationTests`
+  (`PHOTOS_IT_LARGE=1`) send a 2 254 857 830-byte file (> 2³¹; 216 chunks of 10 MiB) twice per server. The app's own
+  chunked upload cancelled at a third (kill, network loss): 73 chunks kept, only the other 143 sent again. A real
+  background `URLSession` invalidated with its transfers at a third (restart): 72–74 chunks kept, 143–145 requests
+  after it (the rest and the MOVE). Each time the server's size is exact, it stored the app's SHA-256 (`oc:checksums`)
+  and the file downloaded again has the same SHA-256. Logs: `r11/backup/logs/large-*.log`.
+- ✅ The same in the app, iPhone simulator (iOS 27.2) against 8089: a 2 259 807 656-byte H.264 video added with
+  `simctl addmedia` is backed up in 216 chunks through the background session; the app killed at 47 chunks (the
+  system finished 5 more), relaunched, the simulator shut down and booted at 127 chunks, relaunched: the pass took the
+  upload up again and finished 40 s later. One file on the server, SHA-256 identical to the original, no upload folder
+  left (`r11/backup/sim-interrupt.sh`, log `logs/sim-interrupt.log`). A first run without interruption: same checksum.
+  🟡 On a device (locked phone, Airplane Mode, real restart, a 4K video recorded on it): DEVICE-TEST-PLAN.md D13.
+- ⬜ Not done: the ledger trusts an upload once it is recorded; a file deleted on the server later still counts as
+  backed up (the backup's daily look at the library does not ask the server again). Plan: let the device layer
+  re-check `uploaded` entries whose server file id left the synced index, and mark them pending.
+
+### §21.2 Verification
+Round 11 (2026-11-26, SPEC §21.2). Tour `UITests/VerifyTourTests.swift` (18 tests) in the iOS 27.2 simulator (iPhone 17
+Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-work/photos-tools/ios-fix-shots/r11-verify/`
+(prefix = run: `v1`…`v8` iPhone, `p1` iPad). The Mac's screen was locked for most of the round; one Mac item was driven at the end (below).
+- Counts in this file outside this section (yellow marks / lines with one): before **246 / 226** (✅ 319, ⬜ 51); after **202 / 190** (✅ 354, ⬜ 77 of which 27 "⬜ device").
+  Changed: 35 new ✅ marks seen working (the run and shot named on the line), 27 moved to the device plan
+  ("⬜ device D…", DEVICE-TEST-PLAN.md D5/D7/D8/D9/D11 and the new D16), 2 bugs found and fixed (below). Several lines
+  keep a yellow mark for the part still not seen (mostly the Mac).
+- ✅ iPhone, seen: viewer double tap zoom and pan, swipe up (info) and down (close); Show in folder; Show in library;
+  slideshow from the viewer; pull to refresh; square tiles off; photo links (and an unknown id); Add photos to an album
+  (server checked) and the album toolbar while selecting; share sheet, Share via Nextcloud, tags and album sharing
+  sheets; stacks, bursts, the stack strip and the stacked delete confirmation; memory film/slideshow and the memory menu;
+  map clusters and time range; archive with undo; Edit date and location; Recently deleted and app lock behind Face ID.
+- ✅ Fixed: sheets with Mac minimum widths were wider than the iPhone (Add photos: 720 pt, Cancel/Add unreachable), 12
+  sheets; the iPhone info card did not close when the app closed it, and one swipe down on it closed the viewer.
+- ✅ iPad (Pro 13-inch, run `p1`): 10 of 12 tests pass — viewer gestures with the inspector column (a swipe down closes it),
+  Show in folder and in library, slideshow, square tiles off, Add photos (the picker is a form sheet now), map, memory
+  film and menu, stacks/bursts and the stacked delete, Recently deleted. Not passed: the share/tag test (the share sheet
+  is a popover on iPad and stayed over the grid; the sheets themselves are seen on iPhone) and Show in library (the step
+  passed, the check asked for an iPhone tab bar; fixed in the tour).
+- ✅ Mac (late in the round the screen was unlocked; the `fixr11verify` build driven through the accessibility API only):
+  Places map with clusters and a cluster's list. Found: the list's sheet had no Done button (only Escape closed it) — fixed.
+- 🟡 Left (how to continue): the other Mac items (drive the `fixr11verify` build through the accessibility API when the owner's
+  screen is unlocked — map, stacks, memory slideshow, tags/sharing sheets, Show in library; menus need a focused window,
+  so the menu-bar items stay with D16.7); Vision Pro (the visionOS 27.2 simulator runtime is installed now: run
+  `SmokeTests` and this tour with `-destination 'platform=visionOS Simulator'` on a simulator of your own); collaborators'
+  sharee search (8089 has no second user: use 8091/8093 with their second user); memory menu actions (Save as album,
+  Share as link, music); Remove from Album slide; the padlock animation (too fast for a screenshot: use the host frames);
+  §15–§20 items not named here, which were left as they were. Backup, search, best shot and the editor were rewritten by
+  their packages this round and were not touched.
+- Last run on the final commit: `SmokeTests` 7 of 7 and `VerifyTourTests` 18 of 18 on the iPhone (`z1`, app lock again in
+  `z2` after the host's Face ID matches were made to wait for the test); macOS unit suite 1630 tests green; Mac, generic
+  iOS, visionOS, tvOS and watchOS builds with `PHOTOS_WARNINGS_AS_ERRORS=YES` without a warning.
+
+### §21.3 Search by meaning
+- ⬜ **Removed on 2026-11-27** (owner's decision: the app uses only the AI that Apple's frameworks provide and never
+  ships, downloads or runs models of its own — SPEC §2 "On-device AI", §21). Round 11 had built it with an image–text
+  embedding model of its own through Core ML (229 MB, fetched by a script, Background Assets planned for release); the
+  model, its tokenizer, the embedding index and its migration, the "shows" chip, "Best matches first", the Settings ›
+  Search section, the background task `com.nextcloud.photos.meaning`, the Licences entry, the fetch and conversion
+  scripts, the unit tests and the UI tour were all deleted before the round was released. No OS 27 API embeds pictures and text in one space
+  (SDK checked: Vision, Natural Language, Foundation Models, Core Spotlight, Media Intelligence, Visual Intelligence,
+  Image Playground), so the feature waits for one.
+- ✅ **Search as before round 11**: Vision labels (SR-7), descriptions (§16.2), names, dates, places and text in the
+  full-text index; typed sentences read by the parser and, with Apple Intelligence, `NaturalSearchModel` (Foundation
+  Models). `SearchScreen` and `NaturalSearch` are back to their round-10 code (round 11 changed them only for search by
+  meaning).
+
+### §21.4 Best shot
+- ✅ Scoring and reasons (`BestShot`, `BestShotAnalysis`): sharpness of picture and subject (independent of brightness),
+  exposure, faces (eyes open, smiling, looking, capture quality, everyone in the picture), Vision aesthetics incl.
+  utility pictures; favourites and Pick first, rejects last. 15 + 9 + 3 + 5 unit tests (`BestShotTests`,
+  `TimeBurstsTests`, `BestShotStoreTests`, `BestShotMeasureTests`/`BestShotAnalysisTests` with real Vision on the Mac).
+  Evaluation on the test library (`BestShotEvaluation`, contact sheet `ios-fix-shots/r11-bestshot/evaluation-contact-sheet.png`):
+  the known best frame chosen in 3 of 3 synthetic bursts; plausible choices in 3 real pairs; 70–130 ms per photo on the
+  Mac. No model bundled (Apple frameworks only).
+- ✅ Clean up › Similar shots analyses the series while open and says why — seen on the Mac test build against 8089:
+  "Best shot: Well exposed, best composed." with the steady frame kept in two test bursts
+  (`ios-fix-shots/r11-bestshot/mac-similar-shots-1.png`).
+- ✅ Show Similar: the moment's shots analysed, reasons under "Best shot" — seen on the Mac (`mac-show-similar.png`).
+  Noticed on the way (not changed): the first row of that sheet's grid sits under the header on the Mac.
+- ✅ Library bursts: quick runs of alike photos (`TimeBursts`) stacked with the best frame as cover, VoiceOver "Burst of 4
+  photos" — seen on the Mac with two uploaded 4-/5-frame bursts (`mac-library-bursts.png`; the blown-out frame of the
+  portrait burst was not alike enough and stayed a photo of its own, as intended).
+- 🟡 Flag ▸ Pick Best Shots (context menu, selection, Image ▸ Flag): built for all platforms, not run — the Flag menu is
+  an advanced feature that is off in the test build; the parts are unit-tested (series, choice), the flagging is the
+  existing tested culling path.
+- 🟡 Memory covers from the analysis (`LibraryStore.chooseCovers`): unit-tested (`memoryCoversAreTheBestAnalysedPhotos`);
+  the strip was seen with covers changed on the Mac, not compared one by one.
+- 🟡 Background analysis of series members after the "Show Similar" trickle (`BestShotAnalyzer.run`): built; on the Mac
+  test build the Library's trickle did not index during the session (the Similar shots screen did) — not followed up.
+- 🟡 Device bursts by PhotoKit `burstIdentifier`: grouping unit-tested; needs the device-photo layer of §21.1 to set
+  `burstIdentifier` (backup package), and a device with bursts (`DEVICE-TEST-PLAN.md` candidate). iPhone/iPad: Vision
+  cannot run in the simulator, so nothing is analysed there; generic iOS build only.
+- ✅ macOS unit suite green (1662 tests); Mac, generic iOS, visionOS, NextcloudPhotosTV and NextcloudPhotosWatch build
+  with `PHOTOS_WARNINGS_AS_ERRORS=YES` and no compiler warning; swift-format strict clean; `UITests/SmokeTests` 7 of 7 on an
+  iPhone 17 Pro simulator (iOS 27.2) against 8089.
+
+### §21.5 Remove objects
+- ✅ **No model of its own** (2026-11-27, owner's decision, SPEC §21 "Apple's AI only"): the LaMa Core ML model (99 MB,
+  its loader, its fetch and conversion scripts, the bundling in project.yml, the REUSE annotation) was removed.
+  Erase fills with `DiffusionFill` (classic push–pull image processing) and says under the picture "Works best on spots
+  and small things."; picking by tap and "Erase N People in the Background" use Vision as before; the recipe's
+  `retouch` strokes are unchanged. Nothing in the tool mentions a model or a download any more.
+- ✅ **Erase tool on the Mac**: test build against 8089, the editor's Erase tab, "Erase 1 Person in the Background"
+  (VoiceOver action on the picture, via AX) removed the man behind the speaker, Done saved the recipe with its `retouch`
+  stroke to `.nextcloud-photos/edits/<id>.json`, the viewer showed the photo without him. Shots
+  `ios-fix-shots/r11-erase/mac-2-editor.png` … `mac-7-viewer-after-done.png`.
+- 🟡 **Fill quality**: the before/after pictures in `ios-fix-shots/r11-erase/` were made with LaMa and no longer show
+  what the app does. The basic fill is right for spots and small things on even backgrounds and leaves a soft patch on
+  large objects; new evidence with `TEST_RUNNER_PHOTOS_INPAINTING_EVAL` (now the basic fill) is open.
+- ✅ **Recipe, geometry, cache, basic fill**: `InpaintingTests` (14 tests: JSON round trip and leniency, run lengths,
+  brushed points through every geometry vs. `PhotoEditor.apply`, only the stroke changes, fills reused across undo and
+  colour changes, windows, basic fill, `EditRendering` applies strokes, background-people rule).
+- ✅ **Brushing on iPhone** (simulator, iOS 27.2, against 8089; run with LaMa then, the tour now also checks the
+  "Works best…" note and that no text mentions a model): `UITests/EraseTourTests` opens a photo, picks Erase in
+  the tool row, drags over the picture, waits for the fill (Restore All appears), Undo takes it back, Cancel. Shots
+  `ios-fix-shots/r11-erase/r11-erase-0*.png`. Tap-to-pick by hand not seen (Vision does not run in the simulator; on the
+  Mac picking was seen through the background-people path, which uses the same instance masks).
+- 🟡 **iPad, visionOS, devices**: built (generic iOS and visionOS without warnings). Speed and peak memory on devices:
+  DEVICE-TEST-PLAN D15.
+- ⬜ **Large fills look soft**: the basic fill invents no detail, and objects larger than ~230 px (window > 512 px) are
+  filled scaled down. Plan: add grain matched to the surroundings.
+- ⬜ **Live Photos**: the removal applies to the still only; the motion still shows the object (Photos turns Live off
+  after Clean Up). Plan: offer "Turn Off Live" when a stroke is added to a Live Photo.
+- ✅ **With the editing-depth branch merged**: Erase is the third tool (after Adjust and Crop), strokes make a recipe
+  version 2, Copy Edits/presets leave them out and Paste keeps the target's (`strokesAreVersion2AndNotPartOfALook`),
+  docs/EDIT-FORMAT.md §4.9 describes the field and its rendering for Android and web.
+
+### §21.6 Editing depth
+- ✅ Format version 2 (§21.6.7): curves, colour mixer, masks, noise reduction, RAW colour noise/detail in the recipe,
+  lowest-version writing, version-3 refusal, unknown mask targets skipped, clamping, 8-mask cap, v1 recipes unchanged:
+  unit-tested (`EditDepthTests`, 30 tests). Spec for other apps: docs/EDIT-FORMAT.md.
+- ✅ Curves (§21.6.1): monotone spline (no overshoot, through its points, black/white points), channel composition and
+  rendering in sRGB unit-tested; editor Curves tool seen on the Mac test build (`~/aloha-work/photos-tools/ios-fix-shots/r11-edit/editor-curves.png`).
+- ✅ Colour mixer (§21.6.2): weights, greys unchanged, only the chosen colours change, hue/luminance moves and the LUT
+  rendering unit-tested; Color tool seen on the Mac (`editor-color.png`); S curve + mixer on 5 test-library photos (`mask-*-curves-mixer.jpg`).
+- ✅ Masks (§21.6.3) on the Mac: sky heuristic (found above a horizon, a blue object not touching the top is no sky),
+  mask blending and fingerprints unit-tested; on 5 test-library photos (`EditDepthEvidenceTests`, strips before / mask /
+  after in `mask-*.jpg`, timings `mask-timings.txt`): sky found on 3 of 4 photos with sky (cloudy runway, Hôtel de Ville
+  with textured clouds, Mekong sunset — its lowest cloud band is left out), missed on a dark black-and-white storm sky
+  (Notre-Dame), correctly none on a street scene; subject 2 of 2, people on the wedding photo. Mask time on a 1920 px
+  photo: subject 60–260 ms, people 370–550 ms, sky 60–110 ms; cached 0 ms. In the app: Masks ▸ Add Mask ▸ Sky tints the
+  sky (`editor-masks-sky.png`) and Done saved a version-2 recipe on 8089 (`recipe-sky.json`, own copy
+  `/Photos/r11-edit/r11-edit-sky.jpg`). Not in the simulator (no Vision). ⬜ Sky via `GenerateIterativeSegmentationRequest` seeded by the heuristic (OS 27, downloadable assets):
+  plan — when its assets are ready, use the heuristic's sky as the seed scribble and keep the heuristic as fallback;
+  compare on 20 landscape photos of the test library.
+- ✅ Noise reduction (§21.6.4): colour noise smoothed with luminosity kept, size-relative strength unit-tested; sliders in
+  Adjust and the RAW tool (Color Noise, Detail where the decoder supports them) built. 🟡 RAW Detail/Color Noise not run on
+  a RAW file.
+- 🟡 Copy/Paste Edits, presets, a selection at once (§21.6.5): look/paste rules, clipboard, built-in presets, preset merge
+  and file round trip, preset sync between two devices through the in-memory WebDAV server unit-tested; editor Presets
+  tool with live previews seen on the Mac (`editor-presets.png`); grid context menu Paste Edits / Apply Preset ▸ with progress built, not run on a selection in
+  the app.
+- ✅ Apply Edits to the File (§21.6.6): against 8089 (`ApplyEditsToFileIntegrationTests`, own copy
+  `/r11-edit/apply-test.jpg`): the original is labelled "Original (Nextcloud Photos)" before the PUT and its bytes are
+  identical to the original (SHA-256), a second edit keeps the same labelled version (versions
+  `[…157, …152, 1431539165:Original]`), a stale ETag replaces nothing, Restore Original brings back the exact bytes
+  (`f68f6cf6…`), a file without versions is not overwritten. Editor option, its confirmation and Restore Original… built, not
+  pressed in the app (proof is the integration test).
+- ✅ Editor tool bar (icons + names, scrolls sideways; Adjust and Crop first so they fit the narrowest iPhone): iPhone 17
+  Pro simulator `EditTourTests` passed (shots `ios-fix-shots/r11-edit/r6-edit-*.png`, the More menu shows Copy Edits and
+  Apply Edits to the File), `SmokeTests` 7 of 7; Mac test build `editor-*.png`. macOS unit suite 1659 tests green; Mac,
+  generic iOS, visionOS, NextcloudPhotosTV and NextcloudPhotosWatch build with `PHOTOS_WARNINGS_AS_ERRORS=YES`, 0 warnings.
+- ✅ "Overwrite Original…" (§16.3.1) now goes through the same path: the original is kept as a labelled version, never
+  overwritten without versions (proven by the same integration test). Corrects §16.3.1's "previous version stays in the
+  file versions": an unlabelled version could expire; a labelled one does not.
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

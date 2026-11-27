@@ -32,8 +32,11 @@ struct SimilarPhotosResult: Sendable {
     var items: [GridMedia]
     /// The shots of the photo's moment (time order), when there are several.
     var moment: [FileID]
-    /// The best of `moment`.
+    /// The best of `moment`, and why (SPEC §21.4).
     var best: FileID?
+    var reasons: [BestShot.Reason] = []
+    /// Shots of `moment` analysed for the best shot so far.
+    var analysed = 0
     /// Images indexed so far, and all images: the search covers the indexed ones.
     var indexed: Int
     var total: Int
@@ -61,6 +64,12 @@ final class SimilarPhotosModel {
                 return
             }
             phase = .found(result)
+            // The shots of the moment are analysed for the best shot (their 1024 px previews, loaded if needed), then
+            // the suggestion is worked out again.
+            if result.moment.count > 1, result.analysed < result.moment.count {
+                let analysed = await BestShotService(services: services).signals(of: result.moment, fetch: true)
+                if analysed.count > result.analysed { continue }
+            }
             guard !result.isComplete else { return }
             // The user is waiting for this: the cached previews not compared yet are indexed now, a few seconds at a time
             // (unless the device is in Low Power Mode, warm, or low on battery), and the search runs again on what grew.
@@ -99,22 +108,19 @@ final class SimilarPhotosModel {
         let found = ids.compactMap { fetched[$0] }
         let moment = SimilarSeries.moment(
             of: (item.fileId, item.timestamp), in: found.map { ($0.fileId, $0.timestamp, similarity[$0.fileId] ?? 0) })
-        var best: FileID?
+        var choice: BestShot.Choice?
+        var analysed = 0
         if moment.count > 1 {
-            let store = SimilarityStore(database: services.database)
-            let quality = (try? store.qualities(of: moment)) ?? [:]
+            // What was analysed so far; `run` analyses the rest and asks again.
+            let signals = (try? BestShotStore(database: services.database).signals(of: moment)) ?? [:]
+            analysed = signals.count
             let byId = Dictionary((found + [item]).map { ($0.fileId, $0) }, uniquingKeysWith: { first, _ in first })
-            best = SimilarSeries.best(
-                of: moment.compactMap { id in
-                    byId[id].map {
-                        SimilarSeries.Member(id: id, date: $0.timestamp, vector: [], quality: quality[id], isFavorite: $0.isFavorite)
-                    }
-                })
+            choice = BestShotService(services: services).choose(moment.compactMap { byId[$0] }, signals: signals)
         }
         let progress = (try? SimilarityStore(database: services.database).progress()) ?? (indexed: 0, total: 0)
         return SimilarPhotosResult(
-            items: [GridMedia(item)] + found.map(GridMedia.init), moment: moment.count > 1 ? moment : [], best: best,
-            indexed: progress.indexed, total: progress.total)
+            items: [GridMedia(item)] + found.map(GridMedia.init), moment: moment.count > 1 ? moment : [], best: choice?.best,
+            reasons: choice?.reasons ?? [], analysed: analysed, indexed: progress.indexed, total: progress.total)
     }
 }
 
@@ -214,6 +220,10 @@ struct SimilarPhotosScreen: View {
                             bundle: .module, comment: "Show Similar: explains the suggested best shot of a series."
                         )
                         .font(.footnote).foregroundStyle(.secondary)
+                        if result.analysed > 0 {
+                            Text(BestShotWording.summary(result.reasons))
+                                .font(.footnote.weight(.medium))
+                        }
                     }
                     Spacer(minLength: 0)
                     if !deletableOthers(result).isEmpty {

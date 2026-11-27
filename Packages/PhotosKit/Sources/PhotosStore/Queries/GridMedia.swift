@@ -26,6 +26,14 @@ public struct GridMedia: Hashable, Sendable, Identifiable, FetchableRecord, Copy
     /// The copies of one shot this tile stands for, the one it shows first (`CopyStacks`); empty when it is not a stack.
     /// Set by the screen that stacks its grid, never by the store.
     public var stack: [FileID] = []
+    /// The stack is a burst rather than copies of one shot (VoiceOver says "Burst of 5 photos"). Set with `stack`.
+    public var stackIsBurst = false
+    /// A photo of this device that is not on the server yet (`DeviceMediaID`, SPEC §21.1): what its badge says. Nil for
+    /// the server's files. Set by the Library's device layer, never by the store.
+    public var deviceBadge: DeviceBackupBadge?
+    /// The burst a photo of this device belongs to (PhotoKit's `burstIdentifier`, only for the frames PhotoKit lists:
+    /// a burst's chosen ones or its representative); nil for the server's files. Set by the Library's device layer.
+    public var burstIdentifier: String?
 
     public init(row: Row) throws {
         fileId = row["fileId"]

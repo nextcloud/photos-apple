@@ -17,9 +17,14 @@ extension LibraryStore {
             var snapshot = MemoriesSnapshot()
             snapshot.onThisDay = Memories.onThisDay(
                 try Self.onThisDayCandidates(db, now: now, calendar: calendar), now: now, calendar: calendar)
-            guard !onlyOnThisDay else { return snapshot }
+            guard !onlyOnThisDay else {
+                try Self.chooseCovers(&snapshot, db)
+                return snapshot
+            }
             snapshot.trips = Memories.trips(try Self.tripCandidates(db), locale: locale)
             snapshot.recap = Memories.yearRecap(try Self.recapCandidates(db, calendar: calendar), calendar: calendar)
+            // Covers by what this device found out about the photos (SPEC §21.4).
+            try Self.chooseCovers(&snapshot, db)
             return snapshot
         }
     }

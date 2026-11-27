@@ -57,6 +57,11 @@ public actor BackupEngine {
     var serverCheckChunk = 200
     /// Counts of the upload phase of the running pass.
     var progress: (done: Int, total: Int, current: String)?
+    /// The asset whose resource this app is exporting or sending right now (`BackupStatus.uploadingIdentifiers`).
+    var currentUpload: String?
+    /// Assets the user asked to back up now (a selection in the Library, SPEC §21.1): they go first, and a failed one
+    /// does not wait for its next attempt. Cleared when they are on the server.
+    var priority: Set<String> = []
     /// Uploads of the running pass's earlier rounds (`done`), and resources that later rounds check first (`later`).
     var passUploads = (done: 0, later: 0)
     /// The running pass removed what interrupted uploads left on the server.
@@ -177,6 +182,7 @@ public actor BackupEngine {
 
     func publish(_ phase: BackupStatus.Phase) {
         status.phase = phase
+        status.uploadingIdentifiers = inFlightIdentifiers
         logTransition()
         statusHandler?(status)
     }
@@ -363,6 +369,8 @@ public actor BackupEngine {
             case .done(let held?, _):
                 pause(held.reason, settings: settings, videosOnly: held.videosOnly, needsICloud: held.needsICloud)
             case .done(nil, let toUpload):
+                // What the user asked for was tried; failed ones wait for their next attempt like the others.
+                priority = []
                 // "Up to date" is what the ledger says, not what this pass found to do: items that failed earlier and
                 // wait for their next attempt were not part of it.
                 publish(dryRun && toUpload ? .idle : BackupPolicy.finalPhase(failed: status.failed, pending: status.pending))

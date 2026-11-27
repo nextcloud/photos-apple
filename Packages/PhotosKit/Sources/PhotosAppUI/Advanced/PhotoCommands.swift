@@ -141,6 +141,8 @@ enum MediaItemProviders {
 struct PhotoTaskResult: Equatable {
     enum Kind: Equatable {
         case rotate, copy
+        /// Paste Edits or a preset on a selection (SPEC §21.6.5).
+        case edit
     }
 
     var kind: Kind
@@ -156,6 +158,9 @@ struct PhotoTaskResult: Equatable {
                 : String(localized: "Rotated \(done) of \(run.total) photos", bundle: .module, comment: "Status after Image › Rotate.")
         case .copy:
             return String(localized: "Copied \(done) items", bundle: .module, comment: "Status after Edit › Copy of photos.")
+        case .edit:
+            return String(
+                localized: "Edited \(done) photos", bundle: .module, comment: "Status after Paste Edits or a preset on a selection.")
         }
     }
 
@@ -163,6 +168,7 @@ struct PhotoTaskResult: Equatable {
         switch kind {
         case .rotate: String(localized: "Couldn't rotate", bundle: .module)
         case .copy: String(localized: "Couldn't copy", bundle: .module)
+        case .edit: String(localized: "Couldn't edit", bundle: .module, comment: "Alert title after Paste Edits failed for some photos.")
         }
     }
 
@@ -175,6 +181,10 @@ struct PhotoTaskResult: Equatable {
             switch kind {
             case .rotate: String(localized: "\(count) photos were not rotated.", bundle: .module)
             case .copy: String(localized: "\(count) items could not be copied.", bundle: .module)
+            case .edit:
+                String(
+                    localized: "\(count) photos were not edited.", bundle: .module,
+                    comment: "Alert after Paste Edits failed for some photos.")
             }
         return reasons.count == 1 ? "\(summary) \(first)" : summary
     }
@@ -224,7 +234,7 @@ final class PhotoTaskModel {
         }
     }
 
-    private func start(
+    func start(
         _ kind: PhotoTaskResult.Kind, total: Int,
         _ work: @escaping @MainActor (_ progress: @escaping @MainActor @Sendable (Int) -> Void) async -> MediaSaveResult
     ) {
@@ -325,6 +335,10 @@ private struct PhotoTaskStatus: ViewModifier {
             return String(localized: "Rotating \(current) of \(progress.total)…", bundle: .module, comment: "Progress of Image › Rotate.")
         case .copy:
             return String(localized: "Copying \(current) of \(progress.total)…", bundle: .module, comment: "Progress of Edit › Copy.")
+        case .edit:
+            return String(
+                localized: "Applying edits to \(current) of \(progress.total)…", bundle: .module,
+                comment: "Progress of Paste Edits or a preset on a selection.")
         }
     }
 }

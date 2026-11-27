@@ -137,8 +137,20 @@ extension BackupEngine {
         if let progress {
             publish(.uploading(done: progress.done, total: progress.total, current: progress.current))
         } else {
+            status.uploadingIdentifiers = inFlightIdentifiers
             statusHandler?(status)
         }
+    }
+
+    /// The assets whose upload runs now: the one this app sends, and what the system has (files and chunked uploads).
+    var inFlightIdentifiers: Set<String> {
+        var ids = Set<String>()
+        if let journal {
+            for job in journal.jobs.values { ids.insert(job.resource.localIdentifier) }
+            for job in journal.chunked.values { ids.insert(job.resource.localIdentifier) }
+        }
+        if let currentUpload { ids.insert(currentUpload) }
+        return ids
     }
 
     func cancelBackgroundUploads() {

@@ -96,7 +96,12 @@ public enum SimilarIndexing {
                     work.cancel()
                 }
                 if done == 0 {
-                    // Nothing cached is left: look again later, when more previews may have been loaded.
+                    // Everything cached is compared: the best shots of the series found are analysed next (SPEC §21.4),
+                    // then it looks again later, when more previews may have been loaded.
+                    await analyseBestShots(services, priority: .background) {
+                        let info = ProcessInfo.processInfo
+                        return !info.isLowPowerModeEnabled && info.thermalState.rawValue <= ProcessInfo.ThermalState.fair.rawValue
+                    }
                     try? await Task.sleep(for: .seconds(180))
                 }
             } else {
@@ -113,8 +118,25 @@ public enum SimilarIndexing {
         guard isEnabled(), let services = model?.session?.services else { return 0 }
         let indexer = SimilarityIndexer(database: services.database, cache: services.images.cache, index: services.similarity)
         let work = Task.detached(priority: .background) { try await indexer.run(shouldContinue: shouldContinue) }
-        return await withTaskCancellationHandler {
+        let indexed = await withTaskCancellationHandler {
             (try? await work.value) ?? 0
+        } onCancel: {
+            work.cancel()
+        }
+        await analyseBestShots(services, priority: .background, shouldContinue: shouldContinue)
+        return indexed
+    }
+
+    /// Analyses the shots of the series of similar shots for their best shot (SPEC §21.4, `BestShotAnalyzer.run`), from
+    /// cached previews only, until `shouldContinue` says stop.
+    @MainActor static func analyseBestShots(
+        _ services: AccountServices, priority: TaskPriority, shouldContinue: @escaping @Sendable () -> Bool
+    ) async {
+        guard isEnabled() else { return }
+        let analyzer = BestShotAnalyzer(database: services.database, cache: services.images.cache)
+        let work = Task.detached(priority: priority) { try await analyzer.run(shouldContinue: shouldContinue) }
+        await withTaskCancellationHandler {
+            _ = try? await work.value
         } onCancel: {
             work.cancel()
         }
