@@ -49,6 +49,10 @@ public struct RootView: View {
                         MainView(storedNavigation: $storedNavigation)
                             // Films shared over SharePlay (SPEC §16.6), behind the app lock.
                             .watchTogether()
+                            #if os(iOS)
+                                // An Apple TV asks this iPhone or iPad to set it up (SPEC §22.2), behind the app lock.
+                                .tvSetupSheet()
+                            #endif
                             .environment(session)
                             .id(session.account.id)
                     }

@@ -4,6 +4,8 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CryptoKit
+import DeviceDiscoveryUI
+import Network
 import PhotosCore
 import PhotosModel
 import PhotosNetworking
@@ -13,6 +15,10 @@ import SwiftUI
 /// keyboard); the password is entered on the user's phone. The TV starts a Login Flow v2 and shows its link as a QR code;
 /// the phone's camera opens it, the user logs in there and grants access, and the TV, which polls the flow, gets its own
 /// app password. No password is ever typed on the TV.
+///
+/// "Set Up with iPhone" (SPEC §22.2) skips even the address: Apple's device picker finds the user's iPhone or iPad, the app
+/// there sends the account's server, the TV starts the same Login Flow, and the phone opens its page in the browser to
+/// grant access (`TVSetup`). The QR code stays as the way for a phone without the app.
 struct TVLoginView: View {
     /// An account whose app password stopped working: the user logs in to it again.
     var signedOutAccount: Account?
@@ -25,12 +31,23 @@ struct TVLoginView: View {
     @State private var untrusted: Untrusted?
     @State private var trustedHosts: Set<String> = []
     @FocusState private var addressFocused: Bool
+    /// Apple's device picker is open.
+    @State private var pickingDevice = false
+    /// The phone that sets this TV up, while it does.
+    @State private var phone: TVSetupTVFlow?
+    @State private var phoneTask: Task<Void, Never>?
+    @Environment(\.devicePickerSupports) private var devicePickerSupports
+    #if DEBUG
+        @State private var browsingBonjour = false
+    #endif
 
     enum Phase: Equatable {
         case address
         case connecting
         /// The QR code of the flow's login link, shown until the phone grants access.
         case waiting(link: URL, code: CGImage, host: String)
+        /// "Set Up with iPhone": waiting for the user to choose the account on the phone.
+        case phoneChoosing
         case finishing
     }
 
@@ -50,6 +67,9 @@ struct TVLoginView: View {
                 // The code gets the whole screen: it is what the user looks at now.
                 qrCode(link: link, code: code, host: host)
                     .frame(maxWidth: 1500)
+            } else if phase == .phoneChoosing {
+                phoneChoosing
+                    .frame(maxWidth: 1400)
             } else {
                 HStack(alignment: .center, spacing: 80) {
                     intro
@@ -82,8 +102,35 @@ struct TVLoginView: View {
         }
         .onDisappear {
             loginTask?.cancel()
+            endPhone(nil)
             forgetUnusedTrust()
         }
+        // Apple's picker of the user's iPhones and iPads (SPEC §22.2); in the simulators it finds none.
+        .fullScreenCover(isPresented: $pickingDevice) {
+            DevicePicker(
+                .applicationService(name: TVSetup.serviceName),
+                onSelect: { endpoint in
+                    pickingDevice = false
+                    startWithPhone(endpoint)
+                },
+                label: {
+                    Text(
+                        "Set up Nextcloud Photos with your iPhone or iPad", comment: "TV: title of the system's device picker.")
+                },
+                fallback: {
+                    Text("No iPhone or iPad can be found.", comment: "TV: the device picker cannot be shown.")
+                },
+                parameters: { .applicationService })
+        }
+        #if DEBUG
+            // Simulators: `PHOTOS_DEBUG_TV_SETUP=bonjour` finds the iPhone simulator's app over Bonjour instead.
+            .sheet(isPresented: $browsingBonjour) {
+                TVDebugPhoneBrowser { endpoint in
+                    browsingBonjour = false
+                    startWithPhone(endpoint)
+                }
+            }
+        #endif
         .alert(
             Text("Connect without encryption?", comment: "TV login: title of the question before using an http:// server."),
             isPresented: Binding(get: { unencryptedHost != nil }, set: { if !$0 { unencryptedHost = nil } })
@@ -151,8 +198,40 @@ struct TVLoginView: View {
         }
     }
 
+    /// Apple's picker can be shown (it needs the app's `NSApplicationServices`), or the debug Bonjour fallback is on.
+    var offersPhoneSetup: Bool {
+        if TVSetup.usesDebugBonjour { return true }
+        return devicePickerSupports(.applicationService(name: TVSetup.serviceName), parameters: { .applicationService })
+    }
+
     var addressForm: some View {
         VStack(alignment: .leading, spacing: 32) {
+            if offersPhoneSetup, signedOutAccount == nil {
+                VStack(alignment: .leading, spacing: 16) {
+                    Button {
+                        choosePhone()
+                    } label: {
+                        Label {
+                            Text("Set Up with iPhone", comment: "TV login: button that sets the TV up from the user's iPhone or iPad.")
+                        } icon: {
+                            Image(systemName: "iphone")
+                        }
+                        .frame(minWidth: 520)
+                    }
+                    .disabled(phase == .connecting)
+                    .accessibilityIdentifier("tv-setup-with-iphone")
+                    Text(
+                        "Open Nextcloud Photos on your iPhone or iPad nearby: it sends your server and you allow access there.",
+                        comment: "TV login: under Set Up with iPhone."
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Or log in with the server address", comment: "TV login: heading of the address form under Set Up with iPhone.")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
             Text("Server address", comment: "TV login: label of the server address field.")
                 .font(.title3)
             TextField(
@@ -197,11 +276,27 @@ struct TVLoginView: View {
                 .background(.white, in: .rect(cornerRadius: 24))
                 .accessibilityLabel(Text("QR code to log in", comment: "TV login: VoiceOver label of the QR code."))
             VStack(alignment: .leading, spacing: 32) {
-                Text("Scan with your phone", comment: "TV login: title next to the QR code.")
-                    .font(.title2.bold())
-                    .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if phone != nil {
+                        Text(
+                            "Continue on your iPhone",
+                            comment: "TV login: title while the phone shows the login page (Set Up with iPhone).")
+                    } else {
+                        Text("Scan with your phone", comment: "TV login: title next to the QR code.")
+                    }
+                }
+                .font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 12) {
-                    step(1, Text("Open the camera on your iPhone or iPad and point it at the code.", comment: "TV login: first step."))
+                    if phone != nil {
+                        step(
+                            1,
+                            Text(
+                                "Your iPhone opened your server's page. (Or scan the code with another phone.)",
+                                comment: "TV login: first step when the phone sets the TV up."))
+                    } else {
+                        step(1, Text("Open the camera on your iPhone or iPad and point it at the code.", comment: "TV login: first step."))
+                    }
                     step(
                         2,
                         Text(
@@ -249,6 +344,7 @@ struct TVLoginView: View {
         loginTask?.cancel()
         loginTask = nil
         phase = .address
+        endPhone(.cancel)
         forgetUnusedTrust()
     }
 
@@ -286,6 +382,8 @@ struct TVLoginView: View {
             let link = app.managed.loginPage(flow.loginURL)
             guard let code = TVQRCode.image(for: link.absoluteString) else { throw NetworkError.invalidResponse("qr") }
             phase = .waiting(link: link, code: code, host: serverURL.host() ?? serverURL.absoluteString)
+            // Set Up with iPhone: the phone opens the page in its browser (the code stays for another phone).
+            await phone?.send(.login(url: flow.loginURL))
             var credentials = try await service.waitForGrant(flow)
             credentials.serverURL = LoginService.securedServerURL(credentials.serverURL, typed: serverURL)
             if !allowUnencrypted, LoginService.isUnencrypted(credentials.serverURL) {
@@ -300,9 +398,11 @@ struct TVLoginView: View {
             phase = .finishing
             try await app.addAccount(credentials, askForNotifications: false, offerBackup: false)
             forgetUnusedTrust()
+            endPhone(.done(name: app.activeAccount?.displayName ?? credentials.loginName))
         } catch is CancellationError {
         } catch let networkError as NetworkError {
             phase = .address
+            endPhone(.failed(reason: networkError.localizedDescription))
             if case .untrustedCertificate(let host, let certificate?) = networkError {
                 untrusted = Untrusted(host: host, certificate: certificate)
             } else if case .timedOut = networkError {
@@ -315,9 +415,137 @@ struct TVLoginView: View {
         } catch {
             phase = .address
             self.error = error.localizedDescription
+            endPhone(.failed(reason: error.localizedDescription))
+        }
+    }
+
+    // MARK: Set Up with iPhone (SPEC §22.2)
+
+    func choosePhone() {
+        error = nil
+        #if DEBUG
+            if TVSetup.usesDebugBonjour {
+                browsingBonjour = true
+                return
+            }
+        #endif
+        pickingDevice = true
+    }
+
+    /// The user picked their phone: say hello, wait for the account chosen there, then log in to its server.
+    func startWithPhone(_ endpoint: NWEndpoint) {
+        endPhone(.cancel)
+        let flow = TVSetupTVFlow(endpoint: endpoint)
+        phone = flow
+        phase = .phoneChoosing
+        phoneTask = Task {
+            do {
+                let chosen = try await flow.begin(device: UIDevice.current.name)
+                address = chosen.serverURL.absoluteString
+                phase = .address
+                // The same checks as a typed address: the organisation's server, http:// asks first on the TV.
+                start(allowUnencrypted: false)
+                if phase == .address, unencryptedHost == nil {
+                    endPhone(.failed(reason: error ?? TVSetupWording.cancelledOnTV))
+                    return
+                }
+                // The phone may give up (Cancel, its browser closed): the TV goes back to its start.
+                let reason = await flow.phoneGaveUp()
+                guard !Task.isCancelled, phone === flow else { return }
+                loginTask?.cancel()
+                loginTask = nil
+                phase = .address
+                error = Self.message(reason)
+                endPhone(nil)
+            } catch {
+                guard !Task.isCancelled, phone === flow else { return }
+                phase = .address
+                self.error = Self.message(error as? TVSetupFailure ?? .connectionLost)
+                endPhone(nil)
+            }
+        }
+    }
+
+    /// Tells the phone how it ended (if it should hear it) and closes the connection.
+    func endPhone(_ last: TVSetup.Message?) {
+        guard let flow = phone else { return }
+        phone = nil
+        phoneTask?.cancel()
+        phoneTask = nil
+        Task {
+            if let last { await flow.send(last) }
+            flow.close()
+        }
+    }
+
+    static func message(_ failure: TVSetupFailure) -> String {
+        switch failure {
+        case .phone(let reason): reason
+        case .cancelled:
+            String(localized: "The set-up was cancelled on your iPhone.", comment: "TV login: the phone cancelled Set Up with iPhone.")
+        case .connectionLost: TVSetupWording.connectionLost
+        }
+    }
+
+    /// Waiting for the user on the phone.
+    var phoneChoosing: some View {
+        HStack(alignment: .center, spacing: 80) {
+            Image(systemName: "iphone.radiowaves.left.and.right")
+                .font(.system(size: 200))
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 32) {
+                Text("Continue on your iPhone", comment: "TV login: title while the user chooses the account on the phone.")
+                    .font(.title2.bold())
+                VStack(alignment: .leading, spacing: 12) {
+                    step(1, Text("Choose your account on your iPhone or iPad.", comment: "TV login (Set Up with iPhone): first step."))
+                    step(2, Text("Allow access on your server's page.", comment: "TV login (Set Up with iPhone): second step."))
+                    step(3, Text("Your photos appear here.", comment: "TV login: third step."))
+                }
+                HStack(spacing: 16) {
+                    ProgressView()
+                    Text("Waiting for your iPhone…", comment: "TV login: shown while the TV waits for the phone.")
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    cancel()
+                } label: {
+                    Text("Cancel", comment: "TV login: button")
+                }
+            }
         }
     }
 }
+
+#if DEBUG
+    /// Simulators only (`PHOTOS_DEBUG_TV_SETUP=bonjour`): the iPhone simulator's app found over Bonjour, as a list.
+    struct TVDebugPhoneBrowser: View {
+        let onSelect: (NWEndpoint) -> Void
+        @State private var results: [NWEndpoint] = []
+        @State private var browser: NWBrowser?
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 24) {
+                Text(verbatim: "Debug: iPhone simulators (Bonjour)").font(.title3.bold())
+                if results.isEmpty { ProgressView() }
+                ForEach(results, id: \.debugDescription) { endpoint in
+                    Button(endpoint.debugDescription) { onSelect(endpoint) }
+                }
+            }
+            .padding(60)
+            .onAppear {
+                let browser = NWBrowser(for: .bonjour(type: TVSetup.debugBonjourType, domain: nil), using: .tcp)
+                browser.browseResultsChangedHandler = { found, _ in
+                    let endpoints = found.map(\.endpoint)
+                    Task { @MainActor in results = endpoints }
+                }
+                browser.start(queue: .main)
+                self.browser = browser
+            }
+            .onDisappear { browser?.cancel() }
+        }
+    }
+#endif
 
 /// QR codes for the login link (Core Image's generator, medium error correction).
 enum TVQRCode {
