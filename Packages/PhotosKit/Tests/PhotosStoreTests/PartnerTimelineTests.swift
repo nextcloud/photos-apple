@@ -9,7 +9,8 @@ import Testing
 @testable import PhotosStore
 
 /// Partner sharing: a folder shared with the user is indexed with the timeline folders (SPEC SH-8).
-@Suite(.timeLimit(.minutes(1))) struct PartnerTimelineTests {
+// One at a time: run together in the CI simulator, every test of the suite ran into its time limit at once.
+@Suite(.serialized, .timeLimit(.minutes(1))) struct PartnerTimelineTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore
