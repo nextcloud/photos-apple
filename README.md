@@ -156,10 +156,13 @@ shortcuts, Home Screen widgets, Controls and the backup Live Activity.
 ratings and flags with one key, compare two or four photos side by side, and Insights into your cameras, lenses and
 settings.
 
+<p align="center">
+  <img src="docs/screenshots/mac-library.jpg" width="760" alt="The Mac app: a sidebar with Library, Favorites, Memories, Places and the albums; the Library with Years, Months, Days and All Photos in the toolbar, the memories as cards and November's photos">
+</p>
 <table>
   <tr>
-    <td><img src="docs/screenshots/mac-library.jpg" height="200" alt="The Mac app: a sidebar with Library, Favorites, Memories, Places and albums; the Library with Years, Months, Days and All Photos at the top, the memories as cards, and November's photos"></td>
-    <td><img src="docs/screenshots/macos-map.jpg" height="200" alt="The Mac app's map with photo clusters over Europe, Africa and the Middle East"></td>
+    <td><img src="docs/screenshots/mac-map.jpg" width="420" alt="The Mac app's Places map with photo clusters over Europe, Africa, the Middle East and Asia"></td>
+    <td><img src="docs/screenshots/mac-albums.jpg" width="420" alt="The Mac app's albums: Lisbon 2025, Rome 2021, Vienna 2019, Prague 2019, Barcelona 2014 and Berlin 2014 as cards"></td>
   </tr>
 </table>
 
