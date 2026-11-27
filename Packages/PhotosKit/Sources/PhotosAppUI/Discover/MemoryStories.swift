@@ -119,6 +119,7 @@ struct MemoryStories: View {
     @AppStorage(TimelineDisplay.showsMemoriesKey) private var showsMemories = true
     @AppStorage(MemoriesStyle.key) private var style = MemoriesStyle.stories
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var front: String?
     @State private var width: CGFloat = 0
     @State private var opened: Memory?
@@ -128,7 +129,11 @@ struct MemoryStories: View {
     @Namespace private var zoom
 
     var compact: Bool { sizeClass == .compact || width < 500 }
+    /// The height of a card's picture.
     var height: CGFloat { MemoryStory.height(compact: compact) }
+    /// Accessibility text sizes: the titles go below the pictures, where they can wrap (SPEC §20.3); the band is as tall
+    /// as the tallest card.
+    var captionsBelow: Bool { dynamicTypeSize.isAccessibilitySize }
     var cardWidth: CGFloat {
         // iPhone: the whole width but a peek of the next card; wider: cards of a pleasant shape side by side.
         compact ? max(width - 24 - 28, 200) : min(height * 1.6, max(width - 24, 200))
@@ -151,8 +156,10 @@ struct MemoryStories: View {
         ScrollViewReader { (proxy: ScrollViewProxy) in
             strip(proxy)
         }
-        // Fixed: a horizontal scroll view takes all the height it is offered (see `MemoriesStrip`).
-        .frame(height: height + 2 * MemoriesStrip.verticalPadding)
+        // Fixed: a horizontal scroll view takes all the height it is offered (see `MemoriesStrip`). With the titles below
+        // the pictures, as tall as its cards: their stack is not lazy then, so every card is measured.
+        .frame(height: captionsBelow ? nil : height + 2 * MemoriesStrip.verticalPadding)
+        .fixedSize(horizontal: false, vertical: captionsBelow)
         .navigationDestination(item: $opened) { memory in
             MemoryScreen(memory: memory).cardTransitionDestination(id: memory.id, in: zoom)
         }
@@ -162,7 +169,7 @@ struct MemoryStories: View {
 
     func strip(_ proxy: ScrollViewProxy) -> some View {
         ScrollView(.horizontal) {
-            LazyHStack(spacing: Self.spacing) {
+            cardStack {
                 if let seasonalYear {
                     NavigationLink {
                         YearInReviewScreen(year: seasonalYear)
@@ -179,10 +186,11 @@ struct MemoryStories: View {
                 ForEach(memories) { memory in
                     StoryCard(
                         memory: memory, isFront: front == memory.id || (front == nil && memory.id == memories.first?.id),
+                        pictureHeight: height, captionBelow: captionsBelow,
                         open: { opened = memory }, play: { slideshow = SlideshowStart(memory: memory) },
                         finished: { advance(after: memory.id) }, back: { retreat(before: memory.id) }
                     )
-                    .frame(width: cardWidth, height: height)
+                    .frame(width: cardWidth, height: captionsBelow ? nil : height)
                     .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 16)
                     .contextMenu { menu(memory) }
                     .id(memory.id)
@@ -216,6 +224,16 @@ struct MemoryStories: View {
             $0.size.width
         } action: {
             width = $0
+        }
+    }
+
+    /// Lazy, but not with the titles below the pictures: the band is as tall as its tallest card, so all are measured
+    /// (a dozen at most, `MemoriesStrip.limit`).
+    @ViewBuilder func cardStack<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if captionsBelow {
+            HStack(alignment: .top, spacing: Self.spacing, content: content)
+        } else {
+            LazyHStack(spacing: Self.spacing, content: content)
         }
     }
 
@@ -306,6 +324,10 @@ struct StoryCard: View {
     let memory: Memory
     /// The card in front plays; the others show their first photo.
     let isFront: Bool
+    /// The picture's height, for the titles below it (`captionBelow`).
+    var pictureHeight: CGFloat = MemoryStory.height(compact: false)
+    /// Accessibility text sizes: the titles below the picture, wrapped, instead of on it (SPEC §20.3).
+    var captionBelow = false
     let open: () -> Void
     let play: () -> Void
     /// Past the last photo, and before the first one.
@@ -337,6 +359,32 @@ struct StoryCard: View {
     }
 
     var body: some View {
+        Group {
+            if captionBelow {
+                VStack(alignment: .leading, spacing: 6) {
+                    card.frame(height: pictureHeight)
+                    titles.fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                card
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { open() }
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: step(forward: true)
+            case .decrement: step(forward: false)
+            @unknown default: break
+            }
+        }
+        .accessibilityAction(named: Text(MemoryScreen.playTitle)) { play() }
+    }
+
+    /// The photos with their bars and the play button, and the titles on them unless they are below (`captionBelow`).
+    var card: some View {
         GeometryReader { proxy in
             ZStack {
                 // Pinned to the card: a fill-scaled preview is larger than the card, and its tap area reached the
@@ -356,15 +404,16 @@ struct StoryCard: View {
                     bars.padding(.horizontal, 10).padding(.top, 8)
                     Spacer(minLength: 0)
                     HStack(alignment: .bottom) {
-                        titles
+                        if !captionBelow { titles }
                         Spacer(minLength: 8)
                         playButton
                     }
                     .padding(12)
                     .background(alignment: .bottom) {
-                        LinearGradient(colors: [.clear, .black.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom)
-                            .padding(.top, -24)
-                            .allowsHitTesting(false)
+                        if !captionBelow {
+                            // Even behind the titles from their first line down: 4.5:1 on any photo (SPEC §20.3).
+                            CaptionScrim(increased: contrast == .increased || reduceTransparency, fade: 40).padding(.top, 12)
+                        }
                     }
                 }
                 #if os(macOS) || os(iOS)
@@ -377,18 +426,6 @@ struct StoryCard: View {
         .onHover { isHovering = $0 }
         .onChange(of: isPlaying, initial: true) { _, playing in playingChanged(playing) }
         .task(id: TimerKey(index: index, playing: isPlaying)) { await runTimer() }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(accessibilityLabel))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { open() }
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: step(forward: true)
-            case .decrement: step(forward: false)
-            @unknown default: break
-            }
-        }
-        .accessibilityAction(named: Text(MemoryScreen.playTitle)) { play() }
     }
 
     var accessibilityLabel: String {
@@ -397,10 +434,6 @@ struct StoryCard: View {
             localized: "Photo \(index + 1) of \(photos.count)", bundle: .module,
             comment: "VoiceOver: which photo of a memory story card is shown.")
         return base + ", " + position
-    }
-
-    var scrimOpacity: Double {
-        OverlayLegibility.scrimOpacity(base: 0.55, increased: contrast == .increased || reduceTransparency)
     }
 
     // MARK: Picture
@@ -460,27 +493,31 @@ struct StoryCard: View {
 
     // MARK: Titles and buttons
 
-    var titles: some View {
-        Button(action: open) {
+    @ViewBuilder var titles: some View {
+        let button = Button(action: open) {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(memory.title).font(.headline).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(memory.title).font(.headline).lineLimit(captionBelow ? nil : 2)
                     Image(systemName: "chevron.forward").font(.caption.weight(.bold)).opacity(0.8)
                 }
                 if let dateLine = Memories.dateLine(for: memory) {
-                    Text(dateLine).font(.caption).lineLimit(1).opacity(0.9)
+                    Text(dateLine).font(.caption).lineLimit(captionBelow ? nil : 1)
                 }
             }
-            .foregroundStyle(.white)
-            .shadow(radius: 3)
+            .foregroundStyle(captionBelow ? Color.primary : .white)
+            .shadow(color: .black.opacity(captionBelow ? 0 : 0.35), radius: 2)
             .multilineTextAlignment(.leading)
-            // UI tests: captions on photos, measured against the photo (SPEC §20.3).
+            // UI tests: captions on photos, which the audit measures against the photo under them (SPEC §20.3).
             .accessibilityIdentifier("memory-caption")
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        // The card has a fixed height: the whole title is in the VoiceOver label and on the memory's screen.
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        if captionBelow {
+            button
+        } else {
+            // On the picture, whose height is fixed: up to xxLarge; larger sizes put the titles below it.
+            button.dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        }
     }
 
     var playButton: some View {

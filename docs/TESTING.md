@@ -265,12 +265,21 @@ when run with `TEST_RUNNER_PHOTOS_POSTCARD_PHOTO=<jpeg>` and `TEST_RUNNER_PHOTOS
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
 
+`UITests/EraseTourTests.swift` (iPhone) brushes in the editor's Erase tool (SPEC §21.5) and cancels.
+`testEraseEvidence` makes before/after pictures of the fill and is opt-in: `TEST_RUNNER_PHOTOS_UITEST_ERASE_EVIDENCE` names a
+folder with JPEGs (without EXIF dates, so they are the newest of the library) and `erase-evidence.json`
+(`[{"file", "name", "brush", "strokes": [[[x, y], …], …]}]`, brush size and points as fractions; photos of different
+aspect ratios, which is how the test tells them apart). It uploads them into `/Photos/erase-evidence-<time>`, brushes each
+stroke, writes `<name>-before/-after.png` and the picture's frame (`<name>-frame.txt`) into `PHOTOS_UITEST_SHOTS`,
+leaves with Cancel (nothing is saved) and removes the folder and its trash bin entries.
+
 `UITests/AccessibilityAuditTests.swift` (iPhone and iPad, SPEC §20.3) runs Xcode's accessibility audit
 (`performAccessibilityAudit`: contrast, hit areas, labels, traits, Dynamic Type, clipped text) on every main screen —
 Library, viewer and its info, Collections (the iPad's sidebar), Albums, Settings, Search, Clean up, Memories — and on
 Library, Settings, Collections and Search at the largest accessibility text size. A finding fails the test unless
 `AccessibilityAuditPolicy.accepts` names it with a reason (a photo's own colours, the system's bars and search field,
 the system's secondary text colours at 3:1 or more, content under the tab bar's glass, findings without an element).
+White captions on photos (`memory-caption`) are never excused.
 With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` every screen's screenshot, accessibility tree and findings
 (`…-audit.txt`, accepted ones with their reason) are written there; `TEST_RUNNER_PHOTOS_UITEST_A11Y_SURVEY=1` only
 writes them, for a look at a new screen. `TEST_RUNNER_PHOTOS_UITEST_LANGUAGE=de` runs the same screens in German with a

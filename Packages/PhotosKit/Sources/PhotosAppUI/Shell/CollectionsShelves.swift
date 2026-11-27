@@ -169,6 +169,7 @@ enum CollectionsOverview {
         let model: CollectionsOverviewModel
         @Environment(SessionModel.self) private var session
         @Environment(\.routeTransitionNamespace) private var transitions
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         /// A memory zooms out of its card (SPEC §17.4).
         @Namespace private var zoom
 
@@ -279,11 +280,13 @@ enum CollectionsOverview {
                             NavigationLink {
                                 MemoryScreen(memory: memory).cardTransitionDestination(id: memory.id, in: zoom)
                             } label: {
-                                MemoryCard(memory: memory, compact: true)
-                                    .frame(width: Self.memorySize.width, height: Self.memorySize.height)
+                                // At accessibility text sizes the titles go below the picture (`MemoryCard`).
+                                MemoryCard(memory: memory, compact: true, pictureHeight: Self.memorySize.height)
+                                    .frame(
+                                        width: Self.memorySize.width,
+                                        height: dynamicTypeSize.isAccessibilitySize ? nil : Self.memorySize.height
+                                    )
                                     .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 12)
-                                    // A fixed size: the whole title is in the VoiceOver label and on the memory's screen.
-                                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                             }
                             .buttonStyle(.plain)
                         }
