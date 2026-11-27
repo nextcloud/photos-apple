@@ -210,6 +210,9 @@ struct WelcomeCard: ViewModifier {
 /// behind it. With Reduce Motion it only fades. It never takes input: the Library can be used at once.
 struct FirstLaunchWelcome: View {
     var name: String
+    /// The first run's done step (SPEC §22.2): a line under the greeting ("Backup is on…"); the welcome stays longer to be
+    /// read, and VoiceOver hears it.
+    var doneLine: String? = nil
     var onFinished: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -232,6 +235,13 @@ struct FirstLaunchWelcome: View {
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .opacity(phase == .leaving ? 0 : 1)
+                if let doneLine {
+                    Label(doneLine, systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                        .opacity(phase == .leaving ? 0 : 1)
+                }
             }
             .padding(32)
         }
@@ -239,7 +249,8 @@ struct FirstLaunchWelcome: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task {
-            await WelcomeTiming.holdCalmly(WelcomeDebug.hold ?? timing.hold)
+            if let doneLine { AccessibilityNotification.Announcement(doneLine).post() }
+            await WelcomeTiming.holdCalmly(WelcomeDebug.hold ?? (timing.hold + (doneLine == nil ? 0 : WelcomeTiming.doneLineExtra)))
             withAnimation(timing.leave) {
                 phase = .leaving
             } completion: {
@@ -268,6 +279,8 @@ struct WelcomeTiming: Equatable {
 
     /// The icon and greeting stay still for this long.
     var hold: Double { reduceMotion ? 0.5 : 0.45 }
+    /// Longer with the first run's done line under the greeting, so it can be read (SPEC §22.2).
+    static let doneLineExtra = 1.4
     /// Then they leave in this long.
     var leaveDuration: Double { reduceMotion ? 0.35 : 0.6 }
     var leave: Animation { reduceMotion ? .easeInOut(duration: leaveDuration) : .smooth(duration: leaveDuration) }

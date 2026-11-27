@@ -227,6 +227,11 @@ public struct LoginView: View {
 
     var header: some View {
         VStack(spacing: 12) {
+            // The first run's first step of three (SPEC §22.2); not when adding an account.
+            if !isAddingAccount {
+                FirstRunProgress(step: 1, count: FirstRun.stepCount(backupAvailable: !app.managed.disablesBackup))
+                    .padding(.bottom, 4)
+            }
             PhotosAppIcon()
                 .frame(width: 96, height: 96)
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
@@ -418,7 +423,8 @@ public struct LoginView: View {
                     return
                 }
                 phase = .finishing
-                try await app.addAccount(credentials)
+                // The first run asks nothing but backup: notifications are offered later, as a tip (SPEC §22.2).
+                try await app.addAccount(credentials, askForNotifications: isAddingAccount)
                 forgetUnusedTrust()
                 if isAddingAccount { dismiss() }
             } catch is CancellationError {
@@ -457,9 +463,9 @@ public struct LoginView: View {
             defer { phase = .idle }
             do {
                 if let credentials = LoginService.parseLoginURL(pasteLink) {
-                    try await app.addAccount(credentials)
+                    try await app.addAccount(credentials, askForNotifications: isAddingAccount)
                 } else if let onetime = LoginService.parseOnetimeLoginURL(pasteLink) {
-                    try await app.addAccount(try await service.exchangeOnetimeToken(onetime))
+                    try await app.addAccount(try await service.exchangeOnetimeToken(onetime), askForNotifications: isAddingAccount)
                 } else {
                     error = String(localized: "This is not a valid login link.", bundle: .module)
                     return

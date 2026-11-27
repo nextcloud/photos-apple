@@ -139,6 +139,13 @@ targets:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
+        # Handoff between the user's iPhone, iPad, Mac and Vision Pro (SPEC §22.2): one type, the account link says what.
+        NSUserActivityTypes: [com.nextcloud.photos.viewing]
+        # Apple TV is set up from the iPhone or iPad (SPEC §22.2, DeviceDiscoveryUI): the TV app browses for this service,
+        # the system starts this app for it (`TVSetupListener`). Only iOS and iPadOS advertise it.
+        NSApplicationServices:
+          Advertises:
+            - NSApplicationServiceIdentifier: NextcloudPhotos-TVSetup
         # Refresh, processing, on-device labels (`ContentLabeling`) and smart offline (`SmartOfflineScheduling`) have fixed
         # identifiers. The last one is the user-started backup as a continued processing task (`ContinuedBackup`): its
         # identifier must start with the bundle identifier, and the system expects a wildcard.
@@ -344,6 +351,12 @@ targets:
         UILaunchScreen: {}
         UIUserInterfaceStyle: Automatic
         NSLocalNetworkUsageDescription: Nextcloud Photos connects to Nextcloud servers on your local network.
+        # "Set Up with iPhone" (SPEC §22.2): Apple's device picker lists the user's iPhones and iPads with the app.
+        NSApplicationServices:
+          Browses:
+            - NSApplicationServiceIdentifier: NextcloudPhotos-TVSetup
+              NSApplicationServiceUsageDescription: Your iPhone or iPad sends the address of your Nextcloud, and you allow Apple TV to access it there.
+              NSApplicationServicePlatformSupport: [iOS, iPadOS]
         # As on the other platforms: self-hosted servers, addresses typed in by the user (docs/PRIVACY-AND-EXPORT.md).
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

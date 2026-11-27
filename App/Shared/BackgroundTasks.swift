@@ -117,6 +117,10 @@
                 }
             }
             PushNotifications.install(delegate: NotificationRouter.shared) { UIApplication.shared.registerForRemoteNotifications() }
+            // Apple TV can be set up from here (SPEC §22.2): the system starts the app for the TV's request, and the listener
+            // has to be there at once.
+            TVSetupListener.shared.hasAccount = { !AppHost.model.needsLogin }
+            TVSetupListener.shared.start()
             return true
         }
 

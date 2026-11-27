@@ -47,7 +47,8 @@ import Testing
         #expect(link("nextcloudphotos://photo/abc") == nil)
         #expect(link("nextcloudphotos://photo/-3") == nil)
         #expect(link("nextcloudphotos://photo/1/2") == nil)
-        #expect(link("nextcloudphotos://memories/extra") == nil)
+        // A destination takes no path; `memories/<id>` is a memory since SPEC §22.2 (`ContinuityLinkTests`).
+        #expect(link("nextcloudphotos://onThisDay/extra") == nil)
     }
 
     @Test func theRequestFormRoundTrips() {

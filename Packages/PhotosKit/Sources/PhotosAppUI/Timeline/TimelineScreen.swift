@@ -6,6 +6,7 @@ import PhotosDomain
 import PhotosModel
 import PhotosStore
 import SwiftUI
+import TipKit
 
 /// Timeline views: All media, Photos, Videos, Favorites (SPEC §7.1).
 struct TimelineScreen: View {
@@ -36,6 +37,16 @@ struct TimelineScreen: View {
     @State private var moments = LibraryMomentsModel()
     @State private var openedMoment: Memory?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// The photo at the top of the Library, for Handoff (SPEC §22.2).
+    @State private var handoffTop: FileID?
+    /// The tip that is due, above the memories (SPEC §22.2).
+    @State private var tips = LibraryTips.makeGroup()
+
+    /// A tip is due and the Library is shown as a whole (not filtered, not while selecting).
+    var showsTip: Bool {
+        filter == .all && !gridSelection.isSelecting && tips.currentTip != nil
+    }
 
     /// The memories strip is at the top of the whole library, not of a filtered one (SPEC TL-3), and not while selecting.
     var showsMemoriesStrip: Bool {
@@ -119,6 +130,7 @@ struct TimelineScreen: View {
         VStack(spacing: 0) {
             #if os(macOS)
                 filterChips
+                if showsTip { LibraryTips(group: tips) }
                 if showsMemoriesStrip && !memories.isEmpty {
                     MemoriesStrip(memories: memories)
                 }
@@ -153,6 +165,16 @@ struct TimelineScreen: View {
             zoom.moments = headers
         }
         .navigationDestination(item: $openedMoment) { memory in MemoryScreen(memory: memory) }
+        // Where the user is in the Library continues on another device (SPEC §22.2). The grid has no scroll callback
+        // that reaches here: its top photo is read every two seconds while the window is active.
+        .handoff(handoffLink)
+        .task(id: filter == .all && scenePhase == .active) {
+            guard filter == .all, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                if let top = zoom.gridTopItem(), top != handoffTop { handoffTop = top }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         .onPreferenceChange(GridSelectionState.Key.self) { state in
             gridSelection = state
         }
@@ -275,9 +297,24 @@ struct TimelineScreen: View {
         #if os(macOS)
             return nil
         #else
-            guard showsMemoriesStrip, !memories.isEmpty else { return nil }
-            return AnyView(MemoriesStrip(memories: memories))
+            let strip = showsMemoriesStrip && !memories.isEmpty
+            guard strip || showsTip else { return nil }
+            return AnyView(
+                VStack(spacing: 0) {
+                    if showsTip { LibraryTips(group: tips) }
+                    if strip { MemoriesStrip(memories: memories) }
+                })
         #endif
+    }
+
+    var handoffLink: DeepLink {
+        switch filter {
+        case .all: handoffTop.map { DeepLink.library(at: $0) } ?? .destination(AppDestination.library.rawValue)
+        case .favorites: .destination(AppDestination.favorites.rawValue)
+        case .photos: .destination(AppDestination.photos.rawValue)
+        case .videos: .destination(AppDestination.videos.rawValue)
+        default: .destination(AppDestination.library.rawValue)
+        }
     }
 
     /// The folders the Library leaves out: `.nomedia` folders and, while partner photos are hidden, the partners' folders.

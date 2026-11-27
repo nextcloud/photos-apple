@@ -30,6 +30,44 @@ struct PersonRouteScreen: View {
     }
 }
 
+/// A memory opened by its id (a link, Handoff from another device; SPEC §22.2). Memories are made on the device from the
+/// library, so the same library on the same day has the same ids; one that is not there (any more) says so.
+struct MemoryRouteScreen: View {
+    let id: String
+    @Environment(SessionModel.self) private var session
+    @State private var memory: Memory?
+    @State private var missing = false
+
+    var body: some View {
+        Group {
+            if let memory {
+                MemoryScreen(memory: memory)
+            } else if missing {
+                ContentUnavailableView(
+                    String(
+                        localized: "Memory not found", bundle: .module,
+                        comment: "A link or Handoff named a memory this device does not have."),
+                    systemImage: "sparkles.rectangle.stack",
+                    description: Text(
+                        "It may not have been made on this device yet. Open Memories to see the ones here.", bundle: .module,
+                        comment: "Below “Memory not found”."))
+            } else {
+                GridSkeleton(zoomStep: GridColumns.default, showsHeader: false)
+            }
+        }
+        .task(id: id) {
+            guard memory == nil, let services = session.services else { return }
+            let snapshot: MemoriesSnapshot = (try? await services.library.memories()) ?? MemoriesSnapshot()
+            memory = Self.memory(id, in: snapshot)
+            missing = memory == nil
+        }
+    }
+
+    nonisolated static func memory(_ id: String, in snapshot: MemoriesSnapshot) -> Memory? {
+        (snapshot.onThisDay + snapshot.trips + (snapshot.recap.map { [$0] } ?? [])).first { $0.id == id }
+    }
+}
+
 /// A tag's photos. The tag is looked up by name: what the device knows first, else the server.
 struct TagRouteScreen: View {
     let name: String

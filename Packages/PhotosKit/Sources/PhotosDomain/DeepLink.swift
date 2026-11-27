@@ -18,6 +18,8 @@ public enum AppRoute: Hashable, Codable, Sendable {
     case place(name: String)
     case person(name: String)
     case tag(name: String)
+    /// A memory (`Memory.id`), opened by a link or Handoff (SPEC §22.2).
+    case memory(id: String)
 }
 
 /// What a `nextcloudphotos://` link opens (SPEC §4.8): a destination, an album, a photo, a place, a person, a tag, a folder
@@ -30,6 +32,8 @@ public enum AppRoute: Hashable, Codable, Sendable {
 ///   (earlier links). A full album id (`own:<name>`, `shared:<name>`) is accepted after `album/` as well.
 /// - `nextcloudphotos://places/<name>`, `…/faces/<name>`, `…/tags/<name>`, `…/folders/<path>`
 /// - `nextcloudphotos://photo/<fileId>`, `nextcloudphotos://search/<text>`
+/// - `nextcloudphotos://memories/<id>` (a memory, `Memory.id`; the TV app's Top Shelf links have the same form) and
+///   `nextcloudphotos://library/<fileId>` (the Library scrolled to that photo; Handoff of the Library's position, SPEC §22.2)
 ///
 /// A link that names an account puts it in front of the route, as the user and server of a URL
 /// (`nextcloudphotos://<user>@<host>[:port][/<server path>]/<route>`, `IncomingLink`).
@@ -44,6 +48,10 @@ public enum DeepLink: Hashable, Sendable {
     case folder(path: String)
     /// The search with this text.
     case search(String)
+    /// A memory (`Memory.id`, e.g. `years-3`, `trip-1714000000`, `recap-2024`).
+    case memory(id: String)
+    /// The Library scrolled to this photo (where the user was on another device).
+    case library(at: FileID)
 
     public static let scheme = "nextcloudphotos"
 
@@ -131,6 +139,15 @@ public enum DeepLink: Hashable, Sendable {
         case "photo":
             guard rest.count == 1, let fileId = FileID(rest[0]), fileId > 0 else { return nil }
             self = .photo(fileId: fileId)
+        case "memories" where !rest.isEmpty:
+            self = .memory(id: joined)
+        case "library", "timeline":
+            if rest.isEmpty {
+                self = .destination("library")
+                return
+            }
+            guard rest.count == 1, let fileId = FileID(rest[0]), fileId > 0 else { return nil }
+            self = .library(at: fileId)
         default:
             guard rest.isEmpty else { return nil }
             // The case of the app's own destination names is kept (`onThisDay`).
@@ -157,6 +174,8 @@ public enum DeepLink: Hashable, Sendable {
         case .tag(let name): "tag/\(name)"
         case .folder(let path): "folder/\(path.drop(while: { $0 == "/" }))"
         case .search(let text): "search/\(text)"
+        case .memory(let id): "memories/\(id)"
+        case .library(let fileId): "library/\(fileId)"
         }
     }
 
@@ -176,6 +195,8 @@ public enum DeepLink: Hashable, Sendable {
             let parts = path.split(separator: "/").map(String.init)
             return parts.isEmpty ? ["folders"] : ["folders"] + parts
         case .search(let text): return ["search", text]
+        case .memory(let id): return ["memories", id]
+        case .library(let fileId): return ["library", String(fileId)]
         }
     }
 

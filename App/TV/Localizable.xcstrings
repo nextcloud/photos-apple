@@ -70,11 +70,17 @@
     "Albums you create on your other devices appear here." : {
       "comment" : "TV: explanation when there are no albums."
     },
+    "Allow access on your server's page." : {
+      "comment" : "TV login (Set Up with iPhone): second step."
+    },
     "Can't Play This Video" : {
       "comment" : "TV: the video could not be loaded."
     },
     "Cancel" : {
       "comment" : "TV login: button"
+    },
+    "Choose your account on your iPhone or iPad." : {
+      "comment" : "TV login (Set Up with iPhone): first step."
     },
     "Connect" : {
       "comment" : "TV login: button that connects to an http:// server after the warning."
@@ -84,6 +90,9 @@
     },
     "Continue" : {
       "comment" : "TV login: button after the server address."
+    },
+    "Continue on your iPhone" : {
+      "comment" : "TV login: title while the phone shows the login page (Set Up with iPhone).\nTV login: title while the user chooses the account on the phone."
     },
     "Family Slideshow" : {
       "comment" : "TV settings: picker of the album of the family slideshow.\nTV: button state when the album is the family slideshow; pressing it again stops using it.\nTV: title of the banner that starts the family slideshow."
@@ -139,6 +148,9 @@
     "No Photos Yet" : {
       "comment" : "TV: title of the empty home screen."
     },
+    "No iPhone or iPad can be found." : {
+      "comment" : "TV: the device picker cannot be shown."
+    },
     "None" : {
       "comment" : "TV settings: no album chosen for the family slideshow."
     },
@@ -154,8 +166,14 @@
     "Offline" : {
       "comment" : "TV settings: the server cannot be reached."
     },
+    "Open Nextcloud Photos on your iPhone or iPad nearby: it sends your server and you allow access there." : {
+      "comment" : "TV login: under Set Up with iPhone."
+    },
     "Open the camera on your iPhone or iPad and point it at the code." : {
       "comment" : "TV login: first step."
+    },
+    "Or log in with the server address" : {
+      "comment" : "TV login: heading of the address form under Set Up with iPhone."
     },
     "Paused" : {
       "comment" : "TV slideshow: VoiceOver label of the pause symbol."
@@ -200,6 +218,12 @@
     },
     "Server address" : {
       "comment" : "TV login: label of the server address field."
+    },
+    "Set Up with iPhone" : {
+      "comment" : "TV login: button that sets the TV up from the user's iPhone or iPad."
+    },
+    "Set up Nextcloud Photos with your iPhone or iPad" : {
+      "comment" : "TV: title of the system's device picker."
     },
     "Settings" : {
       "comment" : "TV: tab with the account and slideshow settings."
@@ -248,6 +272,9 @@
     "The family slideshow plays the chosen album in a shuffled order for as long as you like, like a picture frame. Start it from Home." : {
       "comment" : "TV settings: explanation of the family slideshow."
     },
+    "The set-up was cancelled on your iPhone." : {
+      "comment" : "TV login: the phone cancelled Set Up with iPhone."
+    },
     "This film is on %@. Sign in to that Nextcloud on this Apple TV with an account the photos are shared with, then join again." : {
       "comment" : "TV SharePlay: the film is on a Nextcloud this TV is not signed in to. The argument is the server."
     },
@@ -286,11 +313,17 @@
         }
       }
     },
+    "Waiting for your iPhone…" : {
+      "comment" : "TV login: shown while the TV waits for the phone."
+    },
     "Waiting for your phone…" : {
       "comment" : "TV login: shown while the TV waits for the login on the phone."
     },
     "You can see %lld of %lld photos. The others aren't shared with this account on Nextcloud." : {
       "comment" : "TV SharePlay: how many of the film's photos this TV's account can see. Arguments are numbers."
+    },
+    "Your iPhone opened your server's page. (Or scan the code with another phone.)" : {
+      "comment" : "TV login: first step when the phone sets the TV up."
     },
     "Your memories and albums on the big screen. Log in with your phone: no password is typed on the TV." : {
       "comment" : "TV login: introduction next to the login form."

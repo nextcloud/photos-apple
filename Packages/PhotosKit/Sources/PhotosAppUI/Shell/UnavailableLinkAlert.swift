@@ -17,7 +17,7 @@ extension AppDestination {
         case .album(let id): id.hasPrefix("\(AlbumKind.shared.rawValue):") ? .sharedAlbums : .albums
         case .person: .people
         case .tag: .tags
-        case .photo, .place, .folder, .search: nil
+        case .photo, .place, .folder, .search, .memory, .library: nil
         }
     }
 

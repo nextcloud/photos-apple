@@ -216,6 +216,8 @@ struct MediaViewer: View {
             .thenAndNowSheet($thenAndNow)
             .postcardSheet($postcard)
             .mediaSaveStatus(saver)
+            // The photo shown continues on another device (SPEC §22.2); not an archived one or a Live Photo's video.
+            .handoff(DeepLink.mayOpen(currentItem) ? currentFileId.map { DeepLink.photo(fileId: $0) } : nil)
             .confirmationDialog(
                 String(localized: "Delete this item?", bundle: .module), isPresented: $confirmDelete, titleVisibility: .visible
             ) {
