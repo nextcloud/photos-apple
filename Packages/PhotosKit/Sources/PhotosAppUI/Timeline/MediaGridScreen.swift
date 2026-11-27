@@ -211,7 +211,11 @@ struct MediaGridScreen<Accessory: View>: View {
             .libraryZoomPlacement(libraryZoom, locator: tileLocator)
             #if DEBUG
                 // Screenshots and UI checks: `PHOTOS_DEBUG_VIEWER=<index>` opens the viewer once the feed has items.
+                // After a moment: on the Mac the Library's first grid is replaced by another one right after launch, and
+                // a viewer (or Compare) asked for by the first was lost with it while the request, once per process, was
+                // used up. A grid that goes away within the moment cancels its task before it asks.
                 .task(id: feed.items.isEmpty) {
+                    guard !feed.items.isEmpty, (try? await Task.sleep(for: .milliseconds(800))) != nil else { return }
                     if viewerStart == nil { viewerStart = ViewerStart.debugStart(ids: feed.items.map(\.fileId)) }
                     if compareRequest == nil { compareRequest = CompareRequest.debugStart(ids: feed.items.map(\.fileId)) }
                     if loupeRequest == nil { loupeRequest = LoupeRequest.debugStart(ids: feed.items.map(\.fileId)) }

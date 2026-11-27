@@ -695,6 +695,10 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   simulator (iOS 27.2: badges of the server's tags on a fresh device). iPad hardware-keyboard keys built, not run.
 - ✅ Compare view (2-up/4-up, synchronised zoom/pan, 100 %, keep one). Run on the Mac (`PHOTOS_DEBUG_COMPARE=2`, 100 % via the
   toolbar). Pinch/drag/keys not driven (no real input).
+  2026-11-27: `PHOTOS_DEBUG_COMPARE` and `PHOTOS_DEBUG_VIEWER` had stopped doing anything on the Mac (the Library's
+  first grid is replaced right after launch and took the once-per-process request with it); they now ask after a
+  moment, `PHOTOS_DEBUG_VIEWER_INFO=1` opens the viewer's info, and `scripts/readme-screenshots-mac.sh` takes the Mac's
+  README shots (library, viewer with info, map, albums, compare) ✅ run on the Mac.
 - 🟡 Import from camera or card. Engine unit-tested (pairing, patterns, ledger, matching, verification, delete only
   verified, stop). Run on the Mac with a folder card: new-only (4 of 6 found on the server), upload into the date folder,
   checksum verified, deleted from the card, toolbar summary; iPad simulator: the sheet with the same card folder. Not run:

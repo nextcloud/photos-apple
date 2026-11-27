@@ -322,6 +322,13 @@ struct MediaViewer: View {
             .focusEffectDisabled()
             .focused($focused)
             .onAppear { focused = true }
+            #if DEBUG
+                // Screenshots: `PHOTOS_DEBUG_VIEWER_INFO=1` opens the info of the viewer that opens at launch.
+                .task {
+                    guard ViewerStart.takeDebugInfo(), (try? await Task.sleep(for: .milliseconds(600))) != nil else { return }
+                    showingInfo = true
+                }
+            #endif
             .onChange(of: showingInfo) { _, showing in
                 if !showing {
                     focused = true
@@ -408,6 +415,17 @@ private struct ViewerPageArea: ViewModifier {
             else { return nil }
             debugStartUsed = true
             return ViewerStart(ids: ids, startId: ids[index])
+        }
+
+        /// `PHOTOS_DEBUG_VIEWER_INFO=1` with `PHOTOS_DEBUG_VIEWER`: the first viewer shows its info; true once.
+        @MainActor private static var debugInfoUsed = false
+
+        @MainActor static func takeDebugInfo() -> Bool {
+            guard debugStartUsed, !debugInfoUsed, ProcessInfo.processInfo.environment["PHOTOS_DEBUG_VIEWER_INFO"] != nil else {
+                return false
+            }
+            debugInfoUsed = true
+            return true
         }
     }
 #endif
