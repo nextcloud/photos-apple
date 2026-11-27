@@ -334,6 +334,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v_r11_bestshot_signals") { db in try BestShotStore.migrate(db) }
         // Camera data is read once, into `photoExif` (Insights, search, rules); the rules' own copy goes (SPEC §22.3).
         migrator.registerMigration("v_r12_people_camera_once") { db in try db.drop(table: "cameraDetails") }
+        // People on this device for servers without Recognize: faces, people, the photos looked at (SPEC §22.3).
+        migrator.registerMigration("v_r12_people_device_faces") { db in try DeviceFaceStore.migrate(db) }
         return migrator
     }
 }
