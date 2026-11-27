@@ -234,11 +234,78 @@ import XCTest
             shot("search-results")
         }
 
+        /// The camera in search: typing a camera's name (`PHOTOS_UITEST_SHOT_CAMERA`, default "nikon d50") suggests it as a
+        /// Camera chip, which finds the photos taken with it.
+        func testCameraChip() {
+            launch(destination: "search")
+            pause(20)
+            let field = app.searchFields.firstMatch
+            if !field.waitForExistence(timeout: 5) { app.collectionViews.firstMatch.swipeDown() }
+            XCTAssertTrue(field.waitForExistence(timeout: 10), "No search field")
+            field.tap()
+            field.typeText(environment("PHOTOS_UITEST_SHOT_CAMERA") ?? "nikon d50")
+            let suggestion = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Camera'")).firstMatch
+            let anyCamera = app.staticTexts["Camera"].firstMatch
+            XCTAssertTrue(suggestion.waitForExistence(timeout: 15) || anyCamera.waitForExistence(timeout: 5), "No camera suggestion")
+            pause(2)
+            shot("search-camera-suggestion")
+            if suggestion.exists { suggestion.tap() } else { anyCamera.tap() }
+            pause(3)
+            #if os(iOS)
+                if app.keyboards.firstMatch.exists { app.collectionViews.firstMatch.swipeDown(velocity: .slow) }
+                pause(1)
+                if app.keyboards.firstMatch.exists { app.searchFields.firstMatch.typeText("\n") }
+            #endif
+            pause(10)
+            shot("search-camera")
+        }
+
         func environment(_ name: String) -> String? {
             ProcessInfo.processInfo.environment[name].flatMap { $0.isEmpty ? nil : $0 }
         }
 
         #if os(iOS)
+            /// The first run's backup step, on a fresh install (`xcrun simctl uninstall` first: the debug login only signs
+            /// in an app without an account). Left with Not now: nothing is uploaded.
+            func testFirstRun() throws {
+                app.launchEnvironment["PHOTOS_DEBUG_OFFER_BACKUP"] = "1"
+                launch()
+                let turnOn = app.buttons["first-run-backup"]
+                guard turnOn.waitForExistence(timeout: 120) else {
+                    throw XCTSkip("No backup step: the app already had an account (uninstall it first) or backup is set up.")
+                }
+                pause(3)
+                shot("first-run")
+                _ = tapButton("first-run-not-now", timeout: 5)
+                pause(2)
+            }
+
+            /// Free up space on this device, after a backup that a run of `FreeUpTourTests` (or the app) has made: the account
+            /// menu's summary, the Backup screen's offer and the free-up screen. Only looks: nothing is removed.
+            func testFreeUp() {
+                launch()
+                let account = app.buttons["account-menu"].firstMatch
+                XCTAssertTrue(account.waitForExistence(timeout: 60), "No account button")
+                pause(15)
+                account.tap()
+                pause(3)
+                shot("account-menu")
+                app.terminate()
+                launch(destination: "backup")
+                pause(15)
+                shot("backup-screen")
+                let offer = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Free up'")).firstMatch
+                guard offer.waitForExistence(timeout: 20) else {
+                    XCTFail("No free-up offer on the Backup screen")
+                    return
+                }
+                offer.tap()
+                let headline = app.descendants(matching: .any)["freeUp.headline"].firstMatch
+                XCTAssertTrue(headline.waitForExistence(timeout: 120), "Free up did not open")
+                pause(4)
+                shot("free-up")
+            }
+
             /// Backup you can see: the device's photos in the Library with their badge, and the account menu's summary.
             /// Every upload is held and the backup folder is removed at the end. Backup stays turned on in the app's
             /// settings, so run this test last and uninstall the app afterwards (the script does), or the next launch

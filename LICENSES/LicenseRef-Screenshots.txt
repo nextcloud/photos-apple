@@ -1,9 +1,11 @@
-Screenshots of Nextcloud Photos
+Screenshots and screen recordings of Nextcloud Photos
 
-The user interface shown in these screenshots is part of Nextcloud Photos and is licensed under the MIT licence (see MIT.txt).
+The user interface shown in these screenshots and recordings is part of Nextcloud Photos and is licensed under the MIT licence (see MIT.txt).
 
 The photos shown are sample images from Wikimedia Commons (https://commons.wikimedia.org). Each remains under the licence chosen by its
 author on Wikimedia Commons; they appear here only to illustrate the app. Map imagery and map data in the map screenshot are
-© Apple Inc. and its data providers and are shown under Apple's terms.
+© Apple Inc. and its data providers and are shown under Apple's terms. The system screens around the app (the Home
+Screen's wallpaper, the system's own controls and app icons in the widget screenshot) are Apple's and are shown only to
+illustrate the app's widgets.
 
 The Nextcloud name and logo are trademarks of Nextcloud GmbH (see LicenseRef-NextcloudTrademarks.txt).

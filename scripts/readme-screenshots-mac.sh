@@ -14,20 +14,25 @@
 #
 # Shots (PNG, in <output>/mac/): library (the first launch signs in and waits for the first sync), viewer with its info
 # (PHOTOS_DEBUG_VIEWER, PHOTOS_DEBUG_VIEWER_INFO), map and albums (PHOTOS_DEBUG_DESTINATION), compare
-# (PHOTOS_DEBUG_COMPARE). The window keeps the size of the last run: set it once by hand in that installation if needed.
+# (PHOTOS_DEBUG_COMPARE), people (on a server without Recognize: the faces Vision finds on this Mac,
+# PHOTOS_DEBUG_FACES_NOW). The window keeps the size of the last run: set it once by hand in that installation if needed.
 # Then scale them for the README like the other platforms (at most 1400 px wide, JPEG quality about 80).
 #
 # Environment: README_SHOTS_LOGIN (default the local test server on 8089), README_SHOTS_BUNDLE_ID (default
 # com.nextcloud.photos.shots.mac), README_SHOTS_DERIVED_DATA (default /tmp/photos-ios-dd-readme-mac),
 # README_SHOTS_VIEWER_INDEX (the Library's n-th photo for the viewer, default 3), README_SHOTS_FIRST_WAIT (seconds for
-# the sign-in and first sync, default 90), README_SHOTS_SKIP_BUILD=1 (use the app built before), README_SHOTS_ONLY (names
-# of the shots to take, e.g. "viewer compare"; the first launch signs in, whichever it is).
+# the sign-in and first sync, default 90), README_SHOTS_PEOPLE_WAIT (seconds for the faces, default 90),
+# README_SHOTS_JOBS (xcodebuild -jobs, default 4), README_SHOTS_SKIP_BUILD=1 (use the app built before),
+# README_SHOTS_ONLY (names of the shots to take, e.g. "viewer compare"; the first launch signs in, whichever it is).
 
 set -u
 OUT=${1:?usage: $0 <output directory>}
 LOGIN=${README_SHOTS_LOGIN:-'nc://login/server:http://localhost:8089&user:admin&password:admin'}
 BUNDLE=${README_SHOTS_BUNDLE_ID:-com.nextcloud.photos.shots.mac}
 DD=${README_SHOTS_DERIVED_DATA:-/tmp/photos-ios-dd-readme-mac}
+# The real path (/tmp is /private/tmp): the PIDs are found by the executable path the process reports.
+mkdir -p "$DD"
+DD=${DD:A}
 VIEWER_INDEX=${README_SHOTS_VIEWER_INDEX:-3}
 FIRST_WAIT=${README_SHOTS_FIRST_WAIT:-90}
 ROOT=${0:A:h:h}
@@ -45,7 +50,7 @@ fi
 
 if [[ ${README_SHOTS_SKIP_BUILD:-0} != 1 ]]; then
     xcodegen generate -q >/dev/null
-    xcodebuild build -scheme NextcloudPhotos -destination 'platform=macOS' -derivedDataPath "$DD" -jobs 6 \
+    xcodebuild build -scheme NextcloudPhotos -destination 'platform=macOS' -derivedDataPath "$DD" -jobs "${README_SHOTS_JOBS:-4}" \
         CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PHOTOS_BUNDLE_ID="$BUNDLE" >"$DIR/build.log" 2>&1 ||
         { echo "build failed: $DIR/build.log"; exit 1; }
 fi
@@ -124,4 +129,6 @@ shoot viewer 20 PHOTOS_DEBUG_VIEWER=$VIEWER_INDEX PHOTOS_DEBUG_VIEWER_INFO=1
 shoot map 30 PHOTOS_DEBUG_DESTINATION=map
 shoot albums 25 PHOTOS_DEBUG_DESTINATION=albums
 shoot compare 20 PHOTOS_DEBUG_COMPARE=2
+# People without Recognize: Apple's Vision looks at the library on this Mac (PHOTOS_DEBUG_FACES_NOW), about a minute.
+shoot people "${README_SHOTS_PEOPLE_WAIT:-90}" PHOTOS_DEBUG_DESTINATION=people PHOTOS_DEBUG_FACES_NOW=1
 for file in "$DIR"/*.png(N); do echo "  ${file:t}: $(sips -g pixelWidth -g pixelHeight "$file" | awk '/pixel/ {printf "%s ", $2}')"; done
