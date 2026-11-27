@@ -19,6 +19,8 @@ final class SmokeTests: XCTestCase {
     /// The official bundle id: its container may hold a real account, which the debug login would not replace.
     static let officialBundleId = "com.nextcloud.photos"
     static let wait: TimeInterval = 60
+    /// The first photos of a run: a fresh test server (CI) makes their previews on the first request.
+    static let firstPhotosWait: TimeInterval = 180
 
     var app: XCUIApplication!
 
@@ -33,6 +35,9 @@ final class SmokeTests: XCTestCase {
         try XCTSkipIf(
             runner.hasPrefix(Self.officialBundleId + ".uitests"),
             "Build the UI tests with a bundle id of your own (PHOTOS_BUNDLE_ID), not \(Self.officialBundleId).")
+        // CI's simulator can start in landscape, where the iPhone's tab bar is a bar at the side; the smoke tests check
+        // the portrait layout.
+        XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
         app.launchEnvironment["PHOTOS_DEBUG_LOGIN"] = login
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -78,7 +83,8 @@ final class SmokeTests: XCTestCase {
 
     private func waitForTimeline(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(
-            tiles.firstMatch.waitForExistence(timeout: Self.wait), "No photo appeared in the timeline (login or first sync failed?)",
+            tiles.firstMatch.waitForExistence(timeout: Self.firstPhotosWait),
+            "No photo appeared in the timeline (login or first sync failed?)",
             file: file, line: line)
     }
 
