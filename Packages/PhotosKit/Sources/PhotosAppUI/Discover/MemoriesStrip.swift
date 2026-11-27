@@ -328,6 +328,8 @@ struct MemoryScreen: View {
         }
         .memorySlideshow($slideshow)
         .memoryActions(actions)
+        // Continues on another device (SPEC §22.2).
+        .handoff(.memory(id: memory.id), title: memory.title)
         .albumCardSheets($guestSheet)
         // A hint of the cover's colour in the header (SPEC §16.8.1); on iPhone and iPad the hero shows the cover itself.
         .photoHeaderTint(GridHero.isSupported ? nil : memory.cover)

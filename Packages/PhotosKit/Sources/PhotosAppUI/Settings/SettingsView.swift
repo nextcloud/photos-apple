@@ -230,6 +230,8 @@ public struct SettingsView: View {
         PartnerSharingSection()
         FamilyLibrarySettingsSection()
         LockScreenAlbumSettingsSection()
+        // Settings › Show Tips (SPEC §22.2).
+        TipsSettingsSection()
     }
 
     @ViewBuilder var notificationsSections: some View {

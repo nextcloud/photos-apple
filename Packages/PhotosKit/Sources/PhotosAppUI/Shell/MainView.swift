@@ -177,6 +177,8 @@ struct MainView: View {
     @State private var timelineReveal = TimelineRevealCenter()
     /// The command palette of this window (SPEC §16.2).
     @State private var palette = CommandPaletteCenter()
+    /// What this window shows, advertised for Handoff (SPEC §22.2).
+    @State private var handoff = HandoffRegistry()
     /// The zoom transitions from cards into the screens pushed by value (SPEC §17.4).
     @Namespace private var routeTransitions
     #if os(macOS)
@@ -228,6 +230,11 @@ struct MainView: View {
             .environment(\.showInTimeline, ShowInTimelineAction { item in showInTimeline(item) })
             .environment(\.timelineReveal, timelineReveal)
             .environment(\.destinationRequest, request)
+            .environment(\.handoffRegistry, handoff)
+            // What a tip's button opens in this window (SPEC §22.2).
+            .environment(\.tipActions, TipActions(importLibrary: { importingLibrary = true }))
+            // Not while locked: the activity names an album or a photo.
+            .handoffActivity(handoff, account: session.account, isHidden: lock.requiresUnlock)
             .onChange(of: app.requestedDestination, initial: true) { _, _ in
                 restoreOnce()
                 openRequested()
@@ -386,6 +393,11 @@ struct MainView: View {
             show(.place(name: name), in: .places)
         case .person(let name): show(.person(name: name), in: .people)
         case .tag(let name): show(.tag(name: name), in: .tags)
+        case .memory(let id): show(.memory(id: id), in: .memories)
+        case .library(let fileId):
+            // Where the user was in the Library on another device (Handoff, SPEC §22.2): only a photo the Library shows.
+            go(.library)
+            if let item = try? session.services?.library.item(fileId), DeepLink.mayOpen(item) { timelineReveal.request(item) }
         case .folder(let path): showFolder(path)
         case .search(let text):
             #if os(macOS)
@@ -824,6 +836,23 @@ struct RouteView: View {
     }
 
     @ViewBuilder var screen: some View {
+        routeScreen.handoff(handoffLink)
+    }
+
+    /// What Handoff continues on another device (SPEC §22.2): the viewer and a destination advertise their own.
+    var handoffLink: DeepLink? {
+        switch route {
+        case .album(let id): .album(id: id)
+        case .folder(let path): .folder(path: path)
+        case .place(let name): .place(name: name)
+        case .person(let name): .person(name: name)
+        case .tag(let name): .tag(name: name)
+        case .memory(let id): .memory(id: id)
+        case .photo, .destination: nil
+        }
+    }
+
+    @ViewBuilder var routeScreen: some View {
         switch route {
         case .album(let id): AlbumRouteScreen(albumId: id)
         case .photo(let fileId): MediaViewer(ids: [fileId], startId: fileId)
@@ -831,6 +860,7 @@ struct RouteView: View {
         case .place(let name): PlaceRouteScreen(name: name)
         case .person(let name): PersonRouteScreen(name: name)
         case .tag(let name): TagRouteScreen(name: name)
+        case .memory(let id): MemoryRouteScreen(id: id)
         case .destination(let raw):
             // Pushed from the Collections list (the search tab has its own stack and field).
             if let destination = AppDestination(rawValue: raw) {
@@ -860,6 +890,19 @@ struct DestinationView: View {
     @Environment(\.destinationRequest) private var request
 
     var body: some View {
+        screen.handoff(Self.handoffLink(destination))
+    }
+
+    /// What Handoff continues on another device (SPEC §22.2). The Library and its timelines advertise their position
+    /// themselves (`TimelineScreen`); search, Settings, Backup and the Collections list are of this device.
+    nonisolated static func handoffLink(_ destination: AppDestination) -> DeepLink? {
+        switch destination {
+        case .library, .photos, .videos, .favorites, .search, .settings, .backup, .collections: nil
+        default: .destination(destination.rawValue)
+        }
+    }
+
+    @ViewBuilder var screen: some View {
         switch destination {
         // Photos and Videos are filters of the Library; `MainView.go` opens them there. Kept for links pushed by value.
         case .library, .photos, .videos:

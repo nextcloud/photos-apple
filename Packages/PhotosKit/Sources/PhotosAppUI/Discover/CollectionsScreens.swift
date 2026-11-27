@@ -48,6 +48,7 @@ struct PlacesScreen: View {
                                         try await services.api.placeContent(place.name).map(\.item)
                                     }
                                     .cardTransitionDestination(id: "place-" + place.name, in: zoom)
+                                    .handoff(.place(name: place.name), title: place.name)
                                 } label: {
                                     CollectionTile(
                                         title: place.name, subtitle: AccessibilityText.photos(place.itemCount),

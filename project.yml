@@ -139,6 +139,8 @@ targets:
           - CFBundleURLName: $(PHOTOS_BUNDLE_ID)
             CFBundleURLSchemes: [nextcloudphotos]
         LSApplicationQueriesSchemes: [nextcloud, nextcloudtalk, nextcloudnotes]
+        # Handoff between the user's iPhone, iPad, Mac and Vision Pro (SPEC §22.2): one type, the account link says what.
+        NSUserActivityTypes: [com.nextcloud.photos.viewing]
         # Refresh, processing, on-device labels (`ContentLabeling`) and smart offline (`SmartOfflineScheduling`) have fixed
         # identifiers. The last one is the user-started backup as a continued processing task (`ContinuedBackup`): its
         # identifier must start with the bundle identifier, and the system expects a wildcard.

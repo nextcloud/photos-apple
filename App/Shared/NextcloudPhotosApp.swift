@@ -23,6 +23,8 @@ struct NextcloudPhotosApp: App {
             NSWindow.allowsAutomaticWindowTabbing = false
         #endif
         AppLock.shared.observeApplication()
+        // Contextual tips instead of questions in the first run (SPEC §22.2).
+        AppTips.configure()
         // Siri's phrases with an album or a person follow the albums and people Spotlight has (SPEC §7.23).
         SessionModel.collectionsIndexed = { PhotosShortcuts.updateAppShortcutParameters() }
     }
@@ -54,6 +56,10 @@ struct NextcloudPhotosApp: App {
                     {
                         app.open(url)
                     }
+                }
+                // Handoff from the user's other devices (SPEC §22.2): what they showed, opened like a link.
+                .onContinueUserActivity(HandoffActivity.type) { activity in
+                    HandoffCenter.shared.continue(activity, app: app)
                 }
                 // A link is shown in a window that is already open, not in a new window per link.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
