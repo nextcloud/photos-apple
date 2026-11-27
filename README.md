@@ -12,7 +12,7 @@
 <p align="center">
   <img src="docs/screenshots/iphone-library.jpg" height="380" alt="The Library on iPhone at the Days level: each day as a mosaic of its photos">
   &nbsp;
-  <img src="docs/screenshots/ipad-library.jpg" height="380" alt="The Library on iPad with the sidebar, zoomed out to years, each year a card with its best photo">
+  <img src="docs/screenshots/ipad-library.jpg" height="380" alt="The Library on iPad with the sidebar and the account at its bottom, zoomed out to years, each year a card with its best photo">
   &nbsp;
   <img src="docs/screenshots/iphone-viewer.jpg" height="380" alt="A photo of a seagull on Lake Wakatipu in the viewer on iPhone, with the info card showing date, camera and exposure">
 </p>
@@ -149,8 +149,19 @@ sees what is already there and never uploads a photo twice.
 
 ## Made for every Apple device
 
-**iPhone and iPad** — Liquid Glass, a sidebar on iPad, several windows with drag and drop between them, keyboard
-shortcuts, Home Screen widgets, Controls and the backup Live Activity.
+**iPhone and iPad** — Liquid Glass, a sidebar on iPad with your account at the bottom, several windows with drag and
+drop between them, keyboard shortcuts, Home Screen widgets, Controls and the backup Live Activity.
+
+**iPhone Duo** — the same app on the wider screen, with the tab bar at the side:
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/duo-library.jpg" width="190" alt="iPhone Duo: the Library at the Days level, each day a mosaic of its photos, with the tab bar at the right side"></td>
+    <td><img src="docs/screenshots/duo-viewer.jpg" width="190" alt="iPhone Duo: a seagull on Lake Wakatipu in the viewer, with the info card showing name, date, camera and exposure"></td>
+    <td><img src="docs/screenshots/duo-editor.jpg" width="190" alt="iPhone Duo: the editor with the presets Vivid, Warm, Cool, Matte and Black &amp; White under a glacier lagoon at sunset"></td>
+    <td><img src="docs/screenshots/duo-albums.jpg" width="190" alt="iPhone Duo: the albums Barcelona, Berlin, Lisbon, Prague, Rome and Vienna as cards"></td>
+  </tr>
+</table>
 
 **Mac** — a real Mac app: a full menu bar and keyboard control, smooth trackpad zoom, and tools for photographers —
 ratings and flags with one key, compare two or four photos side by side, and Insights into your cameras, lenses and
