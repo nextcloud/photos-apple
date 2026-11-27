@@ -83,7 +83,9 @@ public enum DevicePeopleIndexing {
             })
         let scanned = (try? await indexer.run(batchSize: batchSize, pause: pause, shouldContinue: shouldContinue)) ?? 0
         let store = DeviceFaceStore(database: services.database)
-        let finished = ((try? store.candidates(limit: 1)) ?? []).isEmpty
+        // The run went through every photo it could look at now (photos without a preview wait; they must not hold
+        // the grouping up).
+        let finished = shouldContinue() && !Task.isCancelled
         let grouped = (try? await engine.group(scanFinished: finished, shouldContinue: shouldContinue)) ?? 0
         let applied = (try? await engine.applySharedNames()) ?? false
         if grouped > 0 || applied { try? store.mirrorNamedPeople() }
@@ -141,6 +143,8 @@ public enum DevicePeopleIndexing {
             guard ProcessInfo.processInfo.environment["PHOTOS_DEBUG_FACES_NOW"] == "1" else { return }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(10))
+                // The account's services may still be opening.
+                for _ in 0..<60 where model()?.session?.services == nil { try? await Task.sleep(for: .seconds(1)) }
                 let start = ContinuousClock.now
                 let scanned = await run(model: model(), shouldContinue: { true })
                 logger.info("debug faces: \(scanned) photos in \(ContinuousClock.now - start, privacy: .public)")

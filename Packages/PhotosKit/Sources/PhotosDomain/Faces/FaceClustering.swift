@@ -14,9 +14,9 @@ import PhotosModel
 /// one the user said it is not. People whose centres come close are merged later, unless they have different names.
 public enum FaceClustering {
     /// The least centered cosine between a face and a person's centre for the face to join. Measured on the test library
-    /// (docs/STATUS.md §22.3): the same person in different photos ≥ 0.78 (pairwise), different people ≤ 0.79 at most,
-    /// mostly < 0.6; a centre is nearer to its members than they are to each other, hence a little lower.
-    public static let joinThreshold: Float = 0.74
+    /// (docs/STATUS.md §22.3): the same person in different photos ≥ 0.78, the nearest different people 0.74 and 0.76,
+    /// most pairs of different people < 0.65.
+    public static let joinThreshold: Float = 0.75
     /// The least centered cosine between two people's centres to merge them.
     public static let mergeThreshold: Float = 0.80
     /// Vision's face capture quality (0…1) below which a face is not used: dark, blurred, turned away, tiny.
