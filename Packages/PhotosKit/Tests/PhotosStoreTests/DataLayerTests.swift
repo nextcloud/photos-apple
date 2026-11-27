@@ -150,6 +150,10 @@ import Testing
 
     func ids() throws -> [FileID] { try library.gridItems(.all).map(\.fileId).sorted() }
 
+    /// The library was walked for deletes and moves: the full walk (by modification time) or the targeted one (folder
+    /// listings, SPEC §22.4.2).
+    func walked() -> Bool { !server.requests(.indexByModified).isEmpty || !server.requests(.listing).isEmpty }
+
     // MARK: Paging (3)
 
     /// A full page in which the parser skips an entry is not the last page.
@@ -256,7 +260,7 @@ import Testing
         // An ordinary sync does not even walk the library for it before the delay is over.
         server.clearRequests()
         await engine.sync()
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
 
         // An hour later the next sync confirms.
         try database.setSyncValue(SyncEngine.Key.suspectedMassDelete, String(Date().timeIntervalSince1970 - 3601))
@@ -371,24 +375,24 @@ import Testing
         // New files come with the delta SEARCH; the delete waits for the reconciliation.
         #expect(try ids() == [1, 2, 3, 4, 5, 6])
         #expect(server.requests(.changed).count == 1)
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
 
         // Nothing changed since: neither a delta nor a walk.
         await engine.sync()
         #expect(server.requests(.changed).count == 1)
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
 
         // Ten minutes later the owed reconciliation runs, although the root ETag is the stored one.
         try database.setSyncValue(SyncEngine.Key.lastReconcile, String(now - 601))
         await engine.sync()
         #expect(try ids() == [2, 3, 4, 5, 6])
-        #expect(!server.requests(.indexByModified).isEmpty)
+        #expect(walked())
 
         // And it is not owed any more.
         server.clearRequests()
         try database.setSyncValue(SyncEngine.Key.lastReconcile, String(now - 601))
         await engine.sync()
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
     }
 
     @Test func userRequestedSyncIsNotThrottled() async throws {
@@ -409,7 +413,7 @@ import Testing
         server.delete(1, changingRootETag: false)
         server.clearRequests()
         await engine.sync(reconcile: .refresh)
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
         #expect(try ids() == [1, 2, 3, 4, 5])
 
         try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 601))
@@ -428,7 +432,7 @@ import Testing
         try database.setSyncValue(SyncEngine.Key.lastReconcile, String(Date().timeIntervalSince1970 - 601))
         server.clearRequests()
         await engine.sync()
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
         #expect(try ids() == [1, 2, 3, 4, 5])
 
         // Overdue: a day without a reconciliation.
@@ -460,12 +464,12 @@ import Testing
         // A plain sync (the app was still open) sees the changed root but leaves the walk to the interval.
         await engine.sync()
         #expect(try ids() == [1, 2, 3, 4, 5, 6, 7])
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
 
         // The next launch, still within the interval: the walk the change owes runs at once.
         await engine.sync(reconcile: .opened)
         #expect(try ids() == [1, 2, 3, 4, 5])
-        #expect(!server.requests(.indexByModified).isEmpty)
+        #expect(walked())
     }
 
     /// The same when the launch is the first sync that sees the change.
@@ -489,7 +493,7 @@ import Testing
         await engine.setReconcileDeferral { true }
         server.clearRequests()
         await engine.sync(reconcile: .opened)
-        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(!walked())
         #expect(server.requests(.favorites).count == 1)
 
         server.delete(1)

@@ -51,6 +51,9 @@ import Testing
         server.requests(.indexByModified).filter { !$0.body.contains("<d:lt>") && !$0.body.contains("<d:gte>") }.count
     }
 
+    /// How often only the changed folders were walked (SPEC §22.4.2): each targeted walk lists the root first.
+    var targetedWalks: Int { server.requests(.listing).filter { $0.path == "/Photos" }.count }
+
     func ids() throws -> [FileID] { try library.gridItems(.all).map(\.fileId).sorted() }
 
     // MARK: Favourites, place, caption (9)
@@ -112,7 +115,9 @@ import Testing
         await engine.sync()
         #expect(try ids() == [2, 3])
         #expect(try library.item(3)?.path == "/Photos/Trips/c.jpg")
-        #expect(reconcileWalks == 1)
+        // Only the folders that changed were listed, not the whole library walked.
+        #expect(reconcileWalks == 0)
+        #expect(targetedWalks == 1)
     }
 
     @Test func refreshReconcilesEvenIfTheRootETagLooksUnchanged() async throws {
@@ -166,8 +171,11 @@ import Testing
         let added = Mutex(false)
         server.afterResponse.withLock {
             $0 = { request, state in
-                // The page after the last item is the walk's last look.
-                guard request.kind == .indexByModified, request.body.contains("<d:lt>"), !request.body.contains("<d:gte>"),
+                // The page after the last item is the full walk's last look; the root's listing the targeted walk's.
+                let lastLook =
+                    (request.kind == .indexByModified && request.body.contains("<d:lt>") && !request.body.contains("<d:gte>"))
+                    || request.kind == .listing
+                guard lastLook,
                     added.withLock({
                         let first = !$0; $0 = true; return first
                     })

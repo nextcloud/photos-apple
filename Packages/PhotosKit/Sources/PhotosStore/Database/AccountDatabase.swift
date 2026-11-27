@@ -332,6 +332,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v8-cache-importance") { db in try CacheImportanceStore.migrate(db) }
         // What this device found out about photos to choose the best shot of a burst or series (SPEC §21.4).
         migrator.registerMigration("v_r11_bestshot_signals") { db in try BestShotStore.migrate(db) }
+        // The folder tree of the targeted sync (SPEC §22.4.2).
+        migrator.registerMigration("v_r12_speed_folder_tree") { db in try FolderTree.migrate(db) }
         return migrator
     }
 }

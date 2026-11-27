@@ -50,7 +50,7 @@ public actor SyncEngine {
     public let library: LibraryStore
     public let collections: CollectionStore
     private var features: ServerFeatures
-    private let logger = Logger(subsystem: "com.nextcloud.photos", category: "sync")
+    let logger = Logger(subsystem: "com.nextcloud.photos", category: "sync")
     private var running: Task<Void, Never>?
     /// The strongest reconcile request ("Sync now", pull-to-refresh) that has not been taken up by a sync yet.
     private var requested = ReconcileRequest.ifDue
@@ -110,7 +110,7 @@ public actor SyncEngine {
         reconcileDeferral = deferral
     }
 
-    private func publish(_ status: SyncStatus) {
+    func publish(_ status: SyncStatus) {
         lastStatus = status
         statusHandler?(status)
     }
@@ -251,10 +251,17 @@ public actor SyncEngine {
             if request == .now {
                 reconcileAttempted = true
             } else {
-                reconcileAttempted = try await reconcileDue(request, owed: owed)
+                reconcileAttempted = try await reconcileDue(request, owed: owed, folders: folders)
             }
             if reconcileAttempted {
-                try await reconcile(folders: folders)
+                // Where a folder tree is stored, only the folders whose ETag changed are walked (SPEC §22.4.2).
+                if try walk(for: request, folders: folders, owed: owed) == .targeted {
+                    try await targetedReconcile(roots: roots)
+                    // The targeted walk does not look at favourites (they change no ETag).
+                    try await syncFavorites(folders: folders)
+                } else {
+                    try await reconcile(folders: folders, roots: roots)
+                }
                 reconciled = true
             } else {
                 // Remembered before the root ETags are stored: the next syncs see no changed root any more.
@@ -277,23 +284,26 @@ public actor SyncEngine {
 
     /// Whether a sync that was not told to reconcile at once (`.ifDue`, `.opened`, `.refresh`) walks through the library
     /// now. `owed`: a source folder changed since the last walk (now or in an earlier sync).
-    func reconcileDue(_ request: ReconcileRequest, owed: Bool) async throws -> Bool {
+    func reconcileDue(_ request: ReconcileRequest, owed: Bool, folders: [String] = []) async throws -> Bool {
         let now = Date().timeIntervalSince1970
         let sinceReconcile = now - (try database.syncValue(Key.lastReconcile).flatMap(Double.init) ?? 0)
         // A walk that stopped half-way (the app went to the background) goes on where it stopped.
-        let walking = try database.syncValue(Key.reconcileWalk) != nil
+        let walking = try database.syncValue(Key.reconcileWalk) != nil || database.syncValue(Key.targetedWalk) != nil
         let confirming =
             try database.syncValue(Key.suspectedMassDelete).flatMap(Double.init).map {
                 now - $0 >= massDeleteConfirmationDelay
             } ?? false
-        let overdue = sinceReconcile > 24 * 3600
+        // A day without a walk, or without a full one (targeted walks do not see what changes no ETag).
+        let overdue = try sinceReconcile > 24 * 3600 || now - lastFullWalk() > Self.fullWalkInterval
         let due: Bool
         switch request {
         case .now: return true
         case .refresh: due = walking || confirming || overdue || owed || sinceReconcile >= reconcileInterval
         case .opened: due = walking || confirming || overdue || owed
         case .ifDue:
-            due = try walking || confirming || overdue || (owed && sinceReconcile >= interval(forIndexOf: library.count()))
+            // A targeted walk costs what changed, not the size of the library: it waits the plain interval.
+            let interval = try canWalkTargeted(folders: folders) ? reconcileInterval : interval(forIndexOf: library.count())
+            due = try walking || confirming || overdue || (owed && sinceReconcile >= interval)
         }
         guard due else { return false }
         // Not while a backup uploads (its uploads are what changed the root), unless the last one is a day old.
@@ -430,6 +440,9 @@ public actor SyncEngine {
         if try database.syncValue(Key.reconcileWalk) != nil {
             try database.writer.write { db in try Self.markSeen(items.map(\.fileId), db: db) }
         }
+        if try database.syncValue(Key.targetedWalk) != nil {
+            try database.writer.write { db in try Self.markListed(items.map(\.fileId), db: db) }
+        }
     }
 
     static func markSeen(_ fileIds: [FileID], db: Database) throws {
@@ -486,7 +499,10 @@ public actor SyncEngine {
     /// The walk can be interrupted at any page (the app goes to the background, the network drops) and goes on from there
     /// at the next sync: which rows it has not met yet is kept in `reconcileUnseen`, the cursor in the sync state. Only
     /// one page of the server's listing and the stored rows of that page are in memory at a time.
-    func reconcile(folders: [String]) async throws {
+    ///
+    /// A new walk first reads the folder tree (`snapshotFolders`); when the walk is through, that tree is what the next
+    /// targeted walks compare with (SPEC §22.4.2).
+    func reconcile(folders: [String], roots: [Root]? = nil) async throws {
         let walk = folders.joined(separator: "|")
         var cursor: Double?
         var finished = false
@@ -500,6 +516,8 @@ public actor SyncEngine {
             known = try database.syncValue(Key.reconcileKnown).flatMap { Int($0) } ?? 0
             logger.info("reconcile: resuming after \(checked) items")
         } else {
+            // The folder tree before the first page: what changes while the walk runs shows up as a changed ETag later.
+            try await snapshotFolders(roots ?? folders.map { Root(folder: $0, etag: nil) }, walk: walk)
             // A new walk (or the folders changed since the last one began): every row of the index is unseen.
             known = try await database.writer.write { db in
                 try db.execute(sql: "DELETE FROM reconcileUnseen")
@@ -559,13 +577,15 @@ public actor SyncEngine {
             try FileID.fetchAll(db, sql: "SELECT fileId FROM reconcileUnseen WHERE fileId IN (SELECT fileId FROM media)")
         }
         let applied = try await applyRemovals(Set(removed), known: known, folders: folders)
+        let finishedAt = Date().timeIntervalSince1970
         try await database.writer.write { db in
             try db.execute(sql: "DELETE FROM reconcileUnseen")
             try Self.setValues(
                 [
                     Key.reconcileWalk: nil, Key.reconcileCursor: nil, Key.reconcileChecked: nil, Key.reconcileKnown: nil,
-                    Key.lastReconcile: String(Date().timeIntervalSince1970), Key.reconcileOwed: nil,
+                    Key.lastReconcile: String(finishedAt), Key.reconcileOwed: nil,
                 ], db: db)
+            try Self.finishFullWalk(walk: walk, now: finishedAt, db: db)
         }
         logger.info("reconciled: \(checked) items, \(applied) of \(removed.count) missing removed, \(refreshed) refreshed")
     }
@@ -604,7 +624,10 @@ public actor SyncEngine {
     ///   suspiciously large removal are kept as suspects. A later listing removes a suspect only when it lacks it too, at
     ///   least `massDeleteConfirmationDelay` after the first one, and when the server answers "not found" for a sample
     ///   of them by path (an external storage that is not available answers with an error, not with 404).
-    func applyRemovals(_ removed: Set<FileID>, known: Int, folders: [String]) async throws -> Int {
+    ///
+    /// `keepOtherSuspects`: a targeted walk saw only some folders; suspects it did not meet stay suspects (with their
+    /// time) for the next full walk to confirm.
+    func applyRemovals(_ removed: Set<FileID>, known: Int, folders: [String], keepOtherSuspects: Bool = false) async throws -> Int {
         let now = Date().timeIntervalSince1970
         let suspectedAt = try database.syncValue(Key.suspectedMassDelete).flatMap(Double.init)
         let suspects: Set<FileID> = try await database.writer.read { db in
@@ -622,7 +645,7 @@ public actor SyncEngine {
             return mounted
         }
         var remove: Set<FileID> = []
-        var keep: Set<FileID> = []
+        var keep: Set<FileID> = keepOtherSuspects ? suspects.subtracting(removed) : []
         var keptSince = suspectedAt ?? now
         if !carried.isEmpty {
             if let suspectedAt, now - suspectedAt >= massDeleteConfirmationDelay, try await confirmGone(carried) {
