@@ -92,6 +92,7 @@ struct SearchAndActivitySettings: View {
             SimilarIndexing.schedule()
             if !enabled, let services = session.services {
                 try? SimilarityStore(database: services.database).deleteAll()
+                try? BestShotStore(database: services.database).deleteAll()
                 Task { await services.similarity.reset() }
             }
             loadSimilarProgress()

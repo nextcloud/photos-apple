@@ -23,6 +23,8 @@ struct MediaViewer: View {
     @State var current: FileID?
     @State var chromeHidden = false
     @State var showingInfo = false
+    /// Whether the info card was open when the vertical swipe in progress began; nil between swipes.
+    @State var swipeBeganWithInfo: Bool?
     @State var confirmDelete = false
     @State var editing: MediaItem?
     @State var editingMetadata: MediaItem?
@@ -68,6 +70,11 @@ struct MediaViewer: View {
     @State var hoverEdge: HorizontalEdge?
     @State private var pagerWidth: CGFloat = 0
     @State var pageSize: CGSize = .zero
+    /// The page size the info card's placement is computed from (`infoPlacement`). It follows `pageSize` only by whole
+    /// points: the placement scales and moves the page, after which the pager measured itself a few points taller or
+    /// shorter, and feeding that back made placement and measurement chase each other without end (round 11: with the
+    /// info card open on a portrait photo the main thread never became idle).
+    @State var placementPageSize: CGSize = .zero
     @FocusState var focused: Bool
     /// The page VoiceOver is on; moved along when the photo is changed with a swipe up or down (adjustable action).
     @AccessibilityFocusState var accessibilityPage: FileID?
@@ -168,6 +175,7 @@ struct MediaViewer: View {
                 proxy.size
             } action: { size in
                 pageSize = size
+                if ViewerStage.isNewPlacementSize(size, old: placementPageSize) { placementPageSize = size }
             }
             .task(id: PagerLayout(size: pageSize, realignments: realignments)) {
                 // Once right away, and once more after the sidebar or inspector animation has settled.
@@ -181,7 +189,7 @@ struct MediaViewer: View {
     var body: some View {
         // In two parts: one long chain of modifiers takes the compiler too long to type-check.
         page
-            .infoInspector(isPresented: $showingInfo) {
+            .infoInspector(isPresented: $showingInfo, compactSheet: true) {
                 // Beside the photo itself: no thumbnail of it on top of the panel.
                 if let item = currentItem {
                     InfoPanel(item: item, inInspector: true, showsPreview: false)
@@ -262,7 +270,7 @@ struct MediaViewer: View {
             guard showingInfo, isSheet, let infoTop else { return (1, 0) }
             let top: CGFloat = topInset + 56 - pageFrame.minY
             return ViewerStage.infoPlacement(
-                content: currentContentSize, page: pageSize, top: top, bottom: infoTop - pageFrame.minY - 8)
+                content: currentContentSize, page: placementPageSize, top: top, bottom: infoTop - pageFrame.minY - 8)
         #endif
     }
 
@@ -307,6 +315,8 @@ struct MediaViewer: View {
                 hoverEdge = Self.edge(under: phase, width: pagerWidth)
             }
             .overlay { stepButtons.viewerChromeDepth() }
+            // A device photo has controls of its own (SPEC §21.1).
+            .overlay(alignment: .bottom) { DeviceViewerControls(fileId: currentFileId, isHidden: chromeHidden) { remove([$0]) } }
             .overlay(alignment: .top) { stackStrip.viewerChromeDepth() }
             .keyFocusable()
             .focusEffectDisabled()

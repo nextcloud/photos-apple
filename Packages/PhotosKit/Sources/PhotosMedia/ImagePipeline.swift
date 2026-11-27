@@ -39,6 +39,8 @@ public actor ImagePipeline {
     private nonisolated let etagProvider = Mutex<(@Sendable (FileID) -> String?)?>(nil)
     /// The still of a Live Photo whose effect changes it (long exposure, another key photo), from its motion.
     private var liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
+    /// Pictures of the device's photos in the Library (negative ids, `DeviceMediaID`; SPEC §21.1).
+    private var devicePicture: (@Sendable (FileID, Int) async -> CGImage?)?
     /// Files without a preview, and when the server may be asked again (SPEC §20.1).
     private nonisolated let failures = Mutex(PreviewFailureLog())
     /// The original (MIME type and URL) of a photo in the library, for requests made without it (covers, memories): a
@@ -109,6 +111,11 @@ public actor ImagePipeline {
 
     public func setLiveStillProvider(_ provider: @escaping @Sendable (FileID, EditRecipe, Int) async -> CGImage?) {
         liveStill = provider
+    }
+
+    /// Where the pictures of device photos come from (PhotoKit): they are kept in memory only, never in the preview cache.
+    public func setDevicePictureProvider(_ provider: @escaping @Sendable (FileID, Int) async -> CGImage?) {
+        devicePicture = provider
     }
 
     /// The edit a preview of `fileId` shows: nil when it shows the photo as it is.
@@ -193,6 +200,8 @@ public actor ImagePipeline {
             return cache.hasDiskImage(fileId: request.fileId, etag: request.cacheEtag, bucket: request.bucket)
                 || isLocal(request.unedited)
         }
+        // A device photo is read from the device.
+        if DeviceMediaID.isDevice(request.fileId) { return true }
         return cache.hasDiskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket)
             || localPreview?(request.fileId, request.etag, request.bucket) != nil
     }
@@ -443,8 +452,8 @@ public actor ImagePipeline {
         running[load.lane, default: 0] += 1
         let work = Work(
             api: api, cache: cache, originals: originals, publicToken: publicToken, logger: logger, localOriginal: localOriginal,
-            localPreview: localPreview, liveStill: liveStill, source: sourceProvider.withLock { $0 },
-            isConstrained: constrainedProvider.withLock { $0 })
+            localPreview: localPreview, liveStill: liveStill, devicePicture: devicePicture,
+            source: sourceProvider.withLock { $0 }, isConstrained: constrainedProvider.withLock { $0 })
         let request = load.request
         let id = load.id
         let lane = load.lane
@@ -529,6 +538,7 @@ public actor ImagePipeline {
         let localOriginal: (@Sendable (FileID, String) -> URL?)?
         let localPreview: (@Sendable (FileID, String, Int) -> URL?)?
         let liveStill: (@Sendable (FileID, EditRecipe, Int) async -> CGImage?)?
+        let devicePicture: (@Sendable (FileID, Int) async -> CGImage?)?
         let source: (@Sendable (FileID) -> (mimeType: String, url: URL)?)?
         let isConstrained: @Sendable () -> Bool
 
@@ -543,6 +553,7 @@ public actor ImagePipeline {
             // Reading, decoding and downsampling must never happen on the main thread (SPEC §10: no scroll hitches).
             dispatchPrecondition(condition: .notOnQueue(.main))
             if Task.isCancelled { return Result() }
+            if DeviceMediaID.isDevice(request.fileId) { return await loadDevicePicture(request) }
             if let edit = request.edit { return await loadEdited(request, edit: edit) }
             let size = request.maxPixelSize
             if let image = cache.diskImage(fileId: request.fileId, etag: request.etag, bucket: request.bucket, maxPixelSize: size) {
@@ -612,6 +623,15 @@ public actor ImagePipeline {
             case .failed:
                 return Result()
             }
+        }
+
+        /// A photo of this device (SPEC §21.1): from PhotoKit, remembered in memory only.
+        func loadDevicePicture(_ request: Request) async -> Result {
+            guard let devicePicture, let image = await devicePicture(request.fileId, request.decodeSize) else { return Result() }
+            cache.remember(
+                image, key: PreviewCache.key(fileId: request.fileId, etag: request.etag, bucket: request.bucket),
+                maxPixelSize: request.decodeSize)
+            return Result(image: image, layer: .offline)
         }
 
         /// An edited photo (SPEC §16.3): rendered on the device from its unedited preview (or, for a Live Photo effect,

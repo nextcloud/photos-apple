@@ -40,6 +40,7 @@ extension BackupEngine {
         defer {
             passUploads.done = progress?.done ?? passUploads.done
             progress = nil
+            currentUpload = nil
         }
         publishProgress()
         var heldVideos: BackupPause?
@@ -93,6 +94,7 @@ extension BackupEngine {
                 if let reason = await takeBackHeldVideos(settings) { heldVideos = reason }
             }
             progress?.current = resource.originalName
+            currentUpload = resource.localIdentifier
             publishProgress()
             var file: URL? = postponed.removeValue(forKey: key)?.file
             var handedOver = false
@@ -161,6 +163,7 @@ extension BackupEngine {
                 if Task.isCancelled { throw CancellationError() }
                 if let stop = uploadFailed(resource, error: error) { throw stop }
             }
+            currentUpload = nil
             // An upload that is with the system now is counted when the system reports it.
             if handedOver { continue }
             progress?.done += 1

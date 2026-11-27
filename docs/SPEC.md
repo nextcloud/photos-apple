@@ -66,6 +66,7 @@ The Nextcloud Files app focuses on file management. Nextcloud Photos focuses on 
 | Accounts | **Multiple accounts, one active** at a time; backup runs for one chosen account. |
 | System integration | Share extension, widgets, App Intents / Siri / Shortcuts / Spotlight, Photos picker, drag & drop, export to the device library. |
 | Smart features | **Server first** (Recognize faces & tags, AI captions, Assistant/TaskProcessing) **plus on-device extras** (Live Text, Visual Look Up, on-device OCR fallback, on-device natural-language query parsing). |
+| On-device AI | **Only what Apple's frameworks provide** (Vision, VisionKit, Core Image, Natural Language, Foundation Models / Apple Intelligence). The app never ships, downloads or runs machine-learning models of its own (*decision 2026-11-27 by the owner*; see §21). |
 | Push | **Yes, via the Nextcloud push proxy** (same mechanism as Files/Talk). |
 | Privacy | **Optional app lock** (Face ID / Touch ID / Optic ID / passcode) and **archived ("hidden") photos always require authentication**. |
 | Delivery | **Milestones M0–M5** (§13), each shippable and testable. |
@@ -395,7 +396,7 @@ Requires: core.
 - **TL-3** Memories strip at the top of "All media" when no filter is active: "N years ago" cards from the On-this-day query (§7.12), cover = first favourite or middle photo.
 - **TL-4** Filter bar / search entry (§7.7) applies to the timeline; "Save as smart album" and "Create album from filters" from an active filter.
 - **TL-5** Pull to refresh = incremental sync; sync status in the toolbar (spinner, "Updated just now", offline).
-- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2) *(decided, round 4: only bursts the camera marked in the file names (`BURST` + number, `COVER` frame shown) are stacked; iPhone bursts need Apple's BurstUUID, which stock servers do not report, and the time rule also stacks quick single shots, which Apple Photos never does)*; (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation *(decided, round 4: delete, favourite, archive, add to album, tags and date/location apply to all members, the delete confirmation counts them; open, info, edit, share and export use the shown copy, as Apple Photos does with RAW + JPEG)*.
+- **TL-6** **Stacks** (setting "Stack similar photos", default on): (a) bursts — consecutive photos ≤ 3 s apart (min. 2) *(decided, round 4: only bursts the camera marked in the file names (`BURST` + number, `COVER` frame shown) are stacked; iPhone bursts need Apple's BurstUUID, which stock servers do not report, and the time rule also stacks quick single shots, which Apple Photos never does)* *(revised, round 11, §21.4: also PhotoKit bursts by `burstIdentifier`, and quick runs of alike photos — ≥ 3 frames, ≥ 2 a second, sketches alike — once this device compared them; a burst shows its best shot)*; (b) shot variants — same folder + same normalised shot name (`IMG_E1234` ↔ `IMG_1234`, `(edited)`, `-edited`, `~2`, RAW+JPEG…; rules and leader ranking in `photos-extended-api.md` stack-same-shot-variants). A stack shows its leader with a count badge; opening it shows all members; actions on a stack apply to all members after confirmation *(decided, round 4: delete, favourite, archive, add to album, tags and date/location apply to all members, the delete confirmation counts them; open, info, edit, share and export use the shown copy, as Apple Photos does with RAW + JPEG)*.
 - **TL-7** Source folders: Settings → Library → "Timeline folders" edits `photosSourceFolders` (folder picker over the user's files) and writes the server config; changing it triggers a re-index.
 
 ### 7.2 Viewer — M1
@@ -635,7 +636,9 @@ If the identifiers from §4.2 change or Apple rejects the extra App Groups, drop
 
 #### 7.18.7 Backup UI
 
-Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". Grid badge for device photos not yet backed up is not needed (the timeline shows server content); instead the Backup screen lists them ("Not backed up yet", local thumbnails, with failed / only-in-iCloud marks).
+Backup status row (sidebar/Collections) and screen: state (Up to date / Uploading 12 of 340 / Paused: waiting for Wi-Fi / Paused: Low Power / Error), progress, current item thumbnail, per-asset status in the device-library view ("Backed up", "Already on server (matched)", "Waiting", "Failed: reason"), pause/resume, "Back up now". The Backup screen lists the photos that are not backed up ("Not backed up yet", local thumbnails, with failed / only-in-iCloud marks).
+
+_Changed in round 11 (§21.1):_ this section first said a grid badge for device photos was "not needed" because the timeline shows server content. The owner now wants them in the Library, like Google Photos: without them a photo taken today is missing from the Library until its upload is through, and nothing in the Library says what is not safe yet. So device photos that are not backed up stand in the timeline with a badge, and the Library and the account menu carry a backup summary; see §21.1.
 
 #### 7.18.8 Free up device space (M5)
 
@@ -1182,7 +1185,7 @@ Settings, the backup status icon while a pass runs, determinate progress bars (u
   on demand (its preview is loaded if needed). While the index is incomplete the screen says how many photos were
   compared and searches again every 6 s.
 - *Best shot of a series.* Results at a cosine of 0.84 or more, taken in a chain of shots no more than 10 minutes
-  apart that reaches the photo, are its moment; its best shot is a favourite, else the best aesthetics score, else the
+  apart that reaches the photo, are its moment; its best shot (since round 11: §21.4) is a favourite, else the best aesthetics score, else the
   middle one. The screen shows it with "Keep Best…", which deletes the other shots (confirmation; to the trash bin,
   through the outbox like every delete). Exact copies stay with Duplicates (§7.15): those are identical files, these
   are different shots.
@@ -2826,7 +2829,7 @@ utility rows Duplicates and Free up server space with one entry point; their scr
   never compete: a HEIC and the JPEG beside it (`CopyStacks` rule: same folder, same name apart from the extension,
   ≤ 2 s) or the same file elsewhere (same size and capture second — that is Duplicates' business) are one shot. A series
   has two or more shots; the best is chosen as in Show Similar (a favourite, else the best aesthetics score, else the
-  middle one) and keeps all its files; the others are offered, as far as the user may delete them (a series where
+  middle one; since round 11 the best-shot analysis of §21.4) and keeps all its files; the others are offered, as far as the user may delete them (a series where
   nothing can be deleted is not listed). The screen lists the series newest first (at most 100 at a time), each with
   its shots as cards (the Duplicates cards: Keep/Delete badge, file name and folder, size); a click or tap keeps another
   shot; "Delete N other shots…" asks the server-delete confirmation. While the comparison is incomplete it says how many
@@ -3318,6 +3321,420 @@ also takes the widened `@State`/`@Environment` properties as defaulted arguments
 helper types stayed next to their only user (`ViewerPageArea`, `ViewerStepButton`, the viewer page's accessibility
 modifiers). One stored property moved within `BackupEngine.swift` to its stored-property block (`serverCheckChunk`), one
 misplaced doc comment went with the type it documents (`FilePromiseDelegate`).
+
+## 21. M12 — Trust, intelligence and editing
+
+Goal (the owner's words, after a comparison with Apple Photos, Google Photos, Microsoft Photos, Photos for macOS and
+Adobe Lightroom): "implement all the improvements". The gap to the best photo apps is no longer the number of
+features: it is trust in backup at scale, on-device intelligence, and editing depth. Everything here runs on the device
+or uses the existing server APIs; no server changes.
+
+**Principle: Apple's AI only** (*decision 2026-11-27 by the owner*). The app uses the AI features that Apple's
+frameworks provide on iOS, iPadOS, macOS and the other Apple platforms — Vision, VisionKit, Core Image, Natural Language
+and Foundation Models (Apple Intelligence) — and **never ships, downloads or runs machine-learning models of its own**.
+Classic image processing without a model is fine. Round 11 had added two models of its own, Google's SigLIP for search
+by meaning (§21.3) and LaMa for Erase (§21.5); both were removed for this reason before the round was released.
+
+### 21.1 Backup you can see: device photos in the Library, resumable large videos [backup]
+
+Like Google Photos, the Library shows what is on this device and not safe yet, and says so plainly. §7.18.7 said a grid
+badge was not needed; the owner wants it (a photo taken today would otherwise be missing from the Library until its
+upload is through, and nothing in the Library says what is not backed up). Everything here is on the device; no server
+change.
+
+#### 21.1.1 Device photos in the Library
+
+- **What**: the photos and videos backup covers (its options: kinds, from date, albums, hidden) whose resources are not
+  all on the server. Shown only while backup is on for the account on screen, with access to the photos, and with
+  Settings › Backup › *On this iPhone* › **Show in Library** on (default on; `BackupSettings.showsDeviceInLibrary`,
+  older settings files keep it on). The Library and its Photos, Videos and Favorites filters show them; other
+  timelines (albums, places, archive, culling filters) are about server files and do not.
+- **Identity**: a device photo has no server file id. It gets a negative id, FNV-1a (64 bit) of PhotoKit's local
+  identifier (`DeviceMediaID`): server ids are positive, the id is the same in every launch, and the grid, selection and
+  viewer work with it unchanged. A collision (about 1 in 2·10⁹ at 100 000 photos) drops the second photo from the layer,
+  it never mixes two up.
+- **No duplicates**: the backup ledger decides. An asset whose every resource is `uploaded` or `matched` (the backup's
+  duplicate check found it, §7.18.4) leaves the layer and only the server's copy is shown. An asset the backup has not
+  looked at yet (no ledger entry) whose capture second and kind are those of a server photo is not shown either (most
+  likely that photo, uploaded by another app before the first pass); once the backup checked it and did not find it on
+  the server it is always shown.
+- **Stacks**: device photos are merged before the timeline makes its stacks. Each has a name of its own, so they are
+  never taken for copies of one shot; a burst's frames carry PhotoKit's `burstIdentifier` (`GridMedia.burstIdentifier`,
+  only the frames PhotoKit lists: the chosen ones or the representative) for the best-shot package's burst stacks
+  (§21.4).
+- **Date**: PhotoKit's `creationDate` (the real capture time); merged into the server's rows by time in one pass
+  (`DeviceTimeline.merge`), so sections, the scrubber and zoom levels just work.
+- **Badge** (top trailing corner, where the partner badge is; device photos are never partner photos): `icloud.slash`
+  not backed up, `icloud.and.arrow.up` while it uploads (the asset this app sends, or what the system has: plain and
+  chunked background uploads, `BackupStatus.uploadingIdentifiers`), `exclamationmark.icloud` failed,
+  `icloud.and.arrow.down` only in iCloud. VoiceOver reads "Not backed up" etc. after the photo's description.
+- **Pictures**: PhotoKit's own (`PHImageManager`, local only for tiles, iCloud allowed above 1024 px), through the image
+  pipeline (`setDevicePictureProvider`), kept in memory only, never in the preview cache.
+- **Speed**: PhotoKit is read off the main thread (`DeviceLibraryReader`), only when the photo library or the backup
+  options change; the ledger is read per asset in one SQL `GROUP BY` when the backup's status changes; at most one
+  rebuild per 0.8 s. The snapshot and the merge run detached; the grid gets the merged list like any other query result
+  (its model is built off the main actor, `GridFeed`). Measured in the unit test (debug build, M-series Mac): snapshot of
+  100 000 device photos 0.14 s, merge of 100 000 + 100 000 rows 0.24 s, both off the main thread.
+- **Actions**: a device photo opens in the viewer among the server's photos (`DeviceViewerPage`: PhotoKit's picture,
+  zoomable; videos play from PhotoKit) with controls of its own: its state ("Not backed up", "Backing up", "Not backed
+  up: <reason>", "Backed up" once it is), **Back Up Now**, **Share** (the file from PhotoKit) and **Delete from This
+  iPhone/iPad** / **Delete from Photos Library** (Mac; the system asks, it goes to Recently Deleted). In the grid the
+  context menu of a selection with device photos offers Open, Back Up Now, Share, the server photos' actions for the
+  rest of the selection, and Delete from This iPhone. The selection bar's buttons act on server photos only.
+- **Back Up Now on a selection** (`BackupModel.backUpNow`, `BackupEngine.prioritize`): the selected assets go first
+  (the running pass from its next round on, else a new pass), and a failed one is tried at once instead of after its
+  back-off; the request is forgotten when a pass has gone through.
+
+#### 21.1.2 Backup summary
+
+- `BackupSummary`: *All backed up* · *N not backed up* · *Backing up · N left* · *Checking backup…*; nothing while backup
+  is off. Honest: only what the server confirmed counts (ledger `uploaded` — the server answered the upload with the
+  file — or `matched`); a file handed to the system or half uploaded is "not backed up".
+- iPhone, iPad, Vision Pro: in the account menu (the Library's top bar), first section; it opens the Backup screen. While
+  something is not backed up, a small orange cloud badge sits on the account button. Mac: a toolbar button in the
+  Library while something is not backed up; it opens Settings › Backup.
+- Per photo: the viewer's controls for a device photo (above); for a server photo the info panel has a **Backup** row
+  "Backed up from this iPhone/iPad/Mac" (this device uploaded it) or "Backup of a photo on this device" (the backup
+  found it on the server), from the ledger by file id or path.
+
+#### 21.1.3 Large videos (≥ 2 GB)
+
+The upload path was read for size limits and is 64-bit throughout: sizes are `Int64`, chunk ranges and offsets are
+`Int64`, the file is read in chunk-sized pieces (`FileHandle.read(upToCount:)`, never the whole file), SHA-256 is
+streamed in 4 MiB pieces, `OC-Total-Length` carries the full size, chunks are 10 MiB up to 97 GiB and larger beyond, so a file never needs more
+than the server's 10 000 chunks. Chunked upload v2 everywhere (MKCOL upload folder,
+numbered chunk PUTs, MOVE `.file` with `OC-Checksum: SHA256:…`, `X-OC-MTime`, `Overwrite: F`).
+
+How each interruption ends:
+
+| Interruption | What survives | What happens next |
+|---|---|---|
+| App killed during an app-driven upload (Mac; iPhone without a background session) | the chunks on the server, the upload folder (same name for the same file and destination), the kept export (`tmp/Backup/Kept`, ≥ 32 MB) | the next pass lists the folder and sends only missing or short chunks |
+| App killed while the system sends the chunks (iPhone, iPad) | the system's transfers, the journal in the container | the system finishes the requests; the next launch hands over the rest (`driveChunkedUploads`) |
+| Network lost | as above; the pass pauses "offline" and waits for a network change | resumes by itself on the next change |
+| Device restart (the system forgets its transfers) | the journal, the staged file and its chunks, the server's chunks | transfers found missing twice are handed over again; chunks the server has are not sent again |
+| Upload folder expired on the server (unfinished for more than a day) | the export | the file is sent again from its first chunk |
+
+Proof: `LargeUploadIntegrationTests` (PhotosNetworkingTests, `PHOTOS_IT_LARGE=1`) uploads a 2 254 857 830-byte file
+(above 2³¹) twice per server, interrupting at a third — the app's own upload cancelled (kill, network loss), and a
+real background `URLSession` invalidated with its transfers (restart) — then checks that only the missing chunks are
+sent, that the server's size is exact, that it stored the SHA-256 the app sent, and that the file downloaded again has
+the same SHA-256. Results in STATUS §21.1. Device steps (a real 4K video of ≥ 2 GB, locked device, force-quit, restart)
+are D13 in DEVICE-TEST-PLAN.md.
+
+### 21.2 Verification: the 🟡 items seen working [verify]
+
+Goal: every STATUS line that says "built, not seen" either seen working (✅ with a screenshot or a UI tour that CI can
+keep running), fixed, or turned into ⬜ with a plan — most central first: Library, viewer, albums, sharing, discover,
+then the rest. Backup, search, best shot and the editor are rewritten in this round by their own packages and are left
+to them.
+
+1. **Proof is a tour, not a look.** New checks are XCUITests (`UITests/VerifyTourTests.swift`) that run against the
+   test server like the other tours, write a screenshot and the accessibility tree of every step, and assert what the
+   STATUS line claims (the viewer closed, the Library tab selected, the server's album holds the added photos, the
+   confirmation names the stacked copy). A line becomes ✅ only with such a run or a screenshot named in STATUS.
+2. **Own data only.** Steps that change something work on photos the tour uploads into a folder of its own and on
+   albums it creates over WebDAV, removed in the teardown (also from the trash bin); settings it switches (app lock,
+   square tiles) are switched back, and the next run starts from a fresh installation (`simctl uninstall`).
+3. **What the simulator cannot do itself is done by the host**, not skipped: Face ID is enrolled and matched with
+   `notifyutil` (Recently deleted, Archive, app lock), and a gesture in progress (pull to refresh, the swipe down that
+   closes the viewer) is captured with `simctl io screenshot` frames while the test holds the finger
+   (`captureFrames`, a request file in the shots folder).
+4. **Device-only items move to the device plan.** Camera, MDM, push, real share targets, AirPlay, shake, two devices,
+   Spotlight/Siri/Shortcuts with a signed build, StandBy, Watch faces, Vision Pro gaze, and the Mac items that need the
+   owner's unlocked screen are collected as D16 in DEVICE-TEST-PLAN.md (StandBy, push, Watch, Vision Pro under their
+   existing D5/D7/D9/D11) and marked "⬜ device D…" in STATUS: they have a plan, and the simulator cannot prove them.
+5. **Found and fixed on the way.** Sheets with a minimum width meant for the Mac (420–720 pt) were as wide on iPhone:
+   "Add photos" to an album was 720 pt wide on a 402 pt screen, its Cancel and Add buttons off the screen and
+   unreachable. Twelve sheets now use the existing `sheetMinimumSize` (macOS only): Add photos, collaborators,
+   comments, Open public link and the public album's viewer, Share via Nextcloud (one photo, several photos, a share's
+   editor), Extract text, the server folder picker (backup folder), Watch Together, memory film export.
+   The info card on iPhone did not close when the app closed it: at compact width it was the inspector's own sheet,
+   which ignored its binding turning false. Info left it on screen while the photo already moved back, and one swipe
+   down on it closed the whole viewer. Compact width now presents a sheet of its own (same detents and background
+   interaction; the iPad's inspector column is unchanged), and a swipe down that began with the card open closes only
+   the card (`ViewerSwipe.closesViewer`).
+   On the Mac the map's list of a marker's photos was a sheet without a Done button (Escape only); it has one now.
+
+6. **Counts and what is left.** STATUS had 246 yellow marks on 226 lines; after this round 202 on 190 (35 new ✅ marks
+   with their run and shot, 27 items moved to the device plan). Left yellow, with how to continue (STATUS §21.2): the
+   Mac items (drive the `fixr11verify` build through the accessibility API on an unlocked screen), Vision Pro (its
+   simulator runtime is installed now: run `SmokeTests` and `VerifyTourTests` there), sharee search with a second user
+   (8091/8093), the memory menu's actions, and the §15–§20 lines this round did not reach — add a step to
+   `VerifyTourTests` per line, most central first, as this round did.
+
+### 21.3 Search by meaning: not built — Apple's frameworks only [search]
+
+Search finds what photos show with what Apple's frameworks provide, as before round 11: the labels Vision's image
+classifier gives the cached previews (SR-7), the descriptions this device writes with Apple Intelligence's language
+model or Vision (§16.2), file names, captions, folders, tags, people, places and dates, all in the full-text index
+(SR-3); typed sentences are read by the parser and, where Apple Intelligence is available, by its language model
+(`NaturalSearchModel`, Foundation Models), whose answer is checked against what the library knows (§16.2).
+
+**Search by meaning** — finding photos by a description ("dog on the beach at sunset", "Hund im Schnee") that no file
+name, label or description contains — is **not in the app**. It needs one space for pictures and text, and the OS 27 SDK
+has no public API for that (checked Nov 2026): Vision's image feature prints (`GenerateImageFeaturePrintRequest`) compare
+images with images only (used by Show Similar, §15.5); Natural Language's embeddings (`NLEmbedding`,
+`NLContextualEmbedding`) are text only; Foundation Models' language model can look at one image at a time (used for
+descriptions, §16.2) and is far too slow to compare a query with 100 000 photos; Core Spotlight's semantic search covers
+only text the app donates; Media Intelligence, Visual Intelligence and Image Playground do not fit. Round 11 built it with
+a model of its own (Google's SigLIP through Core ML, 229 MB, downloaded separately); it was removed under the principle
+above (§21). If Apple adds an image–text embedding API, search by meaning can be built on it.
+
+### 21.4 Best shot: bursts and similar photos pick their best [bestshot]
+
+The best shot of a burst or of a series of similar photos is chosen on this device, compared within its group, and the
+app says why ("Best shot: Sharpest, eyes open."). One scorer (`PhotosDomain/BestShot.swift`) serves every place that
+picks a photo out of a group.
+
+**What is measured** (`PhotosMedia/BestShotAnalysis.swift`, Apple frameworks only — no model is bundled, so nothing of
+§ML applies: no licence, no download, no size). Checked in the OS 27 SDK: Vision has face rectangles with yaw/pitch,
+face landmarks, face capture quality, attention saliency and `CalculateImageAestheticsScoresRequest` (overall score and
+`isUtility`); it has no smile or blink detection, which Core Image's `CIDetector` (`CIDetectorSmile`,
+`CIDetectorEyeBlink`, not deprecated, also on tvOS/visionOS) still offers. Each photo, from its 1024 px preview scaled to
+768 px:
+- *Detail*: variance of the 4-neighbour Laplacian (Accelerate) divided by the variance of the tones, as
+  log2(1 + 1024 × ratio), for the whole picture and for the subject — the largest face, else Vision's most salient
+  object. Dividing by the tones makes it independent of brightness (a darker frame is not "softer"). A group compares
+  0.65 × subject + 0.35 × whole.
+- *Exposure*: share of blown-out (≥ 250) and crushed (≤ 5) pixels beyond 2 %/3 % and how far the mean tone is from the
+  middle; 1 = fine, 0 = mostly clipped.
+- *Faces* (largest 12): eyes open 0…1 from the eye landmarks' height/width (0.12 closed … 0.26 open; the more open eye
+  counts, a wink is not a blink; a Core Image blink caps it at 0.2), smiling (Core Image), looking at the camera
+  (|yaw|, |pitch| ≤ 20°), Vision's capture quality. Only faces at least 5 % of the picture wide *whose eyes were found*
+  count (passers-by and false faces in patterns do not).
+- *Aesthetics*: Vision's overall score and `isUtility`.
+Stored per file version in the account database (table `bestShot`, migration `v_r11_bestshot_signals`, JSON with a
+version; rows go with their photos; deleted with "Find similar photos" off). Never uploaded. ~70–130 ms per photo on an
+Apple-silicon Mac (debug build; the first ~0.5 s loads the models), a few MB of buffers. The simulator cannot run the
+models: nothing is analysed there.
+
+**The choice** (`BestShot.choose`): the user first — favourites, else photos flagged Pick; a rejected photo only when all
+are rejected. Then a weighted score in 0…1 relative to the group: detail (a frame 3 doublings of Laplacian/tone variance
+below the sharpest gets nothing), exposure, aesthetics; with faces in the group also eyes open, smiling, looking, face
+quality and "everyone in the picture" (faces counted against the frame with the most). Weights: people 0.22 detail,
+0.26 eyes, 0.10 smile, 0.07 looking, 0.07 face quality, 0.08 everyone, 0.08 exposure, 0.12 aesthetics; scenery 0.45 /
+0.20 / 0.35 (detail/exposure/aesthetics); documents and screenshots (majority `isUtility`) 0.6 / 0.3 / 0.1 — legible
+beats pretty. Photos not analysed yet never beat analysed ones; with nothing analysed the old rule stays (best aesthetics
+score, else the middle shot). **Reasons** are only what sets the shot apart from the others: eyes open (someone blinked
+elsewhere), everyone in the picture, smiling, sharpest (≥ 0.35 log2 above the others' mean), looking at the camera,
+well exposed, best composed (aesthetics +0.1); at most three, favourite/Pick first; none = "Best balance of sharpness,
+faces and composition".
+
+**Where it is used**
+- *Clean up › Similar shots* (§19.3): the series' best shot is `BestShot.choose`; on opening, the first 24 series whose
+  shots are not analysed are analysed (1024 px previews, loaded when not cached), four series at a time, the list
+  refreshing as it goes ("Choosing the best shots on this device… 4 of 12 series"); each series says "Best shot:
+  Sharpest, eyes open." (with "the suggestion may change" while incomplete).
+- *Show Similar* (§15.5): the moment's shots are analysed while the sheet is open; the header shows the reasons.
+- *Culling* (§15.2): Flag ▸ **Pick Best Shots** (context menu, selection, Image ▸ Flag in the Mac menu bar) cuts the
+  selected photos into series (`SimilarSeries`: alike ≥ 0.84 and ≤ 10 min apart; photos not compared yet are compared
+  from their 256 px previews), analyses them and flags the best of each series Pick through the outbox (one Undo). Other
+  shots stay unflagged (rejecting is the photographer's call); "No series to pick from" when there is none.
+- *Library stacks* (TL-6): a burst shows its best frame once its frames are analysed (favourite first; else the camera's
+  `COVER` frame, as before). VoiceOver says "Burst of N photos" for every burst (`GridMedia.stackIsBurst`).
+- *Memory covers* (§7.12): for the 40 newest memories, the cover is the photo with the best `KeyPhoto.score` plus a face
+  bonus (`BestShot.coverBonus`: open eyes and smiles +, a blink −0.45), among its favourites and up to 600 spread
+  photos — only where this device analysed photos; otherwise the algorithm's cover stays.
+- *Background*: when the "Show Similar" trickle or background task has nothing left to compare, it analyses the shots of
+  the series found, from cached 1024 px previews only (`BestShotAnalyzer.run`), under the same power/thermal conditions.
+- Search ranking does not use the scores this round (contract with the search package).
+
+**Bursts** (TL-6, the round-4 decision revised). Three kinds, most certain first:
+1. *Device bursts*: photos of this device with the same PhotoKit `burstIdentifier` (`CopyStackCandidate.burstIdentifier`,
+   nil for server files). The hook is in place; the device-photo layer of §21.1 sets it. PhotoKit only returns a burst's
+   representative unless asked (`includeAllBurstAssets`), and backup uploads only that one — so on the server an iPhone
+   burst is one photo, as in iCloud Photos' default.
+2. *Camera-named bursts* (`…_BURST001_COVER.jpg`, unchanged).
+3. *Time bursts* (`TimeBursts`, new): photos uploaded frame by frame without a marker — images in one folder, each ≤ 1 s
+   after the one before, ≥ 3 frames, ≥ 2 frames per second on average, every frame alike to the one before (sketch cosine
+   ≥ 0.84, from "Show Similar"). This answers round 4's objection: quick single shots (one a second) are slower than
+   that and stay apart, and nothing is stacked by time alone — a run whose photos are not compared yet is not stacked
+   until they are. Only with "Find similar photos" on.
+Evidence is read synchronously from the database (`StoredBurstEvidence`) for the few fast runs and burst frames, both
+for the live grid and the launch prefetch, so both stack alike. A grid re-stacks when its query delivers again (a new
+analysis does not trigger it by itself).
+
+**Evaluation** (repeatable: `TEST_RUNNER_BESTSHOT_EVAL_DIR=<dir> xcodebuild test … -only-testing:PhotosMediaTests/
+BestShotEvaluation` writes `report.json`; contact sheet in `ios-fix-shots/r11-bestshot/evaluation-contact-sheet.png`).
+Six groups from the test library: three synthetic bursts with a known best frame (a portrait: shaken, 60 % darker,
+face-only blur, blown out; the Apollo 11 crew: soft, shaken, slightly shaken; Lake Tenaya: shaken, blown out, dark) —
+the steady frame was chosen in 3 of 3 ("Well exposed, best composed", "Smiling, sharpest", "Well exposed"); and three
+real pairs: two shots of an award handover (chose the one where both smile: "Smiling, looking at the camera"), two scans
+of Signorelli's portrait and two of van Dyck's family portrait (chose the better-exposed, better-composed scan). Before
+the tone normalisation the blown-out frames won on detail; that is why it is there.
+
+### 21.5 Remove objects: a basic fill as a non-destructive edit [erase]
+
+**Erase** is a tool of the editor (third in the tool row, after Adjust and Crop; symbol `eraser`): tap (click) an object to erase it, or brush (drag) over it; the
+area is filled in on the device from what is around it. It works best on spots, dust and small things on even
+backgrounds, and says so under the picture ("Works best on spots and small things."); it is not a generative fill like
+Clean Up in Photos, Magic Eraser in Google Photos or Remove in Lightroom, which need a model (see "Fill" below).
+
+- **Picking.** A tap picks the object under it with Vision: the foreground instance there
+  (`VNGenerateForegroundInstanceMaskRequest`: people, pets, things in front), else the person there
+  (`VNGeneratePersonInstanceMaskRequest`). Nothing found: "Nothing to pick here. Brush over what you want to erase." A
+  drag paints a stroke (brush size slider, 1–8 % of the shorter side; the stroke is drawn in red while brushing). Brushed
+  points are mapped from the edited picture (crop, turns, straighten, mirror) back onto the original
+  (`RetouchGeometry`, kept in step with `PhotoEditor.apply` by a test that renders marked pictures through it).
+- **People in the background.** When the tool opens, Vision's person instances are looked at; people under a quarter of
+  the size of the largest person (who is at least 2 % of the picture) are offered: **Erase N People in the Background**
+  (button and VoiceOver action on the picture). Vision's instance requests are used directly rather than `EditMasks`'
+  subject and people masks: picking needs the single instance under the tap, and the people one by one. Of the 45 photos in the test library's People folder it offers this
+  on 5, each time for the person behind the subject.
+- **Non-destructive.** Each removal is a stroke in the edit recipe's optional `retouch` field (§16.3.1; decoded when
+  present, never required):
+  `"retouch": {"strokes": [{"brush": {"radius": 0.02, "points": [[x, y], …]}}, {"area": {"width": 192, "height": 128,
+  "runs": [9310, 4, 186, …], "grow": 0.015}}]}` — fractions of the upright original (EXIF orientation applied, before
+  the recipe's geometry), origin top left; `area` is the picked mask as run lengths over a bitmap of at most 192 cells
+  (first run: cells not erased), `grow` the margin added around it (default 1.5 % of the shorter side). Unknown or broken
+  strokes are skipped. A recipe with strokes is format version 2 (§21.6: an older app shows the original rather than
+  the object), and the field is documented for the Android and web teams in docs/EDIT-FORMAT.md §4.9. Copy Edits and
+  presets leave strokes out (they belong to one photo); Paste Edits keeps the target's own. Undo/redo, Done, Revert, Save as Copy and Overwrite Original work on it like on every other edit;
+  **Restore All** removes all strokes (one undo step). Another client that cannot fill strokes shows the photo without
+  the removal (EDIT-FORMAT.md); the rendered file ("Apply edits to the file", §21.6) carries it to every app.
+- **Rendering** (`Inpainting`, one line in `EditRendering.apply`): after the RAW development and *before* colour and
+  tone (noise reduction, adjustments, curves, mixer, masks, filter) and geometry; the masks of §21.6 are found on the
+  picture with the objects already removed — the fill sees the photo's own pixels, adjusting colours or the crop later never fills again,
+  and the strokes stay in the original's coordinates. Each stroke is filled in a window around it with room for context
+  (2.2 × the stroke, at least the fill's 512 px at the picture's own resolution: a small object is filled at full
+  detail; a large one scaled down and the fill scaled up), blended in with a soft 2 px edge. Strokes apply in order;
+  earlier strokes that touch a new one are filled again with it in one window (a person, then their reflection: one hole,
+  no leftover of the first guess, no seam). The proxy in the editor, the grid/viewer previews and the full-resolution
+  original on save are all filled this way ("tiling" by stroke windows); results are cached by a fingerprint of the
+  picture and the strokes so far, so slider changes, undo, redo and the next rendition reuse them. In the editor the
+  stroke is filled off the main thread before it is added (spinner on the picture), so the preview never waits.
+- **Masks grow.** Vision's masks follow the outline tightly; the object's edge pixels left around the hole would be
+  pulled into the fill and leave a dark ghost of the object. Picked areas grow by 1.5 % of the shorter side and every
+  stroke by 4 pixels of the fill's window.
+
+**Fill.** `DiffusionFill`, classic image processing without a model: the surroundings are pulled smoothly into the
+hole ("push–pull" over an image pyramid, 512 × 512 windows). Right for spots, dust, small things and objects on even
+backgrounds (sky, sand, snow, water, a wall); it invents no detail, so a large object on a busy background leaves a
+soft, blurred patch. Apple's frameworks have no public inpainting API in the OS 27 SDK (Vision, Core Image, Image
+Playground — generation only, Visual Intelligence, Media Intelligence — faces and video highlights, Foundation Models:
+none fills a masked area; Photos' Clean Up is not available to apps). Round 11 filled with LaMa through Core ML (99 MB,
+downloaded separately); it was removed under the principle "Apple's AI only" (§21). If Apple adds an inpainting API,
+`Inpainting` takes it as another `InpaintingEngine` (engines name themselves in the cache keys). Speed and memory on
+iPhone and iPad: DEVICE-TEST-PLAN D15.
+
+### 21.6 Editing depth: curves, colour, masks, noise, copy and paste, presets, other apps [edit]
+
+The editor of §7.16/§16.3 had the global sliders of Photos; Lightroom, Photos for macOS and Google Photos also have
+curves, a colour mixer, local (AI) masks, noise reduction, copy/paste of edits and presets. All of it is added to the
+non-destructive recipe (format version 2, §21.6.7), rendered with Core Image on the device, and specified for the
+Android and web teams in **docs/EDIT-FORMAT.md** (storage, sync, JSON, exact rendering formulas).
+
+The editor's tools are now a row of buttons (icon and name) that scrolls sideways — Adjust, Crop, Presets, Filters,
+Curves, Color, Masks, RAW (RAW photos and RAW+JPEG pairs), Live (Live Photos) — instead of a segmented control, which no
+longer fit on an iPhone. The pipeline is split in two stages, colour (`PhotoEditor.applyColor`) and geometry
+(`applyGeometry`), with the place for retouching (§21.5) between them in `EditRendering.apply`; the crop tool now shows
+every colour edit too.
+
+#### 21.6.1 Curves
+
+- RGB curve and one curve per channel (red, green, blue); channel picker and Reset in the **Curves** tool.
+- Drag a point to move it, start a drag elsewhere to add one, double-tap a point or drag it off the area to remove it;
+  the end points move too (black and white points). VoiceOver: every point is adjustable (swipe up/down), "Add Point"
+  action. One undo step per drag.
+- Interpolation: **monotone cubic (Fritsch–Carlson)**, so a curve never overshoots between points (no clipping or
+  colour flips that Catmull-Rom curves cause). At most 16 points; points closer than 1 % merge.
+- Rendering: the curves are sampled into a 1024-entry table per channel (`out = channel(rgb(in))`) and applied with
+  `CIColorCurves` in **sRGB** values, as every editor shows curves.
+
+#### 21.6.2 Colour mixer (HSL)
+
+- **Color** tool: eight swatches (reds, oranges, yellows, greens, aquas, blues, purples, magentas, centred at 0, 30, 60,
+  120, 180, 225, 270, 315°) and Hue (±30°), Saturation (×0…2) and Luminance of the chosen range; a dot marks changed
+  ranges; "Reset All Colors".
+- Neighbouring ranges overlap linearly (weights add up to 1), so no change shows an edge; greys stay grey (luminance is
+  weighted by saturation), nothing clips. Rendered as a 32³ `CIColorCubeWithColorSpace` lookup table in sRGB, made once per
+  setting and cached (32 settings).
+
+#### 21.6.3 Masks: subject, background, sky, people
+
+- **Masks** tool: "Add Mask" ▸ Subject, Background, Sky, People; up to 8 masks, each a chip; the chosen mask has Invert
+  and its own Exposure, Brightness, Contrast, Highlights, Shadows, Saturation, Vibrance, Warmth, Tint and Sharpness, and
+  is **tinted red over the picture** while the tool is open (as in Lightroom). A new mask starts with a small visible
+  change. "No sky found in this photo" (etc.) when its part is not there.
+- Only the **kind** of mask is stored, never pixels: the recipe stays small, fits the original at any size, and gets
+  better with a better segmentation. Masks are found on the picture before any edit (so they do not move while sliders
+  do), on a copy of at most 768 px, and scaled up along the picture's edges (`CIEdgePreserveUpsampleFilter`), so a mask
+  costs the same for a tile and a 48-megapixel export. Found masks are cached by a fingerprint of the picture (size and
+  an 8 × 8 thumbnail).
+- **Apple frameworks first** (OS 27 SDK checked): subject = Vision `VNGenerateForegroundInstanceMaskRequest` (all
+  instances), people = `VNGeneratePersonSegmentationRequest` (accurate), background = inverted subject. **No public API
+  segments the sky** (Vision has subject, person, person-instance, document and — new in OS 27 —
+  `GenerateIterativeSegmentationRequest`, a *prompted* segmentation with downloadable assets). Decision: the sky is a
+  **heuristic** — smooth pixels that are blue, overcast-bright or sunset-warm and connect to the top edge (flood fill),
+  softened and edge-upsampled — gated by Vision's scene classification (`VNClassifyImageRequest`: no sky when every sky
+  label is below 0.05). No third-party model: a sky-segmentation network would add 10–40 MB and a licence review for a
+  mask the heuristic gets right on ordinary landscapes; the documented upgrade path is to seed
+  `GenerateIterativeSegmentationRequest` with the heuristic's sky (⬜ in STATUS). The algorithm is in EDIT-FORMAT.md §4.6
+  so Android/web find the same sky.
+- Vision does not run in the simulator: there a mask changes nothing and the tool says it found nothing.
+
+#### 21.6.4 Noise reduction and RAW detail
+
+- **Adjust** has **Noise Reduction** (luminance: `CINoiseReduction`) and **Color Noise** (colour blotches: the picture's
+  colours blurred, its own luminosity kept — `CIColorBlendMode`). Both are relative to the picture's size, so tile,
+  editor and export look alike. Applied first, before any adjustment boosts the noise.
+- **RAW**: the RAW tool adds **Color Noise** (`CIRAWFilter.colorNoiseReductionAmount`) and **Detail**
+  (`detailAmount`) next to the existing luminance noise reduction, each shown only where the decoder supports it for the
+  camera; the JPEG of a pair approximates colour noise with the filter above.
+
+#### 21.6.5 Copy and paste edits, presets, a whole selection at once
+
+- **Look** = everything but crop/turns/straighten/mirror, the Live Photo effect and the original's description. **Copy
+  Edits** (editor More menu; grid context menu on one edited photo) copies the look; **Paste Edits** (editor; grid
+  context menu on any selection) replaces the target's look and keeps its own crop and turns; RAW settings go only to
+  photos developed from RAW. One clipboard for the app, as in Photos.
+- **Presets**: tool **Presets** with built-in looks (Vivid, Warm, Cool, Matte, Black & White, Dramatic Sky, Portrait
+  Pop, Clean Night — the last three use masks and noise reduction) and the user's own, each shown as a small preview of
+  the photo; "Save as Preset…" names the current look; a user preset's context menu deletes it. User presets are synced
+  through the user's Nextcloud (`/.nextcloud-photos/edit-presets.json`, merged preset by preset, later change wins,
+  removals as markers), when the editor opens and with the library sync at most every 15 minutes.
+- **A selection in one go**: grid context menu **Paste Edits** and **Apply Preset ▸** on any number of photos: one
+  undoable change (one entry in the undo history), then the edited tiles are rendered in the background with progress
+  and Cancel ("Applying edits to 12 of 120…", then "Edited 120 photos"). Videos are left out.
+
+#### 21.6.6 Apply edits to the file
+
+Apps that do not read recipes (the web, the Android app today, desktop apps, other people's shares) show the original.
+**Apply Edits to the File** (editor More menu, a lasting option with an explanation when it is turned on) writes the
+edited picture into the file on Done and on Paste/presets of a selection:
+
+1. The original is kept first: the current version of the file is given the **version label** "Original (Nextcloud
+   Photos)" (`PROPPATCH nc:version-label` on the versions DAV collection; a user's own label is kept inside ours). Nextcloud
+   **never expires a labelled version**, neither by age nor by the quota rule (`files_versions/lib/Storage.php` skips
+   labelled versions in both). The label is read back; if the server keeps no versions or does not keep the label, the
+   file is **not** overwritten (error "Your Nextcloud doesn't keep file versions…"). Only the first original is labelled:
+   editing again keeps it.
+2. Rendered at full resolution in the original's format and name, `PUT` with `If-Match` (a newer version is never
+   replaced), the recipe removed (the edit is in the file now).
+3. **Restore Original…** (editor More menu, when the file has such a version) moves the labelled version back
+   (`MOVE … /restore/target`, `Overwrite: T`); the edited picture stays a version.
+
+Not for read-only shares, formats Image I/O cannot write, or a JPEG developed from its RAW: those keep the recipe.
+"Overwrite Original…" uses the same path, so it too keeps the original as a labelled version and refuses without
+versions. Proven against the 8089 server (`ApplyEditsToFileIntegrationTests`): the labelled version is byte-identical
+to the original, a second edit keeps the same labelled version, a stale ETag replaces nothing, and Restore Original
+brings back the original's exact bytes (SHA-256).
+
+**Default: off.** A recipe can be changed with every slider, undone and reverted at any time, on all devices, for free;
+an edit written into the file can only be undone by restoring the original (sliders start from the edited picture), it
+uploads the whole photo again, every edit adds a version that counts against the user's space, and it changes the photo
+for everybody the file is shared with. Users who need the edits in other apps today turn it on; when the Android and
+web apps render recipes (EDIT-FORMAT.md), nobody needs it.
+
+#### 21.6.7 Format version 2, compatibility
+
+- `version` 2 adds `curves`, `colorMixer`, `masks`, `adjustments.noiseReduction`/`colorNoiseReduction`,
+  `raw.colorNoiseReduction`/`raw.detail`. A recipe is written with the **lowest version that shows it**: edits without
+  these stay version 1 and older app versions keep showing them; with them it is version 2 and an older app shows the
+  original and says "edited with a newer version" instead of half the edit.
+- Readers ignore unknown keys, unknown mask targets (the others apply) and broken values, clamp ranges, and cut masks at
+  8. Retouching (§21.5) adds its optional field and needs version 2 as well.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

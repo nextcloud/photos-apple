@@ -52,7 +52,7 @@ struct OpenPublicLinkSheet: View {
                 }
             }
         }
-        .frame(minWidth: 520, minHeight: 600)
+        .sheetMinimumSize(width: 520, height: 600)
         .alert(
             String(localized: "This link is not encrypted", bundle: .module),
             isPresented: Binding(get: { unencrypted != nil }, set: { shown in if !shown { unencrypted = nil } }),
@@ -182,7 +182,7 @@ struct PublicViewer: View {
             }
         }
         .onAppear { current = start }
-        .frame(minWidth: 700, minHeight: 500)
+        .sheetMinimumSize(width: 700, height: 500)
     }
 }
 

@@ -66,6 +66,29 @@ import Testing
         #expect(noPage.scale == 1 && noPage.offsetY == 0)
     }
 
+    /// Round 11: with the info card open on a portrait photo the pager measured itself 817.46 and 818.05 points tall in
+    /// turn, each placement causing the other measurement; the main thread never became idle. The placement follows whole
+    /// points only, so the chase ends.
+    @Test func thePlacementIgnoresTheFractionsItCausesItself() {
+        var used = CGSize(width: 402, height: 822.76)
+        func measure(_ heights: [Double]) -> Int {
+            var changes = 0
+            for height in heights where ViewerStage.isNewPlacementSize(CGSize(width: 402, height: height), old: used) {
+                used = CGSize(width: 402, height: height)
+                changes += 1
+            }
+            return changes
+        }
+        // The swing as measured: each step of more than a point is followed…
+        #expect(
+            measure([813.33, 822.18, 813.92, 821.59, 814.51, 821.0, 815.1, 820.41, 815.69, 819.82, 816.28, 819.23, 816.87, 818.64]) == 14)
+        // …and the endless alternation that remained changes the placement once at most, then never again.
+        #expect(measure(Array(repeating: [817.46, 818.05], count: 50).flatMap { $0 }) <= 1)
+        #expect(!ViewerStage.isNewPlacementSize(CGSize(width: 402, height: 818.05), old: CGSize(width: 402, height: 817.46)))
+        // A rotation is followed.
+        #expect(ViewerStage.isNewPlacementSize(CGSize(width: 874, height: 402), old: CGSize(width: 402, height: 874)))
+    }
+
     @Test func dragShrinksThePhotoAndFollowsTheFinger() {
         let photo = ViewerDismissal.photoRect(content: CGSize(width: 4000, height: 3000), page: page)
         #expect(photo == CGRect(x: 0, y: 250, width: 400, height: 300))

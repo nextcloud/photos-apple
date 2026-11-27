@@ -68,7 +68,7 @@ struct PhotoPickerSheet: View {
             .task(id: query) { await applyFilter() }
             .onChange(of: columns, initial: true) { _, step in feed.setZoom(step: step) }
         }
-        .frame(minWidth: 720, minHeight: 620)
+        .sheetMinimumSize(width: 720, height: 620)
     }
 
     var title: String { String(localized: "Add to “\(album.title)”", bundle: .module) }
@@ -375,7 +375,7 @@ struct CollaboratorsSheet: View {
                 Text("Photos this person added to the album are removed from it.", bundle: .module)
             }
         }
-        .frame(minWidth: 420, minHeight: 520)
+        .sheetMinimumSize(width: 420, height: 520)
     }
 
     func apply(_ collaborators: [Collaborator]) async {
@@ -442,7 +442,7 @@ struct CommentsSheet: View {
             }
             .task { await load() }
         }
-        .frame(minWidth: 420, minHeight: 520)
+        .sheetMinimumSize(width: 420, height: 520)
     }
 
     func load() async {

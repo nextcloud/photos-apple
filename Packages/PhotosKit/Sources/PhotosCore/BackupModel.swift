@@ -148,9 +148,21 @@ private final class BackupStatusBox: Sendable {
 @MainActor
 @Observable
 public final class BackupModel {
-    public private(set) var settings: BackupSettings
-    public private(set) var status = BackupStatus()
-    public private(set) var authorization: PHAuthorizationStatus = PhotoLibrarySource.authorization
+    public private(set) var settings: BackupSettings {
+        didSet { deviceLayer.settingsChanged() }
+    }
+    public private(set) var status = BackupStatus() {
+        didSet { deviceLayer.statusChanged(from: oldValue, to: status) }
+    }
+    public private(set) var authorization: PHAuthorizationStatus = PhotoLibrarySource.authorization {
+        didSet { if authorization != oldValue { deviceLayer.settingsChanged() } }
+    }
+    /// The device's photos that are not on the server yet, for the Library and the backup summary (SPEC §21.1).
+    @ObservationIgnored public let deviceLayer = DeviceLayerModel()
+    #if DEBUG
+        /// UI tours (`PHOTOS_DEBUG_BACKUP_HOLD`): passes that start by themselves wait; one the user asks for runs.
+        @ObservationIgnored public var debugHold = false
+    #endif
     @ObservationIgnored private var engine: BackupEngine?
     /// The services the engine was built on.
     @ObservationIgnored private var engineServices: AccountServices?
@@ -214,6 +226,7 @@ public final class BackupModel {
     /// Connects the model to the app. Options left behind by an account that no longer exists are discarded.
     func attach(_ app: AppModel) {
         self.app = app
+        deviceLayer.attach(self)
         if let id = settings.accountId, !app.accounts.contains(where: { $0.id == id }) { forgetSettings() }
         updateUploadJobExtension()
         keepScreenOn = app.defaults.bool(forKey: Self.keepScreenOnKey)
@@ -391,6 +404,9 @@ public final class BackupModel {
         guard settings.isEnabled || settings.filesAppMode == .keepFiles else {
             return .unavailable(String(localized: "Backup is not turned on in Nextcloud Photos.", bundle: .module))
         }
+        #if DEBUG
+            if debugHold, !retryFailed { return .paused("held for a UI tour") }
+        #endif
         guard let engine = await configuredEngine() else {
             let reason = unavailableReason
             logger.notice("backup: paused, the backup account is signed out or cannot be opened")

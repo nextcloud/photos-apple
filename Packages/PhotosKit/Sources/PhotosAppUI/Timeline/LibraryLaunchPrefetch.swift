@@ -61,7 +61,9 @@ final class LibraryLaunchPrefetch: Sendable {
             try await library.fetchGridItems(.all, excludedFolders: key.excludedFolders)
         }
         let memories: @Sendable () async -> [Memory] = { await Self.memoryCards(services) }
-        start(key, items: items, memories: showsMemories ? memories : nil)
+        // The same burst evidence as the Library's own observation, so the seeded grid stacks alike (SPEC §21.4).
+        let evidence = SimilarIndexing.isEnabled() ? StoredBurstEvidence(database: services.database) : nil
+        start(key, items: items, memories: showsMemories ? memories : nil, evidence: evidence)
     }
 
     /// The memories strip's cards, as `MemoriesStrip.load` makes them, without the main actor.
@@ -76,7 +78,7 @@ final class LibraryLaunchPrefetch: Sendable {
     /// Starts reading with `items` (and `memories`) for `key`, once per instance.
     func start(
         _ key: Key, items: @escaping @Sendable () async throws -> [GridMedia],
-        memories: (@Sendable () async -> [Memory])? = nil
+        memories: (@Sendable () async -> [Memory])? = nil, evidence: (any BurstEvidence)? = nil
     ) {
         let isFirst: Bool = state.withLock { state in
             guard !state.started else { return false }
@@ -87,7 +89,7 @@ final class LibraryLaunchPrefetch: Sendable {
         guard isFirst else { return }
         let gridRead = Task.detached(priority: .userInitiated) { [self] in
             guard let items = try? await items(), !items.isEmpty else { return }
-            let tiles = key.stacksCopies ? TimelineStacking.collapse(items) : items
+            let tiles = key.stacksCopies ? TimelineStacking.collapse(items, evidence: evidence) : items
             let model = GridModel(items: tiles, sectioning: GridFeed.librarySectioning)
             state.withLock { state in
                 if !state.tookModel { state.model = model }

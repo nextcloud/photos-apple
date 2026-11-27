@@ -27,10 +27,12 @@ public enum SimilarShots {
         public var name: String
         public var directory: String
         public var canDelete: Bool
+        /// What the best-shot analysis found (SPEC §21.4); nil while the photo is not analysed.
+        public var signals: BestShot.Signals?
 
         public init(
             id: FileID, date: Date, vector: [Float], quality: Float? = nil, isFavorite: Bool = false, size: Int64, name: String,
-            directory: String, canDelete: Bool = true
+            directory: String, canDelete: Bool = true, signals: BestShot.Signals? = nil
         ) {
             self.id = id
             self.date = date
@@ -41,6 +43,7 @@ public enum SimilarShots {
             self.name = name
             self.directory = directory
             self.canDelete = canDelete
+            self.signals = signals
         }
     }
 
@@ -58,6 +61,11 @@ public enum SimilarShots {
         public var others: [FileID]
         /// What deleting `others` frees, in bytes.
         public var bytes: Int64
+        /// Why the best shot was chosen (`BestShot.Choice.reasons`).
+        public var reasons: [BestShot.Reason] = []
+        /// The photos of the series that were analysed for the best shot, and all of them (one file per shot): fewer
+        /// analysed means the choice may still change.
+        public var analysed = 0
 
         public var id: FileID { ids.first ?? best }
     }
@@ -128,26 +136,31 @@ public enum SimilarShots {
             && CopyStacks.baseName(photo.name) == CopyStacks.baseName(other.name)
     }
 
-    /// The group of some shots: the best is chosen like "Show Similar" does (`SimilarSeries.best`), with a shot counting
-    /// as favourite when any of its files is one, and as good as its best-rated file. Nil when the user may delete none
-    /// of the other shots (nothing to clean up).
+    /// The group of some shots: the best shot (`BestShot.choose`) of the shots, with a shot counting as favourite when
+    /// any of its files is one, and analysed as the file it shows. Nil when the user may delete none of the other shots
+    /// (nothing to clean up).
     static func group(_ shots: [[Photo]]) -> Group? {
-        let members: [SimilarSeries.Member] = shots.compactMap { files in
+        let candidates: [BestShot.Candidate] = shots.compactMap { files in
             guard let first = files.first else { return nil }
-            let quality = files.compactMap(\.quality).max()
-            return SimilarSeries.Member(
-                id: first.id, date: first.date, vector: [], quality: quality, isFavorite: files.contains(where: \.isFavorite))
+            return BestShot.Candidate(
+                id: first.id, signals: files.first(where: { $0.signals != nil })?.signals, isFavorite: files.contains(where: \.isFavorite),
+                quality: files.compactMap(\.quality).max())
         }
-        guard let best = SimilarSeries.best(of: members), let bestShot = shots.first(where: { $0.first?.id == best }) else { return nil }
+        guard let choice = BestShot.choose(candidates), let bestShot = shots.first(where: { $0.first?.id == choice.best }) else {
+            return nil
+        }
         let keptIds = bestShot.map(\.id)
-        let others = shots.filter { $0.first?.id != best }.flatMap { $0 }.filter(\.canDelete)
+        let others = shots.filter { $0.first?.id != choice.best }.flatMap { $0 }.filter(\.canDelete)
         guard !others.isEmpty else { return nil }
-        // The best shot's own file is the one shown: a favourite file, else the best-rated, else the first.
+        // The best shot's own file is the one shown: a favourite file, else the analysed one, else the best-rated, else
+        // the first.
         let shown =
-            bestShot.first(where: \.isFavorite)?.id ?? bestShot.max(by: { ($0.quality ?? -1) < ($1.quality ?? -1) })?.id ?? best
+            bestShot.first(where: \.isFavorite)?.id ?? bestShot.first(where: { $0.signals != nil })?.id
+            ?? bestShot.max(by: { ($0.quality ?? -1) < ($1.quality ?? -1) })?.id ?? choice.best
         return Group(
             ids: shots.flatMap { $0.map(\.id) }, shots: shots.map { $0.map(\.id) }, best: shown, kept: keptIds,
-            others: others.map(\.id), bytes: others.reduce(0) { $0 + $1.size })
+            others: others.map(\.id), bytes: others.reduce(0) { $0 + $1.size }, reasons: choice.reasons,
+            analysed: candidates.filter { $0.signals != nil }.count)
     }
 }
 

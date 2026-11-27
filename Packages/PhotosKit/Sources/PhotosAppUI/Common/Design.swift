@@ -102,31 +102,79 @@ extension View {
     /// Only the app opens it; the system may only close it (a swipe, a narrower window). On iPad the system restored an
     /// inspector that had been open when the app was last quit, through the binding: the next launch showed an empty
     /// "No selection" panel beside the Library, and ⌘I then seemed to do nothing because it closed that panel.
-    func infoInspector<Content: View>(isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
+    ///
+    /// `compactSheet` (iOS, the viewer): at compact width a sheet of the app's own instead of the inspector's, see
+    /// `InfoInspectorModifier`. Only the viewer asks for it; the Library's grid keeps the plain inspector, as the screen
+    /// behind it changed with the size-class switch and the accessibility audit found an element without a description
+    /// over the grid (round 11).
+    @ViewBuilder
+    func infoInspector<Content: View>(
+        isPresented: Binding<Bool>, compactSheet: Bool = false, @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
         let isPresented = Binding<Bool>(
             get: { isPresented.wrappedValue },
             set: { (shown: Bool) in if !shown { isPresented.wrappedValue = false } })
         #if os(visionOS)
-            return sheet(isPresented: isPresented) { NavigationStack { content() } }
-        #else
-            return inspector(isPresented: isPresented) {
-                content()
-                    .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
-                    #if os(iOS)
+            sheet(isPresented: isPresented) { NavigationStack { content() } }
+        #elseif os(iOS)
+            if compactSheet {
+                modifier(InfoInspectorModifier(isPresented: isPresented, panel: content))
+            } else {
+                inspector(isPresented: isPresented) {
+                    content()
+                        .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
                         // The iPad's inspector column is clear glass over the photo: its secondary text (section
                         // headers, row titles) came out below 3:1 on light photos (SPEC §20.3). A thick material
                         // behind the info keeps the glass look and the text legible.
                         .background(.thickMaterial)
-                        // iPhone (and narrow iPad windows), where the inspector is a sheet: half height first, so the
-                        // photo stays in view above the info as in Photos, and the photo can still be paged meanwhile.
+                        // iPhone (and narrow iPad windows), where the inspector is a sheet: half height first.
                         .presentationDetents([.medium, .large])
                         .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                         .presentationDragIndicator(.visible)
-                    #endif
+                }
+            }
+        #else
+            inspector(isPresented: isPresented) {
+                content()
+                    .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
             }
         #endif
     }
 }
+
+#if os(iOS)
+    /// The info panel on iPhone and iPad. At regular width a trailing inspector column; at compact width (iPhone, narrow iPad
+    /// windows) a sheet of its own. The inspector's own sheet at compact width did not close when the app closed it
+    /// (round 11: Info, or a swipe down, left the card on screen while the photo already moved back, and the next swipe
+    /// closed the viewer behind it).
+    private struct InfoInspectorModifier<Panel: View>: ViewModifier {
+        @Binding var isPresented: Bool
+        let panel: () -> Panel
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+        func body(content: Content) -> some View {
+            if horizontalSizeClass == .compact {
+                content.sheet(isPresented: $isPresented) {
+                    // Half height first, so the photo stays in view above the info as in Photos, and the photo can
+                    // still be paged meanwhile.
+                    panel()
+                        .presentationDetents([.medium, .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                        .presentationDragIndicator(.visible)
+                }
+            } else {
+                content.inspector(isPresented: $isPresented) {
+                    panel()
+                        .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+                        // The iPad's inspector column is clear glass over the photo: its secondary text (section
+                        // headers, row titles) came out below 3:1 on light photos (SPEC §20.3). A thick material
+                        // behind the info keeps the glass look and the text legible.
+                        .background(.thickMaterial)
+                }
+            }
+        }
+    }
+#endif
 
 // MARK: - Chrome motion (SPEC §17.3) ------------------------------------------------------------------------------------
 // Shared by the toolbars, the tab bar's progress accessory, the status rows and the counters. Every helper here falls

@@ -20,15 +20,20 @@ enum TimelineDisplay {
 enum TimelineStacking {
     /// The timeline with every stack shown as one tile, at the place of its newest member. The tile is the member
     /// `TimelineStacks` shows first, with `GridMedia.stack` listing all members.
-    static func collapse(_ items: [GridMedia]) -> [GridMedia] {
-        let stacks: [[Int]] = TimelineStacks.stacks(items)
+    ///
+    /// With `evidence` (what this device worked out for "Show Similar" and the best shot, SPEC §21.4), quick runs of
+    /// alike photos are bursts too and a burst shows its best frame.
+    static func collapse(_ items: [GridMedia], evidence: (any BurstEvidence)? = nil) -> [GridMedia] {
+        let stacks: [TimelineStacks.Stack] = TimelineStacks.classified(items, evidence: evidence)
         guard !stacks.isEmpty else { return items }
         var hidden = Set<Int>()
         var tiles: [Int: GridMedia] = [:]
-        for stack in stacks {
+        for classified in stacks {
+            let stack = classified.members
             guard let first = stack.min(), let leaderIndex = stack.first else { continue }
             var leader = items[leaderIndex]
             leader.stack = stack.map { items[$0].fileId }
+            leader.stackIsBurst = classified.isBurst
             tiles[first] = leader
             for index in stack where index != first { hidden.insert(index) }
         }
@@ -48,14 +53,16 @@ enum TimelineStacking {
     }
 
     /// A grid query whose results are stacked, off the main actor.
-    static func stacked(_ upstream: @escaping @Sendable () -> GridStream) -> @Sendable () -> GridStream {
+    static func stacked(_ upstream: @escaping @Sendable () -> GridStream, evidence: (any BurstEvidence)? = nil)
+        -> @Sendable () -> GridStream
+    {
         {
             let (stream, continuation) = GridStream.makeStream(bufferingPolicy: .bufferingNewest(1))
             let task = Task.detached(priority: .userInitiated) {
                 do {
                     for try await items in upstream() {
                         try Task.checkCancellation()
-                        continuation.yield(collapse(items))
+                        continuation.yield(collapse(items, evidence: evidence))
                     }
                     continuation.finish()
                 } catch {
@@ -125,8 +132,8 @@ struct TimelineDisplaySection: View {
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(
-                    "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge, and so is a burst that the camera named as one. Open it to see every photo.",
-                    bundle: .module)
+                    "A photo saved as HEIC and JPEG, or as RAW and JPEG, is shown once, with a stack badge, and so is a burst. A burst shows its best shot. Open it to see every photo.",
+                    bundle: .module, comment: "Settings footer of Stack copies of a photo.")
                 Text(
                     "Moments name days away and days with the people you named, such as “Sunday in Lisbon”, from what this device knows about your photos.",
                     bundle: .module, comment: "Settings footer, after the explanation of stacks.")

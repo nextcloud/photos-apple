@@ -72,6 +72,7 @@ extension BackupEngine {
         // Entries that lack what an upload needs (written by an earlier version, "Upload anyway") have their asset read.
         let restriction = changed.map { changed in
             changed.union(byAsset.compactMap { id, entries in entries.contains { BackupPolicy.needsRead($0, now: now) } ? id : nil })
+                .union(priority)
         }
         var seen = Set<String>()
         var read = Set<String>()
@@ -116,8 +117,10 @@ extension BackupEngine {
                 // The library's word is newer than the ledger's.
                 refreshed.append((resource, BackupPolicy.isModified(resource.modifiedAt, since: entry.assetModifiedAt)))
             }
+            // What the user asked to back up now does not wait for its next attempt.
+            let retry = retryFailed || priority.contains(resource.localIdentifier)
             let action = BackupPolicy.action(
-                for: resource, entry: entry, now: now, retryFailed: retryFailed, retrySkipped: settings.downloadFromICloud)
+                for: resource, entry: entry, now: now, retryFailed: retry, retrySkipped: settings.downloadFromICloud)
             switch action {
             case .done, .waiting: continue
             case .touch: touched.append(resource)
@@ -131,15 +134,15 @@ extension BackupEngine {
                     continue
                 }
                 if entry == nil { unknown.append(resource) }
-                if let entry, !retryFailed, !BackupPolicy.needsServerCheck(entry, modifiedAt: resource.modifiedAt, now: now) {
+                if let entry, !retry, !BackupPolicy.needsServerCheck(entry, modifiedAt: resource.modifiedAt, now: now) {
                     work.ready.append(resource)
                 } else {
                     work.unchecked.append(resource)
                 }
             }
         }
-        work.ready.sort(by: BackupPolicy.isOlder)
-        work.unchecked.sort(by: BackupPolicy.isOlder)
+        work.ready = prioritized(work.ready.sorted(by: BackupPolicy.isOlder))
+        work.unchecked = prioritized(work.unchecked.sorted(by: BackupPolicy.isOlder))
         // Everything found gets a ledger entry now: an asset without one for each of its resources is read again next time.
         try prepareLedger(pending: unknown, touched: touched, refreshed: refreshed, reopened: reopened, filesMatched: filesMatched)
         try database.setSyncValue(Self.scanSignatureKey, signature)
@@ -155,5 +158,23 @@ extension BackupEngine {
         }
         try Task.checkCancellation()
         return work
+    }
+}
+
+extension BackupEngine {
+    // MARK: Back up now (SPEC §21.1)
+
+    /// The user asked to back up these photos now (a selection in the Library): the running pass takes them first from
+    /// its next round on, the next pass first of all; a failed one is tried at once.
+    public func prioritize(_ localIdentifiers: Set<String>) {
+        priority.formUnion(localIdentifiers)
+    }
+
+    /// `resources` with the prioritized ones first, each part in its order.
+    func prioritized(_ resources: [BackupResource]) -> [BackupResource] {
+        guard !priority.isEmpty else { return resources }
+        let first = resources.filter { priority.contains($0.localIdentifier) }
+        guard !first.isEmpty else { return resources }
+        return first + resources.filter { !priority.contains($0.localIdentifier) }
     }
 }

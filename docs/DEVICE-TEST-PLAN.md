@@ -147,6 +147,74 @@ panorama wraps around you; the memory room opens and closes without leaving a bl
 **Expected:** Gatekeeper accepts the build; the sandbox allows the card, the Photos library and the dragged files; no
 "wants to access" prompt without a reason text.
 
+## D13 Backup you can see and large videos (P, T) — STATUS §21.1
+
+1. With backup on, take three photos and a short video. Open the Library at once: they are at the top, under today,
+   each with a cloud-with-a-slash badge; the account button has a small orange cloud; its menu says "4 not backed up".
+   Turn on VoiceOver on one: "…, Not backed up".
+2. Open one of them: it zooms like a server photo; the bar says "Not backed up". Tap **Back Up Now**: the badge turns
+   into an arrow, then the bar says "Backed up" and, back in the grid, the tile is the server's copy (no duplicate).
+3. Select two device photos and a server photo; long-press: Back Up Now, Share, the server photo's actions and Delete
+   from This iPhone are offered. Share one by AirDrop/Messages (the original arrives); delete one (the system asks; it
+   is in Recently Deleted and gone from the Library).
+4. Settings › Backup › On this iPhone › Show in Library off: the device photos leave the Library; on again: back.
+5. Record a 4K video of at least 2 GB (about 4–5 minutes at 4K 60 fps HEVC) on Wi-Fi with the device charging. While it
+   uploads (arrow badge): (a) force-quit the app, wait a minute, open it; (b) turn on Airplane Mode for two minutes,
+   then off; (c) restart the device during the upload, unlock, open the app. Each time note the percentage before and
+   after (Backup screen).
+6. When it is done: download the video from the web interface and compare its size (Finder › Get Info on a Mac) with
+   the device's (Photos › Info), or `shasum -a 256` of both files.
+
+**Expected:** 1–2: device photos in the right place by capture time, honest counts; "All backed up" only once the server
+has every file. 3: as described; nothing is deleted from the server. 5: after (a)–(c) the upload continues from where
+it was (the percentage does not fall back to 0, except after a restart that took more than a day: the server expires
+unfinished uploads after 24 h), and no second copy appears on the server. 6: same size and checksum.
+
+## D14 (removed)
+
+Search by meaning was removed on 2026-11-27 with its model (SPEC §21: the app uses only Apple's AI). The number stays
+free so that D15 and D16 keep their references.
+
+## D15 Erase tool (P, T, M) — STATUS §21.5
+
+Any build (Erase needs nothing extra; its fill is classic image processing). On a recent iPhone and iPad (and the
+oldest supported iPhone if at hand):
+1. Edit a photo with a person or object on a plain background (sky, sand, snow, a wall) › Erase. Under the picture:
+   "Works best on spots and small things." Tap the object: Vision picks it and it is filled in from the surroundings,
+   no ghost of its outline. Note the time per tap (a stopwatch) and the app's peak memory (Xcode memory gauge).
+2. Brush over a small thing (a spot, a bird in the sky) with a finger and with the Pencil (iPad): the red stroke
+   follows, lifting fills it.
+3. A photo with people behind the subject: "Erase N People in the Background" appears and removes them.
+4. Undo, Redo, Restore All, Done; reopen: the strokes are still there; the grid tile shows the erased version; Save as
+   Copy writes a full-resolution file without the object.
+
+**Expected:** small things on even backgrounds disappear cleanly; large objects on busy backgrounds leave a soft patch
+(that is the basic fill, not a bug); nothing in the tool talks about a model or a download.
+
+## D16 What the simulator could not show (P, T, M; round 11 verification)
+
+The STATUS items round 11 could not prove in the simulator or the (locked) Mac, collected here so that one pass covers
+them. Each is marked "⬜ device D16.n" in STATUS.md.
+
+1. **Login (P, T):** Settings › Accounts › Add › "Scan QR code" with the camera on a web login QR code; with a signed
+   build, check in Settings › Diagnostics that the app password is a keychain item (no `secrets` file in the container).
+2. **Managed configuration (P, T, M):** an MDM profile (Apple Configurator or a test MDM) with `serverUrl`, `username`,
+   `disable_multiaccount`, `enforce_passcode_lock`, `disable_log`, `disable_backup`; look at the login page, Settings ›
+   Accounts, Privacy, Diagnostics and Backup.
+3. **System sheets with real targets (P, T):** share a photo to Messages and Mail from the grid, a memory film to
+   Messages, a postcard; AirPlay a slideshow with a video to an Apple TV.
+4. **Real input (P, T, M):** shake to undo after a delete; Escape and the arrow keys from a hardware keyboard in the
+   iPad grid and viewer; pinch on the Mac trackpad in the viewer; Live Text: select text on a photo with a finger.
+5. **Two devices (P + T):** SharePlay a memory film in a FaceTime call; edit the same photo on both (recipe merge);
+   folder rules on both (lease).
+6. **Spotlight, Siri, Shortcuts (P, M):** with a signed build, search an album name in Spotlight, run "Search photos in
+   Nextcloud Photos" from Shortcuts and by Siri; Photo Shuffle Lock Screen with the family album.
+7. **Mac only (M, own Mac, screen unlocked):** Continuity Camera import, the menu bar extra, the culling window full
+   screen, the desktop picture rotation, Edit With another app, the kiosk guest window, the Mac menus run from the
+   menu bar (Rotate Left/Right, Copy, Add to Album ▸ recent albums, Export…).
+
+**Expected:** each does what its STATUS line says; note any difference in the issue.
+
 ## Results table (copy into the issue)
 
 ```
@@ -165,5 +233,8 @@ Build:            Server (version / Photos):         Date / tester:
 | D10 Apple TV              | – | – | – | – | – |   | |
 | D11 Vision Pro            | – | – | – | V | – | – | |
 | D12 Mac                   | – | – | M | – | – | – | |
+| D13 Backup you can see, 2 GB video |   |   | – | – | – | – | % before/after kill, offline, restart: |
+| D15 Erase tool            |   |   |   | – | – | – | s per object / peak MB / quality: |
+| D16 Simulator gaps        |   |   |   | – | – | – | |
 ```
 Mark each cell ✓, ✗ (with an issue link) or "not tested".

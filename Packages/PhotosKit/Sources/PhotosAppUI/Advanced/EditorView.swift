@@ -15,6 +15,7 @@ struct EditorState: Equatable {
     /// RAW development; nil while the photo is not developed from RAW.
     var raw: RAWAdjustments?
     var live: LivePhotoEffect?
+    var retouch: RetouchSteps?  // Erase tool (SPEC §21.5)
 
     init(edits: PhotoEdits = PhotoEdits(), raw: RAWAdjustments? = nil, live: LivePhotoEffect? = nil) {
         self.edits = edits
@@ -24,20 +25,24 @@ struct EditorState: Equatable {
 
     init(_ recipe: EditRecipe?) {
         self.init(edits: recipe?.edits ?? PhotoEdits(), raw: recipe?.raw, live: recipe?.live)
+        retouch = recipe?.retouch
     }
 
     /// The recipe the editor saves.
     func recipe(developsRAW: Bool) -> EditRecipe {
-        EditRecipe(edits: edits, raw: developsRAW ? (raw ?? RAWAdjustments()) : nil, live: live?.isIdentity == true ? nil : live)
+        EditRecipe(
+            edits: edits, raw: developsRAW ? (raw ?? RAWAdjustments()) : nil, live: live?.isIdentity == true ? nil : live, retouch: retouch)
     }
 
     /// Nothing that shows: Done saves no edit (or reverts one).
     var isIdentity: Bool { recipe(developsRAW: raw != nil).isIdentity }
 }
 
-/// Photo editor (SPEC §7.16, §16.3): geometry, auto-enhance, filters, adjustments, RAW development and Live Photo
-/// effects. Non-destructive: Done saves an edit recipe in the user's Nextcloud and the original stays as it is; "Save as
-/// Copy" writes a new file, "Overwrite Original…" (secondary) replaces the file.
+/// Photo editor (SPEC §7.16, §16.3, §21.6): geometry, auto-enhance, presets, filters, adjustments, noise reduction,
+/// curves, colour mixer, masks, RAW development and Live Photo effects. Non-destructive: Done saves an edit recipe in the
+/// user's Nextcloud and the original stays as it is — unless "Apply Edits to the File" is on, then the edit is written
+/// into the file and the original kept as a named file version. "Save as Copy" writes a new file, "Overwrite
+/// Original…" (secondary) replaces the file once.
 struct EditorView: View {
     let item: MediaItem
     @Environment(SessionModel.self) private var session
@@ -78,11 +83,68 @@ struct EditorView: View {
     /// The recipe on the server was written by a newer version of the app.
     @State private var newerFormat = false
     @State private var error: String?
+    /// "Apply Edits to the File" (SPEC §21.6.6): Done writes the edit into the file.
+    @AppStorage(PhotoEditSaving.applyToFileKey) private var applyToFile = false
+    @State private var confirmingApplyToFile = false
+    /// The file has an original the app kept (a named version): "Restore Original…" puts it back.
+    @State private var keptOriginal = false
+    @State private var confirmingRestore = false
+    /// The mask shown and changed in the Masks tool.
+    @State private var selectedMask: Int?
+    /// The chosen mask tinted over the picture; nil when there is none (yet).
+    @State private var maskOverlay: CGImage?
+    @State private var maskFound: Bool?
+    @State private var userPresets: [EditPreset] = []
+    /// Small previews of the photo with each preset, by preset id (made off the main thread when the tool opens).
+    @State private var presetThumbnails: [String: CGImage] = [:]
+    @State private var namingPreset = false
+    @State private var presetName = ""
     /// Width of the adjustment names; grows with the text size.
+    @State private var removeTool = RemoveToolModel()
     @ScaledMetric(relativeTo: .body) private var labelWidth = 110.0
 
-    enum Tool: Hashable {
-        case adjust, filters, crop, raw, live
+    /// The editor's tools, in the order of the tool bar. Another package's tool adds its case here, its title and symbol
+    /// below, its place in `tools` and its panel in `controls`.
+    enum Tool: Hashable, CaseIterable {
+        case adjust, crop, presets, filters, curves, color, masks, raw, live, remove
+
+        var title: String {
+            switch self {
+            case .adjust: String(localized: "Adjust", bundle: .module)
+            case .presets: String(localized: "Presets", bundle: .module, comment: "Editor tool: saved looks.")
+            case .filters: String(localized: "Filters", bundle: .module)
+            case .curves: String(localized: "Curves", bundle: .module, comment: "Editor tool: tone curves.")
+            case .color: String(localized: "Color", bundle: .module, comment: "Editor tool: hue, saturation and luminance per colour.")
+            case .masks: String(localized: "Masks", bundle: .module, comment: "Editor tool: adjustments of the subject, sky…")
+            case .crop: String(localized: "Crop", bundle: .module)
+            case .raw: String(localized: "RAW", bundle: .module, comment: "Editor tool: RAW development (exposure, white balance…).")
+            case .live: String(localized: "Live", bundle: .module, comment: "Editor tool: Live Photo effects and key photo.")
+            case .remove: RemoveTool.titleString
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .adjust: "dial.medium"
+            case .presets: "square.stack"
+            case .filters: "camera.filters"
+            case .curves: "point.bottomleft.forward.to.point.topright.scurvepath"
+            case .color: "paintpalette"
+            case .masks: "person.and.background.dotted"
+            case .crop: "crop.rotate"
+            case .raw: "camera.aperture"
+            case .live: "livephoto"
+            case .remove: RemoveTool.symbol
+            }
+        }
+    }
+
+    /// The tools this photo offers; the everyday ones first (Adjust and Crop fit on the narrowest iPhone without scrolling).
+    var tools: [Tool] {
+        var tools: [Tool] = [.adjust, .crop, .remove, .presets, .filters, .curves, .color, .masks]
+        if developsRAW || partnerIsRAW { tools.append(.raw) }
+        if item.isLivePhoto { tools.append(.live) }
+        return tools
     }
 
     /// Proxy size the editor works on; save and export render the full original.
@@ -106,26 +168,18 @@ struct EditorView: View {
                 ZStack {
                     Color.black
                     picture
+                    if tab == .masks, !showOriginal, let maskOverlay {
+                        Image(decorative: maskOverlay, scale: 1).resizable().scaledToFit()
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                     if tab == .live, let live = state.live, live.playsByItself {
                         LiveEffectPlayer(item: item, effect: live.effect, recipe: state.recipe(developsRAW: developsRAW))
                             .allowsHitTesting(false)
                     }
                 }
-                Picker(String(localized: "Tools", bundle: .module), selection: $tab) {
-                    Text("Adjust", bundle: .module).tag(Tool.adjust)
-                    Text("Filters", bundle: .module).tag(Tool.filters)
-                    Text("Crop", bundle: .module).tag(Tool.crop)
-                    if developsRAW || partnerIsRAW {
-                        Text("RAW", bundle: .module, comment: "Editor tool: RAW development (exposure, white balance…).").tag(Tool.raw)
-                    }
-                    if item.isLivePhoto {
-                        Text("Live", bundle: .module, comment: "Editor tool: Live Photo effects and key photo.").tag(Tool.live)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding()
-                controls.frame(height: 200)
+                toolBar
+                controls.frame(height: tab == .curves ? 260 : 200)
             }
             .navigationTitle(String(localized: "Edit", bundle: .module))
             #if os(iOS)
@@ -158,6 +212,52 @@ struct EditorView: View {
                     bundle: .module, comment: "Editor: what Overwrite Original does.")
             }
             .confirmationDialog(
+                String(localized: "Apply edits to the file?", bundle: .module, comment: "Editor: asks before turning the option on."),
+                isPresented: $confirmingApplyToFile, titleVisibility: .visible
+            ) {
+                Button(
+                    String(
+                        localized: "Apply Edits to the File", bundle: .module, comment: "Editor option: Done writes the edit into the file."
+                    )
+                ) {
+                    applyToFile = true
+                }
+            } message: {
+                Text(
+                    "Done then writes your edits into the photo's file, so the web and every other app show them. The original is kept as a named version on your Nextcloud and can be restored at any time. Edits saved this way can't be changed later with the sliders.",
+                    bundle: .module, comment: "Editor: what Apply Edits to the File does.")
+            }
+            .confirmationDialog(
+                String(
+                    localized: "Restore the original?", bundle: .module, comment: "Editor: asks before restoring the kept original version."
+                ),
+                isPresented: $confirmingRestore, titleVisibility: .visible
+            ) {
+                Button(
+                    String(localized: "Restore Original", bundle: .module, comment: "Editor: puts the kept original back as the file."),
+                    role: .destructive
+                ) {
+                    restoreOriginal()
+                }
+            } message: {
+                Text(
+                    "The original becomes the photo's file again. The edited picture stays in the file's versions on your Nextcloud.",
+                    bundle: .module, comment: "Editor: what Restore Original does.")
+            }
+            .alert(
+                String(localized: "Save as Preset", bundle: .module, comment: "Editor: title of the alert that names a new preset."),
+                isPresented: $namingPreset
+            ) {
+                TextField(String(localized: "Name", bundle: .module), text: $presetName)
+                Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+                Button(String(localized: "Save", bundle: .module)) { savePreset() }
+                    .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text(
+                    "The look of this edit — without crop and turns — on all your devices.", bundle: .module,
+                    comment: "Editor: what a preset keeps.")
+            }
+            .confirmationDialog(
                 String(localized: "Revert to the original?", bundle: .module, comment: "Editor: asks before removing all edits."),
                 isPresented: $confirmingRevert, titleVisibility: .visible
             ) {
@@ -174,6 +274,10 @@ struct EditorView: View {
             .frame(minWidth: 700, minHeight: 640)
         #endif
         .task { await load() }
+        .task(id: MaskRequest(tab: tab, mask: selectedMaskTarget, hasSource: baseImage != nil)) { await updateMaskOverlay() }
+        .task(id: PresetRequest(open: tab == .presets, hasSource: baseImage != nil, presets: userPresets.map(\.id))) {
+            await updatePresetThumbnails()
+        }
         .onChange(of: state) { old, new in
             if restoring {
                 restoring = false
@@ -214,6 +318,17 @@ struct EditorView: View {
             }
             .disabled(future.isEmpty)
             Menu {
+                Button(String(localized: "Copy Edits", bundle: .module, comment: "Editor: copies the look of this edit for other photos."))
+                {
+                    EditClipboard.look = state.recipe(developsRAW: developsRAW)
+                }
+                .disabled(!state.recipe(developsRAW: developsRAW).hasLook)
+                if let look = EditClipboard.look {
+                    Button(String(localized: "Paste Edits", bundle: .module, comment: "Editor: applies copied edits to this photo.")) {
+                        apply(look: look)
+                    }
+                }
+                Divider()
                 Button(String(localized: "Save as Copy", bundle: .module, comment: "Editor: writes the edited photo as a new file.")) {
                     save(.copy)
                 }
@@ -225,9 +340,21 @@ struct EditorView: View {
                     }
                     .disabled(state.isIdentity)
                 }
+                Toggle(
+                    String(
+                        localized: "Apply Edits to the File", bundle: .module, comment: "Editor option: Done writes the edit into the file."
+                    ),
+                    isOn: Binding(get: { applyToFile }, set: { on in if on { confirmingApplyToFile = true } else { applyToFile = false } }))
                 if hadEdit {
                     Divider()
                     Button(String(localized: "Revert to Original", bundle: .module), role: .destructive) { confirmingRevert = true }
+                }
+                if keptOriginal {
+                    if !hadEdit { Divider() }
+                    Button(
+                        String(localized: "Restore Original…", bundle: .module, comment: "Editor: puts the kept original version back."),
+                        role: .destructive
+                    ) { confirmingRestore = true }
                 }
             } label: {
                 Label(String(localized: "More", bundle: .module), systemImage: "ellipsis.circle")
@@ -241,6 +368,40 @@ struct EditorView: View {
     }
 
     var isCropping: Bool { tab == .crop }
+
+    /// The tools as a row of buttons (icon and name) that scrolls sideways when it does not fit.
+    var toolBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(tools, id: \.self) { tool in
+                    Button {
+                        tab = tool
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: tool.symbol).font(.title3).frame(height: 24)
+                            Text(tool.title).font(.caption).lineLimit(1)
+                        }
+                        .frame(minWidth: 58)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 4)
+                        .foregroundStyle(tab == tool ? Color.accentColor : Color.primary)
+                        .background(tab == tool ? Color.accentColor.opacity(0.15) : .clear, in: .rect(cornerRadius: 8))
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tool.title)
+                    .accessibilityAddTraits(tab == tool ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// A slider as the panels of other files draw it.
+    var panelSlider: (String, Binding<Double>, ClosedRange<Double>) -> AnyView {
+        { title, value, range in AnyView(slider(title, value, range)) }
+    }
 
     var partnerIsRAW: Bool { partner.map { EditRendering.isRAW(name: $0.name) } ?? false }
 
@@ -273,6 +434,11 @@ struct EditorView: View {
                 .onLongPressGesture(minimumDuration: 0.1) {
                 } onPressingChanged: {
                     showOriginal = $0
+                }
+                .overlay {
+                    if tab == .remove {
+                        RemoveToolCanvas(model: removeTool, steps: $state.retouch, base: baseImage?.image, edits: state.edits)
+                    }
                 }
         } else {
             // The preview the grid and viewer already have (or its BlurHash) until the original is decoded.
@@ -340,9 +506,30 @@ struct EditorView: View {
                     slider(String(localized: "Tint", bundle: .module), $state.edits.tint, -1...1)
                     slider(String(localized: "Sharpness", bundle: .module), $state.edits.sharpness, 0...2)
                     slider(String(localized: "Vignette", bundle: .module), $state.edits.vignette, 0...2)
+                    slider(
+                        String(localized: "Noise Reduction", bundle: .module, comment: "RAW development: luminance noise reduction."),
+                        $state.edits.noiseReduction, 0...1)
+                    slider(
+                        String(localized: "Color Noise", bundle: .module, comment: "Editor: colour noise reduction (blotches of colour)."),
+                        $state.edits.colorNoiseReduction, 0...1)
                 }
                 .padding(.horizontal)
             }
+        case .presets:
+            PresetsPanel(
+                presets: PresetsPanel.all(user: userPresets), thumbnail: { presetThumbnails[$0.id] }, apply: { apply(look: $0.recipe) },
+                delete: { deletePreset($0) },
+                saveCurrent: state.recipe(developsRAW: developsRAW).hasLook
+                    ? {
+                        presetName = ""
+                        namingPreset = true
+                    } : nil)
+        case .curves:
+            CurvesPanel(curves: $state.edits.curves)
+        case .color:
+            ColorMixerPanel(mixer: $state.edits.colorMixer, slider: panelSlider)
+        case .masks:
+            MasksPanel(masks: $state.edits.masks, selected: $selectedMask, found: maskFound, slider: panelSlider)
         case .filters:
             ScrollView(.horizontal) {
                 HStack {
@@ -361,6 +548,8 @@ struct EditorView: View {
             rawControls
         case .live:
             liveControls
+        case .remove:
+            RemoveToolPanel(model: removeTool, steps: $state.retouch, base: baseImage?.image)
         }
     }
 
@@ -411,6 +600,17 @@ struct EditorView: View {
     func rawBinding<Value>(_ keyPath: WritableKeyPath<RAWAdjustments, Value>) -> Binding<Value> {
         Binding(
             get: { (state.raw ?? RAWAdjustments())[keyPath: keyPath] },
+            set: { value in
+                var raw = state.raw ?? RAWAdjustments()
+                raw[keyPath: keyPath] = value
+                state.raw = raw
+            })
+    }
+
+    /// An optional RAW setting (nil keeps the decoder's default), shown from 0.
+    func optionalRAW(_ keyPath: WritableKeyPath<RAWAdjustments, Double?>) -> Binding<Double> {
+        Binding(
+            get: { state.raw?[keyPath: keyPath] ?? 0 },
             set: { value in
                 var raw = state.raw ?? RAWAdjustments()
                 raw[keyPath: keyPath] = value
@@ -471,6 +671,19 @@ struct EditorView: View {
                                     raw.noiseReduction = value
                                     state.raw = raw
                                 }), 0...1)
+                    }
+                    if rawInfo?.supportsColorNoiseReduction ?? true {
+                        slider(
+                            String(
+                                localized: "Color Noise", bundle: .module, comment: "Editor: colour noise reduction (blotches of colour)."),
+                            optionalRAW(\.colorNoiseReduction), 0...1)
+                    }
+                    if rawInfo?.supportsDetail ?? true {
+                        slider(
+                            String(
+                                localized: "Detail", bundle: .module,
+                                comment: "RAW development: how much fine detail the decoder brings out."),
+                            optionalRAW(\.detail), 0...1)
                     }
                     Button(
                         String(localized: "Camera Settings", bundle: .module, comment: "RAW development: back to the camera's development.")
@@ -555,7 +768,9 @@ struct EditorView: View {
         HStack {
             Text(title).frame(width: labelWidth, alignment: .leading)
                 .accessibilityHidden(true)
+            // The name is drawn beside it; on the Mac a slider would draw its label a second time.
             Slider(value: value, in: range) { Text(title) }
+                .labelsHidden()
                 .accessibilityValue(value.wrappedValue.formatted(.number.precision(.fractionLength(0...2))))
         }
     }
@@ -596,6 +811,12 @@ struct EditorView: View {
         state = start
         newerFormat = await services.edits.hasNewerFormat(item.fileId)
         partner = session.rawPartner(of: item)
+        userPresets = services.edits.presets.userPresets()
+        Task { keptOriginal = await PhotoEditSaving.hasKeptOriginal(item, services: services) }
+        Task {
+            await services.edits.presets.sync()
+            userPresets = services.edits.presets.userPresets()
+        }
         do {
             if EditRendering.isRAW(name: item.name) {
                 await useRAW(item)
@@ -684,14 +905,123 @@ struct EditorView: View {
 
     func updatePreview() {
         guard let base = baseImage else { return }
+        var recipe = state.recipe(developsRAW: developsRAW)
+        if !base.developed { recipe.raw = nil }
         if isCropping {
-            let output = PhotoEditor.applyWithoutCrop(state.edits, to: base.image)
+            let output = EditRendering.apply(recipe, to: base.image, developed: true, crops: false)
             uncropped = PhotoEditor.context.createCGImage(output, from: output.extent)
         } else {
-            var recipe = state.recipe(developsRAW: developsRAW)
-            if !base.developed { recipe.raw = nil }
             let output = EditRendering.apply(recipe, to: base.image, developed: true)
             preview = PhotoEditor.context.createCGImage(output, from: output.extent)
+        }
+    }
+
+    // MARK: Masks
+
+    /// What the mask overlay depends on: it is made again when one of these changes.
+    struct MaskRequest: Equatable {
+        var tab: Tool
+        var mask: MaskAdjustment?
+        var hasSource: Bool
+    }
+
+    /// The chosen mask's kind (its adjustments do not change where it is).
+    var selectedMaskTarget: MaskAdjustment? {
+        guard let index = selectedMask, state.edits.masks.indices.contains(index) else { return nil }
+        var mask = MaskAdjustment(target: state.edits.masks[index].target, inverted: state.edits.masks[index].inverted)
+        mask.exposure = 0
+        return mask
+    }
+
+    /// Tints the chosen mask over the picture (as Lightroom does), off the main thread: Vision takes a moment.
+    func updateMaskOverlay() async {
+        guard tab == .masks, let mask = selectedMaskTarget, let base = baseImage?.image else {
+            maskOverlay = nil
+            maskFound = nil
+            return
+        }
+        maskFound = nil
+        let edits = state.edits
+        let image = base
+        let result: (CGImage?, Bool) = await Task.detached(priority: .userInitiated) {
+            guard let found = EditMasks.mask(mask.target, inverted: mask.inverted, for: image) else { return (nil, false) }
+            // The tint goes where the picture is after turns and crop.
+            var geometry = edits
+            geometry.masks = []
+            let tint = CIImage(color: CIColor(red: 1, green: 0.15, blue: 0.2, alpha: 0.45)).cropped(to: image.extent)
+            let blend = CIFilter.blendWithRedMask()
+            blend.inputImage = tint
+            blend.backgroundImage = CIImage(color: .clear).cropped(to: image.extent)
+            blend.maskImage = found
+            guard let tinted = blend.outputImage else { return (nil, true) }
+            let placed = PhotoEditor.applyGeometry(geometry, to: tinted.cropped(to: image.extent))
+            return (PhotoEditor.context.createCGImage(placed, from: placed.extent), true)
+        }.value
+        guard !Task.isCancelled else { return }
+        maskOverlay = result.0
+        maskFound = result.1
+    }
+
+    // MARK: Presets, Copy and Paste
+
+    /// The look of a preset or of copied edits on this photo (its crop and turns stay): one undo step.
+    func apply(look: EditRecipe) {
+        let current = state.recipe(developsRAW: developsRAW)
+        let next = current.withLook(look, developsRAW: developsRAW)
+        var updated = state
+        updated.edits = next.edits
+        if developsRAW { updated.raw = next.raw }
+        state = updated
+        selectedMask = state.edits.masks.isEmpty ? nil : 0
+    }
+
+    struct PresetRequest: Equatable {
+        var open: Bool
+        var hasSource: Bool
+        var presets: [String]
+    }
+
+    /// Small pictures of the photo with each preset's look (the photo at 160 px, so masks run on a small picture), made
+    /// off the main thread while the Presets tool is open; each shows as soon as it is ready.
+    func updatePresetThumbnails() async {
+        guard tab == .presets, let base = baseImage?.image else { return }
+        let presets = PresetsPanel.all(user: userPresets).filter { presetThumbnails[$0.id] == nil }
+        guard !presets.isEmpty else { return }
+        let small: CIImage? = await Task.detached(priority: .userInitiated) {
+            let scale = min(1, 160 / max(base.extent.width, base.extent.height, 1))
+            let scaled = base.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            return PhotoEditor.context.createCGImage(scaled, from: scaled.extent.integral).map { CIImage(cgImage: $0) }
+        }.value
+        guard let small else { return }
+        for preset in presets {
+            let recipe = preset.recipe
+            let image: CGImage? = await Task.detached(priority: .userInitiated) {
+                let output = EditRendering.apply(recipe, to: small)
+                return PhotoEditor.context.createCGImage(output, from: output.extent)
+            }.value
+            if Task.isCancelled { return }
+            if let image { presetThumbnails[preset.id] = image }
+        }
+    }
+
+    func savePreset() {
+        guard let services = session.services else { return }
+        let name = presetName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        let preset = EditPreset(name: name, recipe: state.recipe(developsRAW: developsRAW))
+        userPresets.insert(preset, at: 0)
+        Task {
+            await services.edits.presets.save(preset)
+            userPresets = services.edits.presets.userPresets()
+        }
+    }
+
+    func deletePreset(_ preset: EditPreset) {
+        guard let services = session.services, !preset.isBuiltIn else { return }
+        userPresets.removeAll { $0.id == preset.id }
+        Task {
+            await services.edits.presets.delete(id: preset.id)
+            userPresets = services.edits.presets.userPresets()
         }
     }
 
@@ -704,10 +1034,15 @@ struct EditorView: View {
         return [item, partner]
     }
 
-    /// Saves the edit recipe (non-destructive) and closes.
+    /// Saves the edit recipe (non-destructive) and closes; with "Apply Edits to the File" on, writes the edit into the file
+    /// where it can be (a photo of the user's that Image I/O can write, not developed from RAW).
     func done() {
         guard state != saved || newerFormat else {
             dismiss()
+            return
+        }
+        if applyToFile && !state.isIdentity && PhotoEditSaving.overwriteProblem(item) == nil && !developsRAW {
+            save(.overwrite)
             return
         }
         let recipe = state.recipe(developsRAW: developsRAW)
@@ -715,6 +1050,23 @@ struct EditorView: View {
         let pairs: [(item: MediaItem, recipe: EditRecipe)] = targets.map { ($0, recipe) }
         Task { await session.saveEdits(pairs, undoManager: undoManager) }
         dismiss()
+    }
+
+    /// "Restore Original…": the kept original version becomes the file again.
+    func restoreOriginal() {
+        guard let services = session.services else { return }
+        working = String(localized: "Restoring…", bundle: .module, comment: "Editor: the original version is being restored.")
+        let target = item
+        Task {
+            defer { working = nil }
+            do {
+                try await PhotoEditSaving.restoreOriginal(target, services: services)
+                await session.syncNow()
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     func revert() {

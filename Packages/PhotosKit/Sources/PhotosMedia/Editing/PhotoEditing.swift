@@ -74,16 +74,45 @@ public struct PhotoEdits: Hashable, Sendable {
     public var tint: Double = 0
     public var sharpness: Double = 0
     public var vignette: Double = 0
+    /// Luminance noise reduction, 0 … 1 (SPEC §21.6.4).
+    public var noiseReduction: Double = 0
+    /// Colour noise reduction (blotches of colour in dark areas), 0 … 1.
+    public var colorNoiseReduction: Double = 0
+    /// Tone curves, RGB and per channel (SPEC §21.6.1).
+    public var curves = ToneCurves()
+    /// Hue, saturation and luminance of eight colour ranges (SPEC §21.6.2).
+    public var colorMixer = ColorMixer()
+    /// Adjustments of parts of the photo: subject, background, sky, people (SPEC §21.6.3), applied in this order.
+    public var masks: [MaskAdjustment] = []
 
     public init() {}
 
     public var isIdentity: Bool {
+        normalized == PhotoEdits()
+    }
+
+    /// The same edit with what changes nothing taken out: a lock alone, a crop of the whole picture, straight curves,
+    /// masks without adjustments.
+    public var normalized: PhotoEdits {
         var normalized = self
-        // A lock alone or a crop of the whole picture changes nothing in the photo.
         normalized.aspectLocked = false
         if normalized.crop?.isFull == true { normalized.crop = nil }
         if normalized.aspect == .free && normalized.crop == nil { normalized.aspect = .original }
-        return normalized == PhotoEdits()
+        if normalized.curves.isIdentity { normalized.curves = ToneCurves() }
+        if normalized.colorMixer.isIdentity { normalized.colorMixer = ColorMixer() }
+        normalized.masks.removeAll(where: \.isIdentity)
+        return normalized
+    }
+
+    /// Only the crop, turns, straighten and mirror differ from the original (what Image ▸ Rotate makes).
+    public var changesOnlyGeometry: Bool {
+        var look = normalized
+        look.rotation = 0
+        look.straighten = 0
+        look.flipped = false
+        look.aspect = .original
+        look.crop = nil
+        return look == PhotoEdits()
     }
 
     /// Turns the picture a quarter as the user sees it; the crop turns with it.
@@ -105,14 +134,48 @@ public struct PhotoEdits: Hashable, Sendable {
 public enum PhotoEditor {
     public static let context = CIContext(options: [.useSoftwareRenderer: false])
 
+    /// Every edit on `input`: colour and tone, then the geometry and the crop.
     public static func apply(_ edits: PhotoEdits, to input: CIImage) -> CIImage {
-        var image = input
+        applyGeometry(edits, to: applyColor(edits, to: input))
+    }
+
+    /// Everything that changes colours and tones, in the order of docs/EDIT-FORMAT.md: noise reduction, auto-enhance, the
+    /// adjustments, curves, the colour mixer, the masks, the filter, sharpness and vignette. The picture keeps its size.
+    public static func applyColor(_ edits: PhotoEdits, to input: CIImage) -> CIImage {
+        var image = NoiseReduction.apply(luminance: edits.noiseReduction, color: edits.colorNoiseReduction, to: input)
         if edits.autoEnhance {
             for filter in image.autoAdjustmentFilters() {
                 filter.setValue(image, forKey: kCIInputImageKey)
                 image = filter.outputImage ?? image
             }
         }
+        image = applyAdjustments(edits, to: image, sharpen: false)
+        image = edits.curves.apply(to: image)
+        image = edits.colorMixer.apply(to: image)
+        if !edits.masks.isEmpty { image = EditMasks.apply(edits.masks, to: image, source: input) }
+        if let name = edits.filter.name, let filter = CIFilter(name: name) {
+            filter.setValue(image, forKey: kCIInputImageKey)
+            image = filter.outputImage ?? image
+        }
+        if edits.sharpness > 0 {
+            let filter = CIFilter.sharpenLuminance()
+            filter.inputImage = image
+            filter.sharpness = Float(edits.sharpness)
+            image = filter.outputImage ?? image
+        }
+        if edits.vignette > 0 {
+            let filter = CIFilter.vignette()
+            filter.inputImage = image
+            filter.intensity = Float(edits.vignette)
+            filter.radius = 2
+            image = filter.outputImage ?? image
+        }
+        return image
+    }
+
+    /// The adjustment sliders (exposure … tint, and sharpness when `sharpen`): the photo's own, or a mask's.
+    static func applyAdjustments(_ edits: PhotoEdits, to input: CIImage, sharpen: Bool = true) -> CIImage {
+        var image = input
         if edits.exposure != 0 {
             let filter = CIFilter.exposureAdjust()
             filter.inputImage = image
@@ -147,24 +210,18 @@ public enum PhotoEditor {
             filter.targetNeutral = CIVector(x: 6500 - edits.warmth * 2000, y: edits.tint * 50)
             image = filter.outputImage ?? image
         }
-        if let name = edits.filter.name, let filter = CIFilter(name: name) {
-            filter.setValue(image, forKey: kCIInputImageKey)
-            image = filter.outputImage ?? image
-        }
-        if edits.sharpness > 0 {
+        if sharpen && edits.sharpness > 0 {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = image
             filter.sharpness = Float(edits.sharpness)
             image = filter.outputImage ?? image
         }
-        if edits.vignette > 0 {
-            let filter = CIFilter.vignette()
-            filter.inputImage = image
-            filter.intensity = Float(edits.vignette)
-            filter.radius = 2
-            image = filter.outputImage ?? image
-        }
-        // Geometry
+        return image
+    }
+
+    /// Straighten, quarter turns, mirror and crop: the picture moved to the origin.
+    public static func applyGeometry(_ edits: PhotoEdits, to input: CIImage) -> CIImage {
+        var image = input
         let extent = image.extent
         if edits.straighten != 0 {
             let angle = edits.straighten * .pi / 180

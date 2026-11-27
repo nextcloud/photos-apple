@@ -13,6 +13,16 @@ public protocol CopyStackCandidate {
     var mimeType: String { get }
     var isVideo: Bool { get }
     var hasPreview: Bool { get }
+    /// A favourite frame of a burst is its cover (`BurstStacks`). False where unknown.
+    var isFavorite: Bool { get }
+    /// The burst a photo of this device belongs to (PhotoKit's `burstIdentifier`); nil for files on the server, which do
+    /// not carry it (`BurstStacks`).
+    var burstIdentifier: String? { get }
+}
+
+extension CopyStackCandidate {
+    public var isFavorite: Bool { false }
+    public var burstIdentifier: String? { nil }
 }
 
 /// Copies of one shot that the timeline shows as one tile (SPEC TL-6, the conservative part): `IMG_1234.HEIC` next to

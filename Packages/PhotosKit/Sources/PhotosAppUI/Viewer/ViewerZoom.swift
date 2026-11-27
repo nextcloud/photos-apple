@@ -124,6 +124,13 @@ enum ViewerSwipe {
         return .none
     }
 
+    /// Whether a swipe down closes the viewer. Not when the info card was open as the swipe began: the swipe closes the
+    /// card. On iPhone the card is a sheet that closes itself on the same swipe, so by the time the finger is lifted
+    /// it may already be gone (round 11: one swipe down on the card closed the card and the viewer).
+    static func closesViewer(infoShownAtStart: Bool, infoShown: Bool) -> Bool {
+        !infoShownAtStart && !infoShown
+    }
+
     /// 0…1: how far the page has been dragged towards closing, for the fading backdrop and the shrinking page.
     static func dismissProgress(translation: CGFloat, height: CGFloat) -> CGFloat {
         guard height > 0, translation > 0 else { return 0 }

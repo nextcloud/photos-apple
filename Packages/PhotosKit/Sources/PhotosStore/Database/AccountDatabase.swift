@@ -330,6 +330,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v6-family-device-mirror") { db in try FamilyStore.migrateDeviceMirror(db) }
         // Recently viewed photos and the roles the cache ranks by (SPEC §18.2).
         migrator.registerMigration("v8-cache-importance") { db in try CacheImportanceStore.migrate(db) }
+        // What this device found out about photos to choose the best shot of a burst or series (SPEC §21.4).
+        migrator.registerMigration("v_r11_bestshot_signals") { db in try BestShotStore.migrate(db) }
         return migrator
     }
 }

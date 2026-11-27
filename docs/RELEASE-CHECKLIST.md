@@ -27,7 +27,7 @@ The full table with the reasons is in the README, "Release builds". In short:
       are shown too (DEVICE-TEST-PLAN D5).
 - [ ] **Background tasks**: nothing to register, but the identifiers are fixed in `project.yml`
       (`BGTaskSchedulerPermittedIdentifiers`): `com.nextcloud.photos.refresh`, `.processing`, `.labels`, `.similar`,
-      `.describe`, `.offline`, and the wildcard `com.nextcloud.photos.backup.*` (continued processing of a backup or an
+      `.describe`, `.meaning`, `.offline`, and the wildcard `com.nextcloud.photos.backup.*` (continued processing of a backup or an
       import). Background modes in Info.plist: `fetch`, `processing`, `remote-notification`. If the bundle id ever
       changes, the fixed identifiers must change with it (`App/Shared/BackgroundTasks.swift`, `PhotosCore`).
 - [ ] **Mac**: App Sandbox with outgoing network, user-selected files, the photo library, USB (camera import),
@@ -130,4 +130,6 @@ screens per device (Library, viewer, memories, albums, map, search, backup) from
 - [ ] `scripts/measure-performance.sh ios <udid>` and `mac <app>` compared with the baselines in
       [PERFORMANCE.md](PERFORMANCE.md); D8 of the device plan on the oldest supported iPhone.
 - [ ] STATUS.md has no 🟡 that the release notes claim as working.
+- [ ] No machine-learning model of the app's own in the archive (no Core ML model, no model download): the app uses only
+      Apple's frameworks for AI (SPEC §2 "On-device AI", §21).
 - [ ] What's New written (APP-STORE-METADATA.md), version bumped, the release commit tagged `v<version>-<build>`.

@@ -137,6 +137,10 @@ final class CullingModel {
 
     private(set) var feedback: Feedback?
     var error: String?
+    /// "Pick Best Shots" is comparing the photos (SPEC §21.4).
+    private(set) var isChoosingBest = false
+    /// What "Pick Best Shots" found when there was nothing to pick.
+    var notice: String?
 
     /// Applies `command` to `items` (a stacked tile's copies included by the caller).
     func apply(_ command: CullingCommand, to items: [MediaItem], session: SessionModel, undoManager: UndoManager?) {
@@ -177,6 +181,35 @@ final class CullingModel {
     }
 
     func clearFeedback() { feedback = nil }
+
+    /// "Pick Best Shots" (SPEC §21.4): cuts `ids` into series of shots of one scene, finds the best shot of each on this
+    /// device and flags it Pick (undoable like any flag). The other shots are left as they are. Photos in no series are
+    /// not touched.
+    func pickBest(ids: [FileID], session: SessionModel, undoManager: UndoManager?) {
+        guard !isChoosingBest, let services = session.services, let map = try? services.library.items(ids) else { return }
+        let items = ids.compactMap { map[$0] }.sorted { ($0.timestamp, $0.fileId) < ($1.timestamp, $1.fileId) }
+        guard !items.isEmpty else { return }
+        isChoosingBest = true
+        Task {
+            let service = BestShotService(services: services)
+            let series = await Task.detached(priority: .userInitiated) { await service.series(of: items) }.value
+            var best: [MediaItem] = []
+            for shots in series {
+                let chosen = Task.detached(priority: .userInitiated) { await service.choose(shots, fetch: true) }
+                guard let choice = await chosen.value,
+                    let item = shots.first(where: { $0.fileId == choice.best })
+                else { continue }
+                best.append(item)
+            }
+            isChoosingBest = false
+            guard !best.isEmpty else {
+                notice = BestShotWording.noSeries
+                return
+            }
+            apply(.flag(.pick), to: best, session: session, undoManager: undoManager)
+            AccessibilityNotification.Announcement(BestShotWording.picked(best.count, of: series.count)).post()
+        }
+    }
 }
 
 extension View {
@@ -211,6 +244,19 @@ private struct CullingFeedbackModifier: ViewModifier {
                         .allowsHitTesting(false)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if model.isChoosingBest {
+                    Label {
+                        Text("Choosing the best shots…", bundle: .module, comment: "Pick Best Shots is comparing the photos.")
+                    } icon: {
+                        ProgressView().controlSize(.small)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.regularMaterial, in: .capsule)
+                    .padding(.bottom, 24)
+                    .accessibilityElement(children: .combine)
+                }
+            }
             .animation(.snappy(duration: 0.18), value: model.feedback)
             .task(id: model.feedback?.id) {
                 guard model.feedback != nil else { return }
@@ -223,6 +269,13 @@ private struct CullingFeedbackModifier: ViewModifier {
             ) {
             } message: {
                 Text(model.error ?? "")
+            }
+            .alert(
+                String(localized: "No series to pick from", bundle: .module, comment: "Alert title: Pick Best Shots found no series."),
+                isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
+            ) {
+            } message: {
+                Text(model.notice ?? "")
             }
     }
 }
@@ -264,11 +317,19 @@ private struct CullingFeedbackView: View {
 
 /// The Rating and Flag submenus of the grid's context menu, the selection's More menu and the viewer.
 enum CullingMenu {
-    static func actions(apply: @escaping @MainActor (CullingCommand, [FileID]) -> Void) -> [GridMenuAction] {
-        let flags: [GridMenuAction] = [CullingFlag.pick, .reject, .none].map { flag in
+    static func actions(
+        apply: @escaping @MainActor (CullingCommand, [FileID]) -> Void, pickBest: (@MainActor ([FileID]) -> Void)? = nil
+    ) -> [GridMenuAction] {
+        var flags: [GridMenuAction] = [CullingFlag.pick, .reject, .none].map { flag in
             GridMenuAction(
                 id: "cull.flag.\(flag.rawValue)", title: CullingWording.flagTitle(flag), systemImage: CullingWording.flagSymbol(flag)
             ) { ids in apply(.flag(flag), ids) }
+        }
+        if let pickBest {
+            flags.append(
+                GridMenuAction(
+                    id: "cull.flag.best", title: BestShotWording.pickBestTitle, systemImage: "star.square.on.square", startsGroup: true
+                ) { ids in pickBest(ids) })
         }
         let ratings: [GridMenuAction] = (0...CullingTags.maxRating).reversed().map { stars in
             GridMenuAction(
@@ -323,6 +384,9 @@ struct CullingCommands: View {
             ForEach([CullingFlag.pick, .reject, .none], id: \.self) { flag in
                 Button(CullingWording.flagTitle(flag)) { grid?.cull?(.flag(flag)) }
             }
+            Divider()
+            Button(BestShotWording.pickBestTitle) { grid?.pickBest?() }
+                .disabled(grid?.pickBest == nil)
         }
         .disabled(grid?.cull == nil)
         Menu(CullingWording.ratingMenuTitle) {

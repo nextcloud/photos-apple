@@ -556,7 +556,7 @@ struct ServerFolderPicker: View {
                     ServerFolderList(folder: folder, excluded: excluded, confirmTitle: confirmTitle, pick: pick, cancel: { dismiss() })
                 }
         }
-        .frame(minWidth: 420, minHeight: 440)
+        .sheetMinimumSize(width: 420, height: 440)
     }
 
     func pick(_ folder: String) {

@@ -87,6 +87,8 @@ public final class AccountServices: Sendable {
                 await LiveStills.still(
                     fileId: fileId, recipe: recipe, maxPixelSize: bucket, library: library, originals: originals, connection: connection)
             }
+            // The device's photos in the Library (SPEC §21.1).
+            await images?.setDevicePictureProvider { id, maxPixelSize in await DevicePictures.image(id: id, maxPixelSize: maxPixelSize) }
         }
         // Launch: bring the caches below their limits (SPEC §5.5) before this session adds to them.
         Task.detached(priority: .utility) { await images.trimCaches() }

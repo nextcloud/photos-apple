@@ -331,7 +331,9 @@
 
         private func updateBadges(_ item: GridMedia, owner: PhotoGridController) {
             let badges = GridTileBadges(item: item, isPartner: owner.services.partnerPaths.contains(directory: item.directory))
-            partnerIcon.isHidden = !badges.showsPartner
+            // The partner badge, or the backup state of a device photo (SPEC §21.1).
+            partnerIcon.isHidden = badges.cornerSymbol == nil
+            if let symbol = badges.cornerSymbol { partnerIcon.image = UIImage(systemName: symbol) }
             duration = badges.duration
             videoPill.isHidden = !badges.showsVideo
             if favoriteIcon.isHidden, badges.showsFavorite, fileId == item.fileId, window != nil {

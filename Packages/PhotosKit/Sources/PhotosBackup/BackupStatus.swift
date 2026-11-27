@@ -52,6 +52,9 @@ public struct BackupStatus: Sendable, Equatable {
     /// The system took the time away from the last pass (a background task expired) before it was through. This is not
     /// the user's pause: the phase is `.idle` and the pass is taken up again at the next opportunity.
     public var isInterrupted = false
+    /// Local identifiers of the photos whose upload runs now: the one this app sends and those handed to the system. The
+    /// Library's device layer shows them with an arrow (SPEC §21.1).
+    public var uploadingIdentifiers: Set<String> = []
 
     /// A pass is at work.
     public var isRunning: Bool {
