@@ -50,7 +50,9 @@ and print lines starting with `PERF`. Skip them with `PHOTOS_SKIP_PERFORMANCE=1`
 The app itself (launch, scrolling, viewer paging, memory) is measured by `UITests/PerformanceTests` in a simulator and,
 without XCUITest, on the Mac: `scripts/measure-performance.sh ios <simulator udid>` or `mac <Debug app>`. Method and
 baselines: [PERFORMANCE.md](PERFORMANCE.md). `UITests/AppStoreScreenshots` makes the App Store screenshots
-(`scripts/app-store-screenshots.sh`, RELEASE-CHECKLIST.md step 7). Both need `PHOTOS_UITEST_LOGIN` like the tours below.
+(`scripts/app-store-screenshots.sh`, RELEASE-CHECKLIST.md step 7), `UITests/ReadmeScreenshots` those of the README
+(`scripts/readme-screenshots.sh`, which also covers Vision Pro, Apple TV and Apple Watch). They need
+`PHOTOS_UITEST_LOGIN` like the tours below.
 
 ## Integration tests
 
