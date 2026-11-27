@@ -10,6 +10,8 @@ public struct Memory: Hashable, Sendable, Identifiable {
         case yearsAgo(Int)
         case trip
         case yearRecap(Int)
+        /// A person's birthdays over the years (SPEC §22.3).
+        case birthday(person: String)
     }
 
     public var id: String

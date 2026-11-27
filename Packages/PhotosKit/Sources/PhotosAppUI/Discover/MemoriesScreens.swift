@@ -47,6 +47,8 @@ struct MemoriesScreen: View {
                     ThenAndNowRow()
                     // Named people's faces across the years (SPEC §16.6).
                     ThroughTheYearsRow()
+                    // Their birthdays from Nextcloud Contacts (SPEC §22.3); nothing without.
+                    BirthdaysRow()
                 }
                 if loaded && onThisDay.isEmpty && (onlyOnThisDay || (trips.isEmpty && recap == nil && years.isEmpty)) {
                     ContentUnavailableView(

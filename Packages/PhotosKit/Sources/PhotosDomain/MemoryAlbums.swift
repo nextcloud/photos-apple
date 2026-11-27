@@ -13,7 +13,7 @@ extension Memories {
         var base: String
         switch memory.kind {
         case .yearsAgo: base = DateRangeLabel.string(from: memory.start, to: memory.end, locale: locale, calendar: calendar)
-        case .trip, .yearRecap: base = memory.title
+        case .trip, .yearRecap, .birthday: base = memory.title
         }
         base = base.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespacesAndNewlines)
         if base.isEmpty { base = memory.title.isEmpty ? memory.id : memory.title }

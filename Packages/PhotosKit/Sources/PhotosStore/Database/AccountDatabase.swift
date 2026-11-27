@@ -336,6 +336,8 @@ public final class AccountDatabase: Sendable {
         migrator.registerMigration("v_r12_people_camera_once") { db in try db.drop(table: "cameraDetails") }
         // People on this device for servers without Recognize: faces, people, the photos looked at (SPEC §22.3).
         migrator.registerMigration("v_r12_people_device_faces") { db in try DeviceFaceStore.migrate(db) }
+        // Birthdays read from the user's Nextcloud Contacts (SPEC §22.3).
+        migrator.registerMigration("v_r12_people_contact_birthdays") { db in try ContactBirthdayStore.migrate(db) }
         return migrator
     }
 }
