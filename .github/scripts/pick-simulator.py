@@ -5,7 +5,10 @@
 
     xcrun simctl list devices available -j | pick-simulator.py <simulator SDK version>
 
-The newest runtime that is not newer than the SDK of the selected Xcode is preferred (a newer one may not start).
+The newest runtime that is not newer than the SDK of the selected Xcode is preferred (a newer one may not start). Among
+its iPhones the standard one: "iPhone 17", then a plain numbered model ("iPhone 16", "iPhone 17 Pro"), then the newest
+number. The largest name alone picked a lettered model with a different layout (the tab bar at the side), where the
+smoke tests did not find the Collections tab.
 """
 import json
 import re
@@ -28,9 +31,11 @@ def main():
             continue
         for device in devices:
             if device.get("isAvailable", True) and device.get("name", "").startswith("iPhone"):
-                candidates.append((runtime_version <= sdk, runtime_version, device["name"], device["udid"]))
+                name = device["name"]
+                standard = 2 if name == "iPhone 17" else 1 if re.fullmatch(r"iPhone \d+( Pro)?", name) else 0
+                candidates.append((runtime_version <= sdk, runtime_version, standard, version(name), name, device["udid"]))
     if candidates:
-        print(max(candidates)[3])
+        print(max(candidates)[-1])
 
 
 if __name__ == "__main__":
