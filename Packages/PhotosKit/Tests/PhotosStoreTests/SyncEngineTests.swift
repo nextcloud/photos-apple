@@ -10,7 +10,8 @@ import Testing
 @testable import PhotosStore
 
 /// The sync engine against a stubbed DAV layer (`FakeDAVServer`).
-@Suite(.timeLimit(.minutes(1))) struct SyncEngineTests {
+// One at a time: run together in the CI simulator, every test of the suite ran into its time limit at once.
+@Suite(.serialized, .timeLimit(.minutes(1))) struct SyncEngineTests {
     let server = FakeDAVServer()
     let database: AccountDatabase
     let library: LibraryStore
