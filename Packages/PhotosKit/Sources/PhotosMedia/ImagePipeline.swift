@@ -217,6 +217,11 @@ public actor ImagePipeline {
         self.originals = originals
         self.publicToken = publicToken
         self.limits = limits
+        // The background HEIC conversion waits while previews come from the server (SPEC §22.4.4).
+        cache.compactor.setBusyCheck { [weak self] in
+            guard let self else { return false }
+            return await !self.isNetworkIdle
+        }
     }
 
     public struct Request: Sendable, Hashable {
@@ -512,6 +517,8 @@ public actor ImagePipeline {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             cache.trim(toBytes: limits.previewBytes, protecting: pinned) { continuation.resume() }
         }
+        // Lossless previews stored before the background conversion existed (once per cache).
+        cache.compactor.scanOnce()
         await originals.trim(toBytes: limits.originalBytes)
     }
 

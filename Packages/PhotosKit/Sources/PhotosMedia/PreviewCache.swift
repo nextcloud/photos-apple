@@ -22,6 +22,8 @@ final class ImageBox: @unchecked Sendable {
 /// Disk + memory cache of preview images keyed by `(fileId, etag, bucket)` (SPEC §5.5.1).
 public final class PreviewCache: @unchecked Sendable {
     public let directory: URL
+    /// Converts lossless previews of the screen and large pools to HEIC in the background (SPEC §22.4.4).
+    public let compactor: PreviewCompactor
     /// Decoded previews (`MemoryImageCache`: LRU within a byte budget, gives back by `MemoryPressurePolicy`).
     let memory: MemoryImageCache
     private let fileManager = FileManager.default
@@ -62,6 +64,7 @@ public final class PreviewCache: @unchecked Sendable {
 
     public init(directory: URL, memoryLimitBytes: Int = PreviewCache.defaultMemoryLimit()) {
         self.directory = directory
+        compactor = PreviewCompactor(directory: directory)
         memory = MemoryImageCache(limit: memoryLimitBytes)
         let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: ioQueue)
         memoryPressure = pressure
@@ -172,6 +175,8 @@ public final class PreviewCache: @unchecked Sendable {
         let url = fileURL(key: key)
         try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
+        // A PNG preview of 1024 px or more becomes HEIC a few seconds later, not on the way to the screen.
+        compactor.didStore(url, data: data, bucket: bucket)
         let limit = Self.decodeLimit(maxPixelSize, bucket: bucket)
         guard let image = ImageDecoding.decode(data: data, maxPixelSize: limit) else { return nil }
         remember(image, key: key, maxPixelSize: limit)
