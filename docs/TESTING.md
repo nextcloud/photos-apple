@@ -252,6 +252,14 @@ when run with `TEST_RUNNER_PHOTOS_POSTCARD_PHOTO=<jpeg>` and `TEST_RUNNER_PHOTOS
 For other UI work, Debug builds also sign in without a browser when started with
 `PHOTOS_DEBUG_LOGIN='nc://login/server:<url>&user:<user>&password:<app password>'`.
 
+`UITests/EraseTourTests.swift` (iPhone) brushes in the editor's Erase tool (SPEC §21.5) and cancels.
+`testEraseEvidence` makes before/after pictures of the fill and is opt-in: `TEST_RUNNER_PHOTOS_UITEST_ERASE_EVIDENCE` names a
+folder with JPEGs (without EXIF dates, so they are the newest of the library) and `erase-evidence.json`
+(`[{"file", "name", "brush", "strokes": [[[x, y], …], …]}]`, brush size and points as fractions; photos of different
+aspect ratios, which is how the test tells them apart). It uploads them into `/Photos/erase-evidence-<time>`, brushes each
+stroke, writes `<name>-before/-after.png` and the picture's frame (`<name>-frame.txt`) into `PHOTOS_UITEST_SHOTS`,
+leaves with Cancel (nothing is saved) and removes the folder and its trash bin entries.
+
 `UITests/AccessibilityAuditTests.swift` (iPhone and iPad, SPEC §20.3) runs Xcode's accessibility audit
 (`performAccessibilityAudit`: contrast, hit areas, labels, traits, Dynamic Type, clipped text) on every main screen —
 Library, viewer and its info, Collections (the iPad's sidebar), Albums, Settings, Search, Clean up, Memories — and on

@@ -96,5 +96,107 @@ final class EraseTourTests: XCTestCase {
             shot("r11-erase-03-undone")
             cancel.tap()
         }
+
+        /// One photo to erase something on (`PHOTOS_UITEST_ERASE_EVIDENCE`): the brush size (fraction of the shorter side,
+        /// `RemoveTool.brushSizes`) and straight strokes from point to point, in fractions of the photo.
+        struct EvidencePhoto: Decodable {
+            var file: String
+            var name: String
+            var brush: Double
+            var strokes: [[[Double]]]
+        }
+
+        /// Before/after pictures of the basic fill (SPEC §21.5), opt-in: `PHOTOS_UITEST_ERASE_EVIDENCE=<folder>` holds JPEGs
+        /// and `erase-evidence.json` (`[EvidencePhoto]`, photos of different aspect ratios: that is how the test tells
+        /// them apart in the grid). They are uploaded into a folder of their own (dated now, so they are the newest of
+        /// the library), brushed in the Erase tool, photographed before and after (`<name>-before/-after.png` and the
+        /// picture's frame in points, `<name>-frame.txt`, in `PHOTOS_UITEST_SHOTS`), and left with Cancel: nothing is
+        /// saved, and the folder is removed at the end. Never the shared test library.
+        func testEraseEvidence() async throws {
+            let environment = ProcessInfo.processInfo.environment
+            guard let source = environment["PHOTOS_UITEST_ERASE_EVIDENCE"], !source.isEmpty else {
+                throw XCTSkip("Set PHOTOS_UITEST_ERASE_EVIDENCE to a folder with erase-evidence.json and its photos.")
+            }
+            let folderURL = URL(fileURLWithPath: source, isDirectory: true)
+            let photos = try JSONDecoder().decode(
+                [EvidencePhoto].self, from: Data(contentsOf: folderURL.appendingPathComponent("erase-evidence.json")))
+            var aspects: [String: Double] = [:]
+            let login = environment["PHOTOS_UITEST_LOGIN"] ?? ""
+            let folder = "Photos/erase-evidence-\(Int(Date().timeIntervalSince1970))"
+            let server = try XCTUnwrap(TestServer(login: login, folder: folder), "PHOTOS_UITEST_LOGIN is not a login link")
+            addTeardownBlock { try? await server.removeFolder() }
+            for (index, photo) in photos.enumerated() {
+                let data = try Data(contentsOf: folderURL.appendingPathComponent(photo.file))
+                let image = try XCTUnwrap(UIImage(data: data), "\(photo.file) is not a picture")
+                aspects[photo.name] = Double(image.size.width / image.size.height)
+                try await server.upload(data, name: photo.file, contentType: "image/jpeg", age: index * 60)
+            }
+            app.launch()
+            let library = app.tabBars.buttons["Library"].firstMatch
+            _ = library.waitForExistence(timeout: 20)
+            if library.exists { library.tap() }
+            XCTAssertTrue(app.staticTexts["Today"].firstMatch.waitForExistence(timeout: Self.wait), "The uploaded photos did not arrive")
+            pause(3)
+            let tiles = app.collectionViews.cells.matching(NSPredicate(format: "label BEGINSWITH 'Photo,'"))
+            var done: Set<String> = []
+            for index in 0..<photos.count {
+                tiles.element(boundBy: index).tap()
+                let edit = app.buttons["Edit"].firstMatch
+                XCTAssertTrue(edit.waitForExistence(timeout: Self.wait), "Tile \(index) has no Edit button")
+                pause(2)
+                edit.tap()
+                let cancel = app.buttons["Cancel"].firstMatch
+                XCTAssertTrue(cancel.waitForExistence(timeout: Self.wait), "The editor did not open")
+                pause(3)
+                app.buttons["Erase"].firstMatch.tap()
+                let picture = app.images["Edited photo"].firstMatch
+                XCTAssertTrue(picture.waitForExistence(timeout: Self.wait), "The Erase tool shows no picture to brush on")
+                pause(2)
+                let frame = picture.frame
+                // Which of the uploaded photos this is, by its shape; anything else is left alone.
+                let shape = Double(frame.width / max(frame.height, 1))
+                guard
+                    let photo = photos.first(where: { !done.contains($0.name) && abs((aspects[$0.name] ?? 0) - shape) / shape < 0.02 })
+                else {
+                    XCTFail("Tile \(index) is none of the uploaded photos (aspect \(shape))")
+                    cancel.tap()
+                    return
+                }
+                done.insert(photo.name)
+                let slider = app.sliders["Brush Size"].firstMatch
+                if slider.exists {
+                    // `RemoveTool.brushSizes`.
+                    let range = 0.01...0.08
+                    let position = (photo.brush - range.lowerBound) / (range.upperBound - range.lowerBound)
+                    slider.adjust(toNormalizedSliderPosition: CGFloat(position))
+                    pause(1)
+                }
+                shot("\(photo.name)-before")
+                if let shots = environment["PHOTOS_UITEST_SHOTS"], !shots.isEmpty {
+                    let text = "\(frame.minX) \(frame.minY) \(frame.width) \(frame.height)\n"
+                    try? Data(text.utf8).write(to: URL(fileURLWithPath: shots).appendingPathComponent("\(photo.name)-frame.txt"))
+                }
+                let restore = app.buttons["Restore All"].firstMatch
+                for stroke in photo.strokes where stroke.count >= 2 {
+                    let points = stroke.map { picture.coordinate(withNormalizedOffset: CGVector(dx: $0[0], dy: $0[1])) }
+                    for (from, to) in zip(points, points.dropFirst()) {
+                        from.press(forDuration: 0.2, thenDragTo: to)
+                        // Each drag is a stroke of its own; the next waits until it is filled in.
+                        XCTAssertTrue(restore.waitForExistence(timeout: Self.wait), "\(photo.name): the stroke was not erased")
+                        _ = app.activityIndicators.firstMatch.waitForNonExistence(timeout: Self.wait)
+                        pause(1)
+                    }
+                }
+                pause(2)
+                shot("\(photo.name)-after")
+                // Nothing is saved.
+                cancel.tap()
+                pause(2)
+                let close = app.buttons["Close"].firstMatch
+                if close.waitForExistence(timeout: 10) { close.tap() }
+                pause(2)
+            }
+            XCTAssertEqual(done.count, photos.count, "Not every photo was erased on")
+        }
     #endif
 }

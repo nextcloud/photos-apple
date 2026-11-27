@@ -1859,9 +1859,18 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   (VoiceOver action on the picture, via AX) removed the man behind the speaker, Done saved the recipe with its `retouch`
   stroke to `.nextcloud-photos/edits/<id>.json`, the viewer showed the photo without him. Shots
   `ios-fix-shots/r11-erase/mac-2-editor.png` … `mac-7-viewer-after-done.png`.
-- 🟡 **Fill quality**: the before/after pictures in `ios-fix-shots/r11-erase/` were made with LaMa and no longer show
-  what the app does. The basic fill is right for spots and small things on even backgrounds and leaves a soft patch on
-  large objects; new evidence with `TEST_RUNNER_PHOTOS_INPAINTING_EVAL` (now the basic fill) is open.
+- ✅ **Fill quality of the basic fill, for spots and small things** (2026-11-27, iPhone 17 simulator, iOS 27.2, against
+  8089; the LaMa pictures in `ios-fix-shots/r11-erase/` are history): `EraseTourTests.testEraseEvidence` (opt-in,
+  TESTING.md) uploaded three copies of test-library photos without EXIF to `/Photos/erase-evidence-<time>`, brushed them
+  in the Erase tool, took the editor before and after, left with Cancel (nothing saved) and removed the folder and its
+  trash entries. In `ios-fix-shots/a11y-erase/erase/` (`<name>-picture-before-after.png`, zoomed
+  `<name>-crop<n>-before-after.png`): **dust** — three soft spots (24–40 px, added to Lake Tenaya's sky as sensor dust),
+  2 % brush: gone without a trace; **floes** — two small ice floes on Jökulsárlón (~70 × 40 px on calm water, ~75 × 50 px on
+  the orange cloud reflection), 2.5 % brush: removed, each leaves a smooth patch a little calmer in tone than the
+  rippled water around it, visible when zoomed in; **walkers** — two people with their shadows on Porto Covo's sand
+  (~120 × 135 px), 6.5 % brush: removed, but a clearly visible blurred oval without the sand's grain. So: right for spots
+  and small things on even backgrounds; on texture, and for anything person-sized, a soft patch (⬜ "Large fills look
+  soft" below). The pictures show the editor's proxy at screen size; saving fills the original the same way.
 - ✅ **Recipe, geometry, cache, basic fill**: `InpaintingTests` (14 tests: JSON round trip and leniency, run lengths,
   brushed points through every geometry vs. `PhotoEditor.apply`, only the stroke changes, fills reused across undo and
   colour changes, windows, basic fill, `EditRendering` applies strokes, background-people rule).
