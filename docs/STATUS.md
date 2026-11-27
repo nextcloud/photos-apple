@@ -1948,7 +1948,40 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
 - ⬜ Round 12.
 
 ### §22.3 Camera in search, People without Recognize, birthdays from Contacts
-- ⬜ Round 12.
+- ✅ **Camera chip**: `Camera`/`Lens` chips typed ("x100v", "Anna in Lisbon 2024 shot on x100v"), suggested, changed in
+  the chip menu, in recent searches; answered by `photoExif` (unit tests `CameraSearchTests`, `CameraSearchStoreTests`).
+  ✅ Camera data read once: rules read `photoExif`, `cameraDetails` dropped (`OrganizeStoreTests`); seen on the Mac
+  against 8089: after the first sync all 451 photos had their row (Canon PowerShot SX120 IS 21, Sony ILCE-7RM3 16, …,
+  the three X100V test photos). ✅ In the iOS 27.2 simulator (`PeopleTourTests.testCameraChip`): "x100v" is suggested
+  as Camera "Fujifilm X100V", the chip finds the 3 photos (shots `ios-fix-shots/r12-people/sim/p1–p2`). 🟡 Mac and iPad
+  not run; lens chips not seen (the test library has no `LensModel`).
+- ✅ **People without Recognize** (Mac, 8089, which has no Recognize; shots `ios-fix-shots/r12-people/mac-01…03`): 443
+  photos looked at in 26 s with the app's own background run (≈ 59 ms a photo including fetching the 1024 previews of
+  photos with faces; analysis alone 29 ms a photo in `DevicePeopleVisionTests`), 86 usable faces, People shows 8 people
+  with faces in ≥ 2 photos ("Add name", covers, the on-device note). **Quality on the test library** (pairs of photos
+  put together): with the app's previews 6 right (Obama, Signorelli ×1, van Dyck ×2, Red River ×2) and 2 wrong (two
+  Guadeloupe carnival women, 0.76; a child of the Russian imperial family with one of de Vos's painted children, 0.74);
+  with full-size-derived 1024 px pictures (`DevicePeopleVisionTests`, `PHOTOS_FACES_FOLDER`) 6 right, 1 wrong, 1 missed
+  (a baby's face below the quality bar). The test library has few people in more than one photo (mostly one photo per
+  person), so this measures separation far better than recall; centered cosine of the same person in different photos
+  0.78–0.95, different people ≤ 0.76 and mostly < 0.65. A name given on another device (written into the shared
+  document) reached the person at the next sync and went into search/memories (`person`/`personItem`). Grouping,
+  constraints, merges, the shared document and two devices exchanging names, rejections, merges and removals
+  unit-tested (`FaceClusteringTests`, `DevicePeopleDocumentTests`, `DevicePeopleTests`). 🟡 Rename/Merge/Not this
+  person/Move through the Mac's menus not clicked (no real input; the same calls are unit-tested); iPhone/iPad: Vision
+  does not run in the simulator (People shows its note: tour `testPeopleWithoutRecognize` and the new audit
+  `AccessibilityAuditTests.testPeople` pass; `SmokeTests` and `AccessibilityAuditTests` pass on iPhone, 28 tests). ⬜ Sharing through
+  `.nextcloud-photos/people.json` waits for §22.5's settings API: `LocalDevicePeopleNames` keeps the document on the
+  device (TODO for tidy; the format and merge are in place). ⬜ Recall on a library with many photos per person (a real
+  family library) not measured; ⬜ device D22.3: time per photo and battery on an iPhone.
+- ✅ **Birthdays from Contacts**: CardDAV reading against 8089 (`ContactBirthdaysIntegrationTests`: own contact
+  `r12-people-…` added, read, removed; 8089 has no Contacts app — the core address book is enough); vCard forms, matching,
+  memories, store unit-tested (`VCardBirthdayTests`, `BirthdaysTests`, `ContactBirthdayStoreTests`). Seen on the Mac:
+  a test contact "Barack Obama" (birthday 27 Nov) and three copies of his portrait dated 27 Nov 2023, 26 Nov 2024 and
+  28 Nov 2025 in `/Photos/r12-people-test` → Memories shows "Barack Obama turns 65 today", which opens "Barack Obama's
+  birthday" with the three photos (shot `mac-03-birthday-memory.png`); test data and contact removed afterwards.
+  🟡 the 9:00 reminder notification not seen (the Mac test build has no notification permission); Through the years
+  with the Contacts date of birth not opened.
 
 ### §22.4 Tile cache, targeted sync and notify_push, smaller preview cache
 - ⬜ Round 12.
