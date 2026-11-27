@@ -97,7 +97,7 @@ public struct DevicePeopleDirectory: PeopleDirectory {
     /// The person's id from what the screens call them.
     func id(of person: String) throws -> Int64 {
         if let id = try store.personId(named: person) { return id }
-        if let id = Int64(person), try store.person(id) != nil { return id }
+        if let id = Int64(person), try store.personExists(id) { return id }
         throw DevicePeopleError.unknownPerson
     }
 

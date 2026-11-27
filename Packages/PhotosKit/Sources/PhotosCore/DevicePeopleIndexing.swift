@@ -135,8 +135,7 @@ public enum DevicePeopleIndexing {
         }
     }
 
-    /// Debug builds: `PHOTOS_DEBUG_FACES_NOW=1` looks at the cached previews once, shortly after launch (checks on the
-    /// Mac; with `PHOTOS_DEBUG_FACES_FETCH=1` the 1024 previews of photos with faces are fetched too).
+    /// Debug builds: `PHOTOS_DEBUG_FACES_NOW=1` looks at the library once, shortly after launch (checks on the Mac).
     @MainActor static func runNowIfAskedForDebugging(model: @escaping @MainActor () -> AppModel?) {
         #if DEBUG
             guard ProcessInfo.processInfo.environment["PHOTOS_DEBUG_FACES_NOW"] == "1" else { return }

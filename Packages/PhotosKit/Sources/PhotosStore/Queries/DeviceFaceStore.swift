@@ -445,6 +445,13 @@ public struct DeviceFaceStore: Sendable {
         try people(minimumPhotos: 0).first { $0.id == id }
     }
 
+    /// Whether a person with this id is there.
+    public func personExists(_ id: Int64) throws -> Bool {
+        try database.writer.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM devicePerson WHERE id = ?)", arguments: [id]) ?? false
+        }
+    }
+
     /// The person with this name (names are unique among the people of this device).
     public func personId(named name: String) throws -> Int64? {
         try database.writer.read { db in
