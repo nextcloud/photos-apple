@@ -45,6 +45,18 @@ import XCTest
 
         var tiles: XCUIElementQuery { app.collectionViews.cells }
 
+        /// The first element of `query` that is on screen (a query can also match cards outside the window, whose frame
+        /// is infinite).
+        func onScreen(_ query: XCUIElementQuery) -> XCUIElement? {
+            let screen = app.windows.firstMatch.frame
+            for index in 0..<min(query.count, 24) {
+                let element = query.element(boundBy: index)
+                let frame = element.frame
+                if frame.minX.isFinite, frame.minY.isFinite, frame.height > 40, screen.intersects(frame) { return element }
+            }
+            return nil
+        }
+
         func pause(_ seconds: TimeInterval) {
             RunLoop.current.run(until: Date().addingTimeInterval(seconds))
         }
@@ -120,6 +132,37 @@ import XCTest
             }
             _ = tapButton("All Photos", timeout: 3)
             pause(3)
+        }
+
+        /// The Library around one year (`PHOTOS_UITEST_SHOT_YEAR`, default 2025, and `PHOTOS_UITEST_SHOT_MONTH`, default
+        /// November): the years scrolled past the newest one, the year’s months, and the month’s days.
+        func testLibraryYear() {
+            app.launchArguments += ["-libraryZoomLevel", "years"]
+            launch()
+            let year = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", (environment("PHOTOS_UITEST_SHOT_YEAR") ?? "2025") + ",")
+            )
+            .firstMatch
+            XCTAssertTrue(year.waitForExistence(timeout: 240), "No year card")
+            pause(15)
+            let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+            top.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)))
+            pause(5)
+            shot("library-years-scrolled")
+            year.tap()
+            pause(6)
+            shot("library-year-months")
+            let months = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", environment("PHOTOS_UITEST_SHOT_MONTH") ?? "November"))
+            let month = months.firstMatch
+            // A pinch in on the month (a tap opens the days at the top); XCUIElement has no pinch on visionOS.
+            #if os(iOS)
+                if month.waitForExistence(timeout: 5), let card = onScreen(months) {
+                    card.pinch(withScale: 1.25, velocity: 1)
+                    pause(6)
+                    shot("library-month-days")
+                }
+            #endif
         }
 
         func testViewer() {
@@ -283,6 +326,19 @@ import XCTest
             /// Free up space on this device, after a backup that a run of `FreeUpTourTests` (or the app) has made: the account
             /// menu's summary, the Backup screen's offer and the free-up screen. Only looks: nothing is removed.
             func testFreeUp() {
+                // With a folder: the backup of the photos of the last 90 days runs first (the device's photos are added
+                // with `simctl addmedia` beforehand, photo access granted with `simctl privacy`).
+                if let folder = environment("PHOTOS_UITEST_BACKUP_FOLDER") {
+                    app.launchEnvironment["PHOTOS_DEBUG_BACKUP"] = folder
+                    app.launchEnvironment["PHOTOS_DEBUG_BACKUP_RESET"] = "1"
+                    app.launchEnvironment["PHOTOS_DEBUG_BACKUP_SINCE"] = Date().addingTimeInterval(-90 * 86_400).ISO8601Format()
+                    launch()
+                    pause(Double(environment("PHOTOS_UITEST_BACKUP_WAIT") ?? "") ?? 90)
+                    app.terminate()
+                    for name in ["PHOTOS_DEBUG_BACKUP", "PHOTOS_DEBUG_BACKUP_RESET", "PHOTOS_DEBUG_BACKUP_SINCE"] {
+                        app.launchEnvironment[name] = nil
+                    }
+                }
                 launch()
                 let account = app.buttons["account-menu"].firstMatch
                 XCTAssertTrue(account.waitForExistence(timeout: 60), "No account button")

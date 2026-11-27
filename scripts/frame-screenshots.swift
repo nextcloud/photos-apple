@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 //
-// Frames the README's screenshots: each screen gets rounded, device-like corners with a thin dark edge (phone, tablet)
-// or keeps its own window corners (window), a soft shadow, and they stand side by side on a soft background card.
+// Frames the README's screenshots: each screen gets rounded, device-like corners with a thin dark edge (phone, tablet;
+// a portrait iPhone also its Dynamic Island) or keeps its own window corners (window), a soft shadow, and they stand
+// side by side on a soft background card.
 // Drawn here with Core Graphics: no device artwork from anyone else.
 //
 //   swift scripts/frame-screenshots.swift [options] <output.png> <screenshot>[:phone|tablet|window|plain[:height]] …
@@ -230,10 +231,27 @@ func drawScreen(_ context: CGContext, _ item: Placement, picture: Bool) {
     context.clip()
     if picture {
         context.draw(item.screen.image, in: item.rect)
+        drawIsland(context, item)
     } else {
         context.clear(item.rect)
     }
     context.restoreGState()
+}
+
+/// The Dynamic Island of a portrait iPhone screen. XCUITest's screenshots leave it out, `simctl io screenshot` and the
+/// screen recordings have it: drawn on every iPhone screen (over the one already there, at the same place), all phones
+/// in the README look alike.
+func drawIsland(_ context: CGContext, _ item: Placement) {
+    let aspect = item.rect.width / item.rect.height
+    guard item.screen.kind == .phone, aspect > 0.44, aspect < 0.48 else { return }
+    // iPhone 17: 125 × 37 pt, 11 pt from the top of a 402 × 874 pt screen.
+    let width = item.rect.width * 0.312
+    let height = item.rect.height * 0.042
+    let island = CGRect(
+        x: item.rect.midX - width / 2, y: item.rect.maxY - item.rect.height * 0.016 - height, width: width, height: height)
+    context.addPath(roundedPath(island, height / 2))
+    context.setFillColor(color(0x000000))
+    context.fillPath()
 }
 
 let (size, items) = placements()

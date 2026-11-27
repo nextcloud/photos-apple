@@ -72,8 +72,10 @@ The README shows the screenshots framed and its interactions as short videos:
 
 - `swift scripts/frame-screenshots.swift [options] <output.png> <shot>[:phone|tablet|window|plain[:height]] …` draws
   each screenshot with rounded, device-like corners (a thin dark edge for iPhone and iPad), a soft shadow and a light
-  (or `--background dark`) card behind them, several side by side; no device artwork from anyone else. Convert the PNG
-  with `cwebp -q 82 -alpha_q 90` (WebP keeps the card's rounded corners transparent).
+  (or `--background dark`) card behind them, several side by side; no device artwork from anyone else. A portrait
+  iPhone screen gets its Dynamic Island drawn (XCUITest's screenshots leave it out, `simctl io screenshot` and the
+  recordings have it), so all phones look alike. Convert the PNG with `cwebp -q 82 -alpha_q 90` (WebP keeps the card's
+  rounded corners transparent).
 - `scripts/readme-videos.sh record <output> <simulator udid> [test …]` runs `UITests/ReadmeVideos` (Library zoom
   levels, a memory film, the viewer, the editor) and records the simulator's screen (`simctl io recordVideo`) while each
   test plays its part; the test and the script hand over through files in the output folder (`<name>.start`,
@@ -87,7 +89,13 @@ The README shows the screenshots framed and its interactions as short videos:
   the hour and the day; the README's set came from photos of the test library copied into a folder of their own,
   dated a year ago and marked as favourites (removed afterwards).
 - `UITests/ReadmeScreenshots` `testFirstRun` needs a fresh install (`xcrun simctl uninstall` first); `testCameraChip`
-  types a camera of the test library (`PHOTOS_UITEST_SHOT_CAMERA`, default "nikon d50").
+  types a camera of the test library (`PHOTOS_UITEST_SHOT_CAMERA`, default "nikon d50"); `testLibraryYear` takes the
+  years, one year's months and one month's days away from the newest photos; `testFreeUp` with
+  `PHOTOS_UITEST_BACKUP_FOLDER` backs up the photos of the last 90 days first (add them with `simctl addmedia`).
+- Look at every frame before a video goes into the README (`ffmpeg -i <video> -vf "fps=8,tile=…"`): while the Library
+  morphs between levels, the grid of every photo shows through at the bottom edge for a moment, at its own position —
+  with the test library that is the newest photos, among them portraits of politicians. The README's Library video is
+  therefore cut above the tab bar.
 
 ## Integration tests
 

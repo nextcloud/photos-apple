@@ -101,6 +101,18 @@ import XCTest
 
         func level(_ title: String) -> XCUIElement { app.buttons[title].firstMatch }
 
+        /// The first element of `query` that is on screen (a query can also match cards outside the window, whose frame
+        /// is infinite).
+        func onScreen(_ query: XCUIElementQuery) -> XCUIElement? {
+            let screen = app.windows.firstMatch.frame
+            for index in 0..<min(query.count, 24) {
+                let element = query.element(boundBy: index)
+                let frame = element.frame
+                if frame.minX.isFinite, frame.minY.isFinite, frame.height > 40, screen.intersects(frame) { return element }
+            }
+            return nil
+        }
+
         /// A card of the level shown in the middle of the screen (a pinch on the whole scroll view would start on the tab
         /// bar).
         func visibleCard() -> XCUIElement {
@@ -124,38 +136,43 @@ import XCTest
 
         // MARK: Videos
 
-        /// Pinching the Library from days out to months and years, into a year's months and back in to its days.
+        /// The Library's levels around one year (`PHOTOS_UITEST_VIDEO_YEAR`, default "2025,"; `PHOTOS_UITEST_VIDEO_MONTH`,
+        /// default "November"): the year opens its months, and a pinch in on a month shows its days. While the Library
+        /// morphs, the grid of every photo shows through at the bottom edge at its own position (the newest photos): look at
+        /// every frame and cut the video above the tab bar if they should not be seen (docs/TESTING.md).
         func testLevels() {
-            app.launchArguments += ["-libraryZoomLevel", "days"]
+            app.launchArguments += ["-libraryZoomLevel", "years"]
             app.launch()
-            XCTAssertTrue(level("Days").waitForExistence(timeout: 240), "No Library")
-            if !level("Days").isSelected { level("Days").tap() }
+            XCTAssertTrue(level("Years").waitForExistence(timeout: 240), "No Library")
+            if !level("Years").isSelected { level("Years").tap() }
+            let years = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", environment("PHOTOS_UITEST_VIDEO_YEAR") ?? "2025,"))
+            XCTAssertTrue(years.firstMatch.waitForExistence(timeout: 60), "No year card")
+            let months = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", environment("PHOTOS_UITEST_VIDEO_MONTH") ?? "November"))
             // The previews of the first screens.
             pause(15)
+            // The newest year scrolled away: the year of the video at the top.
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+            from.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)))
+            pause(4)
             record("levels") {
-                for (wanted, scale) in [("Months", 0.7), ("Years", 0.7)] {
-                    visibleCard().pinch(withScale: scale, velocity: -1.5)
-                    pause(2)
-                    if !level(wanted).isSelected { level(wanted).tap() }
-                    pause(1.5)
-                }
-                // A year opens its months; a pinch in on them shows the days.
-                let year = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "^[0-9]{4}, .*")).element(boundBy: 1)
-                if year.waitForExistence(timeout: 5) { year.tap() }
-                pause(2)
-                visibleCard().pinch(withScale: 1.5, velocity: 1.5)
-                pause(2.5)
+                (onScreen(years) ?? years.firstMatch).tap()
+                pause(2.2)
+                (onScreen(months) ?? visibleCard()).pinch(withScale: 1.25, velocity: 1)
+                pause(4)
             }
         }
 
-        /// A memory from the Library's strip: its cover opens it, Play turns it into a film.
+        /// A memory from Memories (`PHOTOS_UITEST_VIDEO_MEMORY`, default a trip): its card opens it, Play turns it into a
+        /// film.
         func testMemory() {
-            app.launchArguments += ["-libraryZoomLevel", "all"]
+            app.launchEnvironment["PHOTOS_DEBUG_DESTINATION"] = "memories"
             app.launch()
-            waitForTimeline()
             let name = environment("PHOTOS_UITEST_VIDEO_MEMORY") ?? "trip"
             let memories = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] 'years ago'", name))
-            XCTAssertTrue(memories.firstMatch.waitForExistence(timeout: 30), "No memory in the Library")
+            XCTAssertTrue(memories.firstMatch.waitForExistence(timeout: 120), "No memory")
+            pause(15)
             let wanted = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", name)).firstMatch
             let memory = wanted.exists ? wanted : memories.firstMatch
             record("memory") {

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero.webp" width="860" alt="Nextcloud Photos on iPad and iPhone: on iPad the Library with its sidebar, the memories “1 year ago”, “2 years ago” and “13 years ago” as cards above November's photos; on iPhone the Library at the Days level with Lake Wakatipu on December 15 and a white tulip on November 29">
+  <img src="docs/screenshots/hero.webp" width="860" alt="Nextcloud Photos on iPad and iPhone: on iPad the Library with its sidebar at the Months level of 2025, each month a card with its key photo — a seagull on Lake Wakatipu, a white tulip, a cistern in Istanbul, a temple gate; on iPhone the Memories with “1 year ago” over Moraine Lake">
 </p>
 
 Nextcloud Photos gives the photos on your Nextcloud a fast, native home on every Apple device: a library that scrolls
@@ -48,13 +48,13 @@ Nextcloud already has — there is nothing to install on the server.
       <a href="docs/media/library-zoom.mp4">Watch as video</a>
     </td>
     <td width="45%" align="center">
-      <img src="docs/media/library-zoom.webp" width="300" alt="Video: on iPhone the Library is pinched from days out to months and years, a year opens its months, and a pinch in shows that month's days">
+      <img src="docs/media/library-zoom.webp" width="300" alt="Video: on iPhone the Library at the Years level; a tap on 2025 opens its months, and a pinch in on November 2025 shows its days, each a mosaic of flowers and landscapes">
     </td>
   </tr>
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/iphone-levels.webp" width="860" alt="Three iPhones: the Library as years, each a card with its key photo; the months of 2025 as cards; and the days, each a mosaic of its photos">
+  <img src="docs/screenshots/iphone-levels.webp" width="860" alt="Three iPhones: the Library as years (2025, 2024, 2023), each a card with its key photo; the months of 2025 as cards; and the days of November 2025, each a mosaic of its photos">
 </p>
 
 ## Memories that tell a story
@@ -62,7 +62,7 @@ Nextcloud already has — there is nothing to install on the server.
 <table>
   <tr>
     <td width="45%" align="center">
-      <img src="docs/media/memory-film.webp" width="300" alt="Video: a memory called “1 year ago” plays as a film on iPhone: a title over Moraine Lake, a slow move across the mountains, then a cross-fade to a seagull on Lake Wakatipu">
+      <img src="docs/media/memory-film.webp" width="300" alt="Video: on iPhone the memory “1 year ago” opens from Memories with a grid of its photos, then plays as a film: a title over Moraine Lake, a slow move across the mountains, a cross-fade to a seagull on Lake Wakatipu">
     </td>
     <td width="55%" valign="top">
       On this day, your trips and the people you love come together as memories at the top of the Library. Play one and
@@ -121,7 +121,7 @@ app finds the faces itself, on your device, with Apple's Vision framework, and g
 Nothing is sent anywhere for it.
 
 <p align="center">
-  <img src="docs/screenshots/places-people.webp" width="860" alt="Left: Places on iPhone, a map of Europe and Africa with photos grouped into clusters, each with a count. Right: People in the Mac app on a server without Recognize, eight people found on the Mac by Apple's Vision, each with “Add name”, and the note “People are found on this device with Apple's Vision, from the previews it has. Nothing is sent anywhere for it.”">
+  <img src="docs/screenshots/places-people.webp" width="860" alt="Left: Places on iPhone, a map of Europe and Africa with photos grouped into clusters, each with a count. Right: a detail of People in the Mac app on a server without Recognize: faces found on the Mac by Apple's Vision, each with “Add name”">
 </p>
 
 ## Albums and sharing
@@ -172,7 +172,7 @@ compares checksums with the server right before anything is removed. The photos 
 never anywhere on the server.
 
 <p align="center">
-  <img src="docs/screenshots/iphone-backup.webp" width="860" alt="Three iPhones: the first run asks “Back up the photos of this iPhone?” with a Turn on backup button; the Backup screen says Up to date with 6 uploaded and offers Free up space on this iPhone, 12.5 MB; the free-up screen shows 12.5 MB in 4 photos that are safely on the Nextcloud, a review of the photos and the photos that stay">
+  <img src="docs/screenshots/iphone-backup.webp" width="860" alt="Three iPhone screens: the first run asks “Back up the photos of this iPhone?” with a Turn on backup button; the Backup screen says Up to date with 6 uploaded and offers Free up space on this iPhone, 12.5 MB; the free-up screen shows 12.5 MB in 4 photos that are safely on the Nextcloud, a review of the photos and what to keep on the iPhone">
 </p>
 
 Moving from another service? **Import** reads a Google Takeout, Apple's iCloud Photos export, or a Facebook or Instagram
