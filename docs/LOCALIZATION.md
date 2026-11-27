@@ -47,56 +47,56 @@ problem of pushing a catalog. Following it, `.tx/config` here would be:
 [main]
 host = https://www.transifex.com
 
-[o:nextcloud:p:nextcloud:r:photos-ios]
-file_filter = translations/photos-ios/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple]
+file_filter = translations/photos-apple/<lang>.xcstrings
 source_file = Packages/PhotosKit/Sources/PhotosAppUI/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-core]
-file_filter = translations/photos-ios-core/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-core]
+file_filter = translations/photos-apple-core/<lang>.xcstrings
 source_file = Packages/PhotosKit/Sources/PhotosCore/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-backup]
-file_filter = translations/photos-ios-backup/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-backup]
+file_filter = translations/photos-apple-backup/<lang>.xcstrings
 source_file = Packages/PhotosKit/Sources/PhotosBackup/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-domain]
-file_filter = translations/photos-ios-domain/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-domain]
+file_filter = translations/photos-apple-domain/<lang>.xcstrings
 source_file = Packages/PhotosKit/Sources/PhotosDomain/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-networking]
-file_filter = translations/photos-ios-networking/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-networking]
+file_filter = translations/photos-apple-networking/<lang>.xcstrings
 source_file = Packages/PhotosKit/Sources/PhotosNetworking/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-app]
-file_filter = translations/photos-ios-app/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-app]
+file_filter = translations/photos-apple-app/<lang>.xcstrings
 source_file = App/Resources/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-shortcuts]
-file_filter = translations/photos-ios-shortcuts/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-shortcuts]
+file_filter = translations/photos-apple-shortcuts/<lang>.xcstrings
 source_file = App/Resources/AppShortcuts.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-info]
-file_filter = translations/photos-ios-info/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-info]
+file_filter = translations/photos-apple-info/<lang>.xcstrings
 source_file = App/Resources/InfoPlist.xcstrings
 source_lang = en
 type        = XCSTRINGS
 
-[o:nextcloud:p:nextcloud:r:photos-ios-widgets]
-file_filter = translations/photos-ios-widgets/<lang>.xcstrings
+[o:nextcloud:p:nextcloud:r:photos-apple-widgets]
+file_filter = translations/photos-apple-widgets/<lang>.xcstrings
 source_file = Extensions/Widgets/Localizable.xcstrings
 source_lang = en
 type        = XCSTRINGS

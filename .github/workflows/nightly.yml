@@ -12,7 +12,7 @@ permissions:
 jobs:
   performance:
     # Scheduled runs only in the main repository, not in forks.
-    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-ios'
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-apple'
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +39,7 @@ jobs:
   integration:
     # Against a Nextcloud installed on the runner (release archive, SQLite, PHP's built-in web server): macOS runners
     # have no Docker, and a server in another job could not be reached from here.
-    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-ios'
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'nextcloud/photos-apple'
     runs-on: xcode-27
     env:
       SERVER_URL: http://127.0.0.1:8089

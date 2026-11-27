@@ -348,7 +348,7 @@ public struct SettingsView: View {
             LabeledContent(String(localized: "Version", bundle: .module), value: app.appVersion)
             Link(
                 String(localized: "Source code", bundle: .module),
-                destination: URL(string: "https://github.com/nextcloud/photos-ios")!)
+                destination: URL(string: "https://github.com/nextcloud/photos-apple")!)
             Link(String(localized: "Privacy", bundle: .module), destination: URL(string: "https://nextcloud.com/privacy/")!)
             NavigationLink(String(localized: "Licences", bundle: .module)) { LicensesView() }
             Text(
