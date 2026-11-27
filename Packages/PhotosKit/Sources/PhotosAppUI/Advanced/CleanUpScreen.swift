@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: MIT
 
+import PhotosBackup
 import PhotosCore
 import PhotosDomain
 import PhotosMedia
@@ -21,13 +22,10 @@ enum CleanUpSection: String, CaseIterable, Hashable, Sendable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The sections this device offers: removing backed-up photos from the device exists on iPhone and iPad only.
+    /// The sections this device offers: removing backed-up photos from the device exists on iPhone, iPad and the Mac
+    /// (SPEC §22.1).
     static var available: [CleanUpSection] {
-        #if os(iOS)
-            allCases
-        #else
-            allCases.filter { $0 != .device }
-        #endif
+        BackupModel.offersFreeUp ? allCases : allCases.filter { $0 != .device }
     }
 
     /// The section that an older place of the app opens (SPEC §19.3): its destinations, deep links and menu commands
@@ -117,8 +115,10 @@ struct SimilarShotsFinding: Sendable {
     var similar: SimilarShotsFinding?
     var similarEnabled = SimilarIndexing.isEnabled()
     var freeSpace: [Cleanup.Category: CleanUpFinding]?
-    /// Free storage of this device in bytes (iPhone, iPad).
+    /// Free storage of this device in bytes (iPhone, iPad, Mac).
     var deviceAvailable: Int64?
+    /// What removing backed-up photos from this device would free, estimated by the backup (SPEC §22.1).
+    var deviceFreeable: FreeUpEstimate?
     private(set) var loaded = false
 
     func finding(_ section: CleanUpSection) -> CleanUpFinding? {
@@ -202,7 +202,7 @@ struct SimilarShotsFinding: Sendable {
 
     /// Storage still free on this device for things the user wants to keep (what Settings › General › Storage shows).
     nonisolated static func availableDeviceSpace() -> Int64? {
-        #if os(iOS)
+        #if os(iOS) || os(macOS)
             let url = URL(fileURLWithPath: NSHomeDirectory())
             let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             return values?.volumeAvailableCapacityForImportantUsage
@@ -250,18 +250,22 @@ struct CleanUpScreen: View {
                         "Nothing is deleted until you confirm. Deleting here deletes on your Nextcloud server and so on all your devices and the web.",
                         bundle: .module, comment: "Clean up: footer of the sections that delete on the server.")
                 }
-                #if os(iOS)
+                if BackupModel.offersFreeUp {
                     Section {
                         row(.device)
                     } header: {
                         Text(DeviceWording.sectionTitle)
                     }
-                #endif
+                }
             }
             #if os(macOS)
                 .listStyle(.inset(alternatesRowBackgrounds: false))
             #endif
             .navigationTitle(Self.title)
+            .task(id: session.backup.freeUpEstimate) {
+                model.deviceFreeable = session.backup.freeUpEstimate
+                if model.deviceFreeable == nil { await session.backup.refreshFreeUpEstimate() }
+            }
             .task {
                 guard let services = session.services else { return }
                 await model.load(services: services)
@@ -292,15 +296,11 @@ struct CleanUpScreen: View {
         case .similarShots: SimilarShotsScreen()
         case .largeVideos, .screenshots: FreeSpaceScreen(categories: section.cleanupCategories)
         case .device:
-            #if os(iOS)
-                if session.backup.authorization == .authorized || session.backup.authorization == .limited {
-                    FreeUpSpaceView()
-                } else {
-                    BackupScreen()
-                }
-            #else
-                EmptyView()
-            #endif
+            if session.backup.canFreeUp {
+                FreeUpSpaceView()
+            } else {
+                BackupScreen()
+            }
         }
     }
 
@@ -406,15 +406,13 @@ struct CleanUpRow: View {
         }
     }
 
-    var bytes: Int64? { model.finding(section)?.bytes }
+    var bytes: Int64? { section == .device ? model.deviceFreeable?.bytes : model.finding(section)?.bytes }
 
     /// What the section found, in words.
     var summary: String {
         if section == .device {
-            if let available = model.deviceAvailable {
-                return String(
-                    localized: "\(Formatters.bytes(available)) available", bundle: .module,
-                    comment: "Clean up: free storage on the iPhone or iPad. The placeholder is a size.")
+            if let estimate = model.deviceFreeable, estimate.count > 0 {
+                return FreeUpWording.offerDetail(count: estimate.count)
             }
             return String(
                 localized: "Remove photos and videos that are safely on your Nextcloud.", bundle: .module,
@@ -468,19 +466,14 @@ struct CleanUpRow: View {
                 localized: "Compared \(similar.indexed.formatted()) of \(similar.total.formatted()) photos on this device so far.",
                 bundle: .module, comment: "Clean up: the on-device comparison for similar shots is not complete yet.")
         case .device:
+            guard let available = model.deviceAvailable else { return nil }
             return String(
-                localized: "Remove photos and videos that are safely on your Nextcloud.", bundle: .module,
-                comment: "Clean up: what the section about the device's own photos does."
-            )
-            .nilIfEqual(to: summary)
+                localized: "\(Formatters.bytes(available)) available", bundle: .module,
+                comment: "Clean up: free storage on the iPhone, iPad or Mac. The placeholder is a size.")
         default:
             return nil
         }
     }
-}
-
-extension String {
-    fileprivate func nilIfEqual(to other: String) -> String? { self == other ? nil : self }
 }
 
 /// A few small pictures of what a section found (decorative: the row's text says what it is).

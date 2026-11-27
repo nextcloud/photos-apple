@@ -11,8 +11,8 @@ import SwiftUI
     import UIKit
 #endif
 
-/// The device side of the backup on the Backup screen: photos that are not on the server yet (round-3 item 37) and, on
-/// iPhone and iPad, removing backed-up photos from the device (SPEC §7.18.8, round-3 item 36).
+/// The device side of the backup on the Backup screen: photos that are not on the server yet (round-3 item 37) and
+/// removing backed-up photos from the device (SPEC §7.18.8, §22.1; iPhone, iPad and the Mac).
 struct BackupDeviceSection: View {
     @Environment(SessionModel.self) private var session
     /// Nil while they are counted.
@@ -37,13 +37,21 @@ struct BackupDeviceSection: View {
                     }
                 }
                 .disabled(notBackedUp == nil)
-                #if os(iOS)
+                if BackupModel.offersFreeUp, backup.authorization == .authorized {
+                    // Free up space (SPEC §7.18.8, §22.1), with what it would free when that is known.
                     NavigationLink {
                         FreeUpSpaceView()
                     } label: {
-                        Label(DeviceWording.freeUpTitle, systemImage: "arrow.up.trash")
+                        LabeledContent {
+                            if let estimate = backup.freeUpEstimate, estimate.count > 0 {
+                                Text(Formatters.bytes(estimate.bytes))
+                            }
+                        } label: {
+                            Label(DeviceWording.freeUpTitle, systemImage: "arrow.up.trash")
+                        }
                     }
-                #endif
+                    .accessibilityIdentifier("freeUp.row")
+                }
                 if backup.settings.isEnabled {
                     // Device photos that are not backed up in the Library (SPEC §21.1).
                     Toggle(
@@ -182,134 +190,6 @@ struct LocalAssetThumbnail: View {
     }
 }
 
-#if os(iOS)
-    /// How far the server check has come, written from the check's task.
-    @MainActor @Observable final class FreeUpProgress {
-        var checked = 0
-        var total = 0
-    }
-
-    /// "Free up space on this iPhone" (SPEC §7.18.8): the photos and videos whose every file is on the server with the
-    /// same size, checked now, with their count and size; removed after the user's and the system's confirmation.
-    struct FreeUpSpaceView: View {
-        @Environment(SessionModel.self) private var session
-        @State private var includeRecent = false
-        @State private var candidates: [FreeUpCandidate]?
-        @State private var progress = FreeUpProgress()
-        @State private var error: String?
-        @State private var confirming = false
-        @State private var removing = false
-        @State private var removed: Int?
-
-        var totalSize: Int64 { candidates?.reduce(0) { $0 + $1.byteSize } ?? 0 }
-
-        var body: some View {
-            Form {
-                Section {
-                    if let error {
-                        Text(error).foregroundStyle(.red)
-                        Button(String(localized: "Try again", bundle: .module)) { Task { await check() } }
-                    } else if let candidates {
-                        if candidates.isEmpty {
-                            Text(DeviceWording.nothingToRemove)
-                        } else {
-                            LabeledContent(
-                                String(
-                                    localized: "Photos and videos", bundle: .module,
-                                    comment: "Free up space: label of the number of items that can be removed."),
-                                value: candidates.count.formatted())
-                            LabeledContent(
-                                String(
-                                    localized: "Space", bundle: .module,
-                                    comment: "Free up space: label of the storage the removal frees."),
-                                value: Formatters.bytes(totalSize))
-                            Button(DeviceWording.removeButton, role: .destructive) { confirming = true }
-                                .disabled(removing)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            ProgressView().controlSize(.small)
-                            VStack(alignment: .leading) {
-                                Text(
-                                    "Checking which photos are on your Nextcloud…", bundle: .module,
-                                    comment: "Free up space: shown while the server copies are checked.")
-                                if progress.total > 0 {
-                                    Text(
-                                        "Folder \(progress.checked) of \(progress.total)", bundle: .module,
-                                        comment: "Free up space: progress of the server check, in server folders."
-                                    )
-                                    .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let removed {
-                        Text(DeviceWording.removed(removed)).foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    Text(
-                        "Only photos and videos whose files are on your Nextcloud with exactly the same size are offered: original, edited version, RAW and Live Photo. Photos converted to JPEG for the backup, or only recognised by their name, stay.",
-                        bundle: .module, comment: "Footer of Free up space: which photos are offered for removal.")
-                }
-                Section {
-                    Toggle(
-                        String(
-                            localized: "Include the last 30 days", bundle: .module,
-                            comment: "Free up space: also offer photos taken in the last 30 days."),
-                        isOn: $includeRecent)
-                } footer: {
-                    Text(DeviceWording.recentFooter)
-                }
-            }
-            .formStyle(.grouped)
-            .navigationTitle(DeviceWording.freeUpTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .task(id: includeRecent) { await check() }
-            .confirmationDialog(
-                DeviceWording.confirmTitle(candidates?.count ?? 0), isPresented: $confirming, titleVisibility: .visible
-            ) {
-                Button(DeviceWording.removeButton, role: .destructive) { Task { await remove() } }
-            } message: {
-                Text(DeviceWording.confirmMessage)
-            }
-        }
-
-        func check() async {
-            error = nil
-            candidates = nil
-            progress.checked = 0
-            progress.total = 0
-            let progress = progress
-            do {
-                candidates = try await session.backup.freeUpCandidates(includeRecent: includeRecent) { checked, total in
-                    Task { @MainActor in
-                        progress.checked = checked
-                        progress.total = total
-                    }
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
-
-        func remove() async {
-            guard let candidates, !candidates.isEmpty else { return }
-            removing = true
-            defer { removing = false }
-            do {
-                // Checked against the server once more right before; the system asks again.
-                removed = try await session.backup.removeFromDevice(candidates)
-                await check()
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
-    }
-#endif
-
 /// Texts that name this device (on the main actor: they ask UIDevice, which is the main actor's).
 @MainActor enum DeviceWording {
     enum Kind { case iPhone, iPad, mac }
@@ -368,64 +248,56 @@ struct LocalAssetThumbnail: View {
         }
     }
 
-    // Free up space exists on iPhone and iPad only; the Mac texts are never shown.
+    // Free up space (SPEC §7.18.8, §22.1): iPhone, iPad and the Mac.
 
     static var freeUpTitle: String {
-        kind == .iPad
-            ? String(
-                localized: "Free up space on this iPad", bundle: .module,
-                comment: "Row and screen title: remove backed-up photos from the iPad.")
-            : String(
+        switch kind {
+        case .iPhone:
+            String(
                 localized: "Free up space on this iPhone", bundle: .module,
                 comment: "Row and screen title: remove backed-up photos from the iPhone.")
+        case .iPad:
+            String(
+                localized: "Free up space on this iPad", bundle: .module,
+                comment: "Row and screen title: remove backed-up photos from the iPad.")
+        case .mac:
+            String(
+                localized: "Free up space on this Mac", bundle: .module,
+                comment: "Row and screen title: remove backed-up photos from the Photos library of the Mac.")
+        }
     }
 
     static var removeButton: String {
-        kind == .iPad
-            ? String(
-                localized: "Remove from this iPad", bundle: .module,
-                comment: "Free up space: button that removes the backed-up photos from the iPad.")
-            : String(
+        switch kind {
+        case .iPhone:
+            String(
                 localized: "Remove from this iPhone", bundle: .module,
                 comment: "Free up space: button that removes the backed-up photos from the iPhone.")
-    }
-
-    static var nothingToRemove: String {
-        String(
-            localized: "Nothing to remove right now: no photo is both old enough and verified on your Nextcloud.", bundle: .module,
-            comment: "Free up space when no photo can be removed.")
-    }
-
-    static var recentFooter: String {
-        kind == .iPad
-            ? String(
-                localized: "Photos and videos from the last 30 days stay on this iPad unless you turn this on.", bundle: .module,
-                comment: "Footer of the Free up space option for recent photos (iPad).")
-            : String(
-                localized: "Photos and videos from the last 30 days stay on this iPhone unless you turn this on.", bundle: .module,
-                comment: "Footer of the Free up space option for recent photos (iPhone).")
+        case .iPad:
+            String(
+                localized: "Remove from this iPad", bundle: .module,
+                comment: "Free up space: button that removes the backed-up photos from the iPad.")
+        case .mac:
+            String(
+                localized: "Remove from this Mac", bundle: .module,
+                comment: "Free up space: button that removes the backed-up photos from the Photos library of the Mac.")
+        }
     }
 
     static func confirmTitle(_ count: Int) -> String {
-        kind == .iPad
-            ? String(
-                localized: "Remove \(count) photos and videos from this iPad?", bundle: .module,
-                comment: "Free up space: confirmation title (iPad). The placeholder is the number of items.")
-            : String(
+        switch kind {
+        case .iPhone:
+            String(
                 localized: "Remove \(count) photos and videos from this iPhone?", bundle: .module,
                 comment: "Free up space: confirmation title (iPhone). The placeholder is the number of items.")
-    }
-
-    static var confirmMessage: String {
-        String(
-            localized:
-                "They stay on your Nextcloud. The system asks you once more and keeps them in Recently Deleted for 30 days. If you use iCloud Photos, they are also removed from iCloud and your other devices.",
-            bundle: .module, comment: "Free up space: confirmation message.")
-    }
-
-    static func removed(_ count: Int) -> String {
-        String(
-            localized: "\(count) photos and videos were moved to Recently Deleted.", bundle: .module,
-            comment: "Free up space: result after removing. Recently Deleted is the album of Apple's Photos app.")
+        case .iPad:
+            String(
+                localized: "Remove \(count) photos and videos from this iPad?", bundle: .module,
+                comment: "Free up space: confirmation title (iPad). The placeholder is the number of items.")
+        case .mac:
+            String(
+                localized: "Remove \(count) photos and videos from this Mac?", bundle: .module,
+                comment: "Free up space: confirmation title (Mac). The placeholder is the number of items.")
+        }
     }
 }

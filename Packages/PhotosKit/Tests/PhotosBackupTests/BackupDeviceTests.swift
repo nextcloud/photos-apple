@@ -164,9 +164,12 @@ import Testing
 
     @Test func recentPhotosNeedTheUsersChoice() {
         let now = Date(timeIntervalSince1970: 100 * 86_400)
-        #expect(DeviceCleanup.isOldEnough(now.addingTimeInterval(-31 * 86_400), now: now))
-        #expect(!DeviceCleanup.isOldEnough(now.addingTimeInterval(-29 * 86_400), now: now))
-        #expect(!DeviceCleanup.isOldEnough(nil, now: now))
+        #expect(!DeviceCleanup.isRecent(now.addingTimeInterval(-31 * 86_400), period: .month, now: now))
+        #expect(DeviceCleanup.isRecent(now.addingTimeInterval(-29 * 86_400), period: .month, now: now))
+        #expect(DeviceCleanup.isRecent(nil, period: .month, now: now))
+        // Keeping nothing for its age: everything may go, also what has no date.
+        #expect(!DeviceCleanup.isRecent(now.addingTimeInterval(-60), period: .none, now: now))
+        #expect(!DeviceCleanup.isRecent(nil, period: .none, now: now))
     }
 
     final class FakeListing: ServerFileListing {
@@ -196,13 +199,15 @@ import Testing
             ],
             "/Photos/2023/01": ["/Photos/2023/01/c.jpg": ServerFileInfo(fileId: nil, size: 30)],
         ])
-        let progress = Mutex<[Int]>([])
-        let result = try await DeviceCleanup.verify(
-            [local("a", [(.photo, 10)]), local("b", [(.photo, 10)]), local("c", [(.photo, 30)])], ledger: ledger, listing: listing,
-            progress: { checked, _ in progress.withLock { $0.append(checked) } })
+        let progress = Mutex<[FreeUpProgress]>([])
+        let result = try await DeviceCleanup.plan(
+            [local("a", [(.photo, 10)]), local("b", [(.photo, 10)]), local("c", [(.photo, 30)])], ledger: ledger,
+            options: FreeUpOptions(keepRecent: .none), listing: listing, now: Date(),
+            progress: { value in progress.withLock { $0.append(value) } }
+        ).candidates
         #expect(result.map(\.localIdentifier) == ["a", "c"])
         #expect(result.map(\.byteSize) == [10, 30])
         #expect(listing.asked.withLock { $0 }.sorted() == ["/Photos/2023/01", "/Photos/2024/05"])
-        #expect(progress.withLock { $0 } == [1, 2])
+        #expect(progress.withLock { $0 } == [.listing(done: 1, total: 2), .listing(done: 2, total: 2)])
     }
 }

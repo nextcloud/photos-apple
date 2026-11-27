@@ -49,6 +49,8 @@ struct BackupStatusView: View {
     @State private var notBackedUp: [NotBackedUpAsset]?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Free up, opened from the account menu's summary (SPEC §22.1).
+    @State private var showsFreeUp = false
 
     var body: some View {
         let backup = session.backup
@@ -121,6 +123,9 @@ struct BackupStatusView: View {
                 }
             }
 
+            // Everything is on the server: the offer to free up space on this device (SPEC §22.1).
+            FreeUpOfferSection()
+
             BackupDeviceSection(notBackedUp: notBackedUp)
 
             if backup.settings.isEnabled {
@@ -161,6 +166,13 @@ struct BackupStatusView: View {
             notBackedUp = await backup.notBackedUp()
         }
         .task { if status.lastRun == nil { await backup.runNow() } }
+        .task { if backup.freeUpEstimate == nil { await backup.refreshFreeUpEstimate() } }
+        .navigationDestination(isPresented: $showsFreeUp) { FreeUpSpaceView() }
+        .onChange(of: backup.freeUpRequested, initial: true) { _, requested in
+            guard requested else { return }
+            backup.freeUpRequested = false
+            if backup.canFreeUp { showsFreeUp = true }
+        }
         // Back from Settings: the access may be another one now.
         .onChange(of: scenePhase) { _, phase in if phase == .active { backup.refreshAuthorization() } }
     }

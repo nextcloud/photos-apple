@@ -16,7 +16,9 @@ import Photos
         /// `PHOTOS_DEBUG_BACKUP_RESET=1`: the ledger is emptied first, so that the device's photos are "not backed up" again
         /// in a container an earlier run backed up from. `PHOTOS_DEBUG_BACKUP_SAMPLES=<n>`: n new photos are added to the
         /// device's library first, taken now, so that they are on no server (the simulator's own sample photos may be
-        /// there already, and are then shown once, as the server's).
+        /// there already, and are then shown once, as the server's). `PHOTOS_DEBUG_BACKUP_SINCE=<ISO 8601 date>`: only
+        /// photos taken since then are backed up, so that free up (SPEC §22.1) can only ever offer the photos a tour added
+        /// itself, never the simulator's own.
         func debugEnableBackup(folder: String) async {
             let environment = ProcessInfo.processInfo.environment
             backup.debugHold = environment["PHOTOS_DEBUG_BACKUP_HOLD"] != nil
@@ -32,6 +34,9 @@ import Photos
             if let samples = environment["PHOTOS_DEBUG_BACKUP_SAMPLES"].flatMap(Int.init), samples > 0 {
                 await backup.requestAuthorization()
                 await Self.debugAddSamplePhotos(samples)
+            }
+            if let since = environment["PHOTOS_DEBUG_BACKUP_SINCE"].flatMap({ try? Date($0, strategy: .iso8601) }) {
+                backup.update { $0.since = since }
             }
             if backup.settings.isEnabled, backup.settings.accountId == session.account.id, backup.settings.folder == folder {
                 backup.deviceLayer.refresh()
