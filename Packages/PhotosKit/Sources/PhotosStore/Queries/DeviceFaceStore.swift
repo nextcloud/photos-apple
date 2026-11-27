@@ -323,7 +323,8 @@ public struct DeviceFaceStore: Sendable {
             let source = try Row.fetchOne(db, sql: "SELECT name, syncId FROM devicePerson WHERE id = ?", arguments: [from])
             try db.execute(sql: "UPDATE deviceFace SET personId = ? WHERE personId = ?", arguments: [into, from])
             try db.execute(
-                sql: "INSERT OR IGNORE INTO deviceFaceRejection(faceId, personId) SELECT faceId, ? FROM deviceFaceRejection WHERE personId = ?",
+                sql:
+                    "INSERT OR IGNORE INTO deviceFaceRejection(faceId, personId) SELECT faceId, ? FROM deviceFaceRejection WHERE personId = ?",
                 arguments: [into, from])
             try db.execute(sql: "DELETE FROM devicePerson WHERE id = ?", arguments: [from])
             try db.execute(
@@ -372,7 +373,8 @@ public struct DeviceFaceStore: Sendable {
                         sql: "UPDATE devicePerson SET sum = ?, faceCount = faceCount + 1 WHERE id = ?",
                         arguments: [Self.data(floats: sum), personId])
                 }
-                try db.execute(sql: "UPDATE deviceFace SET personId = ?, pinned = 1, clustered = 1 WHERE id = ?", arguments: [personId, faceId])
+                try db.execute(
+                    sql: "UPDATE deviceFace SET personId = ?, pinned = 1, clustered = 1 WHERE id = ?", arguments: [personId, faceId])
                 try db.execute(sql: "DELETE FROM deviceFaceRejection WHERE faceId = ? AND personId = ?", arguments: [faceId, personId])
             }
         }
@@ -389,7 +391,8 @@ public struct DeviceFaceStore: Sendable {
     /// Removes a person: their faces are no one's and are not grouped again.
     public func deletePerson(_ personId: Int64) throws {
         try database.writer.write { db in
-            try db.execute(sql: "UPDATE deviceFace SET personId = NULL, pinned = 0, clustered = 1 WHERE personId = ?", arguments: [personId])
+            try db.execute(
+                sql: "UPDATE deviceFace SET personId = NULL, pinned = 0, clustered = 1 WHERE personId = ?", arguments: [personId])
             try db.execute(sql: "DELETE FROM devicePerson WHERE id = ?", arguments: [personId])
         }
     }
@@ -465,7 +468,9 @@ public struct DeviceFaceStore: Sendable {
     }
 
     /// Faces that are no one's and clear enough to be someone: in no shown person, newest first.
-    public func unassignedFaces(minimumPhotos: Int = FaceClustering.minimumPhotos, limit: Int = 2000) throws -> [(face: Face, item: MediaItem)] {
+    public func unassignedFaces(minimumPhotos: Int = FaceClustering.minimumPhotos, limit: Int = 2000) throws -> [(
+        face: Face, item: MediaItem
+    )] {
         let shown = try people(minimumPhotos: minimumPhotos).map(\.id)
         let marks = shown.isEmpty ? "-1" : shown.map(String.init).joined(separator: ",")
         return try faceItems(
@@ -509,12 +514,15 @@ public struct DeviceFaceStore: Sendable {
 
     public func setSyncId(_ syncId: String?, of personId: Int64) throws {
         try database.writer.write { db in
-            if let syncId { try db.execute(sql: "UPDATE devicePerson SET syncId = NULL WHERE syncId = ? AND id <> ?", arguments: [syncId, personId]) }
+            if let syncId {
+                try db.execute(sql: "UPDATE devicePerson SET syncId = NULL WHERE syncId = ? AND id <> ?", arguments: [syncId, personId])
+            }
             try db.execute(sql: "UPDATE devicePerson SET syncId = ? WHERE id = ?", arguments: [syncId, personId])
         }
     }
 
-    func faceItems(where condition: String, _ arguments: StatementArguments, limit: Int = Int.max) throws -> [(face: Face, item: MediaItem)] {
+    func faceItems(where condition: String, _ arguments: StatementArguments, limit: Int = Int.max) throws -> [(face: Face, item: MediaItem)]
+    {
         try database.writer.read { db in
             let rows = try Row.fetchAll(
                 db,
@@ -591,11 +599,13 @@ public struct DeviceFaceStore: Sendable {
 
     static func removeMirror(_ db: Database) throws {
         try db.execute(sql: "DELETE FROM personItem WHERE detectionId < 0")
-        let written = try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: [mirrorKey])
+        let written =
+            try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: [mirrorKey])
             .flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
         for name in written {
             try db.execute(
-                sql: "DELETE FROM person WHERE name = ? AND NOT EXISTS (SELECT 1 FROM personItem WHERE person = ?)", arguments: [name, name])
+                sql: "DELETE FROM person WHERE name = ? AND NOT EXISTS (SELECT 1 FROM personItem WHERE person = ?)",
+                arguments: [name, name])
         }
         try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: [mirrorKey])
     }
