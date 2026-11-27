@@ -76,6 +76,14 @@ public final class AccountServices: Sendable {
         let edits = EditLibrary(dav: dav, file: layout.accountDirectory(account.id).appending(path: "Edits/recipes.json"))
         self.edits = edits
         syncedSettings = SyncedSettingsFiles(dav: dav, directory: layout.accountDirectory(account.id).appending(path: "SyncedSettings"))
+        // Recipes of photos deleted for good go after a full reconcile (SPEC §22.5.3).
+        Task { [api, library] in
+            await sync.setAfterFullReconcile { [edits] in
+                guard let canary = try? library.canaryFileId() else { return }
+                await edits.removeOrphans(
+                    probe: ServerOrphanProbe(api: api, canary: canary), indexed: { try library.indexedFileIds(among: $0) })
+            }
+        }
         images.setEditProvider { [edits] fileId in edits.recipe(for: fileId) }
         // One cache key per photo (SPEC §18.1.1): covers and memories asked for without an ETag use the grid's files.
         images.setEtagProvider { [library] fileId in try? library.etag(of: fileId) }

@@ -948,8 +948,7 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   Loop/Bounce playback and video/GIF export built, not run (AVFoundation is not exercised by the unit tests).
 - 🟡 Undo history (§16.3.4): history, undo of an older entry, edits replaced later, bounded size unit-tested
   (`UndoHistoryTests`); panel, Edit ▸ Undo History… (⌥⌘Z) and the More menu items built, not run in the app.
-- ⬜ Orphaned recipes of photos deleted for good are not cleaned up (plan: on a full reconcile, remove recipes whose file
-  id is neither in the files nor in the trash bin, after the trash retention).
+- 🟡 Orphaned recipes of photos deleted for good are removed after a full reconcile (round 12, §22.5.3; see M13).
 - ⬜ Aspect-ratio grid tiles keep the original's shape for cropped photos (plan: store the rendition's aspect with the
   recipe and let `GridMedia` use it).
 
@@ -1033,7 +1032,8 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   (`27-shareplay-without-call`). ⬜ device D16.5: not run with real participants: needs two devices in a FaceTime call and the Group
   Activities capability in the provisioning profiles (entitlement `com.apple.developer.group-session` added for the app
   and the TV app).
-- ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`), syncing styles/birthdays between devices (`.nextcloud-photos/`),
+- 🟡 Film styles per memory and the birthdays given in Through the Years follow the user (round 12, §22.5.2).
+- ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`),
   inline clips on Apple TV, a spatial SharePlay template on Vision Pro.
 
 ### §16.7 Sharing and family: postcards, family library, weekly prompts, Lock Screen shuffle album
@@ -1061,8 +1061,8 @@ Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2
   "N removed photos are still on this device"). Plan, hidden
   people, edits, declined/confirmed deletion and turning off unit-tested with a fake library. ⬜ device D16.6: Photo Shuffle on a real
   Lock Screen needs a device.
-- ⬜ Family settings and dismissed suggestions are per device; syncing them through `.nextcloud-photos/` is left for
-  later (plan: a `family.json` with the folder, members and dismissed file ids, merged as a union).
+- 🟡 Family settings and decisions (dismissed, moved, copied) are shared by the user's devices through
+  `.nextcloud-photos/family.json` (round 12, §22.5.1; see M13).
 - ⬜ The Lock Screen album syncs only while the app runs (after syncs); a background refresh task would keep it current
   while the app is closed.
 
@@ -1954,7 +1954,21 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
 - ⬜ Round 12.
 
 ### §22.5 Settings synced between devices, orphaned edit recipes
-- ⬜ Round 12.
+- 🟡 **Synced settings files** (§22.5.1): `SyncedSettingsDocument`/`SyncedSettingsStore`, one JSON file per kind in
+  `/.nextcloud-photos/`, last writer wins per key, tombstones, values lost in a race kept in `replaced` ("never lose a
+  name"), ETag-safe writes with merge on 412, one PROPFIND of the folder per sync. Merge rules, two devices through an
+  in-memory WebDAV server, offline persistence and the one-request sync unit-tested (`SyncedSettingsDocumentTests`,
+  `SyncedSettingsStoreTests`). `people.json` is the store the people feature (§22.3) writes into.
+- 🟡 **App settings follow the user** (§22.5.2): `SyncedDefaults` with the catalogue of 22 settings (library display,
+  appearance, slideshow, film choices per memory, Through the Years birthdays per account, culling, Apply Edits to the
+  File, naming patterns, album sort orders), first sync lets the account win, per-entry merge of film choices and
+  birthdays, removals, the switch Settings › Advanced › Sync settings through Nextcloud: unit-tested
+  (`SyncedDefaultsTests`, `SyncedSettingsCatalogTests` keeps the catalogue on the screens' keys).
+- 🟡 **Family library** (§16.7.2) options and decisions through `family.json` (`FamilySettingsSyncTests`).
+- 🟡 **Orphaned edit recipes** (§22.5.3): rules (index, SEARCH over the whole tree, trash bin also inside trashed folders,
+  two looks 30 days apart, canary, If-Match) unit-tested (`OrphanRecipesTests`, `OrphanRecipesStoreTests` incl. the
+  hook after a full reconcile); the server probe ✅ against 8089 (`OrphanProbeIntegrationTests`: a moved file found, a
+  trashed file and a file in a trashed folder found in the trash bin, a missing canary refused).
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

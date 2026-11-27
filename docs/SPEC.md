@@ -370,7 +370,7 @@ Every view has: first-load skeleton, empty state with a single helpful action (e
 
 ### 6.4 Photo grid
 
-- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting is per device (Settings › On this device › Square tiles, View ▸ Square Tiles ⌥⌘S) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
+- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting follows the user to their other devices since round 12 (Settings › Library display › Square tiles, View ▸ Square Tiles ⌥⌘S; §22.5.2) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
 - Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and View ▸ Zoom In/Out (the toolbar slider was removed in M10, §19.2). Map the density to the server config `gridDensity` (small/medium/large) where available.
 - Section headers: **month** (sticky) and **day** headers (local calendar day of the capture time, "Today", "Yesterday", weekday names within the last week), each with a select-all checkbox while selecting.
 - **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync). *Decided (simulator pass):* on iPhone, iPad and Vision Pro it is not UIKit's section index (which lists every year in a column over the photos, into the tab bar) but the Mac's scrubber: it runs between the bars, appears while the grid scrolls and fades out like Photos' scroll indicator, can be grabbed at the edge only while shown, leaves out year labels that do not fit (the newest and oldest stay), draws each label on a background of its own, and stays for VoiceOver as an adjustable element (a year per swipe).
@@ -1452,7 +1452,7 @@ Zermatt"), computed on the device from the local index (`LibraryMoments`, Photos
 - *Cost.* Built after each sync (and when the day or the excluded folders change) off the main actor from five columns
   of every visible item plus the named people and the label rows that contain an activity word: 100 000 items in
   0.22 s in a debug build (unit test budget 3 s). Titles appear in place without a relayout.
-- Settings › On this device › "Name moments" (on by default).
+- Settings › Library display › "Name moments" (on by default).
 
 **Scrub to peek.** Videos, Live Photos and stacks can be looked into without opening them.
 - iPhone, iPad, Vision Pro: hold a finger on the tile for 0.2 s, then slide sideways: the tile shows frames of the
@@ -1481,7 +1481,7 @@ is room; a fixed band of 184 pt on iPhone, 220 pt on iPad, 210 pt on the Mac (no
 on the leading third back (mirrored right to left); after the last photo the next card comes to the front. The title
 opens the memory, the play button its film; with the pointer, chevrons appear. VoiceOver: one element per card (title,
 dates, count, "Photo 2 of 6"), swipe up/down steps through the photos, double-tap opens; no auto-advance while
-VoiceOver runs. The card's context menu: Play Slideshow, Show as Strip, Hide Memories. Settings › On this device ›
+VoiceOver runs. The card's context menu: Play Slideshow, Show as Strip, Hide Memories. Settings › Library display ›
 Memories: Stories or Strip (the strip's context menu has Show as Stories).
 
 ### 16.2 Search: command palette, natural-language search with chips, photo descriptions [search]
@@ -1595,7 +1595,8 @@ top of the original. The original file is never changed by Done.
   Files app hides hidden files by default, the desktop client does not sync hidden files by default, and the Photos web
   app lists only pictures and videos (other clients show the original). A photo **shared with the user** is edited in the
   user's own folder: the edit is that user's view of it. **Deleting** a photo leaves its recipe (a few hundred bytes), so a
-  photo restored from the trash bin comes back with its edit.
+  photo restored from the trash bin comes back with its edit; recipes of photos deleted for good are removed after a
+  full reconcile (§22.5.3).
 - **Format** (`EditRecipe`): `{"format": "nextcloud-photos-edit", "version": 1, "updatedAt": …, "original": {name, etag,
   width, height}, "geometry": {rotation, straighten, flipped, aspect, aspectLocked, crop{x,y,width,height}},
   "adjustments": {…}, "filter": …, "raw": {…}, "live": {effect, keyFrameTime}}`. Only values that differ from
@@ -3830,7 +3831,26 @@ dismissed suggestions are now (`family.json`); People names with §22.3 (`people
 
 #### 22.5.3 Orphaned edit recipes
 
-_To be written._
+A recipe stays when its photo is deleted, so a photo restored from the trash bin comes back with its edit (§16.3.1).
+Recipes of photos that are **gone for good** are removed (`EditLibrary.removeOrphans`, rules in `OrphanRecipes`):
+
+- **When**: at the end of a completed full reconcile (`SyncEngine` runs the hook set by `AccountServices`, in the
+  background, not holding the sync up), at most once a day.
+- **Which**: only recipes the server has and this device has nothing pending for, whose photo is
+  1. not in the library's index, and
+  2. not a file anywhere in the user's files: one SEARCH by file id over the whole tree (`/files/<user>`, at most 89
+     ids each) — a photo **moved** out of the timeline folders, into a shared, group or external folder keeps its file id
+     and its recipe, and
+  3. not in the **trash bin**, also not inside a trashed folder (`PROPFIND Depth: infinity` of the trash bin; folder by
+     folder, at most 300, where a server refuses that), and
+  4. found so at two looks at least **30 days** apart (the first look marks it; a photo restored or found in between
+     loses the mark and starts over).
+- **Proof that the server can see**: every SEARCH also asks for a file the index has (the canary); when the answer
+  lacks it, or any request fails, or the trash bin is too large to read, nothing is removed and the marks stay.
+- **Removing**: `DELETE` with `If-Match` of the version this device knows, so a recipe another device changed in the
+  meantime stays; then the recipe is dropped on the device, the edited tiles show the original (nothing to show).
+- *Decision*: no shorter path through Nextcloud's trash retention setting (not readable by the user): the trash bin
+  check plus the 30 days cover `trashbin_retention_obligation` "auto" (30 days) and longer retention alike.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
