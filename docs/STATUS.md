@@ -1385,7 +1385,7 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
 - ✅ iPad (iOS 27.2 simulator, iPad Pro 13-inch, landscape; `IPadTourTests.testSidebarDestinations` passes,
   `ipad-dest-*.png`): Browse (Favorites, Memories, Places), Albums (All albums, Shared with "Shared with you" on top),
   Utilities with Clean up, Insights, Stickers, Backup; every row opens its screen. `TabViewCustomization` per device
-  (`@AppStorage`), Restore Default Sidebar in the account header's menu 🟡 (built, not opened). Vision Pro 🟡 (built).
+  (`@AppStorage`), Restore Default Sidebar in the menu of the account row at the bottom of the sidebar 🟡 (built, not opened). Vision Pro 🟡 (built).
   The top albums are not listed in the iPad sidebar (tabs need one selection type; album tabs would leave stale ids in the
   customization) — left for later.
 - 🟡 Clean up row: routes to Duplicates / Free up server space until `CleanUpScreen(initialSection:)` (§19.3, its own branch)
