@@ -63,6 +63,10 @@ public final class SessionModel {
     /// Running work of this session; a task removes itself when it ends, so the collection does not grow.
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var foregroundRefresh: UUID?
+    /// Syncs every few minutes while a window can be seen (SPEC §5.4.4); not one of `tasks`, which end by themselves.
+    @ObservationIgnored private var periodicSync: Task<Void, Never>?
+    /// When a sync last asked for the walk an opened app makes (`ReconcileRequest.opened`).
+    @ObservationIgnored private var openedSyncAt: Date?
     /// When the capabilities were last compared with `features.fingerprint` (foreground check, at most every 5 minutes).
     @ObservationIgnored private var fingerprintCheckedAt: Date?
     /// A detection asked for by `featureUnavailable(_:)` is running or ran recently.
@@ -134,12 +138,31 @@ public final class SessionModel {
                 await MainActor.run { self?.backup.isPassRunning ?? false }
             }
             await self?.refreshFeatures()
-            await self?.syncNow()
+            // The launch: what was deleted or moved elsewhere since the last walk goes now, not after the interval.
+            await self?.syncNow(reconcile: .opened)
             await services.outbox.kick()
             // Stopped again by `Outbox.shutdown()`, which `shutdown()` reaches through the services.
             await services.outbox.startNetworkMonitoring()
             await self?.offline?.syncPins()
             if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
+        }
+        startPeriodicSync()
+    }
+
+    /// How often the library syncs while a window can be seen (SPEC §5.4.4).
+    static let periodicSyncInterval: Duration = .seconds(300)
+
+    /// Syncs every `periodicSyncInterval` while a window can be seen. A sync that finds nothing changed is a PROPFIND of
+    /// the root folders and the favourites SEARCH; deletes and moves made elsewhere arrive with the reconciliation that a
+    /// changed root owes (at most every `SyncEngine.reconcileInterval`).
+    private func startPeriodicSync() {
+        periodicSync?.cancel()
+        periodicSync = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.periodicSyncInterval)
+                guard let self, !Task.isCancelled, !self.isStopped else { return }
+                if ForegroundState.shared.isVisible { await self.syncNow() }
+            }
         }
     }
 
@@ -161,6 +184,7 @@ public final class SessionModel {
     func stop() {
         isStopped = true
         tasks.values.forEach { $0.cancel() }
+        periodicSync?.cancel()
         organize?.stop()
         // Nothing of this account can be undone any more (account switch, removal).
         clearUndo()
@@ -175,6 +199,8 @@ public final class SessionModel {
         stop()
         for task in Array(tasks.values) { await task.value }
         tasks = [:]
+        await periodicSync?.value
+        periodicSync = nil
         await transfers.shutdown()
         await offline?.shutdown()
         await smartOffline?.shutdown()
@@ -267,10 +293,11 @@ public final class SessionModel {
         await syncNow(reconcile: forceReconcile ? .now : .ifDue)
     }
 
-    /// Syncs; `.refresh` is pull-to-refresh (reconciles only if the last reconciliation is a while ago), `.now` is
-    /// "Sync now".
+    /// Syncs; `.opened` is the launch and a return to the app, `.refresh` is pull-to-refresh (reconciles only if the last
+    /// reconciliation is a while ago or something changed), `.now` is "Sync now".
     public func syncNow(reconcile: ReconcileRequest) async {
         guard let services, !isStopped else { return }
+        if reconcile >= .opened { openedSyncAt = Date() }
         await services.sync.sync(reconcile: reconcile)
         // Photos without a server preview are asked for again after a sync, with a backoff (SPEC §20.1).
         services.images.librarySynced()
@@ -291,8 +318,15 @@ public final class SessionModel {
         foregroundRefresh = track { [weak self] in
             guard let self else { return }
             await self.refreshFeaturesIfNeeded()
-            await self.syncNow()
+            await self.syncNow(reconcile: self.foregroundReconcile())
         }
+    }
+
+    /// Coming back to the app is opening it, as the launch is (`ReconcileRequest.opened`), unless that was asked for a
+    /// moment ago: on the Mac the app comes to the front whenever one of its windows is clicked.
+    func foregroundReconcile(now: Date = Date()) -> ReconcileRequest {
+        guard let openedSyncAt else { return .opened }
+        return now.timeIntervalSince(openedSyncAt) >= Self.periodicSyncInterval / .seconds(1) ? .opened : .ifDue
     }
 
     public func refreshFailedOperations() async {

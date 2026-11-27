@@ -30,7 +30,13 @@ public enum ReconcileRequest: Int, Sendable, Comparable {
     /// Only when one is due: after a change below a source folder, at most every `SyncEngine.reconcileInterval` (longer
     /// for large libraries) and not while a backup uploads; at the latest a day after the last one.
     case ifDue
-    /// Pull to refresh: also when no root ETag changed, but not more often than every `SyncEngine.reconcileInterval`.
+    /// The app was opened (launched, or back in front after a while): after a change below a source folder at once,
+    /// without the interval. Deletes and moves made elsewhere then show up in the first sync after the launch; the
+    /// interval hid them for up to ten minutes when the app had been open shortly before. Nothing is walked when no
+    /// root ETag changed, and the walk is resumable like any other.
+    case opened
+    /// Pull to refresh: like `opened`, and also when no root ETag changed, but then not more often than every
+    /// `SyncEngine.reconcileInterval`.
     case refresh
     /// "Sync now": at once.
     case now
@@ -269,7 +275,8 @@ public actor SyncEngine {
         }
     }
 
-    /// Whether a sync that was not told to reconcile at once (`.ifDue`, `.refresh`) walks through the library now.
+    /// Whether a sync that was not told to reconcile at once (`.ifDue`, `.opened`, `.refresh`) walks through the library
+    /// now. `owed`: a source folder changed since the last walk (now or in an earlier sync).
     func reconcileDue(_ request: ReconcileRequest, owed: Bool) async throws -> Bool {
         let now = Date().timeIntervalSince1970
         let sinceReconcile = now - (try database.syncValue(Key.lastReconcile).flatMap(Double.init) ?? 0)
@@ -283,7 +290,8 @@ public actor SyncEngine {
         let due: Bool
         switch request {
         case .now: return true
-        case .refresh: due = walking || confirming || overdue || sinceReconcile >= reconcileInterval
+        case .refresh: due = walking || confirming || overdue || owed || sinceReconcile >= reconcileInterval
+        case .opened: due = walking || confirming || overdue || owed
         case .ifDue:
             due = try walking || confirming || overdue || (owed && sinceReconcile >= interval(forIndexOf: library.count()))
         }

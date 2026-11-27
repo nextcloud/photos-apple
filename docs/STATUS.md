@@ -102,7 +102,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   everything). Reconciliation is resumable (unseen rows in `reconcileUnseen`, cursor in the sync state; an interrupted
   walk goes on from its page) and streamed page by page; a changed root ETag leads to one at most every 10 minutes,
   longer for large libraries (150 000 items: one hour), not while a backup pass uploads (unless a day has passed);
-  pull-to-refresh reconciles only when the last walk is 10 minutes old, "Sync now" at once. Small removals are checked
+  but the first sync after a launch or a return to the app (`ReconcileRequest.opened`, at most every 5 minutes) and
+  pull-to-refresh walk at once when a root changed (2026-11-27: a Mac build kept the photos of a folder deleted on the
+  server through four launches in eight minutes — the walk the change owed waited for the 10-minute interval since the
+  walk of a launch shortly before; ✅ `SyncSafetyTests.folderDeletedSoonAfterAWalkIsGoneAtTheNextLaunch`,
+  `IntegrationSyncTests.folderDeletedElsewhereIsGoneAfterTheNextLaunch` and the Mac app against the 8089 server);
+  pull-to-refresh without a change reconciles only when the last walk is 10 minutes old, "Sync now" at once. While a
+  window can be seen (on the Mac also behind other apps) the library syncs every 5 minutes (SPEC §5.4.4; before, it
+  synced only at launch, on activation and on push). Small removals are checked
   by id before they are applied. Recent uploads are read again at checkpoints (10 min, 1 h, 6 h, 24 h, 47 h after the
   upload) while their place is unknown, not on every sync. Opening an album asks for the album alone and reads its
   content only when count, last photo, date range or last-modified changed (or after a day); the content is written as
