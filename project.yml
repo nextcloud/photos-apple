@@ -33,6 +33,9 @@ targets:
     sources:
       - path: App/Shared
       - path: App/Resources
+      # The app icon (Icon Composer): Xcode renders its default, dark, clear and tinted looks for iOS, iPadOS and macOS.
+      - path: icon/Photos App Icon.icon
+        destinationFilters: [iOS, macOS]
     dependencies:
       - package: PhotosKit
         product: PhotosAppUI
@@ -60,7 +63,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID)
         PRODUCT_NAME: Nextcloud Photos
         TARGETED_DEVICE_FAMILY: "1,2,7"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: Photos App Icon
+        # Vision Pro: Icon Composer has no visionOS look; a three-layer image stack from the same artwork
+        # (scripts/make-icon-layers.swift).
+        ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xros*]: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xrsimulator*]: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: Nextcloud Photos
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
@@ -382,6 +389,8 @@ targets:
     sources:
       - path: App/Watch
         excludes: ["*.entitlements", "Info.plist"]
+      # The same Icon Composer file as the iPhone app: its watchOS (circle) look.
+      - path: icon/Photos App Icon.icon
     dependencies:
       - package: PhotosKit
         product: PhotosModel
@@ -392,7 +401,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(PHOTOS_BUNDLE_ID).watchkitapp
         PRODUCT_NAME: Nextcloud Photos
         TARGETED_DEVICE_FAMILY: "4"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: Photos App Icon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SKIP_INSTALL: YES
         PHOTOS_ENTITLEMENTS_NO: ""

@@ -71,7 +71,7 @@ public struct NextcloudLogo: View {
     }
 }
 
-/// The Nextcloud Photos app icon (the Photos server app's icon, white on Nextcloud blue).
+/// The Nextcloud Photos app icon as in `icon/Photos App Icon.icon`: the white glyph on Nextcloud blue, lighter at the top.
 public struct PhotosAppIcon: View {
     public init() {}
 
@@ -82,11 +82,13 @@ public struct PhotosAppIcon: View {
                 RoundedRectangle(cornerRadius: side * 0.225, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Design.accent, Color(red: 28 / 255, green: 175 / 255, blue: 1)], startPoint: .topLeading,
-                            endPoint: .bottomTrailing))
+                            stops: [
+                                .init(color: Color(.displayP3, red: 0.1098, green: 0.6863, blue: 1), location: 0),
+                                .init(color: Color(red: 0, green: 130 / 255, blue: 201 / 255), location: 0.7),
+                            ], startPoint: .top, endPoint: .bottom))
                 SVGShape.photosIcon
                     .fill(.white)
-                    .padding(side * 0.12)
+                    .padding(side * 0.13)
             }
             .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
