@@ -11,7 +11,8 @@ import PhotosNetworking
 /// A recipe stays when its photo is deleted, so that restoring it from the trash bin brings its edit back (§16.3.1).
 /// After a completed full reconcile the recipes are looked at (at most once a day) and one is removed only when all of
 /// this holds:
-/// 1. its photo is not in the library's index,
+/// 1. its photo is not in the library's index nor in an album the app knows (photos of albums shared with the user are
+///    not in the user's files, so the SEARCH below would not find them),
 /// 2. the server knows no file with its file id anywhere in the user's files (a SEARCH over the whole tree, so a photo
 ///    moved out of the timeline folders, into a shared or a group folder keeps its recipe),
 /// 3. the file id is not in the trash bin (also not inside a trashed folder),
@@ -132,14 +133,15 @@ public struct ServerOrphanProbe: OrphanRecipeProbe {
 }
 
 extension LibraryStore {
-    /// Which of `fileIds` the index has.
-    public func indexedFileIds(among fileIds: Set<FileID>) throws -> Set<FileID> {
+    /// Which of `fileIds` the index or an album the app knows has (own albums, albums shared with the user).
+    public func knownFileIds(among fileIds: Set<FileID>) throws -> Set<FileID> {
         guard !fileIds.isEmpty else { return [] }
         return try database.writer.read { db in
             var result: Set<FileID> = []
             for chunk in Array(fileIds).chunked(500) {
                 let list = chunk.map { String($0) }.joined(separator: ",")
                 result.formUnion(try FileID.fetchAll(db, sql: "SELECT fileId FROM media WHERE fileId IN (\(list))"))
+                result.formUnion(try FileID.fetchAll(db, sql: "SELECT fileId FROM albumItem WHERE fileId IN (\(list))"))
             }
             return result
         }

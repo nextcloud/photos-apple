@@ -1959,15 +1959,18 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   name"), ETag-safe writes with merge on 412, one PROPFIND of the folder per sync. Merge rules, two devices through an
   in-memory WebDAV server, offline persistence and the one-request sync unit-tested (`SyncedSettingsDocumentTests`,
   `SyncedSettingsStoreTests`). `people.json` is the store the people feature (§22.3) writes into.
-- 🟡 **App settings follow the user** (§22.5.2): `SyncedDefaults` with the catalogue of 22 settings (library display,
+- ✅ **App settings follow the user** (§22.5.2): `SyncedDefaults` with the catalogue of 22 settings (library display,
   appearance, slideshow, film choices per memory, Through the Years birthdays per account, culling, Apply Edits to the
   File, naming patterns, album sort orders), first sync lets the account win, per-entry merge of film choices and
-  birthdays, removals, the switch Settings › Advanced › Sync settings through Nextcloud: unit-tested
-  (`SyncedDefaultsTests`, `SyncedSettingsCatalogTests` keeps the catalogue on the screens' keys).
+  birthdays, removals, launch arguments kept local, the switch Settings › Advanced › Sync settings through Nextcloud:
+  unit-tested (`SyncedDefaultsTests`, `SyncedSettingsCatalogTests` keeps the catalogue on the screens' keys). ✅ Run in
+  the iOS 27.2 simulator against 8089 (`UITests/SyncedSettingsTourTests`): "Strip" written into `settings.json` by
+  "another device" was shown in Settings › Library display, Square tiles turned off in the app reached the file within
+  seconds, both put back from the app (`ios-fix-shots/r12-tidy/01…03`, `settings-json-after-tour.json`).
 - 🟡 **Family library** (§16.7.2) options and decisions through `family.json` (`FamilySettingsSyncTests`).
 - 🟡 **Orphaned edit recipes** (§22.5.3): rules (index, SEARCH over the whole tree, trash bin also inside trashed folders,
   two looks 30 days apart, canary, If-Match) unit-tested (`OrphanRecipesTests`, `OrphanRecipesStoreTests` incl. the
-  hook after a full reconcile); the server probe ✅ against 8089 (`OrphanProbeIntegrationTests`: a moved file found, a
+  hook after a full reconcile, photos of albums shared with the user kept); the server probe ✅ against 8089 (`OrphanProbeIntegrationTests`: a moved file found, a
   trashed file and a file in a trashed folder found in the trash bin, a missing canary refused).
 
 ## Prerequisites from SPEC §14 still open

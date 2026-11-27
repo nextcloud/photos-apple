@@ -81,7 +81,7 @@ public final class AccountServices: Sendable {
             await sync.setAfterFullReconcile { [edits] in
                 guard let canary = try? library.canaryFileId() else { return }
                 await edits.removeOrphans(
-                    probe: ServerOrphanProbe(api: api, canary: canary), indexed: { try library.indexedFileIds(among: $0) })
+                    probe: ServerOrphanProbe(api: api, canary: canary), indexed: { try library.knownFileIds(among: $0) })
             }
         }
         images.setEditProvider { [edits] fileId in edits.recipe(for: fileId) }

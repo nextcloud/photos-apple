@@ -3811,9 +3811,11 @@ user's own Nextcloud, in the hidden folder `/.nextcloud-photos/` (§16.4), **one
 
 #### 22.5.2 Which settings follow the user
 
-Settings › Advanced › **Same Settings on All Devices** (on by default; per device) syncs these through `settings.json`
-(`SyncedDefaults`: the device's settings are compared with what was last synced, changes are stamped when noticed;
-on the first sync of a device its existing settings count as old, so the account's settings win and only fill in):
+Settings › Advanced › Everywhere › **Sync settings through Nextcloud** (on by default; a setting of each device) syncs
+these through `settings.json` (`SyncedDefaults`: the device's settings are compared with what was last synced, changes
+are stamped when noticed, at once while the app runs; on the first sync of a device its existing settings count as
+old, so the account's settings win and only fill in; a setting given as a launch argument is neither sent nor
+replaced). The section "On this device" of Settings › Library is now "Library display":
 
 | Synced (follow the user) | Stay on the device (and why) |
 |---|---|
@@ -3837,7 +3839,8 @@ Recipes of photos that are **gone for good** are removed (`EditLibrary.removeOrp
 - **When**: at the end of a completed full reconcile (`SyncEngine` runs the hook set by `AccountServices`, in the
   background, not holding the sync up), at most once a day.
 - **Which**: only recipes the server has and this device has nothing pending for, whose photo is
-  1. not in the library's index, and
+  1. not in the library's index nor in an album the app knows (photos of albums shared with the user are not in the
+     user's files, so the SEARCH below cannot see them; their recipes stay), and
   2. not a file anywhere in the user's files: one SEARCH by file id over the whole tree (`/files/<user>`, at most 89
      ids each) — a photo **moved** out of the timeline folders, into a shared, group or external folder keeps its file id
      and its recipe, and

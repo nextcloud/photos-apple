@@ -53,8 +53,17 @@ import Testing
                 fileId: 6, path: "/Photos/b.jpg", name: "b.jpg", mimeType: "image/jpeg", kind: .image, etag: "b",
                 modifiedAt: t0.addingTimeInterval(10)),
         ])
-        #expect(try library.indexedFileIds(among: [5, 7, 8]) == [5])
-        #expect(try library.indexedFileIds(among: []) == [])
+        // 7 is a photo of an album shared with the user: not in the user's files, but known.
+        let collections = CollectionStore(database: database)
+        let album = Album(kind: .shared, name: "From Bob")
+        try collections.upsertAlbum(album)
+        try database.writer.write { db in
+            try db.execute(
+                sql: "INSERT INTO albumItem(albumId, fileId, childName, origin, position) VALUES (?, 7, 'x.jpg', 'user', 0)",
+                arguments: [album.id])
+        }
+        #expect(try library.knownFileIds(among: [5, 7, 8]) == [5, 7])
+        #expect(try library.knownFileIds(among: []) == [])
         #expect(try library.canaryFileId() == 6)
     }
 

@@ -49,8 +49,29 @@ final class SyncedSettingsTourTests: XCTestCase {
             .appending(path: "settings.json")
     }
 
-    func request(_ method: String, _ url: URL, body: Data? = nil) async throws -> (Data, Int) {
-        guard let server else { throw XCTSkip("No test server") }
+    /// A request to the test server, waited for on the run loop (the test itself stays synchronous, as the other tours).
+    func send(_ method: String, _ url: URL, body: Data? = nil) -> (data: Data, status: Int)? {
+        guard let server else { return nil }
+        let box = ResultBox()
+        Task.detached { box.value = try? await Self.request(method, url, body: body, server: server) }
+        let deadline = Date().addingTimeInterval(30)
+        while box.value == nil && Date() < deadline { pause(0.1) }
+        return box.value
+    }
+
+    final class ResultBox: @unchecked Sendable {
+        // Unchecked: the stored answer is only touched under the lock.
+        private let lock = NSLock()
+        private var stored: (data: Data, status: Int)?
+        var value: (data: Data, status: Int)? {
+            get { lock.withLock { stored } }
+            set { lock.withLock { stored = newValue } }
+        }
+    }
+
+    nonisolated static func request(
+        _ method: String, _ url: URL, body: Data?, server: (url: URL, user: String, password: String)
+    ) async throws -> (data: Data, status: Int) {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
@@ -79,7 +100,7 @@ final class SyncedSettingsTourTests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    func testSettingsFollowTheUser() async throws {
+    func testSettingsFollowTheUser() throws {
         guard let settingsFile else { throw XCTSkip("No test server") }
         // "Another device" chose memories as a strip, a moment ago.
         let stamp = Date().addingTimeInterval(-5).formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
@@ -87,8 +108,8 @@ final class SyncedSettingsTourTests: XCTestCase {
             {"format": "nextcloud-photos-settings", "version": 1, "kind": "settings",
              "entries": {"memoriesStyle": {"value": "strip", "modifiedAt": "\(stamp)"}}}
             """
-        _ = try await request("MKCOL", settingsFile.deletingLastPathComponent())
-        let (_, put) = try await request("PUT", settingsFile, body: Data(document.utf8))
+        _ = send("MKCOL", settingsFile.deletingLastPathComponent())
+        let put = send("PUT", settingsFile, body: Data(document.utf8))?.status ?? 0
         XCTAssertTrue((200..<300).contains(put), "settings.json not written (\(put))")
 
         app.launch()
@@ -110,7 +131,7 @@ final class SyncedSettingsTourTests: XCTestCase {
         let wasOn = (square.value as? String) == "1"
         if wasOn { square.switches.firstMatch.tap() }
         shot("02-square-tiles-off")
-        let sent = await fileSays { $0.contains("\"squareTiles\"") && $0.contains("\"value\" : false") }
+        let sent = fileSays { $0.contains("\"squareTiles\"") && $0.contains("\"value\" : false") }
         XCTAssertTrue(sent, "Square tiles off did not reach settings.json")
 
         // Back as they were (the tours after this one expect square tiles and story cards): changed here, sent.
@@ -121,28 +142,30 @@ final class SyncedSettingsTourTests: XCTestCase {
             let stories = app.buttons["Stories"].firstMatch
             if stories.waitForExistence(timeout: 5) { stories.tap() }
         }
-        let restored = await fileSays { !$0.contains("\"value\" : false") && $0.contains("\"stories\"") }
+        let restored = fileSays { !$0.contains("\"value\" : false") && $0.contains("\"stories\"") }
         XCTAssertTrue(restored, "The settings were not put back")
 
         // The switch of this device, in Settings › Advanced.
-        app.buttons["settings-done"].firstMatch.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         pause(1)
-        app.openSettings(page: "advanced")
+        let advanced = app.buttons["settings-page-advanced"].firstMatch
+        for _ in 0..<4 where !(advanced.exists && advanced.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(advanced.waitForExistence(timeout: 5), "No Advanced page")
+        advanced.tap()
+        pause(1)
         let sync = app.switches["Sync settings through Nextcloud"].firstMatch
         for _ in 0..<6 where !(sync.exists && sync.isHittable) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(sync.waitForExistence(timeout: 5), "No Sync settings switch")
         XCTAssertEqual(sync.value as? String, "1")
         shot("03-sync-settings-switch")
-
     }
 
     /// Waits (up to 20 s) until the server's settings.json satisfies `condition`.
-    func fileSays(_ condition: (String) -> Bool) async -> Bool {
+    func fileSays(_ condition: (String) -> Bool) -> Bool {
         guard let settingsFile else { return false }
         for _ in 0..<20 {
             pause(1)
-            if let (data, status) = try? await request("GET", settingsFile), status == 200, condition(String(decoding: data, as: UTF8.self))
-            {
+            if let answer = send("GET", settingsFile), answer.status == 200, condition(String(decoding: answer.data, as: UTF8.self)) {
                 return true
             }
         }
