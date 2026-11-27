@@ -65,6 +65,8 @@ public final class SessionModel {
     @ObservationIgnored private var foregroundRefresh: UUID?
     /// Syncs every few minutes while a window can be seen (SPEC §5.4.4); not one of `tasks`, which end by themselves.
     @ObservationIgnored private var periodicSync: Task<Void, Never>?
+    /// The server's `notify_push` connection, when it has one (`SessionModel+NotifyPush.swift`).
+    @ObservationIgnored var notifyPush = NotifyPushState()
     /// When a sync last asked for the walk an opened app makes (`ReconcileRequest.opened`).
     @ObservationIgnored private var openedSyncAt: Date?
     /// When the capabilities were last compared with `features.fingerprint` (foreground check, at most every 5 minutes).
@@ -147,6 +149,7 @@ public final class SessionModel {
             if self?.backup.settings.isEnabled == true { await self?.backup.runNow() }
         }
         startPeriodicSync()
+        startNotifyPush()
     }
 
     /// How often the library syncs while a window can be seen (SPEC §5.4.4).
@@ -185,6 +188,7 @@ public final class SessionModel {
         isStopped = true
         tasks.values.forEach { $0.cancel() }
         periodicSync?.cancel()
+        stopNotifyPush()
         organize?.stop()
         // Nothing of this account can be undone any more (account switch, removal).
         clearUndo()
@@ -314,6 +318,7 @@ public final class SessionModel {
     public func didBecomeActive() {
         guard services != nil, !isStopped else { return }
         // One foreground refresh at a time: coming to the foreground again while it runs adds nothing.
+        resumeNotifyPushIfDropped()
         if let foregroundRefresh, tasks[foregroundRefresh] != nil { return }
         foregroundRefresh = track { [weak self] in
             guard let self else { return }
