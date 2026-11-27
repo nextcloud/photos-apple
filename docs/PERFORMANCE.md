@@ -127,6 +127,78 @@ Instruments › App Launch, five cold launches after a reboot and five warm ones
 ~300 ms there, try weak-linking the frameworks only rare screens use; if the first commit dominates, profile it with the
 SwiftUI instrument.
 
+### Round 12 (speed, SPEC §22.4): tile cache, targeted sync, HEIC previews
+
+2026-11-27, the same Mac (18 cores), load average 20–130 (five agents). Before/after in the same build where a switch
+exists, alternating the two.
+
+**Tile cache, per tile** (`TileCacheTests.measureLookups`, `PHOTOS_TILE_PERF=1`, Debug build, 100 000 synthetic
+photos in 250 month files of 525 MB, 5 000 random photos, every month file opened on first use):
+
+| | per tile |
+|---|---|
+| Disk cache: open the 256 px file, read, decode at 231 px (what a cell waits for today) | 0.608 ms |
+| Tile cache: index lookup in the mapped month file, decode the 128 px tile | 0.177 ms |
+
+A test library photo's tile is 9 KB (JPEG 0.7, 171×128); decoding one alone (-O build) 0.14 ms; wrapping raw pixels
+would be 0.001 ms but cost 87 KB a tile on disk (SPEC §22.4.1).
+
+**Tile cache, launch** (Mac, Debug, 8089, signed in, previews and tiles of the first screen cached; alternating
+`PHOTOS_DEBUG_NO_TILES=1`, n=8 each; LaunchMetrics, ms since the process started):
+
+| | With tiles | `PHOTOS_DEBUG_NO_TILES=1` |
+|---|---|---|
+| "first picture" (the first cell with a picture) | median 1499 ms (1225–2373) | median 1574 ms (1156–2595) |
+| "first screen" (24 cells with pictures) | **median 1552 ms** (1273–2424) | median 1958 ms (1596–3416) |
+| first picture → first screen | **median 50 ms** (40–90) | median 463 ms (294–821) |
+| "library data" (the grid has its items) | 483–634 ms | 459–607 ms |
+
+With the tiles the whole first screen comes with the first picture (the cells take their tiles while they are
+configured); without them each cell shows its BlurHash and waits for the pipeline's disk read and decode. The first
+picture itself is not earlier: the grid configures its cells about 0.7 s after it has its items (the window's first
+layout, round 10's open question), on both sides. Load average 25–320 during these runs (other agents).
+
+**Tile cache, launch, iPhone 17 Pro Max simulator** (iOS 27.2, Debug, 8089, the same alternation with
+`SIMCTL_CHILD_PHOTOS_DEBUG_NO_TILES=1`, `simctl launch`, n=6 with tiles, n=5 without; load average 100–160):
+
+| | With tiles | Without |
+|---|---|---|
+| "library data" | median 2488 ms (1748–3011) | median 2620 ms (1696–3356) |
+| "first picture" | **median 2671 ms** (1882–3248) | median 4067 ms (3221–4308) |
+| "first screen" | **median 2712 ms** (1915–3311) | median 4069 ms (3225–4311) |
+
+Here the cells are configured soon after the grid has its items (about 180 ms), and with the tiles they have their
+pictures then; without them the first pictures waited 1.4 s more for the pipeline under this load. (The UI tour
+`TileCacheTourTests` takes a screenshot of each launch once the first cell exists; at that moment both already showed
+pictures, so the screenshots do not show the difference, the log does.)
+
+**Targeted sync** (`TargetedSyncIntegrationTests.measureWalks`, 20 160 photos in 261 folders, user `r12-speed` on
+8093, Nextcloud 36 stock):
+
+| | time |
+|---|---|
+| Launch, nothing changed (root PROPFIND, favourites SEARCH) | 0.43 s |
+| Launch after one delete elsewhere, **targeted walk** (4 folders listed, 83 files; delta, by-id check, favourites) | **1.29 s** |
+| The same delete with a **full walk** ("Sync now", 11 SEARCH pages of 2000) | 6.27–6.45 s |
+| Initial sync and its first full walk (these synthetic files have no capture time: fetched by id) | 84–89 s |
+
+The full walk grows with the library (about 0.3 s per 1000 photos here, so about 30 s for 100 000); the targeted walk
+with the change (one listing per changed folder: the path from the root down). With the fake server, 40 rounds of
+random changes (adds, deletes, moves, edits, renamed and removed folders, files outside the timeline) on 120 photos in 7
+folders: 184–191 listings in all, the index equal to the server's after every round (`TargetedSyncTests`).
+
+**HEIC instead of PNG for 1024/4096 px previews** (`PreviewCompactionTests.measureServerPreviews`, 12 PNG screenshots
+uploaded to 8093, their server previews at 1024 and 4096 px; HEIC quality 0.7):
+
+| | PNG (server) | HEIC | |
+|---|---|---|---|
+| Size, 24 previews | 35.3 MB | 3.2 MB | 9 % |
+| Size, 1024 px | 69 KB – 859 KB | 14 KB – 152 KB | |
+| Size, 4096 px | 249 KB – 4.9 MB | 43 KB – 545 KB | |
+| Decode at 1024 px, 1024 px file | 2.9–8.8 ms | 8.3–11.9 ms | +3–8 ms |
+| Decode at 1024 px, 4096 px file | 16.5–51.4 ms | 26.9–52.5 ms | ±, faster for the largest |
+| Decode, all 24 | 403 ms | 551 ms | |
+
 ## Re-running
 
 ```sh

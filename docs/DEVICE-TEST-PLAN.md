@@ -215,6 +215,22 @@ them. Each is marked "⬜ device D16.n" in STATUS.md.
 
 **Expected:** each does what its STATUS line says; note any difference in the issue.
 
+## D20 Faster: tiles, targeted sync, notify_push (P, M; round 12, SPEC §22.4)
+
+1. With a large library (10 000+ photos), use the app for a while (scroll the Library), wait a minute, kill it and launch
+   it again: the first screen shows photos at once (no BlurHash squares); fling hard through years of photos and pinch
+   out to Months and Years. Instruments › **Animation Hitches** while flinging.
+2. On another device or in the web interface, delete a photo and move another one to another folder; launch the app (or
+   bring it to the front): both changes show after the first sync. Console.app (subsystem `com.nextcloud.photos`,
+   category `sync`, info messages on) shows "targeted walk: N folders listed".
+3. A server with the **notify_push** app set up (`occ notify_push:self-test` passes): with the app open, delete a photo
+   in the web interface: it disappears within about 5 s without pulling to refresh. Lock and unlock the iPhone, repeat.
+
+**Expected:** 1: pictures in the first frame, flinging without stutter (hitch time under 5 ms/s); the tile cache in the
+app's caches (`Previews/<account>/tiles`) at most an eighth of the preview cache limit. 2: one sync, a few hundred
+milliseconds more than a sync without changes. 3: the change arrives within seconds, also after the lock; without
+notify_push nothing is different from before.
+
 ## Results table (copy into the issue)
 
 ```
@@ -236,5 +252,6 @@ Build:            Server (version / Photos):         Date / tester:
 | D13 Backup you can see, 2 GB video |   |   | – | – | – | – | % before/after kill, offline, restart: |
 | D15 Erase tool            |   |   |   | – | – | – | s per object / peak MB / quality: |
 | D16 Simulator gaps        |   |   |   | – | – | – | |
+| D20 Tiles, targeted sync, notify_push |   | – |   | – | – | – | hitch ms/s, s until a change shows: |
 ```
 Mark each cell ✓, ✗ (with an issue link) or "not tested".
