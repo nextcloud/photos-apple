@@ -173,8 +173,8 @@ import Testing
         #expect(merged.count == 2 * count)
         #expect(zip(merged, merged.dropFirst()).allSatisfy { $0.timestamp >= $1.timestamp })
         print("device layer: build \(built), merge \(merging) for \(count) + \(count)")
-        #expect(built < .seconds(3))
-        #expect(merging < .seconds(3))
+        #expect(built < timingBudget(.seconds(3)))
+        #expect(merging < timingBudget(.seconds(3)))
     }
 
     // MARK: Summary

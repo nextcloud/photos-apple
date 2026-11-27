@@ -218,7 +218,7 @@ import Testing
         for _ in 0..<3 { best = min(best, clock.measure { found = matrix.nearest(to: query, limit: 360) }) }
         print("PERF sketch search 100k: \(best)")
         #expect(found.count == 360)
-        #expect(best < .milliseconds(250))
+        #expect(best < timingBudget(.milliseconds(250)))
     }
 
     @Test func seriesAreCloseInTimeAndAlike() {

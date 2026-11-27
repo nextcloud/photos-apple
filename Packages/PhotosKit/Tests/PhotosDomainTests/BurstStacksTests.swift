@@ -121,7 +121,7 @@ import Testing
         var stacks: [[Int]] = []
         let elapsed = clock.measure { stacks = TimelineStacks.stacks(items) }
         #expect(stacks.count == 150)
-        #expect(elapsed < .seconds(3))
+        #expect(elapsed < timingBudget(.seconds(3)))
     }
 }
 

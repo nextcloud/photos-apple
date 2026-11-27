@@ -97,7 +97,7 @@ import Testing
         }
         print("PERF sectioning 100k items into \(sectionCount) day sections: \(best)")
         #expect(sectionCount > 2900)
-        #expect(best < .milliseconds(250))
+        #expect(best < timingBudget(.milliseconds(250)))
     }
 
     @Test func emptyInput() {
