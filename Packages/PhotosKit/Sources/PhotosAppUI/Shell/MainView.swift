@@ -694,8 +694,10 @@ struct MainView: View {
             // The models are handed over explicitly: when the sidebar first appears during a rotation (portrait → landscape),
             // UIKit sizes the header before SwiftUI has given it the environment, and the app crashed ("No Observable object
             // of type AppModel found").
-            .tabViewSidebarHeader {
-                AccountHeader(restoreSidebar: { customization = TabViewCustomization() }).environment(app).environment(session)
+            // The account pinned to the bottom of the sidebar, as on the Mac (and in Mail or Music); a footer would follow
+            // the rows and sit high up in a short sidebar (Vision Pro).
+            .tabViewSidebarBottomBar {
+                SidebarAccountFooter(restoreSidebar: { customization = TabViewCustomization() }).environment(app).environment(session)
             }
             .onChange(of: selection, initial: true) { _, destination in
                 if CompactNavigation.isInCollectionsTab(destination) { collectionsPlace = destination }
@@ -910,9 +912,9 @@ extension EnvironmentValues {
     @Entry var destinationRequest = DestinationRequest()
 }
 
-/// Account name and server in the sidebar header, with the account switcher (iPad, Vision Pro; the Mac has a compact
-/// account button at the bottom of its sidebar).
-struct AccountHeader: View {
+/// The account at the bottom of the sidebar (iPad, Vision Pro), like the Mac's `SidebarAccountButton`: the account's
+/// initials, name and server; its menu switches or adds an account and restores the default sidebar.
+struct SidebarAccountFooter: View {
     /// "Restore Default Sidebar": the header's menu is the sidebar's (iPad, Vision Pro).
     var restoreSidebar: (() -> Void)? = nil
     @Environment(SessionModel.self) private var session
@@ -926,14 +928,18 @@ struct AccountHeader: View {
                 Button(SidebarWording.restore, systemImage: "arrow.counterclockwise") { restoreSidebar() }
             }
         } label: {
-            HStack(spacing: 10) {
-                NextcloudLogo().frame(width: 36, height: 18)
+            HStack(spacing: 13) {
+                AccountBadge(name: session.account.displayName, size: 24)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(session.account.displayName).font(.headline)
-                    Text(session.account.hostDisplayName).font(.caption).foregroundStyle(.secondary)
+                    Text(session.account.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Text(session.account.hostDisplayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
+            .contentShape(.rect)
             // One control, not one per logo and line of text.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
@@ -941,6 +947,11 @@ struct AccountHeader: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        // In line with the sidebar's rows: the badge under their icons, name and server under their titles, the chevron
+        // under the sections' chevrons.
+        .padding(.leading, 38)
+        .padding(.trailing, 22)
+        .padding(.vertical, 10)
         .accessibilityHint(Text("Switch or add an account", bundle: .module))
         .sheet(isPresented: $addingAccount) { AddAccountSheet() }
     }

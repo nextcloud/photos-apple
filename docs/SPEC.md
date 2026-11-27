@@ -356,7 +356,8 @@ The structure mirrors the web app's navigation (including the extended "Advanced
 - *Superseded by §19.1 (round 9), the slim sidebar:* Library, Favorites, Memories, People, Places; Albums (the top albums
   listed on the Mac, then All Albums) and Shared; Utilities (collapsed): Folders, Tags, Archive, Recently deleted, Clean up,
   Insights, Stickers. Photos and Videos are Library filters, the map is part of Places. The Mac's account is a compact row at
-  the bottom of the sidebar; iPad and Vision Pro keep the account switcher in the sidebar header.
+  the bottom of the sidebar; iPad and Vision Pro have the same account row at the bottom of their sidebar (since
+  2026-11-27; before, it was the sidebar's header).
 
 **macOS specifics:** menu bar commands (File: New Album, Upload…, Export…; Edit: Select All, Favorite ⌘., Delete ⌫, Info ⌘I; View: zoom ⌘+/⌘−, Show sidebar, Square Tiles ⌥⌘S; Image: Rotate ⌘R, Edit ↩︎), multiple windows (open album/person/place in new window or tab), space bar quick look in the grid, drag & drop with Finder and other apps, Settings scene, toolbar search field.
 Decided in round 4 (as in Photos): Image ▸ Rotate Left ⌘R and Rotate Right ⌥⌘R work on the selection and save like the editor's "Overwrite original" (a new file version; not offered for read-only shares or formats that can't be written back), View ▸ Sync Now is ⇧⌘R; Edit ▸ Copy puts the originals on the pasteboard (image data and file URL; at most 100 items, Export for more); "Add to Album" is a submenu (New Album…, the albums used last in this app, then the most recently changed, All Albums…); the grid's context menu has Copy, Rotate, Share (system share menu/sheet) and the same submenu; an album opens in its own window from File ▸ Open in New Window, its card's context menu or ⌥-click (one window per album, restored with the app; it shows the album only while its account is the active one). On iPad, a photo dragged from a grid onto an album (another window) is added to it — the same file, not an uploaded copy; files from other apps dropped there are uploaded into it.
@@ -2744,7 +2745,7 @@ to show it, Pin/Unpin, drag to reorder the pinned rows, Restore Defaults. Librar
 Shared stay in their group. Stored per device in `UserDefaults` (`sidebarLayout`, pinned albums per account in
 `sidebarPinnedAlbums.<account>`); the default writes nothing. iPad and Vision Pro use the system's sidebar editing
 (`TabViewCustomization`, now `@AppStorage("sidebarTabCustomization")`: per device, a new key so the slim default applies),
-with "Restore Default Sidebar" in the menu of the sidebar's account header (a section action would be a permanent row). The iPad's Albums group
+with "Restore Default Sidebar" in the menu of the account row at the bottom of the sidebar (a section action would be a permanent row). The iPad's Albums group
 reads "All albums" and "Shared", as on the Mac; it does not list the top albums (a tab view has one selection type, and
 album tabs would leave stale ids in `TabViewCustomization` as albums come and go).
 
