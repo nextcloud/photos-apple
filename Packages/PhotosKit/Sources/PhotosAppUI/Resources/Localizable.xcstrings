@@ -5895,6 +5895,12 @@
     "Other Album" : {
       "comment" : "Search chip menu (Mac): submenu with the other albums. Title case."
     },
+    "Other Camera" : {
+      "comment" : "Search chip menu (Mac): replaces the camera of a camera chip with another one."
+    },
+    "Other Lens" : {
+      "comment" : "Search chip menu (Mac): replaces the lens of a lens chip with another one."
+    },
     "Other Person" : {
       "comment" : "Search chip menu (Mac): submenu with the other people. Title case."
     },
@@ -5906,6 +5912,12 @@
     },
     "Other album" : {
       "comment" : "Search chip menu: submenu with the other albums."
+    },
+    "Other camera" : {
+      "comment" : "Search chip menu: replaces the camera of a camera chip with another one."
+    },
+    "Other lens" : {
+      "comment" : "Search chip menu: replaces the lens of a lens chip with another one."
     },
     "Other person" : {
       "comment" : "Search chip menu: submenu with the other people."

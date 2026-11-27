@@ -156,6 +156,8 @@ extension SearchFilter {
         case .photos: "photo"
         case .label: "eye"
         case .rating: "star"
+        case .camera: "camera"
+        case .lens: "camera.aperture"
         }
     }
 }
@@ -565,8 +567,7 @@ struct SearchScreen: View {
         case .favorites: String(localized: "Favorites", bundle: .module)
         case .videos: String(localized: "Videos", bundle: .module)
         case .photos: String(localized: "Photos", bundle: .module)
-        case .label: SearchChipWording.kind(filter)
-        case .rating: SearchChipWording.kind(filter)
+        case .label, .rating, .camera, .lens: SearchChipWording.kind(filter)
         }
     }
 
@@ -582,7 +583,10 @@ struct SearchScreen: View {
         let albums = (((try? services.collections.albums(.own)) ?? []) + ((try? services.collections.albums(.shared)) ?? [])).map {
             ($0.id, $0.title)
         }
-        vocabulary = SearchSuggestions.Vocabulary(places: places.sorted(), albums: albums)
+        // Cameras and lenses from the camera data read for Insights (SPEC §22.3).
+        let camera = try? await InsightsStore(database: services.database).cameraVocabulary(limit: 200)
+        vocabulary = SearchSuggestions.Vocabulary(
+            places: places.sorted(), albums: albums, cameras: camera?.cameras ?? [], lenses: camera?.lenses ?? [])
         vocabularyRevision += 1
         // Tags and people from the server; offline, the ones stored for search.
         let labels = LabelStore(database: services.database)

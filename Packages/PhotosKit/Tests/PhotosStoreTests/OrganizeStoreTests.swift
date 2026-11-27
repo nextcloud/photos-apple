@@ -51,21 +51,36 @@ import Testing
         #expect(SmartRuleEvaluator.items(of: album, from: items, in: context).map(\.fileId) == [2, 1])
     }
 
-    @Test func keepsCameraDetailsPerFileVersion() async throws {
-        #expect(try await store.cameraDetailsProgress() == (0, 5))
-        let missing = try await store.filesNeedingCameraDetails(limit: 10)
-        #expect(missing.count == 5)
-        try await store.storeCameraDetails([1: CameraDetails(make: "Canon", model: "EOS R5", focalLength: 50), 2: CameraDetails()])
-        #expect(try await store.cameraDetailsProgress() == (2, 5))
-        #expect(try await store.filesNeedingCameraDetails(limit: 10).count == 3)
+    /// Rules read the camera data Insights and the search read (`photoExif`): one table, one reader (SPEC §22.3).
+    @Test func readsCameraDetailsFromTheOneExifTable() async throws {
+        // Photo 4 is archived: not part of the library Insights counts.
+        #expect(try await store.cameraDetailsProgress() == (0, 4))
+        let insights = InsightsStore(database: database)
+        try insights.store([
+            1: ("e1", ExifFacts(camera: "Canon EOS R5", lens: "RF50mm F1.2 L USM", focalLength: 50, aperture: 1.2, iso: 200)),
+            2: ("e2", ExifFacts()),
+        ])
+        #expect(try await store.cameraDetailsProgress() == (2, 4))
         let context = try await store.ruleContext(camera: true)
         #expect(context.camera[1]?.focalLength == 50)
+        #expect(context.camera[1]?.iso == 200)
+        #expect(context.camera[1]?.cameraName == "Canon EOS R5")
         // Empty details are known (not asked again) but not kept in the context.
         #expect(context.camera[2] == nil)
-        #expect(try await store.cameraVocabulary().cameras == ["Canon EOS R5"])
+        let vocabulary = try await store.cameraVocabulary()
+        #expect(vocabulary.cameras == ["Canon EOS R5"])
+        #expect(vocabulary.lenses == ["RF50mm F1.2 L USM"])
+        #expect(try store.cameraDetails(of: [1, 3])[1]?.lens == "RF50mm F1.2 L USM")
+        // A rule on the camera finds the photo.
+        let rule = SmartAlbumDefinition(name: "R5", rule: .all([.condition(.camera("eos r5"))]))
+        let items = try await store.ruleItems()
+        #expect(SmartRuleEvaluator.items(of: rule, from: items, in: context).map(\.fileId) == [1])
         // A new version of the file is read again.
         try library.update(1) { $0.etag = "e1-new" }
-        #expect(try await store.filesNeedingCameraDetails(limit: 10).contains(1))
+        #expect(try insights.pending(limit: 10).contains { $0.fileId == 1 })
+        // The rules' own copy of the old version is gone.
+        let tables = try await database.writer.read { db in try db.tableExists("cameraDetails") }
+        #expect(!tables)
     }
 
     @Test func namesAndFolders() async throws {

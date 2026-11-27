@@ -21,6 +21,10 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
     case label(String)
     /// At least this many stars (1–5; the ratings of SPEC §15.2).
     case rating(atLeast: Int)
+    /// Taken with this camera, as Insights names it ("Fujifilm X100V"; SPEC §22.3).
+    case camera(String)
+    /// Taken with this lens ("XF23mmF2 R WR"; SPEC §22.3).
+    case lens(String)
 
     public var id: String {
         switch self {
@@ -35,12 +39,14 @@ public enum SearchFilter: Hashable, Sendable, Identifiable {
         case .photos: "photos"
         case .label(let word): "label:\(word.lowercased())"
         case .rating(let stars): "rating:\(stars)"
+        case .camera(let name): "camera:\(name)"
+        case .lens(let name): "lens:\(name)"
         }
     }
 
     public var label: String {
         switch self {
-        case .place(let name), .person(let name), .text(let name): name
+        case .place(let name), .person(let name), .text(let name), .camera(let name), .lens(let name): name
         case .tag(_, let name): name
         case .album(_, let title): title
         case .dateRange(_, _, let label): label
@@ -73,14 +79,20 @@ public enum SearchSuggestions {
         public var people: [String]
         public var tags: [(id: Int, name: String)]
         public var albums: [(id: String, title: String)]
+        /// The cameras and lenses the library's photos were taken with, most used first (SPEC §22.3).
+        public var cameras: [String]
+        public var lenses: [String]
 
         public init(
-            places: [String] = [], people: [String] = [], tags: [(id: Int, name: String)] = [], albums: [(id: String, title: String)] = []
+            places: [String] = [], people: [String] = [], tags: [(id: Int, name: String)] = [], albums: [(id: String, title: String)] = [],
+            cameras: [String] = [], lenses: [String] = []
         ) {
             self.places = places
             self.people = people
             self.tags = tags
             self.albums = albums
+            self.cameras = cameras
+            self.lenses = lenses
         }
     }
 
@@ -95,6 +107,16 @@ public enum SearchSuggestions {
         let prefix = folded.filter { $0.1.hasPrefix(q) }.map(\.0)
         let contains = folded.filter { !$0.1.hasPrefix(q) && $0.1.contains(q) }.map(\.0)
         return Array((prefix.sorted() + contains.sorted()).prefix(perGroup))
+    }
+
+    /// Cameras for the typed text: as `matches`, and also by the model alone ("x100" finds "Fujifilm X100V").
+    static func cameraMatches(_ names: [String], _ query: String) -> [String] {
+        let direct = matches(names, query)
+        let q = fold(query)
+        let byModel = names.filter { name in
+            !direct.contains(name) && FuzzyMatch.words(name).dropFirst().contains { fold($0).hasPrefix(q) }
+        }
+        return Array((direct + byModel.sorted()).prefix(perGroup))
     }
 
     public static func suggestions(
@@ -112,6 +134,8 @@ public enum SearchSuggestions {
         result += tagNames.compactMap { name in vocabulary.tags.first { $0.name == name }.map { .tag(id: $0.id, name: name) } }
         let albumTitles = matches(vocabulary.albums.map(\.title), trimmed)
         result += albumTitles.compactMap { title in vocabulary.albums.first { $0.title == title }.map { .album(id: $0.id, title: title) } }
+        result += cameraMatches(vocabulary.cameras, trimmed).map { .camera($0) }
+        result += matches(vocabulary.lenses, trimmed).map { .lens($0) }
         result.append(.text(trimmed))
         return result
     }

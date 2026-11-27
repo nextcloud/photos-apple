@@ -47,6 +47,12 @@ extension LibraryStore {
             conditions.append("media.fileId IN (SELECT fileId FROM albumItem WHERE albumId IN (\(marks)))")
             for id in search.albumIds { arguments += [id] }
         }
+        // The camera data read for Insights (`photoExif`), the one copy of it in the index (SPEC §22.3).
+        for (column, names) in [("camera", search.cameras), ("lens", search.lenses)] where !names.isEmpty {
+            let marks = names.map { _ in "?" }.joined(separator: ",")
+            conditions.append("media.fileId IN (SELECT fileId FROM photoExif WHERE \(column) IN (\(marks)))")
+            for name in names { arguments += [name] }
+        }
         return ("SELECT \(columns) FROM media WHERE \(conditions.joined(separator: " AND ")) \(displayOrder)", arguments)
     }
 
@@ -131,8 +137,9 @@ extension LibraryStore {
         if search.favoritesOnly && !item.isFavorite { return false }
         if search.videosOnly && item.kind != .video { return false }
         if search.photosOnly && item.kind != .image { return false }
-        // Ratings are tags of the user's own files; photos only known from albums have none here.
-        if search.minimumRating != nil { return false }
+        // Ratings are tags of the user's own files and camera data is read for the library's photos; photos only known
+        // from albums have neither here.
+        if search.minimumRating != nil || !search.cameras.isEmpty || !search.lenses.isEmpty { return false }
         return search.memberships.allSatisfy { $0.contains(item.fileId) }
     }
 
