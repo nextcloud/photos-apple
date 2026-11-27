@@ -1575,7 +1575,8 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
   AX5, iPhone 17 simulator (iOS 27.2) against the 8089 test library: all pass with the policy of SPEC §20.3; the
   findings per screen (accepted ones with their reason) are in `ios-fix-shots/r10-a11y/run3/*-audit.txt`. iPad: see
   below.
-- ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`),
+- ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`;
+  kept by the owner's decision of 2026-11-27),
   text on glass in the text colour (caption plates, viewer pill), the viewer's action bar targets (44 points), account
   avatar, Settings' current-account check mark, the iPad's info inspector (thick material behind the info, prominent
   section headers), the year in review cards' year (scales with the text size), the close crosses of the weekly prompt and family suggestion cards.

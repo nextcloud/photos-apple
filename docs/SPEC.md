@@ -3047,7 +3047,8 @@ retried after a pause when it runs out of time, which it does on a loaded Mac; t
 **Accent colour.** Nextcloud blue #0082c9 has 4.2:1 on white, below WCAG AA (4.5:1) for the text, symbols and tinted
 buttons drawn in it. In light mode the app uses the Nextcloud server's own default primary colour (theming, `default.css`),
 #00679e (6.1:1 on white, 4.9:1 on a tinted button), and #00507a with Increase Contrast; in dark mode #0082c9 stays
-(5.0:1 on black). `AccentPalette` (PhotosAppUI) and the app's `AccentColor` asset have these variants.
+(5.0:1 on black). `AccentPalette` (PhotosAppUI) and the app's `AccentColor` asset have these variants. Confirmed by
+the owner on 2026-11-27 over the original #0082c9 in light mode.
 
 **Other fixes from the audits.** Text on Liquid Glass in the secondary colour came out at about 3:1 over light photos
 (the glass draws every hierarchical style vibrant): the count line of album and smart album caption plates and the time
