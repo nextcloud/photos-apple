@@ -56,7 +56,9 @@ extension PhotosAPI {
         let search = DAVSearch(
             select: [DAVProp.etag, DAVProp.fileId, DAVProp.resourceType],
             scopes: [DAVSearch.Scope(href: connection.filesHref(root))],
-            condition: .isCollection)
+            // Without a limit Nextcloud answers 100 results (seen on 36); it ignores an offset. A folder left out is only
+            // listed once more by the next targeted walk.
+            condition: .isCollection, limit: Self.folderSearchLimit)
         let own = Self.normalized(root)
         return try await dav.search(search, timeout: 300).compactMap { resource in
             guard var entry = Self.syncFolderEntry(resource, connection: connection), entry.path != own else { return nil }
@@ -64,6 +66,8 @@ extension PhotosAPI {
             return entry
         }
     }
+
+    static let folderSearchLimit = 50_000
 
     static func syncFolderEntry(_ resource: DAVResource, connection: ServerConnection) -> SyncFolderEntry? {
         guard let path = connection.userPath(fromHref: resource.href) else { return nil }

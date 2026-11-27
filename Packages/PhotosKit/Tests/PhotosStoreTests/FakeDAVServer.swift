@@ -356,7 +356,9 @@ final class FakeDAVServer: Sendable {
                 && !state.unavailable.contains { file.path.hasPrefix($0 + "/") } && !state.hiddenFromSearch.contains(file.id)
         }
         files.sort { (order?($0) ?? $0.modified, $0.id) > (order?($1) ?? $1.modified, $1.id) }
-        if let limit { files = Array(files.prefix(limit)) }
+        // Like Nextcloud's FileSearchBackend: 100 results when the request has no limit.
+        let limit = limit ?? request.body.firstMatch(of: /<d:nresults>(\d+)<\/d:nresults>/).flatMap { Int($0.1) } ?? 100
+        files = Array(files.prefix(limit))
         return .http(status: 207, body: Self.multistatus(files.map(xml).joined()))
     }
 

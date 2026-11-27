@@ -73,6 +73,10 @@ public actor SyncEngine {
     let massDeleteConfirmationDelay: TimeInterval
     public static let defaultMassDeleteConfirmationDelay: TimeInterval = 3600
 
+    /// The most results asked of a SEARCH that has to be complete (favourites, changes). Without a limit Nextcloud answers
+    /// with 100: more than 100 favourites lost their flag on the next sync, more than 100 changes waited for a walk.
+    static let searchLimit = 20_000
+
     /// The shortest time between two looks at the late metadata of recent uploads (`recentUploadsToRefresh`).
     let recentUploadsCheckInterval: TimeInterval
     public static let defaultRecentUploadsCheckInterval: TimeInterval = 600
@@ -303,7 +307,7 @@ public actor SyncEngine {
         case .ifDue:
             // A targeted walk costs what changed, not the size of the library: it waits the plain interval.
             let interval = try canWalkTargeted(folders: folders) ? reconcileInterval : interval(forIndexOf: library.count())
-            due = try walking || confirming || overdue || (owed && sinceReconcile >= interval)
+            due = walking || confirming || overdue || (owed && sinceReconcile >= interval)
         }
         guard due else { return false }
         // Not while a backup uploads (its uploads are what changed the root), unless the last one is a day old.
@@ -388,8 +392,12 @@ public actor SyncEngine {
             let last = try database.syncValue(Key.lastDeltaSync).flatMap(Double.init) ?? 0
             let since = Date(timeIntervalSince1970: max(0, last - 600))
             let changed = try await api.changedItems(
-                since: since, sourceFolders: changedRoots.map(\.folder), mimeTypes: mimeTypes, properties: indexProperties)
+                since: since, sourceFolders: changedRoots.map(\.folder), mimeTypes: mimeTypes, properties: indexProperties,
+                limit: Self.searchLimit)
             try upsertFromServer(changed)
+            // More changes than one answer holds (another device uploaded a whole trip): the walk this change owes finds
+            // the rest (a targeted one reads every file it does not know).
+            if changed.count >= Self.searchLimit { try database.setSyncValue(Key.reconcileOwed, "1") }
         }
         // Metadata the server fills in later (place, caption, EXIF on external storage) changes no ETag: look at recent
         // uploads again, a few times while it may still arrive.
@@ -465,13 +473,17 @@ public actor SyncEngine {
         let search = DAVSearch(
             select: [DAVProp.fileId],
             scopes: folders.map { DAVSearch.Scope(href: api.connection.filesHref($0)) },
-            condition: .and([PhotosAPI.mimeCondition(mimeTypes), .eq(DAVProp.favorite, "1")])
+            condition: .and([PhotosAPI.mimeCondition(mimeTypes), .eq(DAVProp.favorite, "1")]),
+            limit: Self.searchLimit
         )
-        let remote = Set(try await api.dav.search(search, timeout: 300).compactMap { $0.int64(DAVProp.fileId) })
+        let answer = try await api.dav.search(search, timeout: 300)
+        let remote = Set(answer.compactMap { $0.int64(DAVProp.fileId) })
+        // A full answer may lack favourites: then none is taken away here (the next full walk compares every flag).
+        let complete = answer.count < Self.searchLimit
         try await database.writer.write { db in
             let pending = try Outbox.pendingFileIds(db)
             let local = Set(try FileID.fetchAll(db, sql: "SELECT fileId FROM media WHERE isFavorite = 1"))
-            for (value, ids) in [(true, remote.subtracting(local)), (false, local.subtracting(remote))] {
+            for (value, ids) in [(true, remote.subtracting(local)), (false, complete ? local.subtracting(remote) : [])] {
                 let ids = ids.subtracting(pending)
                 guard !ids.isEmpty else { continue }
                 // Ids the index does not know (yet) match no row.

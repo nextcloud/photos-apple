@@ -363,6 +363,71 @@ import Testing
     }
 }
 
+/// Nextcloud answers a SEARCH without a limit with 100 results (`FileSearchBackend`, the fake does the same): the
+/// searches that must be complete ask for more.
+@Suite(.serialized, .timeLimit(.minutes(2))) struct SearchLimitTests {
+    let server = FakeDAVServer()
+    let database: AccountDatabase
+    let library: LibraryStore
+
+    init() throws {
+        database = try AccountDatabase.temporary()
+        library = LibraryStore(database: database)
+    }
+
+    func engine() -> SyncEngine {
+        SyncEngine(
+            api: server.api, database: database, features: ServerFeatures(serverVersion: ServerVersion(major: 36)), reconcileInterval: 600)
+    }
+
+    func file(_ id: FileID, time: Double, favorite: Bool = false) -> FakeDAVServer.File {
+        var file = FakeDAVServer.File(id: id, path: "/Photos/\(id).jpg", etag: "e\(id)", modified: time, captured: time)
+        file.favorite = favorite
+        return file
+    }
+
+    /// 150 favourites: none loses its flag at the next sync.
+    @Test func moreThanAHundredFavouritesStay() async throws {
+        server.state.withLock { state in
+            for id in FileID(1)...200 { state.files[id] = file(id, time: 1000 + Double(id), favorite: id <= 150) }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        let engine = engine()
+        await engine.sync()
+        await engine.sync()  // no change: the favourites SEARCH
+        #expect(try library.gridItems(.favorites).count == 150)
+    }
+
+    /// 300 photos added elsewhere arrive with the next sync's delta, not 100 of them.
+    @Test func moreThanAHundredChangesArriveAtOnce() async throws {
+        server.put(file(1, time: 1000))
+        let engine = engine()
+        await engine.sync()
+        let now = Date().timeIntervalSince1970
+        server.state.withLock { state in
+            for id in FileID(2)...301 { state.files[id] = file(id, time: now + Double(id)) }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        await engine.sync()  // a plain sync: within the interval, no walk
+        #expect(try library.count() == 301)
+    }
+
+    /// 300 files with the same modification and capture second (a folder unpacked at once) where a page ends: all
+    /// indexed, and a walk through the library keeps them all.
+    @Test func moreThanAHundredFilesInOneSecond() async throws {
+        server.state.withLock { state in
+            for id in FileID(1)...300 { state.files[id] = file(id, time: 5000) }
+            for id in FileID(301)...2250 { state.files[id] = file(id, time: 6000 + Double(id)) }
+            FakeDAVServer.bumpRoot(&state)
+        }
+        let engine = engine()
+        await engine.sync()
+        #expect(try library.count() == 2250)
+        await engine.sync(reconcile: .now)
+        #expect(try library.count() == 2250)
+    }
+}
+
 /// SplitMix64, for reproducible random rounds (the seed is printed when a round fails).
 struct SplitMix {
     var state: UInt64
