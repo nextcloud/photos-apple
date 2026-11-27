@@ -3768,6 +3768,68 @@ _To be written._
 _To be written._
 
 ### 22.5 Settings synced between devices, orphaned edit recipes cleaned up [tidy]
+
+#### 22.5.1 Synced settings files (`.nextcloud-photos/<kind>.json`)
+
+What the user sets once should be the same on all their devices, without a server change: small JSON files in the
+user's own Nextcloud, in the hidden folder `/.nextcloud-photos/` (§16.4), **one file per kind**.
+
+- **Format** (`SyncedSettingsDocument`, PhotosNetworking): `{"format": "nextcloud-photos-settings", "version": 1,
+  "kind": "people", "entries": {"<key>": {"value": <any JSON>, "modifiedAt": "2026-11-27T10:00:00.123Z", "base": …,
+  "replaced": [<JSON>…]}, "<removed key>": {"deleted": true, "modifiedAt": …}}}`. Keys are free strings; a kind's
+  users group them with prefixes (`person/…`, `decision/…`). Readers skip entries they cannot read, keep unknown keys
+  and never write over a file of a newer `version`.
+- **Merge: last writer wins per key** by `modifiedAt` (milliseconds, the time the user made the change; a change is
+  always stamped after the version it replaces, also when the device clock is behind). Same time: the value that sorts
+  first by its JSON, so every device picks the same. Removals are tombstones (dropped after 90 days), so an offline
+  device does not bring a removed key back. Merging is commutative and idempotent.
+- **Never lose a name**: `base` is the stamp of the version a change replaced. When two devices changed a key without
+  having seen each other's change (a race), the losing value is kept in the winner's `replaced` list (newest first, at
+  most five), so "Anna" typed on the Mac and "Anne" typed on the iPhone at the same time both survive; the UI may offer
+  the replaced values. A later rename over a seen version is no race and keeps nothing extra.
+- **Store** (`SyncedSettingsStore`, one per account and kind, from `AccountServices.syncedSettings.store(.people)`):
+  values readable at once without waiting (`value`, `value(_:as:)`, `values(prefix:)`, `replacedValues`), changes with
+  `set(_:for:)`, `set(encoding:for:)` or several keys at once (`set([key: value?])`, nil removes); a change is kept on
+  the device at once (`<account>/SyncedSettings/<kind>.json`) and sent about 2 s later as one write, offline changes
+  wait. Every write names the version it replaces (`If-Match`, `If-None-Match: *` for a new file); when another device
+  wrote in between, the store reads again, merges and retries (`AppDataFiles.update`). Observers hear the keys that
+  changed (here or from another device).
+- **When**: after every library sync (`SyncedSettingsFiles.syncAll()`): one `PROPFIND` (depth 1) of the folder tells
+  which files changed, so an unchanged set costs one request; a file is read only when its ETag changed.
+- **Kinds**:
+  - `settings.json` — the app settings that follow the user (§22.5.2).
+  - `people.json` — on-device People (§22.3, written by the people feature through the store): `person/<id>` →
+    `{"name": …}` (`id` made by the device that found the person), plus assignments and corrections with their own
+    prefixes as §22.3 defines them (`face/<face key>` → person id, `merged/<id>` → id, `not/<face key>` → ids). The
+    value schemas are §22.3's; the merge rules are the ones above, so a name given on any device is never lost.
+  - `family.json` — the family library (§16.7.2): `settings` → the folder, members and copy option;
+    `decision/<fileId>` → `"dismissed"`, `"moved"` or `"copied"` (a union of all devices' decisions; "Show dismissed
+    again" and choosing another folder remove them as tombstones).
+  - Earlier files keep their own formats: `smart-albums.json`, `folder-rules.json` (§16.4, `SyncedList`),
+    `edit-presets.json` (§21.6.5), `album-covers.json` (§16.8), `edits/<fileId>.json` (§16.3.1).
+
+#### 22.5.2 Which settings follow the user
+
+Settings › Advanced › **Same Settings on All Devices** (on by default; per device) syncs these through `settings.json`
+(`SyncedDefaults`: the device's settings are compared with what was last synced, changes are stamped when noticed;
+on the first sync of a device its existing settings count as old, so the account's settings win and only fill in):
+
+| Synced (follow the user) | Stay on the device (and why) |
+|---|---|
+| Library display: show memories, memories as stories/strip, name moments, square tiles, stack copies | Grid columns and zoom level, sidebar layout (screen size) |
+| Appearance: viewer background, tinted headers, Live Photo covers | Cache sizes, library thumbnails, smart offline, offline on Wi-Fi (storage of this device) |
+| Slideshow interval and repeat; Through the Years speed | Backup, album mirror, Lock Screen album, desktop pictures, menu bar (this device's library and system) |
+| Memory films: style and music per memory (`films/<memory>`) | App lock and its timeout, guest mode (security of this device) |
+| Birthdays given in Through the Years (`birthdays/<person>`) | Notifications: photo of the day, shared albums, weekly prompt reminders (per device, as in Apple's apps) |
+| Culling: auto-advance, loupe peaking/clipping/histogram | On-device analysis: content labels, similar photos, descriptions (battery, Vision on this device) |
+| Editing: Apply Edits to the File | Advanced features switch (a simpler phone and a full Mac are both reasonable) |
+| Batch rename and card import name patterns; album sort orders | Own music for films (a file on this device), diagnostics, debug and UI-test switches |
+
+Edit presets, smart albums, folder rules and album covers were synced already (own files); the family library and
+dismissed suggestions are now (`family.json`); People names with §22.3 (`people.json`).
+
+#### 22.5.3 Orphaned edit recipes
+
 _To be written._
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
