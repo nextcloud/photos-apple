@@ -124,6 +124,9 @@ struct PhotosBackupRemote: BackupRemote {
         return uploader
     }
 
+    /// The most server files asked for one backup round's time window.
+    static let candidateLimit = 20_000
+
     func candidates(from start: Date, to end: Date) async throws -> [RemoteCandidate] {
         let mimes =
             MimeTypes.defaultImages + MimeTypes.extendedImages + MimeTypes.appleExtras + MimeTypes.defaultVideos + MimeTypes.extendedVideos
@@ -148,7 +151,10 @@ struct PhotosBackupRemote: BackupRemote {
                         .lte(DAVProp.lastModified, PhotosAPI.isoDate(endSeconds)),
                     ]),
                 ]),
-            ])
+            ]),
+            // Without a limit Nextcloud answers 100 results: in a busy time window the files after the hundredth were
+            // not seen as already there, and their photos were uploaded once more (SPEC §22.4.2).
+            limit: Self.candidateLimit
         )
         return try await api.dav.search(search, timeout: 300).compactMap { resource in
             guard let item = MediaParser.mediaItem(from: resource, connection: api.connection) else { return nil }
