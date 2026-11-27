@@ -59,18 +59,20 @@ public struct RootView: View {
                 }
                 // A normal launch: the app comes up with a quick fade (SPEC §17.6.3).
                 .modifier(LaunchReveal())
-                // The first run's backup step covers the Library, which loads behind it (SPEC §22.2).
-                .accessibilityHidden(showsFirstRunBackup)
+                // The first run's backup step covers the Library, which loads behind it (SPEC §22.2). Modal: VoiceOver stays
+                // on the step. (Not `accessibilityHidden(false)` on the content: that made the whole window one element
+                // without a description in the accessibility audits.)
                 .overlay {
                     if showsFirstRunBackup {
                         FirstRunBackupStep().environment(session)
+                            .accessibilityAddTraits(.isModal)
                             .transition(.opacity)
                     }
                 }
                 // The first run's last step: the short welcome into the Library, over it (SPEC §17.6.3, §22.2), after the
                 // backup step.
                 .overlay {
-                    if (app.welcomesFirstLogin && !showsFirstRunBackup) || debugWelcome {
+                    if (app.welcomesFirstLogin || debugWelcome) && !showsFirstRunBackup {
                         FirstLaunchWelcome(name: session.account.displayName, doneLine: firstRunDoneLine) {
                             debugWelcome = false
                             FirstRunState.shared.backupTurnedOn = false

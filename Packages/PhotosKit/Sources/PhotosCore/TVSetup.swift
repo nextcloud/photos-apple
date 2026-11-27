@@ -147,7 +147,8 @@ public final class TVSetupChannel: Sendable {
             default: break
             }
         }
-        continuation.onTermination = { [connection] _ in connection.cancel() }
+        // Not closed when a reader stops (its task was cancelled): the last message ("done", "cancel") is often sent just
+        // after that, and `close()` ends the connection.
         connection.start(queue: Self.queue)
     }
 
@@ -338,7 +339,8 @@ public final class TVSetupPhoneFlow {
             } catch {
                 if !Task.isCancelled { step = .failed(TVSetupWording.connectionLost) }
             }
-            channel.close()
+            // Cancelled: `cancel()` sends "cancel" first and closes then.
+            if !Task.isCancelled { channel.close() }
         }
     }
 

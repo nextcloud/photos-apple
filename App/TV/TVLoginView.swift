@@ -529,7 +529,7 @@ struct TVLoginView: View {
                 Text(verbatim: "Debug: iPhone simulators (Bonjour)").font(.title3.bold())
                 if results.isEmpty { ProgressView() }
                 ForEach(results, id: \.debugDescription) { endpoint in
-                    Button(endpoint.debugDescription) { onSelect(endpoint) }
+                    Button(Self.name(endpoint)) { onSelect(endpoint) }
                 }
             }
             .padding(60)
@@ -543,6 +543,11 @@ struct TVLoginView: View {
                 self.browser = browser
             }
             .onDisappear { browser?.cancel() }
+        }
+
+        static func name(_ endpoint: NWEndpoint) -> String {
+            if case .service(let name, _, _, _) = endpoint { return name }
+            return endpoint.debugDescription
         }
     }
 #endif

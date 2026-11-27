@@ -106,7 +106,13 @@ import Testing
         let page = try #require(URL(string: "https://cloud.example.com/nextcloud/index.php/login/v2/flow/abc"))
         await tv.send(.login(url: page))
         try await waitUntil { flow.step == .grantInBrowser(TVSetup.loginPage(page, user: "alice@example.com")) }
+        // As `TVLoginView` does it: the watch for the phone giving up is cancelled, then "done" is sent and the
+        // connection closed. The phone hears "done", not a lost connection.
+        let watching = Task { await tv.phoneGaveUp() }
+        try await Task.sleep(for: .milliseconds(50))
+        watching.cancel()
         await tv.send(.done(name: "Alice"))
+        tv.close()
         try await waitUntil { flow.step == .done(name: "Alice") }
     }
 
@@ -143,8 +149,8 @@ import Testing
         let gaveUp = Task { await tv.phoneGaveUp() }
         try await Task.sleep(for: .milliseconds(100))
         flow.cancel()
-        let reason = await gaveUp.value
-        #expect(reason == .cancelled || reason == .connectionLost)
+        // The TV hears "cancel", not just a closed connection.
+        #expect(await gaveUp.value == .cancelled)
         #expect(flow.step == .failed(TVSetupWording.cancelled))
     }
 }
