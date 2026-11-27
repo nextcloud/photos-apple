@@ -10,6 +10,13 @@ public struct PersonPhoto: Sendable, Hashable {
     public var childName: String
     public var item: MediaItem
     public var box: FaceBox?
+
+    public init(detectionId: Int, childName: String, item: MediaItem, box: FaceBox?) {
+        self.detectionId = detectionId
+        self.childName = childName
+        self.item = item
+        self.box = box
+    }
 }
 
 /// A folder entry of the Folders view.

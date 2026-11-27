@@ -106,6 +106,8 @@
             SimilarIndexing.register { AppHost.model }
             // Descriptions of photos for VoiceOver and search, while charging and idle (SPEC §16.2).
             PhotoDescriptions.register { AppHost.model }
+            // People on this device where the server has no Recognize, while charging and idle (SPEC §22.3).
+            DevicePeopleIndexing.register { AppHost.model }
             // Smart offline fills up while charging on Wi-Fi (SPEC §15.8.1).
             SmartOfflineScheduling.register { AppHost.model }
             // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.

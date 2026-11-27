@@ -570,6 +570,11 @@ public struct DeviceFaceStore: Sendable {
         }
     }
 
+    /// Whether named people were written into `person`/`personItem` (after a launch: write them once).
+    public func hasMirror() throws -> Bool {
+        try database.syncValue(Self.mirrorKey) != nil
+    }
+
     /// Takes the device's people out of `person`/`personItem` (the server has Recognize now, or the feature was turned off).
     public func removeMirror() throws {
         try database.writer.write { db in try Self.removeMirror(db) }

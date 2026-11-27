@@ -148,6 +148,7 @@ targets:
           - com.nextcloud.photos.labels
           - com.nextcloud.photos.similar
           - com.nextcloud.photos.describe
+          - com.nextcloud.photos.faces
           - com.nextcloud.photos.offline
           - $(PRODUCT_BUNDLE_IDENTIFIER).backup.*
         UIBackgroundModes: [fetch, processing, remote-notification]

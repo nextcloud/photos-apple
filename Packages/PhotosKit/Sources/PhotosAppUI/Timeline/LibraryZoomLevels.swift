@@ -422,6 +422,8 @@ struct LibraryZoomOverlay: ViewModifier {
                 guard let services = session.services else { return }
                 await PhotoDescriptions.trickle(services)
             }
+            // And looked at for people where the server has no Recognize (SPEC §22.3).
+            .task(id: session.account.id) { await DevicePeopleIndexing.trickle(session) }
     }
 
     /// Zooming in, the new level grows out of where the fingers were and the old one grows past them; out, both shrink.

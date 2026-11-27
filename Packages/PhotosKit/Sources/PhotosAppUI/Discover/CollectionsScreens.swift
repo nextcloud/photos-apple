@@ -116,6 +116,8 @@ struct PeopleScreen: View {
     @State private var renaming: Person?
     @State private var newName = ""
     @State private var actionError: String?
+    /// The people are found on this device (no Recognize on the server; SPEC §22.3).
+    @State private var isOnDevice = false
     /// A person's page zooms out of their face (SPEC §17.4).
     @Namespace private var zoom
 
@@ -151,9 +153,10 @@ struct PeopleScreen: View {
             }
             .padding()
             if hiddenCount > 0 { hiddenNote }
+            if isOnDevice { DevicePeopleNote(isEmpty: people.isEmpty) { Task { await load() } } }
         }
         .overlay {
-            if loading && people.isEmpty && error == nil {
+            if loading && people.isEmpty && error == nil && !isOnDevice {
                 SkeletonCovers(minimum: 100, circular: true).frame(maxHeight: .infinity, alignment: .top)
             }
         }
@@ -230,7 +233,7 @@ struct PeopleScreen: View {
         guard trimmed != person.name else { return }
         Task {
             do {
-                try await session.services?.api.renamePerson(person.name, to: trimmed, key: await session.recognizeKey())
+                try await session.peopleDirectory?.rename(person.name, to: trimmed)
                 hidden = hidden.renamed(person.name, to: trimmed)
                 if let file = session.hiddenPeopleFile { hidden.save(to: file) }
                 await load()
@@ -244,10 +247,10 @@ struct PeopleScreen: View {
         loading = true
         defer { loading = false }
         if let file = session.hiddenPeopleFile { hidden = HiddenPeople.load(from: file) }
-        guard let services = session.services else { return }
+        guard let directory = session.peopleDirectory else { return }
+        isOnDevice = directory.isOnDevice
         do {
-            let key = await session.recognizeKey()
-            people = try await services.api.people(key: key)
+            people = try await directory.people()
             error = nil
         } catch NetworkError.forbidden {
             error = String(
@@ -330,12 +333,9 @@ struct PersonScreen: View {
                     ) {
                         _ in
                         Task {
-                            let key = await session.recognizeKey()
-                            for item in items {
-                                if let photo = photos.first(where: { $0.item.fileId == item.fileId }) {
-                                    try? await session.services?.api.removeFromPerson(person.name, childName: photo.childName, key: key)
-                                }
-                            }
+                            let ids = Set(items.map(\.fileId))
+                            let children = photos.filter { ids.contains($0.item.fileId) }.map(\.childName)
+                            try? await session.peopleDirectory?.remove(children, from: person.name)
                             reloads += 1
                             changed()
                         }
@@ -346,8 +346,8 @@ struct PersonScreen: View {
                 ]
             },
             hero: hero,
-            load: { services in
-                photos = try await services.api.personPhotos(person.name, key: await session.recognizeKey())
+            load: { _ in
+                photos = try await session.peopleDirectory?.photos(of: person.name) ?? []
                 return photos.map(\.item)
             }
         ) {
@@ -399,7 +399,7 @@ struct PersonScreen: View {
             PersonPickerSheet(title: PeopleActions.moveTitle, excluding: person.name) { name in
                 let ids = Set((moving ?? []).map(\.fileId))
                 let children: [String] = photos.filter { ids.contains($0.item.fileId) }.map(\.childName)
-                try await session.services?.api.moveFaces(children, from: person.name, to: name, key: await session.recognizeKey())
+                try await session.peopleDirectory?.move(children, from: person.name, to: name)
                 reloads += 1
                 changed()
             }
@@ -410,7 +410,7 @@ struct PersonScreen: View {
             Button(String(localized: "Remove person", bundle: .module), role: .destructive) {
                 Task {
                     do {
-                        try await session.services?.api.deletePerson(person.name, key: await session.recognizeKey())
+                        try await session.peopleDirectory?.delete(person.name)
                         changed()
                         dismiss()
                     } catch { self.error = error.localizedDescription }
@@ -462,13 +462,12 @@ struct PersonScreen: View {
         guard name != person.name else { return }
         Task {
             do {
-                let key = await session.recognizeKey()
-                let others: [String] = ((try? await session.services?.api.people(key: key)) ?? []).map(\.name)
+                let others: [String] = ((try? await session.peopleDirectory?.people()) ?? []).map(\.name)
                 if let problem = PersonName.problem(name, existing: others, current: person.name) {
                     error = PersonName.message(problem)
                     return
                 }
-                try await session.services?.api.renamePerson(person.name, to: name, key: key)
+                try await session.peopleDirectory?.rename(person.name, to: name)
                 if let file = session.hiddenPeopleFile { HiddenPeople.load(from: file).renamed(person.name, to: name).save(to: file) }
                 changed()
                 dismiss()
@@ -489,7 +488,7 @@ struct MergePersonSheet: View {
             List(people.filter { $0.name != person.name && !$0.isUnnamed }) { other in
                 Button(other.name) {
                     Task {
-                        try? await session.services?.api.mergePerson(person.name, into: other.name, key: await session.recognizeKey())
+                        try? await session.peopleDirectory?.merge(person.name, into: other.name)
                         dismiss()
                         done()
                     }
@@ -499,7 +498,7 @@ struct MergePersonSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
-            .task { people = (try? await session.services?.api.people(key: await session.recognizeKey())) ?? [] }
+            .task { people = (try? await session.peopleDirectory?.people()) ?? [] }
         }
         .frame(minWidth: 360, minHeight: 420)
     }

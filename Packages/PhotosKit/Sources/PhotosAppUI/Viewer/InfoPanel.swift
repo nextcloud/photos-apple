@@ -123,7 +123,7 @@ struct InfoPanel: View {
         .task(id: item.fileId) {
             guard item.kind == .image, let services = session.services else { return }
             exif = (try? await services.api.exif(userPath: item.path)) ?? [:]
-            if session.features.has(.recognize) { faces = (try? await services.api.faceDetections(userPath: item.path)) ?? [] }
+            if let people = session.peopleDirectory { faces = (try? await people.faces(in: item)) ?? [] }
             if session.features.has(.systemtags) { tags = (try? await services.api.tags(of: item.fileId)) ?? [] }
         }
     }
