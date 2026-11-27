@@ -932,7 +932,9 @@ struct SidebarAccountFooter: View {
                 AccountBadge(name: session.account.displayName, size: 24)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(session.account.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
-                    Text(session.account.hostDisplayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    // In the text colour, smaller than the name: the secondary colour had 2.4–2.8:1 on the sidebar's glass
+                    // over the photos (SPEC §20.3), as on the caption plates.
+                    Text(session.account.hostDisplayName).font(.caption).foregroundStyle(.primary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
@@ -940,6 +942,8 @@ struct SidebarAccountFooter: View {
                     .foregroundStyle(.secondary)
             }
             .contentShape(.rect)
+            // UI tests: the account row in the sidebar's bottom bar (SPEC §20.3).
+            .accessibilityIdentifier("sidebar-account")
             // One control, not one per logo and line of text.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(

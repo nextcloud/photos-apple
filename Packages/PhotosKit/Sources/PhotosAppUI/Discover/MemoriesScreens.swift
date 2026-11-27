@@ -124,8 +124,11 @@ struct MemoriesScreen: View {
 
 struct MemoryCard: View {
     let memory: Memory
-    /// Small, for the strip at the top of the library: smaller titles, always on the picture, which fills the card.
+    /// Small, for the strip at the top of the library: smaller titles on the picture, which fills the card; at
+    /// accessibility text sizes below it.
     var compact = false
+    /// A small card's picture height when its titles are below it (accessibility text sizes).
+    var pictureHeight: CGFloat = 104
     @Environment(SessionModel.self) private var session
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorSchemeContrast) private var contrast
@@ -136,7 +139,13 @@ struct MemoryCard: View {
 
     var body: some View {
         Group {
-            if compact {
+            if compact && dynamicTypeSize.isAccessibilitySize {
+                // Large text does not fit on the small picture: below it, wrapped, as on the large cards (SPEC §20.3).
+                VStack(alignment: .leading, spacing: 4) {
+                    compactPicture.frame(height: pictureHeight).clipShape(.rect(cornerRadius: 12))
+                    compactTitles(onPicture: false).fixedSize(horizontal: false, vertical: true)
+                }
+            } else if compact {
                 compactCard
             } else if dynamicTypeSize.isAccessibilitySize {
                 // Large text does not fit on the picture: it goes below it, and wraps.
@@ -149,11 +158,11 @@ struct MemoryCard: View {
                     .overlay(alignment: .bottomLeading) {
                         titles
                             .foregroundStyle(.white)
-                            .shadow(radius: 4)
+                            .shadow(color: .black.opacity(0.35), radius: 3)
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                LinearGradient(colors: [.clear, scrimColor.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                            // Even behind the titles: 4.5:1 on any photo (SPEC §20.3).
+                            .background { CaptionScrim(color: scrimColor, increased: increased, fade: 56) }
                     }
                     .clipShape(.rect(cornerRadius: 14))
             }
@@ -172,25 +181,36 @@ struct MemoryCard: View {
             .clipped()
     }
 
-    /// The picture fills the card the strip gives it; the title is on it and may take two lines.
-    var compactCard: some View {
+    var compactPicture: some View {
         Color.clear
             .overlay { PreviewImage(fileId: memory.cover, etag: "", bucket: 256).scrollParallax(.horizontal) }
             .clipped()
+    }
+
+    /// The picture fills the card the strip gives it; the title is on it and may take two lines.
+    var compactCard: some View {
+        compactPicture
             .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(memory.title).font(.footnote.bold()).lineLimit(2)
-                    if let dateLine { Text(dateLine).font(.caption2).lineLimit(1) }
-                }
-                // UI tests: captions on photos, measured against the photo (SPEC §20.3).
-                .accessibilityIdentifier("memory-caption")
-                .foregroundStyle(.white)
-                .shadow(radius: 3)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LinearGradient(colors: [.clear, scrimColor.opacity(scrimOpacity)], startPoint: .top, endPoint: .bottom))
+                compactTitles(onPicture: true)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 2)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Even behind the titles: 4.5:1 on any photo (SPEC §20.3).
+                    .background { CaptionScrim(color: scrimColor, increased: increased, fade: 22) }
+                    // The card has a fixed size: up to xxLarge on it; larger sizes put the titles below the picture.
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             }
             .clipShape(.rect(cornerRadius: 12))
+    }
+
+    func compactTitles(onPicture: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(memory.title).font(.footnote.bold()).lineLimit(onPicture ? 2 : nil)
+            if let dateLine { Text(dateLine).font(.caption2).lineLimit(onPicture ? 1 : nil) }
+        }
+        // UI tests: captions on photos, which the audit measures against the photo under them (SPEC §20.3).
+        .accessibilityIdentifier("memory-caption")
     }
 
     var titles: some View {
@@ -199,7 +219,7 @@ struct MemoryCard: View {
             Text(memory.title).font(Typography.overlayTitle).lineLimit(2)
             if let dateLine { Text(dateLine).font(Typography.overlaySubtitle).lineLimit(1) }
         }
-        // UI tests: captions on photos, measured against the photo (SPEC §20.3).
+        // UI tests: captions on photos, which the audit measures against the photo under them (SPEC §20.3).
         .accessibilityIdentifier("memory-caption")
     }
 
@@ -209,10 +229,8 @@ struct MemoryCard: View {
             cover: memory.cover, services: session.services, contrast: contrast, reduceTransparency: reduceTransparency)
     }
 
-    /// Stronger with Increase Contrast or Reduce Transparency, so the white titles stay readable on bright photos.
-    var scrimOpacity: Double {
-        OverlayLegibility.scrimOpacity(base: 0.6, increased: contrast == .increased || reduceTransparency)
-    }
+    /// Increase Contrast or Reduce Transparency: a stronger shade under the white titles.
+    var increased: Bool { contrast == .increased || reduceTransparency }
 }
 
 // MARK: - Archive (SPEC §7.13)

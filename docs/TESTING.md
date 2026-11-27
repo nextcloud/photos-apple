@@ -258,6 +258,7 @@ Library, viewer and its info, Collections (the iPad's sidebar), Albums, Settings
 Library, Settings, Collections and Search at the largest accessibility text size. A finding fails the test unless
 `AccessibilityAuditPolicy.accepts` names it with a reason (a photo's own colours, the system's bars and search field,
 the system's secondary text colours at 3:1 or more, content under the tab bar's glass, findings without an element).
+White captions on photos (`memory-caption`) are never excused.
 With `TEST_RUNNER_PHOTOS_UITEST_SHOTS=<folder>` every screen's screenshot, accessibility tree and findings
 (`…-audit.txt`, accepted ones with their reason) are written there; `TEST_RUNNER_PHOTOS_UITEST_A11Y_SURVEY=1` only
 writes them, for a look at a new screen. `TEST_RUNNER_PHOTOS_UITEST_LANGUAGE=de` runs the same screens in German with a

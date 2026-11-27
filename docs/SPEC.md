@@ -3034,14 +3034,22 @@ Settings, Collections and Search again at the largest accessibility text size (A
   screen is audited again at the largest size, where these fail;
 - Search's start screen on the animated living wash, which the audit cannot sample (it reports even the black title;
   measured in the screenshot: 18.8:1 and 5.3:1), and the viewer's date pill, capped at accessibility2 on purpose;
-- the iPad Library dimmed behind the sidebar that overlays it in portrait; text "clipped" only because its row is at
-  the edge of a scroll area; text on glass and materials, which the audit measures against what is behind them (the
-  cover under a caption plate, the photo under the iPad's info inspector): there the test measures the element's own
-  pixels in the screenshot and accepts 7:1 or more, but only on an even background, never on a photo;
-- the sidebar's account line (server name, secondary colour on the sidebar's glass, 3.5:1) — an open item for the
-  sidebar's rendering, see STATUS §20.3;
-- memory captions on photos (story and memory cards, marked `memory-caption` for the tests) — an open item, see
-  STATUS §20.3.
+- the iPad Library dimmed behind the sidebar that overlays it in portrait, and its memory captions under that sidebar;
+  text "clipped", or measured against what is outside, only because its row is at the edge of a scroll area; text on
+  glass and materials, which the audit measures against what is behind them (the cover under a caption plate, the
+  photo under the iPad's info inspector): there the test measures the element's own pixels in the screenshot and
+  accepts 7:1 or more, but only on an even background, never on a photo;
+- the account row in the sidebar's bottom bar (`sidebar-account`): the badge's initials (white on the accent, 6.1:1,
+  measured by the audit against the glass around the circle; a fixed-size picture hidden from VoiceOver) and the text
+  size, which the system's bottom bar lets grow only a little. Its name and server are in the text colour and must pass.
+
+**Memory captions on photos** (story cards, memory cards, the Collections and Library strips and the Mac's menu bar
+panel; marked `memory-caption` for the tests) are not excused, not even as "nearly passed": white text stands on an
+even shade from its first line down (`CaptionScrim`, black or the deep tone of the cover's colour at 65 %, 75 % with
+Increase Contrast or Reduce Transparency) that fades in over 22–56 points above it with an eased curve. On a white
+photo that is more than 5:1 (`CaptionScrimTests`), so the small date line meets AA on any photo. At accessibility text
+sizes the captions go below the picture and wrap, and the strips grow to the tallest card.
+
 The audit is run in three parts (contrast; elements, hit areas, descriptions, traits; Dynamic Type and clipping) and
 retried after a pause when it runs out of time, which it does on a loaded Mac; the handler only records.
 

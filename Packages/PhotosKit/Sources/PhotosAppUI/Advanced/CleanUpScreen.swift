@@ -336,10 +336,10 @@ struct CleanUpTotalView: View {
                     )
                     .font(.callout).foregroundStyle(.secondary)
                 } else {
-                    Label {
+                    // Not a Label: at the largest text sizes the audit took its wrapped title for clipped (SPEC §20.3).
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "checkmark.seal").accessibilityHidden(true)
                         Text("Nothing to clean up", bundle: .module)
-                    } icon: {
-                        Image(systemName: "checkmark.seal")
                     }
                     .font(.title3.weight(.semibold))
                     Text(

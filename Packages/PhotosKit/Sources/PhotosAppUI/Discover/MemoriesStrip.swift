@@ -55,6 +55,10 @@ struct MemoriesStrip: View {
     /// Mac: the memories folded away to their title line (SPEC §20.1); a setting of this device.
     @AppStorage(Self.collapsedKey) private var collapsed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Accessibility text sizes: the titles go below the pictures, where they can wrap (SPEC §20.3).
+    var captionsBelow: Bool { dynamicTypeSize.isAccessibilitySize }
 
     /// `@AppStorage` key of the Mac's folded memories.
     static let collapsedKey = "memoriesCollapsed"
@@ -157,7 +161,7 @@ struct MemoriesStrip: View {
                 MemoryStories(memories: shown, seasonalYear: seasonalYear, slideshow: $slideshow)
             } else if !memories.isEmpty {
                 ScrollView(.horizontal) {
-                    LazyHStack(spacing: 10) {
+                    cardStack {
                         if let seasonalYear { yearInReviewLink(seasonalYear) }
                         ForEach(shown) { memory in card(memory) }
                         allMemoriesLink
@@ -168,12 +172,23 @@ struct MemoriesStrip: View {
                 .scrollIndicators(.hidden)
                 // A horizontal scroll view takes all the height it is offered: in the library's stack it would share
                 // the screen with the grid and leave a large empty band above the cards. A fixed height, not
-                // `fixedSize()`: measured at its ideal size the lazy stack could stay empty until it was scrolled.
-                .frame(height: cardSize.height + 2 * Self.verticalPadding)
+                // `fixedSize()`: measured at its ideal size the lazy stack could stay empty until it was scrolled. With
+                // the titles below the pictures the stack is not lazy, and the strip is as tall as its tallest card.
+                .frame(height: captionsBelow ? nil : cardSize.height + 2 * Self.verticalPadding)
+                .fixedSize(horizontal: false, vertical: captionsBelow)
                 .contextMenu { stripMenu }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(Text("Memories", bundle: .module))
             }
+        }
+    }
+
+    /// Lazy, but not with the titles below the pictures: then every card is measured (`limit` at most).
+    @ViewBuilder func cardStack<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if captionsBelow {
+            HStack(alignment: .top, spacing: 10, content: content)
+        } else {
+            LazyHStack(spacing: 10, content: content)
         }
     }
 
@@ -199,12 +214,10 @@ struct MemoriesStrip: View {
             MemoryScreen(memory: memory)
                 .cardTransitionDestination(id: memory.id, in: zoom)
         } label: {
-            MemoryCard(memory: memory, compact: true)
-                .frame(width: cardSize.width, height: cardSize.height)
+            // At accessibility text sizes the titles go below the picture (`MemoryCard`), and the card grows.
+            MemoryCard(memory: memory, compact: true, pictureHeight: cardSize.height)
+                .frame(width: cardSize.width, height: captionsBelow ? nil : cardSize.height)
                 .cardTransitionSource(id: memory.id, in: zoom, cornerRadius: 12)
-                // The card has a fixed size: at accessibility text sizes its title would be cut to a word or two. The
-                // whole title is in the VoiceOver label and on the memory's screen.
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         }
         .buttonStyle(.plain)
         .contextMenu {

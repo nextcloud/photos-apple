@@ -111,6 +111,49 @@ enum OverlayLegibility {
     static func scrimOpacity(base: Double, increased: Bool) -> Double {
         increased ? max(base, 0.75) : base
     }
+
+    /// The shade behind white captions on a photo (`CaptionScrim`): at this opacity white text keeps WCAG AA (4.5:1) on
+    /// any photo, a white one too, also where the shade is a deep tone of the cover's colour (`PhotoTintRole.scrim`)
+    /// instead of black (`CaptionScrimTests`).
+    static let captionScrimOpacity = 0.65
+
+    /// How the shade fades in above a caption, as (location, share of the full shade): eased (smoothstep), so the photo
+    /// darkens without a visible edge where the fade meets the even shade behind the text.
+    static func captionFade(steps: Int = 8) -> [(location: Double, amount: Double)] {
+        (0...steps).map { step in
+            let t = Double(step) / Double(steps)
+            return (t, t * t * (3 - 2 * t))
+        }
+    }
+}
+
+/// The shade under white captions on a photo (memory and story cards; SPEC §20.3): even behind the text, so that the
+/// date line keeps 4.5:1 on any photo, and fading in above it, so that the photo above stays as it is. Goes into the
+/// caption's background and reaches `fade` points above the caption.
+struct CaptionScrim: View {
+    /// Black, or a deep tone of the cover's colour (`MemoryScrimColor`).
+    var color: Color = .black
+    /// Increase Contrast or Reduce Transparency: stronger.
+    var increased: Bool
+    /// How far above the caption the shade fades in.
+    var fade: CGFloat = 36
+
+    var body: some View {
+        let opacity = OverlayLegibility.scrimOpacity(base: OverlayLegibility.captionScrimOpacity, increased: increased)
+        VStack(spacing: 0) {
+            LinearGradient(
+                stops: OverlayLegibility.captionFade().map {
+                    Gradient.Stop(color: color.opacity(opacity * $0.amount), location: $0.location)
+                },
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: fade)
+            color.opacity(opacity)
+        }
+        .padding(.top, -fade)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
 }
 
 /// Short, standard haptics (iPhone and iPad); nothing on the Mac and Vision Pro.
