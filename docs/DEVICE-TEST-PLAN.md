@@ -215,6 +215,33 @@ them. Each is marked "⬜ device D16.n" in STATUS.md.
 
 **Expected:** each does what its STATUS line says; note any difference in the issue.
 
+## D17 Continuity: Handoff and Apple TV set-up (P, T, M, V, TV) — STATUS §22.2
+
+Needs signed builds of one team (Handoff and DeviceDiscoveryUI do not work between ad-hoc builds), devices on the same
+Apple Account with Handoff on (System Settings › General › AirPlay & Continuity / Handoff), Bluetooth and Wi-Fi on.
+
+1. **Handoff (P → M, M → P, P → T, T → V):** on one device open a photo in the viewer, then an album, a memory (On this
+   day), a place, a person, the Map and the Library scrolled into an older year; each time pick the app up on the other
+   device (Mac: the Handoff icon at the end of the Dock; iPhone and iPad: the app switcher's banner). Also: lock the app
+   on the first device (app lock) — nothing is offered; open an archived photo — nothing is offered for it.
+2. **Other account:** log in to a second account on device A, keep device B on the first; hand off from A. Then remove
+   the account from B and hand off again.
+3. **Without the app:** uninstall the app from the Mac (or use a Mac without it) and hand off an album from the iPhone.
+4. **Set Up with iPhone (TV + P):** a TV app without an account; Set Up with iPhone; pick the iPhone in Apple's picker;
+   allow on the iPhone; choose the account (with two accounts: the second); Continue; in the browser log in if asked and
+   allow access. Repeat with the iPhone app not running (force-quit) and with the iPhone locked; then once more pressing
+   Cancel on the iPhone, and once closing the browser.
+5. On the web: Settings › Security › Devices & sessions lists the TV as its own session; revoke it — the TV asks to log
+   in again, the iPhone stays logged in.
+
+**Expected:** 1: the same photo, album, memory, place, person, Map, and the Library at the same photo open on the other
+device, with Back to where it came from; nothing while locked or for the archived photo. 2: "Open the link in another
+account?" and, after the account was removed, "Continue in Another Account?" with Open in Browser, which opens the same
+place on the web. 3: the Mac opens the server's web page of the album in the browser. 4: the iPhone's app starts by
+itself, the sheet names the TV, the TV shows "Continue on your iPhone", the page in the browser proposes the user name,
+after "Grant access" the TV shows its Home within a few seconds and the iPhone says "Apple TV is set up". Cancel and a
+closed browser bring the TV back to its start with a message. 5: as described. Note the taps and seconds for step 4.
+
 ## Results table (copy into the issue)
 
 ```
@@ -236,5 +263,6 @@ Build:            Server (version / Photos):         Date / tester:
 | D13 Backup you can see, 2 GB video |   |   | – | – | – | – | % before/after kill, offline, restart: |
 | D15 Erase tool            |   |   |   | – | – | – | s per object / peak MB / quality: |
 | D16 Simulator gaps        |   |   |   | – | – | – | |
+| D17 Handoff, TV set-up    |   |   |   |   | – |   | taps / s for the TV set-up: |
 ```
 Mark each cell ✓, ✗ (with an issue link) or "not tested".

@@ -3759,7 +3759,103 @@ optional server app such as `notify_push` may be used when present).
 _To be written._
 
 ### 22.2 Handoff, Apple TV set-up from the iPhone, a three-step first run [continuity]
-_To be written._
+
+#### 22.2.1 Handoff (iPhone, iPad, Mac, Vision Pro)
+
+- **What continues.** The photo in the viewer, an album (own or shared), a memory, a place, a person, a tag, a folder,
+  a destination (Albums, Memories, Map, Clean up …) and the Library's position (the photo at the top of the grid). Search,
+  Settings, Backup and the iPhone's Collections list are of the device and are not handed off. Archived photos and the
+  video half of a Live Photo are never advertised (`DeepLink.mayOpen`); nothing is advertised while the app is locked
+  or in Guest Mode, and album windows, the loupe window and Guest Mode have no activity.
+- **One activity type, the link as payload.** `com.nextcloud.photos.viewing` (`NSUserActivityTypes`). The user info is
+  `{"link": "nextcloudphotos://<user>@<host>[/<path>]/<route>", "version": 1}` — the same account link Spotlight items,
+  widgets and App Intents carry (§4.8, `DeepLink.url(for:)`); nothing else (no names, no secrets). Not eligible for
+  search, prediction or public indexing: Spotlight has its own index (`SpotlightIndexer`), and a photo the user looked at
+  is not a Siri suggestion. Spotlight already used `CSSearchableItemActionType` continuation with the same links; Handoff
+  reuses that path. Two routes were added for it: `memories/<id>` (a memory by `Memory.id`, the form the TV's Top Shelf
+  already used; memories are made on each device from the same library, so the same day gives the same ids — one that is
+  not there says "Memory not found") and `library/<fileId>` (the Library scrolled to that photo, as "Show in Library" does).
+- **Which window advertises what.** Each main window has a `HandoffRegistry`: a screen registers its content when it
+  appears and takes it back when it goes; the newest wins (the viewer over the album under it, an album over the list).
+  SwiftUI's `userActivity(_:element:)` makes the active window's activity current. The Library's grid has no scroll
+  callback that reaches SwiftUI: its top photo (`gridTopItem`) is read every 2 s while the window is active.
+- **On the other device** (`HandoffCenter`): the link goes through `AppModel.open` like every link — the same account opens
+  at once (after the unlock when locked); another account that is logged in there asks "Open the link in another
+  account?" (§4.8); an account that is not logged in there (or no account at all, the login screen) asks "Continue in
+  Another Account?" with **Open in Browser**: the activity's `webpageURL` is the same place in the server's web app
+  (`/index.php/apps/photos/albums/<name>`, `…/sharedalbums/…`, `…/places/…`, `…/faces/…`, `…/thisday` for On this day,
+  `/index.php/f/<fileId>` for a photo, the start page for screens the web app lacks). A device without the app opens that
+  page directly (the system does it).
+- Handoff needs both devices on the same Apple Account with Handoff on, and builds of the same team; it cannot be shown in
+  the simulator (DEVICE-TEST-PLAN D17).
+
+#### 22.2.2 Setting up Apple TV from the iPhone
+
+- **The TV** (`TVLoginView`): "Set Up with iPhone" above the address form opens Apple's device picker (DeviceDiscoveryUI
+  `DevicePicker`, application service `NextcloudPhotos-TVSetup`, `NSApplicationServices` › Browses, iOS and iPadOS). The
+  picker lists the iPhones and iPads of the TV's iCloud account or family that have the app; the system asks on the phone
+  and starts the app there. The QR code login (§15.3 TV-1) stays: typing the address, and the code for a phone without
+  the app.
+- **The phone** (`TVSetupListener`, started at launch on iPhone and iPad; `NSApplicationServices` › Advertises) takes the
+  connection and shows "Set Up Apple TV": the TV's name, the account to use (a picker when there are several), "Apple TV
+  gets its own access to your Nextcloud, which you allow on your server's page in the browser. No password is sent to Apple
+  TV." Continue. The sheet is behind the app lock. Without an account the TV hears "Log in to Nextcloud Photos on your
+  iPhone first"; a second TV while one is set up hears that the phone is busy.
+- **Protocol** (`TVSetup`, length-prefixed JSON frames over the system's connection): TV → `hello(version, device)`; phone →
+  `account(serverURL, loginName)`; the TV runs the same checks as a typed address (managed server, "Connect without
+  encryption?" for http://, certificate trust), starts **Login Flow v2** and sends `login(url)`; the phone opens that page
+  in the browser (`ASWebAuthenticationSession`, shared browser session, so a browser that is already logged in to the
+  server only needs "Grant access"; the login name is proposed with `?user=`); the TV polls the flow as with the QR code
+  and receives **its own app password** from the server; TV → `done(name)`; the phone closes the browser and says "Apple TV
+  is set up". `failed(reason)`/`cancel` either way end it on both sides (Cancel on the phone, the browser closed, an
+  expired flow, a lost connection).
+- **Security.** The connection is the system's application-service connection: end-to-end encrypted and limited to the
+  TV's iCloud account or family. Nothing secret crosses it: an address, a login name and a login page; the credentials go
+  from the server to the TV over its own HTTPS poll. The phone opens only a Login Flow page of the server it chose
+  (`TVSetup.isLoginPage`: same host, port and path below the server, https for an https server, no user info, exactly
+  `…/login/v2/flow/<token>`); anything else is refused and the TV is told. Frames over 64 KB are refused.
+- **Why the browser.** The TV needs a dedicated app password (revoking the TV must not sign out the phone), and stock
+  Nextcloud refuses to make one from another app password: `ocs/v2.php/core/getapppassword` and the Login Flow's grant
+  both answer 403 to a client authenticated with an app password (checked on NC 36, round 12). A grant without the page
+  would need a server change, which §2 rules out.
+- Simulators: DeviceDiscoveryUI's picker shows no devices there. Debug builds with `PHOTOS_DEBUG_TV_SETUP=bonjour` on both
+  apps use plain Bonjour (`_ncphotos-setup._tcp`) and a list instead (not encrypted, never in release builds);
+  `PHOTOS_DEBUG_TV_SETUP_SHEET=<name>` shows the phone's sheet for screenshots.
+
+#### 22.2.3 The first run in three steps
+
+1. **Sign in** — the login screen (§17.6.2) with "1 · 2 · 3" above the headline (iPhone and iPad; two dots on the Mac and
+   Vision Pro, where there is no backup step).
+2. **Turn backup on** (iPhone, iPad) — "Back up the photos of this iPhone?", what backup does, **Turn on backup** and **Not
+   now**. One tap asks the system for photo access and, once given (full or limited), turns backup on at once
+   (`BackupModel.enable`); only when the Nextcloud Files app is there does the existing set-up with its Files question
+   come first (`BackupSetupSteps`). Denied: the explanation and "Allow full access in Settings". The step lies over the
+   Library, which loads behind it (no sheet animation, VoiceOver does not reach the Library under it).
+3. **Done** — the welcome into the Library (§17.6.3) plays after the backup step, with "Backup is on. Your photos are on
+   their way to your Nextcloud." under "Welcome, <name>" (held 1.4 s longer, announced to VoiceOver).
+
+The notification question is no longer part of the first run: it is a tip. Taps from launch to the Library on a new
+iPhone install: the login is unchanged (the address, Log in, and on the server's page the user's login and Grant access);
+after it, **2** taps — Turn on backup, Allow (the system's photo question) — where there were **4** (Turn on backup, Allow,
+Start backup, Allow for notifications); with "Not now" 1 where there were 2. Measured by `ContinuityTourTests`
+(`testFirstRunInThreeSteps` counts its taps). The Mac: the login and the welcome, and no notification prompt.
+
+#### 22.2.4 Contextual tips
+
+Apple's TipKit (`AppTips`), one tip at a time at the top of the Library (above the memories; on the Mac above its memories
+band), at most one new tip a day (`displayFrequency(.daily)`), none on the first launch, each shown until it is closed or
+its button is used, then never again. Settings › Library (Mac: Settings › General) › **Show Tips** turns them off. In order (`TipPlan`):
+
+| Tip | When | Button | Where |
+|---|---|---|---|
+| Back up this device's / this Mac's photos | backup offered but not on, from the 2nd launch | Set Up Backup | iPhone, iPad, Mac |
+| Know when there's something new | notification permission not asked yet, from the 2nd launch | Turn On Notifications | all |
+| Keep Photos in the menu bar | menu bar extra off, from the 3rd launch | Show in Menu Bar | Mac |
+| Bring your photos home (Import Library) | from the 3rd launch | Import Library… | all |
+| Make room on your Nextcloud (Clean up) | 500 or more photos, from the 4th launch | Open Clean Up | all |
+| More tools when you want them (Advanced features) | Advanced features off, from the 6th launch | Open Settings | all |
+
+Debug builds signed in by `PHOTOS_DEBUG_LOGIN` (UI tests) show no tips; `PHOTOS_DEBUG_TIPS=show` shows them all.
 
 ### 22.3 Camera in search, People without Recognize, birthdays from Contacts [people]
 _To be written._

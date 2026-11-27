@@ -1945,7 +1945,39 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
 - ⬜ Round 12.
 
 ### §22.2 Handoff, Apple TV set-up from the iPhone, three-step first run
-- ⬜ Round 12.
+- 🟡 **Handoff** (§22.2.1): viewer photo, album, memory, place, person, tag, folder, destinations and the Library's
+  position advertised per window (`HandoffRegistry`, `userActivity(_:element:)`), continued through `AppModel.open`; web
+  page fallback and "Continue in Another Account?". Unit tests: payload, link parsing, the account rules, web pages, which
+  screen wins (`HandoffTests` 9, `ContinuityLinkTests` 3). Built for iPhone, iPad, Mac and Vision Pro; the Mac build's
+  Info.plist lists the type. *Not seen working:* Handoff needs two devices on one Apple Account and signed builds of one
+  team — DEVICE-TEST-PLAN D17.1–3.
+- ✅ **Set up Apple TV from the iPhone, protocol and Login Flow** (§22.2.2): `TVSetupIntegrationTests` against the test
+  server (8093): the TV's side starts Login Flow v2 for the account the phone sends, the phone gets the page (refuses
+  another server's), "the browser" grants, the TV receives its own app password (works, differs from the phone's; revoked
+  by the test). `TVSetupTests` 8 over a real loopback connection: frames, hello/account/login/done, wrong server refused,
+  Cancel reaches the TV.
+- ✅ **Both apps' screens, end to end in the simulators** (Bonjour instead of Apple's picker, `PHOTOS_DEBUG_TV_SETUP`):
+  `TVSetupTourTests` on the `r12-continuity-tv` simulator — Set Up with iPhone, the iPhone simulator's app found, the
+  http question, "Continue on your iPhone" with the page, then Home with the account; the iPhone simulator's sheet went
+  from the account to the system's browser question to "Apple TV is set up" (a script stood in for the browser's Grant
+  access). Shots `ios-fix-shots/r12-continuity/tv-setup-*.png`, `continuity-tv-setup-01-phone-sheet.png`.
+- 🟡 **Apple's device picker and the system's connection** (DeviceDiscoveryUI, `NSApplicationServices`), the app started
+  by the system for the TV, and the real browser grant: need a TV and an iPhone of one iCloud account — D17.4–5.
+- ✅ **First run in three steps** (§22.2.3): `ContinuityTourTests.testFirstRunInThreeSteps` on a fresh install of the
+  iPhone simulator: the backup step with "1 · 2 · 3", Turn on backup → the system's photo question → the welcome with
+  "Backup is on…" → the Library, backing up (6 sample photos into `/r12-continuity-backup`, removed). **2 taps** after the
+  login (were 4: Turn on backup, Allow, Start backup, Allow notifications). Shots `continuity-first-run-*.png`.
+  `FirstRunTests` (afterAccess, step count).
+- ✅ **Contextual tips** (§22.2.4): `testTipsInTheLibrary` (all tips shown): the backup tip at the top of the Library above
+  the memories, closing it shows the notifications tip (`continuity-tips-*.png`); on the Mac the tip is in the window's
+  accessibility tree above the memories band (AX query; the window was behind others, its screenshot stale). `TipPlan`
+  tests: no tip on the first launch, platform sets, order. 🟡 the once-a-day rhythm and launch counts are TipKit's and
+  were not watched over days.
+- ✅ Regression: `SmokeTests` 7 of 7 and `AccessibilityAuditTests` 13 of 13 on the `r12-continuity` iPhone 17 Pro
+  simulator. (The first version hid the Library under the backup step with `accessibilityHidden(false)` the rest of the
+  time, which made the whole window one undescribed element in every audit; the step is now a modal overlay instead.)
+- ⬜ Handoff of a photo opens it alone in the viewer (no neighbours to swipe to): the receiving device does not know the
+  list it was opened from. Plan: carry the album or the Library position with the photo and open the viewer over it.
 
 ### §22.3 Camera in search, People without Recognize, birthdays from Contacts
 - ⬜ Round 12.
