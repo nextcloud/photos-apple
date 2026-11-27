@@ -3822,7 +3822,68 @@ removal and no reminder notification: the user always starts it.
 _To be written._
 
 ### 22.3 Camera in search, People without Recognize, birthdays from Contacts [people]
-_To be written._
+
+**Camera in search (idea 5).** The search knows the camera and the lens a photo was taken with: chips `Camera` and
+`Lens` (`SearchFilter.camera/.lens`), typed in words ("Fujifilm X100V", the model alone "x100v", "Anna in Lisbon 2024
+shot on x100v" → Anna · Lisbon · 2024 · Fujifilm X100V), offered as suggestions (by make and by model prefix), changed in
+the chip's menu (Other Camera / Other Lens, the library's cameras most used first), remembered in recent searches, and
+combined with names, dates, places like every chip (OR within cameras, AND with the rest). Names as Insights writes them
+(`ExifFacts.cameraName`: "Nikon D700", "iPhone 15 Pro"). Camera data is **read once**: the one table is `photoExif` and
+the one reader `ExifIndexing` (`nc:metadata-photos-exif`/`-ifd0` by SEARCH, 500 photos a request, newest first), now
+started after every sync — for Insights (§16.5.1), the search and the organising rules (§16.4), which read their camera
+details from it (`OrganizeStore`); their own table `cameraDetails` is dropped (migration `v_r12_people_camera_once`).
+Photos only known from shared albums have no camera data: a camera chip does not find them.
+
+**People without Recognize (idea 10).** On a server without Recognize the app finds the people itself, with Apple's
+Vision only (no model of the app's own, §2/§21):
+- *Faces* (`PhotosMedia/Faces/FaceAnalysis`): Vision face rectangles and face capture quality on the 1024 px preview;
+  for each face that is clear enough (quality ≥ 0.25, ≥ 40 px wide) a Vision feature print of the face's crop, turned
+  upright (roll taken out) and widened to head and shoulders (1.8 × the box, 160 px). The small cached tile (256) says
+  first whether a photo shows anyone; the 1024 preview is the cached one, else fetched for the analysis (not stored) only
+  on a network that is neither expensive nor constrained. Stored per photo version (`DeviceFaceStore`: `deviceFaceScan`,
+  `deviceFace`, `devicePerson`, `deviceFaceRejection`, migration `v_r12_people_device_faces`); rows go with their photos.
+- *Grouping* (`PhotosDomain/Faces/FaceClustering`): a feature print describes a picture in general, not identity, so
+  prints are compared after taking away the library's mean print (what all faces share): centered cosine. A face joins the
+  person whose centre is nearest at ≥ 0.75, never a person with a face in the same photo, never one the user said it is
+  not; else it starts a person. Grouping waits for 100 faces (or the whole library) so the mean means something, then
+  takes faces in the order their photos were taken; afterwards people whose centres are ≥ 0.80 alike are merged (never
+  two different names, never two with faces in one photo). In memory: everyone with two faces or a name, and the 4 000
+  most recent one-face people (≈ 3 KB each). The thresholds come from the test library (STATUS §22.3).
+- *Shown like Recognize's* (`PeopleDirectory`: `RecognizePeopleDirectory` / `DevicePeopleDirectory`): the People screen
+  (people with faces in ≥ 2 photos, or named; unnamed ones "Add name"), a person's photos, Rename, Merge with…, Not this
+  person, Move to another person…, Unassigned faces with Assign to person…, New person…, Remove person, Hide; search
+  (people chips and vocabulary), Through the years, sticker packs, the info panel's faces and VoiceOver's "with Anna".
+  Named people are written into `person`/`personItem` (detection ids < 0), where smart albums, moments, family
+  suggestions, the year in review, Spotlight and the command palette find people. When the server has Recognize,
+  Recognize's people are used and the device's are hidden (taken out of `person`/`personItem`; nothing is analysed).
+- *When*: while the Library or People is on screen (not in Low Power Mode, thermal state nominal/fair, on battery above a
+  third), and in a `BGProcessingTask` that needs external power (`com.nextcloud.photos.faces`) / an
+  `NSBackgroundActivityScheduler` activity on the Mac. Resumable (per photo version), incremental. Vision does not run in
+  the simulator. Settings › Privacy & security › *Find people on this device* (only without Recognize; default on; off
+  deletes faces and people found). The People screen says how far the device has looked and that it happens on the device.
+- *Shared between the user's devices* (contract with §22.5): names and assignments live in `.nextcloud-photos/people.json`
+  (`DevicePeopleDocument`, one JSON file per kind): `{"version":1,"people":{"<uuid>":{"name","updatedAt","deleted",
+  "mergedInto","faces":[{"fileId","box":{x,y,width,height},"at"}],"rejected":[…]}}}`. A face is its photo and its box
+  (normalized, top-left, rounded to 1/1000); every device finds it again on the same preview (boxes overlapping > ½).
+  A named person carries up to 24 of their clearest faces, so another device can find the same person among its own
+  groups (the group with most of them takes the name); faces assigned or rejected are added with their time. Merge
+  rule: per person the newer name/deletion/merge wins (`updatedAt`), faces and rejections of both are kept, a face said
+  both ways keeps the newer word; a name is never lost. People goes through the protocol `DevicePeopleNames`; until the
+  settings API of §22.5 reads and writes the file on the server, `LocalDevicePeopleNames` keeps it in the account's
+  folder (`device-people.json`, TODO for tidy to wire).
+
+**Birthdays from Contacts (idea 11).** Read-only over CardDAV, once a day after a sync: the address books under
+`remote.php/dav/addressbooks/users/<user>/` (not the generated "Accounts" and "Recently contacted" books), one
+`addressbook-query` per book for cards with `BDAY`, with UID, FN, N, NICKNAME, BDAY only (no photos). vCard 3 and 4
+dates (`19850412`, `1985-04-12`, `--0412`, Apple's year 1604 / `X-APPLE-OMIT-YEAR`), folded lines, grouped properties.
+Stored in `contactBirthday` (migration `v_r12_people_contact_birthdays`), replaced at each read. Matched with the named
+people (Recognize's or the device's) by full name or nickname, else by a first name that only one contact and one
+person have; a person matching two contacts is not guessed. Memories gets a *Birthdays* section: "Anna's birthday" —
+her photos within three days of the day over the years (≥ 3 photos), the next birthday first; on the day a card
+"Today is Anna's birthday" / "Anna turns 8 today" opens it, and a notification at 9:00 says so (only where
+notifications are allowed already; with app lock "A birthday today"; a tap opens the person). Through the years takes
+the date of birth from Contacts when the user set none. Works without the Contacts app or birthdays: nothing is shown.
+Settings › Privacy & security › *Birthdays from Contacts* (default on; off deletes the birthdays read and the reminders).
 
 ### 22.4 Faster: tile cache, targeted sync and notify_push, smaller preview cache [speed]
 _To be written._

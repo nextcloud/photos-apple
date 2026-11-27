@@ -119,6 +119,26 @@ public struct InsightsStore: Sendable {
         }
     }
 
+    /// The cameras and lenses the library's photos were taken with, most used first (search chips and the rule
+    /// builder's pickers; SPEC §22.3).
+    public func cameraVocabulary(limit: Int = 30) async throws -> (cameras: [String], lenses: [String]) {
+        try await database.writer.read { db in
+            let cameras = try String.fetchAll(
+                db,
+                sql: """
+                    SELECT camera FROM photoExif WHERE camera IS NOT NULL AND camera <> ''
+                    GROUP BY camera ORDER BY count(*) DESC, camera LIMIT ?
+                    """, arguments: [limit])
+            let lenses = try String.fetchAll(
+                db,
+                sql: """
+                    SELECT lens FROM photoExif WHERE lens IS NOT NULL AND lens <> ''
+                    GROUP BY lens ORDER BY count(*) DESC, lens LIMIT ?
+                    """, arguments: [limit])
+            return (cameras, lenses)
+        }
+    }
+
     /// Rows of files that are no longer in the index.
     public func removeOrphans() throws {
         try database.writer.write { db in

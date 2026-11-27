@@ -62,6 +62,8 @@ struct RecentSearches: Equatable {
             case .photos: kind = "photos"
             case .label(let word): (kind, text) = ("label", word)
             case .rating(let stars): (kind, id) = ("rating", String(stars))
+            case .camera(let name): (kind, text) = ("camera", name)
+            case .lens(let name): (kind, text) = ("lens", name)
             }
         }
 
@@ -84,6 +86,8 @@ struct RecentSearches: Equatable {
             case "photos": .photos
             case "label": text.map { .label($0) }
             case "rating": id.flatMap(Int.init).map { .rating(atLeast: $0) }
+            case "camera": text.map { .camera($0) }
+            case "lens": text.map { .lens($0) }
             default: nil
             }
         }

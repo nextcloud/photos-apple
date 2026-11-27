@@ -32,6 +32,8 @@ extension SessionModel {
         await afterSyncOrganize()
         // The Lock Screen album, family suggestions and prompt reminders (SPEC §16.7).
         await afterSyncFamily()
+        // Camera data for search, People on this device and birthdays (SPEC §22.3).
+        await afterSyncPeople()
     }
 
     // MARK: Search labels

@@ -134,6 +134,8 @@ enum BackupRowStatus {
         @State private var model = CollectionsOverviewModel()
 
         func visible(_ destination: AppDestination) -> Bool {
+            // People found on this device where the server has no Recognize (SPEC §22.3).
+            if destination == .people { return session.offersPeople }
             guard let feature = destination.requiredFeature else { return true }
             return session.features.has(feature)
         }

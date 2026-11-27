@@ -136,6 +136,13 @@ import XCTest
             try audit("memories")
         }
 
+        /// People without Recognize (SPEC §22.3): what People shows while this device looks for people.
+        func testPeople() throws {
+            launch(at: "people")
+            pause(8)
+            try audit("people")
+        }
+
         /// The largest accessibility text size: nothing clipped, nothing that does not grow.
         func testLargestTextSize() throws {
             app.launchArguments += Self.largestText

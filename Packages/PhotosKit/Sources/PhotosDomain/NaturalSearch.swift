@@ -11,7 +11,8 @@ import Foundation
 ///  2. a rating ("5 stars", "4+ stars", "★★★", "rated 3"),
 ///  3. a media kind or favourites ("videos", "photos only", "favourites"),
 ///  4. a name the library knows: a person (also by first name when only one person has it), a place, a tag, an album
-///     (only next to the word "album"), or something photos show (the labels this device recognised, and common words),
+///     (only next to the word "album"), a camera (also by its model alone: "x100v") or lens, or something photos show
+///     (the labels this device recognised, and common words),
 ///  5. a filler word ("of", "at", "the", "photos"…), which is dropped.
 /// The words that are left become one free-text chip, so plain text keeps working as before. A person comes first after
 /// "with" or "of", a place after "in", "at" or "from".
@@ -23,21 +24,27 @@ public enum NaturalSearch {
         public var albums: [(id: String, title: String)]
         /// Things photos show, as the on-device labels name them (English, lower case): "dog", "beach".
         public var labels: [String]
+        /// Cameras and lenses the photos were taken with (SPEC §22.3).
+        public var cameras: [String]
+        public var lenses: [String]
 
         public init(
             places: [String] = [], people: [String] = [], tags: [(id: Int, name: String)] = [], albums: [(id: String, title: String)] = [],
-            labels: [String] = []
+            labels: [String] = [], cameras: [String] = [], lenses: [String] = []
         ) {
             self.places = places
             self.people = people
             self.tags = tags
             self.albums = albums
             self.labels = labels
+            self.cameras = cameras
+            self.lenses = lenses
         }
 
         public init(_ suggestions: SearchSuggestions.Vocabulary, labels: [String] = []) {
             self.init(
-                places: suggestions.places, people: suggestions.people, tags: suggestions.tags, albums: suggestions.albums, labels: labels)
+                places: suggestions.places, people: suggestions.people, tags: suggestions.tags, albums: suggestions.albums, labels: labels,
+                cameras: suggestions.cameras, lenses: suggestions.lenses)
         }
     }
 
@@ -268,7 +275,7 @@ public enum NaturalSearch {
     /// The names the library knows, by their first word.
     struct NameIndex {
         enum Kind: Int {
-            case person, place, tag, album
+            case person, place, tag, album, camera
         }
 
         struct Entry {
@@ -297,6 +304,17 @@ public enum NaturalSearch {
             for place in vocabulary.places { insert(place, .place(place), .place) }
             for tag in vocabulary.tags { insert(tag.name, .tag(id: tag.id, name: tag.name), .tag) }
             for album in vocabulary.albums { insert(album.title, .album(id: album.id, title: album.title), .album) }
+            // A camera also by its model alone ("x100v", "eos r5"), when no other camera has that model name.
+            var models: [[String]: [String]] = [:]
+            for camera in vocabulary.cameras {
+                insert(camera, .camera(camera), .camera)
+                let words = FuzzyMatch.words(camera)
+                if words.count > 1 { models[Array(words.dropFirst()), default: []].append(camera) }
+            }
+            for (words, cameras) in models where cameras.count == 1 {
+                byFirstWord[words[0], default: []].append(Entry(words: words, filter: .camera(cameras[0]), kind: .camera))
+            }
+            for lens in vocabulary.lenses { insert(lens, .lens(lens), .camera) }
         }
 
         mutating func insert(_ name: String, _ filter: SearchFilter, _ kind: Kind) {
@@ -331,6 +349,7 @@ public enum NaturalSearch {
                 case .person: return personPrepositions.contains(previous ?? "") ? 0 : 1
                 case .place: return placePrepositions.contains(previous ?? "") ? 0 : 2
                 case .tag: return 3
+                case .camera: return 4
                 }
             }
             guard let chosen = best.min(by: { rank($0) < rank($1) }), rank(chosen) < 100 else { return nil }

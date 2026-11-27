@@ -82,8 +82,8 @@ extension SessionModel {
 
     /// The photos of a person's sticker pack with the person's face in each (unit coordinates, origin top left).
     public func stickerPackPhotos(person: String) async throws -> [(item: MediaItem, face: CGRect)] {
-        guard let services else { throw NetworkError.unauthorized }
-        let photos = try await services.api.personPhotos(person, key: await recognizeKey())
+        guard let directory = peopleDirectory else { throw NetworkError.unauthorized }
+        let photos = try await directory.photos(of: person)
         var faces: [FileID: CGRect] = [:]
         var items: [FileID: MediaItem] = [:]
         for photo in photos {

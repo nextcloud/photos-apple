@@ -60,6 +60,8 @@ struct NotificationCompletion: @unchecked Sendable {
             SimilarIndexing.register { AppHost.model }
             // Descriptions of photos for VoiceOver and search, while charging and idle (SPEC §16.2).
             PhotoDescriptions.register { AppHost.model }
+            // People on this device where the server has no Recognize, while the Mac is idle (SPEC §22.3).
+            DevicePeopleIndexing.register { AppHost.model }
             // Smart offline fills up while the Mac is idle (SPEC §15.8.1).
             SmartOfflineScheduling.register { AppHost.model }
         }

@@ -140,10 +140,8 @@ struct ViewerPage: View {
             } catch {}
         }
         .task(id: PeopleRequest(fileId: fileId, wanted: isCurrent && voiceOver)) {
-            guard isCurrent, voiceOver, item?.kind == .image, let path = item?.path, session.features.has(.recognize),
-                let services = session.services
-            else { return }
-            let faces = (try? await services.api.faceDetections(userPath: path)) ?? []
+            guard isCurrent, voiceOver, let item, item.kind == .image, let directory = session.peopleDirectory else { return }
+            let faces = (try? await directory.faces(in: item)) ?? []
             people = faces.compactMap(\.title).filter { !$0.isEmpty }
         }
     }

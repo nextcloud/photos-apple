@@ -6,8 +6,8 @@ import GRDB
 import PhotosDomain
 import PhotosModel
 
-/// What smart album rules and folder rules read from the index (SPEC §16.4), and the camera details the index keeps
-/// for them (make, model, lens, exposure from the server's EXIF; read in the background when a rule needs them).
+/// What smart album rules and folder rules read from the index (SPEC §16.4). Their camera details are the camera data
+/// Insights and the search read (`photoExif`, filled by `ExifIndexing`): one table and one reader (SPEC §22.3).
 public struct OrganizeStore: Sendable {
     public let database: AccountDatabase
 
@@ -15,6 +15,7 @@ public struct OrganizeStore: Sendable {
         self.database = database
     }
 
+    /// As `v6-organize-camera` made it; `v_r12_people_camera_once` drops it again (the details are in `photoExif`).
     static func migrate(_ db: Database) throws {
         try db.create(table: "cameraDetails") { t in
             t.primaryKey("fileId", .integer)
@@ -49,10 +50,8 @@ public struct OrganizeStore: Sendable {
             }
             context.marks = try CullingStore.fetchMarks(db)
             if camera {
-                for row in try Row.fetchAll(db, sql: "SELECT * FROM cameraDetails") {
-                    let details = CameraDetails(
-                        make: row["make"], model: row["model"], lens: row["lens"], focalLength: row["focalLength"],
-                        aperture: row["aperture"], iso: row["iso"])
+                for row in try Row.fetchAll(db, sql: "SELECT \(Self.cameraColumns) FROM photoExif") {
+                    let details = Self.details(row)
                     if !details.isEmpty { context.camera[row["fileId"]] = details }
                 }
             }
@@ -75,54 +74,21 @@ public struct OrganizeStore: Sendable {
         }
     }
 
-    /// Photos whose camera details are missing or older than the file, newest first.
-    public func filesNeedingCameraDetails(limit: Int) async throws -> [FileID] {
-        try await database.writer.read { db in
-            try FileID.fetchAll(
-                db,
-                sql: """
-                    SELECT media.fileId FROM media LEFT JOIN cameraDetails ON cameraDetails.fileId = media.fileId
-                    WHERE media.kind = 'image' AND media.isLivePhotoVideo = 0 AND media.mountType != ?
-                      AND (cameraDetails.fileId IS NULL OR cameraDetails.etag != media.etag)
-                    ORDER BY media.timestamp DESC LIMIT ?
-                    """, arguments: [MediaItem.collectionChildMountType, limit])
-        }
+    /// The columns of `photoExif` that make `CameraDetails`.
+    static let cameraColumns = "fileId, camera, lens, focalLength, aperture, iso"
+
+    /// Camera details from a `photoExif` row: the camera's name as Insights and the search show it ("Nikon D700") is
+    /// the model; rules match their text against it.
+    static func details(_ row: Row) -> CameraDetails {
+        CameraDetails(
+            model: row["camera"], lens: row["lens"], focalLength: row["focalLength"], aperture: row["aperture"],
+            iso: (row["iso"] as Int?).map(Double.init))
     }
 
-    /// How many photos have camera details, of all photos that can have them.
-    public func cameraDetailsProgress() async throws -> (read: Int, total: Int) {
-        try await database.writer.read { db in
-            let total =
-                try Int.fetchOne(
-                    db, sql: "SELECT count(*) FROM media WHERE kind = 'image' AND isLivePhotoVideo = 0 AND mountType != ?",
-                    arguments: [MediaItem.collectionChildMountType]) ?? 0
-            let read =
-                try Int.fetchOne(
-                    db,
-                    sql: """
-                        SELECT count(*) FROM media JOIN cameraDetails ON cameraDetails.fileId = media.fileId AND cameraDetails.etag = media.etag
-                        WHERE media.kind = 'image' AND media.isLivePhotoVideo = 0 AND media.mountType != ?
-                        """, arguments: [MediaItem.collectionChildMountType]) ?? 0
-            return (read, total)
-        }
-    }
-
-    /// Stores details read from the server, for the file versions the index has now.
-    public func storeCameraDetails(_ details: [FileID: CameraDetails]) async throws {
-        guard !details.isEmpty else { return }
-        try await database.writer.write { db in
-            for (fileId, value) in details {
-                guard let etag = try String.fetchOne(db, sql: "SELECT etag FROM media WHERE fileId = ?", arguments: [fileId]) else {
-                    continue
-                }
-                try db.execute(
-                    sql: """
-                        INSERT OR REPLACE INTO cameraDetails(fileId, etag, make, model, lens, focalLength, aperture, iso)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                    arguments: [fileId, etag, value.make, value.model, value.lens, value.focalLength, value.aperture, value.iso])
-            }
-        }
+    /// How many photos have camera details, of all photos that can have them (the library's photos, as Insights counts).
+    public func cameraDetailsProgress(excludedFolders: [String] = []) async throws -> (read: Int, total: Int) {
+        let progress = try await InsightsStore(database: database).progress(excludedFolders: excludedFolders)
+        return (progress.analysed, progress.total)
     }
 
     /// The details of some files (rename patterns with `{camera}`).
@@ -134,11 +100,9 @@ public struct OrganizeStore: Sendable {
                 let chunk = Array(fileIds[start..<min(start + 500, fileIds.count)])
                 let marks = chunk.map { _ in "?" }.joined(separator: ",")
                 for row in try Row.fetchAll(
-                    db, sql: "SELECT * FROM cameraDetails WHERE fileId IN (\(marks))", arguments: StatementArguments(chunk))
+                    db, sql: "SELECT \(Self.cameraColumns) FROM photoExif WHERE fileId IN (\(marks))", arguments: StatementArguments(chunk))
                 {
-                    result[row["fileId"]] = CameraDetails(
-                        make: row["make"], model: row["model"], lens: row["lens"], focalLength: row["focalLength"],
-                        aperture: row["aperture"], iso: row["iso"])
+                    result[row["fileId"]] = Self.details(row)
                 }
             }
             return result
@@ -165,18 +129,7 @@ public struct OrganizeStore: Sendable {
 
     /// Values for the rule builder's pickers: cameras and lenses the library has, most used first.
     public func cameraVocabulary(limit: Int = 30) async throws -> (cameras: [String], lenses: [String]) {
-        try await database.writer.read { db in
-            let cameras = try Row.fetchAll(
-                db,
-                sql:
-                    "SELECT make, model, count(*) AS n FROM cameraDetails WHERE model IS NOT NULL GROUP BY make, model ORDER BY n DESC LIMIT ?",
-                arguments: [limit]
-            ).compactMap { row in CameraDetails(make: row["make"], model: row["model"]).cameraName }
-            let lenses = try String.fetchAll(
-                db, sql: "SELECT lens FROM cameraDetails WHERE lens IS NOT NULL GROUP BY lens ORDER BY count(*) DESC LIMIT ?",
-                arguments: [limit])
-            return (cameras, lenses)
-        }
+        try await InsightsStore(database: database).cameraVocabulary(limit: limit)
     }
 
     /// The folders of the library, for the folder picker (the parents of indexed files), most photos first.

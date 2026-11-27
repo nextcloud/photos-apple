@@ -212,6 +212,8 @@ struct MainView: View {
 
     func visible(_ destination: AppDestination) -> Bool {
         if destination == .collections { return usesCollectionsTab }
+        // People found on this device where the server has no Recognize (SPEC §22.3).
+        if destination == .people { return session.offersPeople }
         guard let feature = destination.requiredFeature else { return true }
         return session.features.has(feature)
     }
@@ -355,7 +357,9 @@ struct MainView: View {
     }
 
     func open(_ link: DeepLink) {
-        if let screen = AppDestination.unavailableScreen(of: link, has: session.features.has) {
+        // People is there without Recognize when this device finds them (SPEC §22.3).
+        let has: (ServerFeature) -> Bool = { $0 == .recognize ? session.offersPeople : session.features.has($0) }
+        if let screen = AppDestination.unavailableScreen(of: link, has: has) {
             unavailableLink = screen
             return
         }

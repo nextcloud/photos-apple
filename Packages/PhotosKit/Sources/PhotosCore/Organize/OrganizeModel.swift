@@ -213,57 +213,34 @@ public final class OrganizeModel {
 
     // MARK: Camera details
 
-    /// Reads the camera details of photos that lack them, in the background, while a rule needs them.
-    /// - Parameter batches: the most requests in this pass (90 photos each); nil until all are read.
-    public func readCameraDetails(batches: Int? = nil) {
-        guard cameraTask == nil else { return }
-        isReadingCameraDetails = true
-        let services = services
-        let folders = session?.features.userConfig.photosSourceFolders ?? ["/Photos"]
+    /// Reads the camera details of photos that lack them, in the background. They are the camera data Insights and the
+    /// search read (`ExifIndexing`, one reader for all three; SPEC §22.3); this follows its progress for the rule builder.
+    public func readCameraDetails() {
+        guard let session, cameraTask == nil else { return }
+        let indexing = ExifIndexing.shared
+        indexing.start(session: session)
+        isReadingCameraDetails = indexing.isRunning
         cameraTask = Task { [weak self] in
-            let store = OrganizeStore(database: services.database)
-            var remaining = batches ?? Int.max
-            while remaining > 0, !Task.isCancelled {
-                guard let ids = try? await store.filesNeedingCameraDetails(limit: PhotosAPI.cameraDetailsBatch * 2), !ids.isEmpty else {
-                    break
+            var seen = -1
+            while !Task.isCancelled {
+                let running = indexing.isRunning
+                if indexing.revision != seen {
+                    seen = indexing.revision
+                    // Rules see the new details at their next count.
+                    self?.context = nil
+                    await self?.refreshCameraProgress()
                 }
-                let halves = stride(from: 0, to: ids.count, by: PhotosAPI.cameraDetailsBatch).map {
-                    Array(ids[$0..<min($0 + PhotosAPI.cameraDetailsBatch, ids.count)])
-                }
-                var failed = false
-                await withTaskGroup(of: [FileID: CameraDetails]?.self) { group in
-                    for half in halves {
-                        group.addTask { try? await services.api.cameraDetails(fileIds: half, sourceFolders: folders) }
-                    }
-                    for await details in group {
-                        if let details { try? await store.storeCameraDetails(details) } else { failed = true }
-                    }
-                }
-                remaining -= halves.count
-                if let progress = try? await store.cameraDetailsProgress() {
-                    await MainActor.run {
-                        // Rules see the new details at their next count.
-                        self?.context = nil
-                        self?.cameraProgress = progress
-                    }
-                }
-                if failed { break }
+                self?.isReadingCameraDetails = running
+                guard running else { break }
+                try? await Task.sleep(for: .seconds(1))
             }
-            await MainActor.run {
-                self?.cameraTask = nil
-                self?.isReadingCameraDetails = false
-                self?.context = nil
-            }
+            self?.cameraTask = nil
         }
     }
 
     public func refreshCameraProgress() async {
-        cameraProgress = try? await OrganizeStore(database: services.database).cameraDetailsProgress()
-    }
-
-    /// A rule of a smart album or an enabled folder rule asks about cameras.
-    var rulesNeedCameraDetails: Bool {
-        smartAlbums.contains { $0.rule.needsCameraDetails } || folderRules.contains { $0.isEnabled && $0.rule.needsCameraDetails }
+        cameraProgress = try? await OrganizeStore(database: services.database).cameraDetailsProgress(
+            excludedFolders: session?.excludedFolders ?? [])
     }
 
     func stop() {

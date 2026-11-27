@@ -58,6 +58,8 @@ struct SearchAndActivitySettings: View {
         }
         similarSection
         descriptionsSection
+        // People on this device and birthdays from Contacts (SPEC §22.3).
+        PeopleSettingsSections()
     }
 
     var sharedAlbumsSection: some View {
