@@ -14,12 +14,19 @@ What it covers:
 - **Inside the app:** the login and welcome screens draw the same icon with `PhotosAppIcon` (`Common/Design.swift`,
   glyph in `Brand/PhotosIconPath.swift`). Change it together with the `.icon` file.
 
-What Icon Composer does not cover:
+Icon Composer has no tvOS or visionOS look. `scripts/make-icon-layers.swift` makes those icons from the same artwork:
+the layer SVGs of the `.icon` file and its gradient. Run it from the repository root after changing the `.icon` file:
+`swift scripts/make-icon-layers.swift`.
 
-1. **tvOS:** `App/TV/Assets.xcassets` still has the earlier glyph: the brand assets (layered App Icon and Top Shelf
-   image). tvOS wants layered PNGs, which can be made from `icon/app.svg` and the gradient above.
-2. **visionOS:** an image stack (`AppIcon.solidimagestack`) of two or three 1024 px layers (background, glyph). There
-   is none yet, so the app has no proper icon on Apple Vision Pro.
-3. **App Store artwork:** screenshots per device class, and an optional preview video.
+- **tvOS** (`App/TV/Assets.xcassets`, brand assets):
+  - the App Icon (400 × 240 pt, 1x and 2x) and the App Store icon (1280 × 768), each with three layers: Back (the
+    gradient), Middle (the hills) and Front (the sun), so they part when the icon has the focus;
+  - the Top Shelf images (1920 × 720 and wide 2320 × 720, 1x and 2x): the whole icon on the gradient.
+- **visionOS:** `App/Resources/Assets.xcassets/AppIcon.solidimagestack`, the same three layers at 1024 px. The glyph is
+  smaller there, so it stays inside the circle. The app target sets `ASSETCATALOG_COMPILER_APPICON_NAME` to `AppIcon`
+  for the `xros` and `xrsimulator` SDKs.
+- The glyph layers mimic the `.icon` file's glass: white, a little translucent towards the bottom, with a soft shadow.
+
+Still to supply: **App Store artwork**, meaning screenshots per device class and an optional preview video.
 
 The Nextcloud logo and name, and this icon, are trademarks of Nextcloud GmbH (`LicenseRef-NextcloudTrademarks`).

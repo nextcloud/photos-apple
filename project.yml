@@ -64,6 +64,10 @@ targets:
         PRODUCT_NAME: Nextcloud Photos
         TARGETED_DEVICE_FAMILY: "1,2,7"
         ASSETCATALOG_COMPILER_APPICON_NAME: Photos App Icon
+        # Vision Pro: Icon Composer has no visionOS look; a three-layer image stack from the same artwork
+        # (scripts/make-icon-layers.swift).
+        ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xros*]: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xrsimulator*]: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: Nextcloud Photos
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
