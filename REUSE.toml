@@ -9,13 +9,13 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nextcloud GmbH and Nextcloud contributors"
 SPDX-License-Identifier = "MIT"
 
-# The app icon is the Nextcloud Photos server app's icon (Material Symbols "image") on Nextcloud blue; the Apple TV icon
-# layers and Top Shelf image and the watch icon are made from it.
+# The app icon: the Icon Composer file and its glyph (iOS, iPadOS, macOS, watchOS), and the layers made from them for
+# Apple TV (icon, Top Shelf) and Vision Pro by scripts/make-icon-layers.swift.
 [[annotations]]
-path = ["App/Resources/Assets.xcassets/AppIcon.appiconset/*.png", "App/TV/Assets.xcassets/**/*.png", "App/Watch/Assets.xcassets/**/*.png"]
+path = ["icon/**", "App/TV/Assets.xcassets/**/*.png", "App/Resources/Assets.xcassets/AppIcon.solidimagestack/**/*.png"]
 precedence = "override"
-SPDX-FileCopyrightText = ["2018-2024 Google LLC", "2026 Nextcloud GmbH"]
-SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileCopyrightText = "2026 Nextcloud GmbH"
+SPDX-License-Identifier = "LicenseRef-NextcloudTrademarks"
 
 # Screenshots: the app's UI (MIT) showing sample photos from Wikimedia Commons, each under its own licence, and Apple Maps data.
 [[annotations]]
