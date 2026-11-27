@@ -155,8 +155,20 @@ extension LibraryStore {
     }
 }
 
+/// The hook of the orphaned edit recipes in the sync engine (SPEC §22.5.3).
+///
+/// `afterFullWalk` is called once, at the end of a completed **full** walk through the library — never after a targeted
+/// walk (only changed folders), which does not see the whole library. It starts the clean-up in the background, so the
+/// sync is not held up.
+public enum OrphanRecipeCleanup {
+    static func afterFullWalk(_ action: (@Sendable () async -> Void)?) {
+        guard let action else { return }
+        Task.detached(priority: .utility) { await action() }
+    }
+}
+
 extension SyncEngine {
-    /// `action` runs at the end of every completed full reconcile (the orphaned edit recipes, SPEC §22.5.3).
+    /// `action` runs after every completed full walk (`OrphanRecipeCleanup.afterFullWalk`): the orphaned edit recipes.
     public func setAfterFullReconcile(_ action: (@Sendable () async -> Void)?) {
         afterFullReconcile = action
     }

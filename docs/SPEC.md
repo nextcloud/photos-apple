@@ -3803,6 +3803,9 @@ user's own Nextcloud, in the hidden folder `/.nextcloud-photos/` (§16.4), **one
     `{"name": …}` (`id` made by the device that found the person), plus assignments and corrections with their own
     prefixes as §22.3 defines them (`face/<face key>` → person id, `merged/<id>` → id, `not/<face key>` → ids). The
     value schemas are §22.3's; the merge rules are the ones above, so a name given on any device is never lost.
+    People's records merge in their own way (both devices' faces of a person are kept): `SyncedRecords` keeps one key
+    per person (`person/<id>` → §22.3's person record) and folds the versions that lost a race back in with the
+    feature's merge; §22.3's `DevicePeopleNames` sits on it (`SyncedDevicePeopleNames`, wired at the merge).
   - `family.json` — the family library (§16.7.2): `settings` → the folder, members and copy option;
     `decision/<fileId>` → `"dismissed"`, `"moved"` or `"copied"` (a union of all devices' decisions; "Show dismissed
     again" and choosing another folder remove them as tombstones).
@@ -3836,8 +3839,9 @@ dismissed suggestions are now (`family.json`); People names with §22.3 (`people
 A recipe stays when its photo is deleted, so a photo restored from the trash bin comes back with its edit (§16.3.1).
 Recipes of photos that are **gone for good** are removed (`EditLibrary.removeOrphans`, rules in `OrphanRecipes`):
 
-- **When**: at the end of a completed full reconcile (`SyncEngine` runs the hook set by `AccountServices`, in the
-  background, not holding the sync up), at most once a day.
+- **When**: at the end of a completed **full** walk through the library, never after a targeted walk (§22.4), which
+  does not see the whole library: one call, `OrphanRecipeCleanup.afterFullWalk`, starts the hook `AccountServices`
+  set, in the background, not holding the sync up; at most once a day.
 - **Which**: only recipes the server has and this device has nothing pending for, whose photo is
   1. not in the library's index nor in an album the app knows (photos of albums shared with the user are not in the
      user's files, so the SEARCH below cannot see them; their recipes stay), and

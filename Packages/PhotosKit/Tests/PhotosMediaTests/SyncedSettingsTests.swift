@@ -213,3 +213,40 @@ final class HeardKeys: Sendable {
     func add(_ keys: Set<String>) { stored.withLock { $0.formUnion(keys) } }
     var keys: Set<String> { stored.withLock { $0 } }
 }
+
+/// Records that merge in their own way (on-device People, SPEC §22.3/§22.5.1): two devices changing the same person at
+/// once keep both devices' faces.
+@Suite struct SyncedRecordsTests {
+    struct Person: Codable, Equatable, Sendable {
+        var name: String
+        var faces: Set<Int>
+    }
+
+    func records(_ server: EditDAVServer) -> SyncedRecords<Person> {
+        let store = SyncedSettingsStore(files: AppDataFiles(dav: server.dav), kind: .people, localFile: nil, sendDelay: .milliseconds(1))
+        return SyncedRecords(store: store, prefix: "person/") { a, b in Person(name: a.name, faces: a.faces.union(b.faces)) }
+    }
+
+    @Test func aRaceKeepsBothDevicesFaces() async throws {
+        let server = EditDAVServer()
+        let mac = records(server)
+        let phone = records(server)
+        await mac.replace(["anna": Person(name: "Anna", faces: [1])])
+        await mac.store.waitUntilIdle()
+        await phone.store.sync()
+        // Both add a face to Anna before seeing the other's.
+        await mac.replace(["anna": Person(name: "Anna", faces: [1, 2])])
+        await phone.replace(["anna": Person(name: "Anna", faces: [1, 3])])
+        await mac.store.waitUntilIdle()
+        await phone.store.waitUntilIdle()
+        await mac.store.sync()
+        await phone.store.sync()
+        #expect(mac.load()["anna"]?.faces == [1, 2, 3])
+        #expect(phone.load()["anna"]?.faces == [1, 2, 3])
+        // Removing a person is a removal everywhere.
+        await phone.replace([:])
+        await phone.store.waitUntilIdle()
+        await mac.store.sync()
+        #expect(mac.load().isEmpty)
+    }
+}
