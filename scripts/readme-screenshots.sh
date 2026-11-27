@@ -23,8 +23,7 @@
 # - watch: the watch app needs what the iPhone app sends (SPEC §15.3). Set README_WATCH_DIGEST to a folder with
 #   `digest.json` and its JPEGs: the iPhone app's outbox (`Library/Caches/WatchDigest` in the app's container on an
 #   iPhone simulator paired with a watch), or one made by hand in the same format (`WatchDigest`).
-# - Mac: window captures of the Debug app (`screencapture -l <window id> -o`), launched with `open -g` and
-#   PHOTOS_DEBUG_LOGIN. Not done here: a launch can bring the app to the front, so only on a Mac nobody is using.
+# - Mac: scripts/readme-screenshots-mac.sh (window captures of the Debug app; it comes to the front while it runs).
 #
 # Environment: README_SHOTS_LOGIN (default the local test server on 8089), README_SHOTS_BUNDLE_ID (default
 # com.nextcloud.photos.shots), README_SHOTS_DERIVED_DATA (default /tmp/photos-ios-dd-readme-<platform>),

@@ -54,6 +54,19 @@ baselines: [PERFORMANCE.md](PERFORMANCE.md). `UITests/AppStoreScreenshots` makes
 (`scripts/readme-screenshots.sh`, which also covers Vision Pro, Apple TV and Apple Watch). They need
 `PHOTOS_UITEST_LOGIN` like the tours below.
 
+The Mac's README screenshots come without XCUITest (it would take over keyboard and pointer):
+`scripts/readme-screenshots-mac.sh <output directory>` builds the Debug app with a bundle id of its own
+(`README_SHOTS_BUNDLE_ID`, default `com.nextcloud.photos.shots.mac`; it refuses the official one), launches it once per
+shot with `open -n --env …` and launch settings only — never a `nextcloudphotos://` link, which another installation
+could answer — waits, captures the window of exactly that process (`screencapture -x -o -l <window id>`, the id from a
+small `CGWindowListCopyWindowInfo` helper filtered by PID) and quits that PID. Light mode comes from the launch argument
+`-NSRequiresAquaSystemAppearance YES`. Shots: library (the first launch signs in with `PHOTOS_DEBUG_LOGIN` and waits for
+the first sync), viewer with its info (`PHOTOS_DEBUG_VIEWER=<index>`, `PHOTOS_DEBUG_VIEWER_INFO=1`), map and albums
+(`PHOTOS_DEBUG_DESTINATION`), compare (`PHOTOS_DEBUG_COMPARE=2`). The app comes to the front while it runs; nothing is
+clicked or typed. `README_SHOTS_ONLY="viewer compare"` takes some of them again, `README_SHOTS_SKIP_BUILD=1` keeps the
+build. The debug launch settings that open a screen wait a moment after the Library's grid has its photos: on the Mac
+the first grid is replaced right after launch, and a request made by it was lost.
+
 ## Integration tests
 
 Nine tests talk to a real server. They run when `PHOTOS_IT_SERVER`, `PHOTOS_IT_USER` and `PHOTOS_IT_PASSWORD` are set.

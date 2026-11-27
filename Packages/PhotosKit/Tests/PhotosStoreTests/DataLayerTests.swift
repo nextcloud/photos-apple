@@ -445,6 +445,68 @@ import Testing
         #expect(try ids() == [3, 4, 5])
     }
 
+    /// A folder moved to the trash bin a few minutes after the app's last walk is gone after the next launch's first
+    /// sync. With the interval alone its photos stayed in the Library for up to ten minutes, however often the app was
+    /// launched (seen on the Mac: four launches in eight minutes kept a deleted folder's photos).
+    @Test func folderDeletedSoonAfterAWalkIsGoneAtTheNextLaunch() async throws {
+        fill(5)
+        server.put(file(6, "/Photos/Garden party/a.jpg", time: 600), file(7, "/Photos/Garden party/b.jpg", time: 700))
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync(reconcile: .opened)  // a launch: the initial sync and its walk
+        #expect(try ids() == [1, 2, 3, 4, 5, 6, 7])
+
+        server.deleteFolder("/Photos/Garden party")
+        server.clearRequests()
+        // A plain sync (the app was still open) sees the changed root but leaves the walk to the interval.
+        await engine.sync()
+        #expect(try ids() == [1, 2, 3, 4, 5, 6, 7])
+        #expect(server.requests(.indexByModified).isEmpty)
+
+        // The next launch, still within the interval: the walk the change owes runs at once.
+        await engine.sync(reconcile: .opened)
+        #expect(try ids() == [1, 2, 3, 4, 5])
+        #expect(!server.requests(.indexByModified).isEmpty)
+    }
+
+    /// The same when the launch is the first sync that sees the change.
+    @Test func launchWalksAtOnceWhenTheRootChanged() async throws {
+        fill(5)
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync(reconcile: .opened)
+        server.delete(2)
+        server.move(3, to: "/Photos/Moved/3.jpg")
+        await engine.sync(reconcile: .opened)
+        #expect(try ids() == [1, 3, 4, 5])
+        #expect(try library.item(3)?.path == "/Photos/Moved/3.jpg")
+    }
+
+    /// A launch with nothing changed below the source folders walks nothing (one PROPFIND, the favourites SEARCH), and a
+    /// launch does not wait for a backup that is uploading.
+    @Test func launchWithoutChangesDoesNotWalk() async throws {
+        fill(5)
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync(reconcile: .opened)
+        await engine.setReconcileDeferral { true }
+        server.clearRequests()
+        await engine.sync(reconcile: .opened)
+        #expect(server.requests(.indexByModified).isEmpty)
+        #expect(server.requests(.favorites).count == 1)
+
+        server.delete(1)
+        await engine.sync(reconcile: .opened)
+        #expect(try ids() == [2, 3, 4, 5])
+    }
+
+    /// Pull to refresh after a change elsewhere walks at once too.
+    @Test func pullToRefreshWalksAtOnceWhenTheRootChanged() async throws {
+        fill(5)
+        let engine = engine(reconcileInterval: 600)
+        await engine.sync()
+        server.delete(4)
+        await engine.sync(reconcile: .refresh)
+        #expect(try ids() == [1, 2, 3, 5])
+    }
+
     @Test func largeLibrariesAreWalkedLessOften() async throws {
         let engine = engine(reconcileInterval: 600)
         #expect(await engine.interval(forIndexOf: 1000) == 600)

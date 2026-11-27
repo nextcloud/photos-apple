@@ -19,6 +19,18 @@ import PhotosStore
 public final class ForegroundState {
     public static let shared = ForegroundState()
     public private(set) var isActive = false
+    /// A window of the app can be seen: the app is in front, or on the Mac a window of it is on screen behind another
+    /// app's (the library there keeps syncing while it is in view, SPEC §5.4.4).
+    public var isVisible: Bool {
+        #if os(macOS)
+            isActive || isOnScreen
+        #else
+            isActive
+        #endif
+    }
+    #if os(macOS)
+        private var isOnScreen = false
+    #endif
 
     private init() {
         let center = NotificationCenter.default
@@ -35,6 +47,11 @@ public final class ForegroundState {
         center.addObserver(forName: inactive, object: nil, queue: .main) { _ in
             Task { @MainActor in ForegroundState.shared.isActive = false }
         }
+        #if os(macOS)
+            center.addObserver(forName: NSApplication.didChangeOcclusionStateNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in ForegroundState.shared.isOnScreen = NSApp?.occlusionState.contains(.visible) ?? false }
+            }
+        #endif
     }
 }
 

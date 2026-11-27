@@ -125,6 +125,16 @@ final class FakeDAVServer: Sendable {
         }
     }
 
+    /// A folder with everything in it goes to the trash bin (one WebDAV DELETE): one change of the root ETag. The trash
+    /// bin is not below the user's files, so no search finds its files any more.
+    func deleteFolder(_ folder: String) {
+        state.withLock { state in
+            state.files = state.files.filter { !$0.value.path.hasPrefix(folder + "/") }
+            state.folders.remove(folder)
+            Self.bumpRoot(&state)
+        }
+    }
+
     func move(_ id: FileID, to path: String) {
         state.withLock { state in
             state.files[id]?.path = path

@@ -128,6 +128,45 @@ struct IntegrationSyncTests {
         }
         try await api.dav.delete(api.connection.filesURL(folder))
     }
+
+    /// A folder moved to the trash bin by another client, minutes after the app's last walk through the library, is gone
+    /// after the next launch's first sync (with the app's real reconcile interval). A Mac build kept such a folder's
+    /// photos through four launches in eight minutes.
+    @Test func folderDeletedElsewhereIsGoneAfterTheNextLaunch() async throws {
+        let api = base.api
+        let features = try await FeatureDetector(dav: api.dav, ocs: api.ocs).detect()
+        let root = try #require(features.userConfig.photosSourceFolders.first)
+        let folder = (root == "/" ? "" : root) + "/sync-delete-test-\(Int(Date().timeIntervalSince1970))"
+        try await api.dav.mkcol(api.connection.filesURL(folder))
+        do {
+            let paths = ["a.jpg", "b.jpg", "c – d.jpg"].map { folder + "/" + $0 }
+            for path in paths { _ = try await api.dav.put(api.connection.filesURL(path), data: Data([0xFF, 0xD8, 0xFF, 0xD9])) }
+            let database = try AccountDatabase.temporary()
+            let library = LibraryStore(database: database)
+            let engine = SyncEngine(api: api, database: database, features: features)
+            await engine.sync(reconcile: .opened)  // a launch
+            let indexed = try await database.writer.read { db in
+                try FileID.fetchAll(db, sql: "SELECT fileId FROM media WHERE path LIKE ?", arguments: [folder + "/%"])
+            }
+            #expect(indexed.count == paths.count)
+
+            let rootBefore = try await api.folderETag(root)
+            try await api.dav.delete(api.connection.filesURL(folder))
+            let rootAfter = try await api.folderETag(root)
+            print("folder delete: root etag \(rootBefore ?? "-") -> \(rootAfter ?? "-")")
+            #expect(rootBefore != rootAfter)
+
+            // Still open: the walk waits for the interval.
+            await engine.sync()
+            #expect(try indexed.compactMap { try library.item($0) }.count == paths.count)
+            // The next launch.
+            await engine.sync(reconcile: .opened)
+            #expect(try indexed.compactMap { try library.item($0) }.isEmpty)
+        } catch {
+            try? await api.dav.delete(api.connection.filesURL(folder))
+            throw error
+        }
+    }
 }
 
 /// Album, link and upload round trip. Creates and deletes its own test album and file.

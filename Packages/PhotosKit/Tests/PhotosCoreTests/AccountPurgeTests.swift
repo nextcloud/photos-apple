@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import Foundation
+import PhotosStore
 import Testing
 
 @testable import PhotosBackup
@@ -209,6 +210,19 @@ import Testing
         // The start-up task and at most one foreground refresh.
         #expect(session.runningTaskCount <= 2)
         #expect(await eventually { session.runningTaskCount == 0 })
+        await session.shutdown(closeDatabase: true)
+    }
+
+    /// The launch's sync is an "opened" one (deletes made elsewhere go at once); coming back to the app is one again
+    /// once the last is a while ago, not each time a Mac window is clicked.
+    @Test func launchAndReturnToTheAppAskForTheOpenedWalk() async throws {
+        defer { sandbox.remove() }
+        let app = makeApp()
+        _ = try await login(app)
+        let session = try #require(app.session)
+        #expect(await eventually { session.runningTaskCount == 0 })
+        #expect(session.foregroundReconcile() == .ifDue)
+        #expect(session.foregroundReconcile(now: Date().addingTimeInterval(301)) == .opened)
         await session.shutdown(closeDatabase: true)
     }
 

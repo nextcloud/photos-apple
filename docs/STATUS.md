@@ -102,7 +102,14 @@ Index sync (initial, incremental, reconciliation) ✅, timeline views ✅, grid 
   everything). Reconciliation is resumable (unseen rows in `reconcileUnseen`, cursor in the sync state; an interrupted
   walk goes on from its page) and streamed page by page; a changed root ETag leads to one at most every 10 minutes,
   longer for large libraries (150 000 items: one hour), not while a backup pass uploads (unless a day has passed);
-  pull-to-refresh reconciles only when the last walk is 10 minutes old, "Sync now" at once. Small removals are checked
+  but the first sync after a launch or a return to the app (`ReconcileRequest.opened`, at most every 5 minutes) and
+  pull-to-refresh walk at once when a root changed (2026-11-27: a Mac build kept the photos of a folder deleted on the
+  server through four launches in eight minutes — the walk the change owed waited for the 10-minute interval since the
+  walk of a launch shortly before; ✅ `SyncSafetyTests.folderDeletedSoonAfterAWalkIsGoneAtTheNextLaunch`,
+  `IntegrationSyncTests.folderDeletedElsewhereIsGoneAfterTheNextLaunch` and the Mac app against the 8089 server);
+  pull-to-refresh without a change reconciles only when the last walk is 10 minutes old, "Sync now" at once. While a
+  window can be seen (on the Mac also behind other apps) the library syncs every 5 minutes (SPEC §5.4.4; before, it
+  synced only at launch, on activation and on push). Small removals are checked
   by id before they are applied. Recent uploads are read again at checkpoints (10 min, 1 h, 6 h, 24 h, 47 h after the
   upload) while their place is unknown, not on every sync. Opening an album asks for the album alone and reads its
   content only when count, last photo, date range or last-modified changed (or after a day); the content is written as
@@ -688,6 +695,10 @@ Vision) 🟡, Ask your photos (server Assistant or on-device Foundation Models) 
   simulator (iOS 27.2: badges of the server's tags on a fresh device). iPad hardware-keyboard keys built, not run.
 - ✅ Compare view (2-up/4-up, synchronised zoom/pan, 100 %, keep one). Run on the Mac (`PHOTOS_DEBUG_COMPARE=2`, 100 % via the
   toolbar). Pinch/drag/keys not driven (no real input).
+  2026-11-27: `PHOTOS_DEBUG_COMPARE` and `PHOTOS_DEBUG_VIEWER` had stopped doing anything on the Mac (the Library's
+  first grid is replaced right after launch and took the once-per-process request with it); they now ask after a
+  moment, `PHOTOS_DEBUG_VIEWER_INFO=1` opens the viewer's info, and `scripts/readme-screenshots-mac.sh` takes the Mac's
+  README shots (library, viewer with info, map, albums, compare) ✅ run on the Mac.
 - 🟡 Import from camera or card. Engine unit-tested (pairing, patterns, ledger, matching, verification, delete only
   verified, stop). Run on the Mac with a folder card: new-only (4 of 6 found on the server), upload into the date folder,
   checksum verified, deleted from the card, toolbar summary; iPad simulator: the sheet with the same card folder. Not run:
