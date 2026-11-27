@@ -50,7 +50,8 @@ public struct DAVClient: Sendable {
         let response = try await send(
             "PROPFIND", url,
             headers: [
-                "Depth": depth == 0 ? "0" : depth == Self.infiniteDepth ? "infinity" : "1", "Content-Type": "application/xml; charset=utf-8",
+                "Depth": depth == 0 ? "0" : depth == Self.infiniteDepth ? "infinity" : "1",
+                "Content-Type": "application/xml; charset=utf-8",
             ],
             body: DAVBody.propfind(properties)
         )

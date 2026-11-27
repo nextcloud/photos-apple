@@ -106,7 +106,8 @@ public struct ServerOrphanProbe: OrphanRecipeProbe {
     public func trashed() async throws -> Set<FileID> {
         let root = api.dav.connection.davURL("trashbin/\(api.dav.connection.userId)/trash/")
         do {
-            let listing = try await api.dav.propfind(root, depth: DAVClient.infiniteDepth, properties: [DAVProp.fileId, DAVProp.resourceType])
+            let listing = try await api.dav.propfind(
+                root, depth: DAVClient.infiniteDepth, properties: [DAVProp.fileId, DAVProp.resourceType])
             return Set(listing.compactMap { $0.int64(DAVProp.fileId) })
         } catch NetworkError.notFound {
             // No trash bin (the app is disabled): deleted files are gone at once.

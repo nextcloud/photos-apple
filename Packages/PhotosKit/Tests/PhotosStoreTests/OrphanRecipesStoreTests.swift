@@ -88,11 +88,13 @@ struct OrphanProbeIntegrationTests {
     }
 
     func fileId(_ path: String) async throws -> FileID {
-        try #require(try await dav.propfind(dav.connection.filesURL(path), depth: 0, properties: [DAVProp.fileId]).first?.int64(DAVProp.fileId))
+        try #require(
+            try await dav.propfind(dav.connection.filesURL(path), depth: 0, properties: [DAVProp.fileId]).first?.int64(DAVProp.fileId))
     }
 
     func upload(_ path: String) async throws -> FileID {
-        _ = try await dav.put(dav.connection.filesURL(path), data: Data("orphan test \(path)".utf8), headers: ["Content-Type": "text/plain"])
+        _ = try await dav.put(
+            dav.connection.filesURL(path), data: Data("orphan test \(path)".utf8), headers: ["Content-Type": "text/plain"])
         return try await fileId(path)
     }
 
@@ -120,7 +122,8 @@ struct OrphanProbeIntegrationTests {
         }
         // Clean up: the folder, then this test's entries in the trash bin (never the trash bin itself).
         try await dav.delete(dav.connection.filesURL(folder))
-        for item in try await api.trash(mimeTypes: nil) + trashedFolders() where item.originalLocation.hasPrefix(String(folder.dropFirst())) {
+        for item in try await api.trash(mimeTypes: nil) + trashedFolders() where item.originalLocation.hasPrefix(String(folder.dropFirst()))
+        {
             try? await api.deletePermanently(item)
         }
     }

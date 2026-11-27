@@ -131,6 +131,20 @@ import Testing
         #expect(mac.defaults.object(forKey: "stackCopies") == nil)
     }
 
+    /// `-albumsSortOrder name` on the command line (UI tests, screenshots) is for that launch: not sent, not replaced.
+    @Test func launchArgumentsAreNeitherSentNorOverwritten() async {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        UserDefaults.standard.setVolatileDomain(
+            arguments.merging(["albumsSortOrder": "name"]) { $1 }, forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain) }
+        let mac = device("mac")
+        let phone = device("phone")
+        phone.defaults.set("recent", forKey: "albumsSortOrder")
+        await exchange(mac, phone)
+        #expect(mac.store.value("albumsSortOrder") == nil)
+        #expect(phone.store.value("albumsSortOrder") == nil)
+    }
+
     @Test func propertyListValuesRoundTrip() {
         #expect(SyncedDefaults.json(true as NSNumber) == .bool(true))
         #expect(SyncedDefaults.json(3 as NSNumber) == .number(3))

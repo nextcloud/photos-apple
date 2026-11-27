@@ -144,15 +144,16 @@ public final class SyncedDefaults {
             mapped.entries[journalKey] = entry
         }
         journal = journal.merged(with: mapped)
-        for item in items {
+        for item in items where !isLaunchArgument(item, account: account) {
             let wanted = journalValues(item, account: account)
             let current = read(item, account: account)
             guard wanted != current else { continue }
             write(wanted, item, account: account)
             logger.info("setting \(item.defaultsKey, privacy: .public) taken over from another device")
         }
-        for (key, value) in currentValues(account: account) { snapshot[key] = value }
-        for key in snapshotKeys(account: account) where currentValues(account: account)[key] == nil { snapshot[key] = nil }
+        let now = currentValues(account: account)
+        for key in snapshotKeys(account: account) where now[key] == nil { snapshot[key] = nil }
+        for (key, value) in now { snapshot[key] = value }
         persist()
     }
 
@@ -209,6 +210,7 @@ public final class SyncedDefaults {
     private func snapshotKeys(account: String) -> [String] {
         snapshot.keys.filter { key in
             items.contains { item in
+                guard !isLaunchArgument(item, account: account) else { return false }
                 let prefix = journalPrefix(item, account: account)
                 return item.expands ? key.hasPrefix(prefix) : key == prefix
             }
@@ -218,7 +220,7 @@ public final class SyncedDefaults {
     /// The synced settings as `UserDefaults` has them now, by journal key.
     func currentValues(account: String) -> [String: JSONValue] {
         var result: [String: JSONValue] = [:]
-        for item in items {
+        for item in items where !isLaunchArgument(item, account: account) {
             let prefix = journalPrefix(item, account: account)
             guard let value = read(item, account: account) else { continue }
             if item.expands {
@@ -242,6 +244,12 @@ public final class SyncedDefaults {
     }
 
     // MARK: UserDefaults
+
+    /// A setting given as a launch argument (`-memoriesStyle strip`, UI tests and screenshots) is for this launch only:
+    /// neither sent nor overwritten.
+    private func isLaunchArgument(_ item: SyncedDefaultsCatalog.Item, account: String) -> Bool {
+        UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[item.defaultsKey(account: account)] != nil
+    }
 
     func read(_ item: SyncedDefaultsCatalog.Item, account: String) -> JSONValue? {
         guard let object = defaults.object(forKey: item.defaultsKey(account: account)) else { return nil }
