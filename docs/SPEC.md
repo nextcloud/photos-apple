@@ -3746,6 +3746,30 @@ web apps render recipes (EDIT-FORMAT.md), nobody needs it.
 - Readers ignore unknown keys, unknown mask targets (the others apply) and broken values, clamp ranges, and cut masks at
   8. Retouching (§21.5) adds its optional field and needs version 2 as well.
 
+## 22. M13 — Easier, faster, more useful
+
+After a fresh look at the app (2026-11-27) the owner chose twelve improvements: free up space on the device after
+backup, Handoff, setting up Apple TV from the iPhone, a three-step first run, the camera in search, a pre-rendered tile
+cache, a targeted sync (and `notify_push` where the server has it), a smaller preview cache, People without Recognize,
+birthdays from Nextcloud Contacts, settings synced through `.nextcloud-photos/`, and cleaning up orphaned edit recipes.
+The principles of §2 and §21 hold: only Apple's frameworks for analysis on the device, no server changes (an existing
+optional server app such as `notify_push` may be used when present).
+
+### 22.1 Free up space on this device [space]
+_To be written._
+
+### 22.2 Handoff, Apple TV set-up from the iPhone, a three-step first run [continuity]
+_To be written._
+
+### 22.3 Camera in search, People without Recognize, birthdays from Contacts [people]
+_To be written._
+
+### 22.4 Faster: tile cache, targeted sync and notify_push, smaller preview cache [speed]
+_To be written._
+
+### 22.5 Settings synced between devices, orphaned edit recipes cleaned up [tidy]
+_To be written._
+
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 
 1. ~~Create the GitHub repo~~ (done: https://github.com/nextcloud/photos-apple) and ~~confirm the bundle id~~ (done: `com.nextcloud.photos`). Still open: App Group and keychain group names (§4.2) and the App Store record/name "Nextcloud Photos".

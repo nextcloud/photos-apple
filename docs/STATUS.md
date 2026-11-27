@@ -1939,6 +1939,23 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   overwritten without versions (proven by the same integration test). Corrects §16.3.1's "previous version stays in the
   file versions": an unlabelled version could expire; a labelled one does not.
 
+## M13 Easier, faster, more useful (SPEC §22) — ⬜
+
+### §22.1 Free up space on this device
+- ⬜ Round 12.
+
+### §22.2 Handoff, Apple TV set-up from the iPhone, three-step first run
+- ⬜ Round 12.
+
+### §22.3 Camera in search, People without Recognize, birthdays from Contacts
+- ⬜ Round 12.
+
+### §22.4 Tile cache, targeted sync and notify_push, smaller preview cache
+- ⬜ Round 12.
+
+### §22.5 Settings synced between devices, orphaned edit recipes
+- ⬜ Round 12.
+
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification
 filtering entitlement, push proxy topic, notification routing in the notifications app, app icon artwork,
