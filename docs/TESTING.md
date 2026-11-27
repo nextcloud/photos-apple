@@ -197,7 +197,7 @@ the server's values while it runs (PROPFIND of `nc:metadata-photos-original_date
 
 `UITests/GridMotionTourTests.swift` (iPhone) tours SPEC §17.2: the Library edge to edge with its date pill, selecting
 tiles, the viewer's zoom out of a tile and back, an album's grid (`TEST_RUNNER_PHOTOS_UITEST_ALBUM`, default
-"r7-grid-album") and a favourite's heart, a delete and its undo on two photos the test uploads first (dated now, so
+"Lisbon 2025" of the shared test library, only looked at) and a favourite's heart, a delete and its undo on two photos the test uploads first (dated now, so
 they are the newest of the library on any day) and removes at the end. `TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX` names the screenshots (before/after pairs), and
 `TEST_RUNNER_PHOTOS_UITEST_REDUCE_MOTION=1` / `TEST_RUNNER_PHOTOS_UITEST_REDUCE_TRANSPARENCY=1` launch the app with those
 settings. For motion, record the simulator meanwhile (`xcrun simctl io <udid> recordVideo --codec h264 <file>`).

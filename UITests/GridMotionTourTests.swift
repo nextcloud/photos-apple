@@ -13,7 +13,7 @@ final class GridMotionTourTests: XCTestCase {
     var app: XCUIApplication!
 
     var prefix: String { ProcessInfo.processInfo.environment["PHOTOS_UITEST_SHOT_PREFIX"] ?? "grid" }
-    var album: String { ProcessInfo.processInfo.environment["PHOTOS_UITEST_ALBUM"] ?? "r7-grid-album" }
+    var album: String { ProcessInfo.processInfo.environment["PHOTOS_UITEST_ALBUM"] ?? "Lisbon 2025" }
 
     override func setUp() async throws {
         continueAfterFailure = true
