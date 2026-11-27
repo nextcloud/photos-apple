@@ -215,6 +215,24 @@ them. Each is marked "⬜ device D16.n" in STATUS.md.
 
 **Expected:** each does what its STATUS line says; note any difference in the issue.
 
+## D17 Free up space on this device (P, T, M) — STATUS §22.1
+
+Use a library you can afford to thin out (a test iPhone, or a Mac test user's own Photos library — never the owner's).
+
+1. Back up everything (D1). The account menu says "All backed up · Free up …" (from 100 MB); the Backup screen shows the
+   card. Note the size.
+2. Open it. Compare "Staying on this iPhone" with what you know: favourites, hidden photos, the last 30 days, a photo you
+   edited *after* it was backed up ("Edit not backed up"), an iCloud shared album item (never listed as offered).
+3. Change the options (Recent photos: None; Favorites off) and see the size change. In the review keep two photos.
+4. Free Up: watch "Comparing checksums: n of m", answer the system's question with Delete.
+5. In Apple's Photos app: Recently Deleted has exactly the removed photos; the two kept ones and every favourite are still
+   in the library. On the web: every removed photo is there, full size. Empty Recently Deleted and compare the free
+   storage in Settings › General › Storage with the size the app showed.
+6. With iCloud Photos on: the removed photos are gone from the other devices too (the confirmation said so).
+
+**Expected:** nothing is removed that is not on the server with the same size/checksum; the freed storage matches the
+size within a few per cent; on the Mac the same with "Optimize Mac Storage" off.
+
 ## Results table (copy into the issue)
 
 ```
@@ -236,5 +254,6 @@ Build:            Server (version / Photos):         Date / tester:
 | D13 Backup you can see, 2 GB video |   |   | – | – | – | – | % before/after kill, offline, restart: |
 | D15 Erase tool            |   |   |   | – | – | – | s per object / peak MB / quality: |
 | D16 Simulator gaps        |   |   |   | – | – | – | |
+| D17 Free up space         |   |   |   | – | – | – | size shown / freed: |
 ```
 Mark each cell ✓, ✗ (with an issue link) or "not tested".

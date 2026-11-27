@@ -645,6 +645,8 @@ _Changed in round 11 (§21.1):_ this section first said a grid badge for device 
 
 "Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before: the server lists the file with exactly the device's size, and the same file id when known; converted or name-only matches never qualify; RAW, edited version and Live Photo motion are required), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
 
+_Extended in round 12 (§22.1):_ keep options (recent period, favourites, hidden), edited photos stay unless their edit is backed up, shared-album items always stay, checksums right before the removal, a review, the Mac, and offers in the account menu, on the Backup screen and in Clean up.
+
 #### 7.18.9 Mirror device albums (iOS, iPadOS)
 
 Opt-in, for the albums the user picks (Backup › Albums): after each pass, backed-up photos (ledger `uploaded`/`matched`) of a picked device album are added to the Nextcloud album of the same name (created when missing; `/` becomes `-`). The edited rendition is preferred. Only adds: a photo taken out of the device album, or removed from the Nextcloud album, is not touched again (what was added is remembered per album).
@@ -2815,7 +2817,8 @@ utility rows Duplicates and Free up server space with one entry point; their scr
   5. *Free up space on this iPhone/iPad* (iPhone and iPad only, under "On this iPhone/iPad") — the device's available
      storage (`volumeAvailableCapacityForImportantUsage`) → the Backup screen's "Free up space on this iPhone" (§7.18.8);
      without access to the photo library it opens Backup instead. Not offered on the Mac and Vision Pro (no
-     backed-up device library to thin out).
+     backed-up device library to thin out). _Round 12 (§22.1):_ also on the Mac ("On this Mac"), with the free-up
+     estimate as the row's size and the available storage as its second line; still not on Vision Pro.
 - **Headline**: "Up to X can be freed" over rows 1–4, each file counted once (`CleanUpTotals`: a large video can also
   be a duplicate copy or a similar shot); "Nothing to clean up" when all are empty. The footer says that nothing is
   deleted until the user confirms and that deleting deletes on the server and so everywhere. Every delete goes through
@@ -3756,7 +3759,64 @@ The principles of §2 and §21 hold: only Apple's frameworks for analysis on the
 optional server app such as `notify_push` may be used when present).
 
 ### 22.1 Free up space on this device [space]
-_To be written._
+
+Builds on §7.18.8 (one flow, `PhotosBackup/DeviceFreeUp.swift`, `PhotosCore/BackupModel+FreeUp.swift`,
+`PhotosAppUI/Backup/FreeUpSpaceViews.swift`). After the backup the app offers to remove from the device the photos and
+videos that are proven to be on the server, like Google Photos' "Free up space", with the rules below and Apple's own
+confirmation.
+
+**Where.** iPhone, iPad and the Mac (the Mac's backup reads its Photos library through PhotoKit, so the same flow removes
+from that library; with "Optimize Mac Storage" it frees less, which the size shows). Not on Vision Pro, Apple TV and the
+Watch (no backup of a photo library there). Only with access to the whole library (with selected photos only, the
+counts would mislead and the system would refuse the others). Entry points:
+- the account menu's backup summary: "All backed up · Free up 3.2 GB" (only when everything is backed up and the estimate
+  is at least 100 MB); it opens the Backup screen, which pushes the free-up screen;
+- the Backup screen: a card "Free up 3.2 GB on this iPhone · 1,234 photos and videos are safely on your Nextcloud" while
+  the backup is up to date, and the row "Free up space on this iPhone/iPad/Mac" (with the estimate) in the device section;
+- Clean up › "On this iPhone/iPad/Mac" (§19.3, now also on the Mac): the estimate as the row's size, the available
+  storage below.
+
+**Which photos may go.** An asset is offered only when all of these hold (`DeviceCleanup.keepReason` + `isVerified`):
+1. it is part of the user's own library (`sourceType` user library) — items of iCloud shared albums and photos synced
+   from a computer always stay;
+2. the keep options let it go: *Recent photos* (none / last 7 days / **last 30 days** / 3 months / 6 months / year, by
+   capture date; an asset without a date counts as recent unless "None"), *Favorites* (kept by default), *Hidden photos*
+   (kept by default);
+3. if the user edited it (`adjustmentsState == .userAdjusted`), its edited version is in the ledger as uploaded or
+   matched, recorded at or after `adjustmentTimestamp` — an edit made after the backup, an edit not rendered by
+   PhotoKit, or a backup set to "originals only" keeps the photo ("Edit not backed up");
+4. every file the backup keeps of it (original, edited version, RAW, Live Photo motion — whatever the backup options
+   say) is in the ledger as `uploaded`/`matched` with a server path, and it has nothing the backup never uploads (a Live
+   Photo's edited motion) — otherwise "Not completely backed up";
+5. the server lists each of those files right now (one `PROPFIND` depth 1 per folder, only for the folders still needed)
+   with exactly the device's size and the recorded file id — otherwise "Not verified on your Nextcloud" (a JPEG
+   conversion, a match by name only, a file replaced or removed on the server);
+6. right before the removal everything is checked again (options, ledger, listing), and where the server keeps a
+   checksum of a file (`oc:checksums`: SHA-256 from the backup's own `OC-Checksum`, or SHA-1/MD5 from other clients) the
+   device's data is hashed (`PHAssetResourceManager`, no iCloud download) and must match. A file whose data is only in
+   iCloud is checked by size and id. Photos that fail now are left out and counted ("3 stayed because they changed since
+   the first check").
+
+Each photo that stays is counted once, under the first rule that keeps it, in "Staying on this iPhone" with count and
+size. Nothing is ever deleted on the server.
+
+**The screen.** The size in large type ("3.2 GB") and "1,234 photos and videos are safely on your Nextcloud and can be
+removed from this iPhone"; a strip of the newest of them that opens the review (a grid; a tap keeps a photo on the
+device, "Select All"/"Deselect All"); "Free Up 3.2 GB" → the app's confirmation ("Remove 1,234 photos and videos from this
+iPhone?" with the size, Recently Deleted and the iCloud Photos warning) → the second check with progress ("Comparing
+checksums: 120 of 1,234") → the system's own confirmation (`PHAssetChangeRequest.deleteAssets`) → "1,230 photos and
+videos (3.1 GB) moved to Recently Deleted. The space comes free when Recently Deleted is emptied: in the Photos app, or by
+itself after 30 days." The keep options ("Keep on this iPhone") are a preference of this device (app defaults
+`backup.freeUpOptions`, not synced: what to keep depends on the device's storage); a change checks again at once.
+
+**Estimate.** After each pass that leaves everything backed up (and when the Backup screen or Clean up opens without
+one), `DeviceCleanup.estimate` applies rules 1–4 to the ledger's complete assets with PhotoKit's flags and the sizes the
+ledger recorded — no server, no file reads — off the main actor. The free-up screen's real check replaces it.
+
+**Not possible / decided.** PhotoKit does not say which photos are in the iCloud Shared Photo Library (deleting one
+removes it for all participants); the system's confirmation and the iCloud Photos sentence cover it. Photos in Recently
+Deleted still take space until it is emptied: the app says so instead of claiming the space at once. No automatic
+removal and no reminder notification: the user always starts it.
 
 ### 22.2 Handoff, Apple TV set-up from the iPhone, a three-step first run [continuity]
 _To be written._

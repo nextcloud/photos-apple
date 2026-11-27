@@ -451,7 +451,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
 - Background tasks, silent pushes and the "Back up now" intent find the app model after a launch without a window
   (`AppHost`) 🟡 compiled for iOS, not run on a device.
-- 🟡 §7.18.8 "Free up space on this iPhone/iPad" (Backup screen, iOS/iPadOS only): offers only assets whose every file the
+- 🟡 §7.18.8 "Free up space on this iPhone/iPad" (_round 12: extended and also on the Mac, see M13 §22.1_) (Backup screen, iOS/iPadOS only): offers only assets whose every file the
   backup keeps (original, edited version, RAW, Live Photo motion) is uploaded or matched in the ledger with a server path and
   is listed by the server right now (one `PROPFIND` per folder) with exactly the device's size and, when both are known, the
   same file id; nothing converted to JPEG, matched by name only, recorded by the Files app without a path, or with an
@@ -1942,7 +1942,40 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
 ## M13 Easier, faster, more useful (SPEC §22) — ⬜
 
 ### §22.1 Free up space on this device
-- ⬜ Round 12.
+- ✅ Rules (`PhotosBackup/DeviceFreeUp.swift`), unit-tested (`FreeUpTests`, 13 tests, + `BackupDeviceTests`): keep options
+  (recent period none/7 d/30 d/3/6/12 months, favourites, hidden), shared-album and synced items always stay, user-edited
+  photos stay unless their current edit is in the ledger (recorded at or after `adjustmentTimestamp`), every file the
+  backup keeps must be uploaded/matched with a path, the server lists it now with the same size and file id; one reason
+  per photo that stays, with count and size; only folders still needed are listed.
+- ✅ Checksums right before the removal: `oc:checksums` read (SHA-256/SHA-1/MD5, Adler-32 ignored), the device's data
+  hashed through PhotoKit without iCloud downloads (`PhotoKitResourceDigester`), mismatch → stays; checked on 8089 that the
+  server keeps the backup's `OC-Checksum: SHA256:…` (curl PUT + PROPFIND). Digest and parsing unit-tested; the PhotoKit
+  stream itself 🟡 (simulator run below).
+- ✅ Estimate from the ledger (no server, no file reads) after a complete pass, for the account menu ("All backed up ·
+  Free up 129 MB", from 100 MB), the Backup screen's card and row, Clean up's device row (now also on the Mac). Seen on the
+  iPhone simulator: Backup screen card "Free up 129 MB on this iPhone · 4 photos and videos are safely on your Nextcloud"
+  (`ios-fix-shots/r12-space/`).
+- ✅ Seen working on the iPhone simulator (`FreeUpTourTests`, passed in 48 s; shots `ios-fix-shots/r12-space/freeup3-*`):
+  six photos added with `simctl addmedia` (four of 32 MB from two months ago, two small ones of this week; backup limited
+  to the last 90 days by `PHOTOS_DEBUG_BACKUP_SINCE`, so the simulator's own photos were never candidates) are backed up
+  to `/r12-space-freeup` on 8089; the account menu says "All backed up · Free up 129 MB"; it opens the free-up screen
+  (129 MB, 4 photos; "Recent 2 · 90 KB" stays); the review keeps one; "Free Up" → app confirmation → "Comparing
+  checksums: 3 of 3" (the PhotoKit stream's SHA-256 matched the server's for all three) → the system's "Allow “Nextcloud
+  Photos” to delete 3 photos?" → "3 photos and videos (96.8 MB) moved to Recently Deleted", the kept one offered again.
+  Also seen: a stale ledger whose server folder was deleted still gives the ledger estimate on the Backup card, and the
+  real check then offers nothing (the estimate is replaced by the check).
+- ✅ Accessibility: the tour audits the free-up screen and the review with `AccessibilityAuditTests`' policy — only
+  accepted findings (system secondary colour, bar glass, checked at the largest size); review tiles are buttons with
+  date and size, value "Will be removed"/"Stays" and the selected trait; the headline and progress are one element each.
+  `SmokeTests` 7/7 and `AccessibilityAuditTests` 13/13 pass on the branch (fresh install).
+- ✅ Mac: Clean up shows "On this Mac › Free up space on this Mac" with the available storage (shot
+  `ios-fix-shots/r12-space/mac-cleanup.png`).
+- 🟡 iPad (same views, iPad wording) not run separately.
+- 🟡 Mac free-up flow itself: compiled; it reads the Mac's Photos library through PhotoKit like the backup, but it was not
+  run against a library (the only one on the test Mac is the owner's, and the test build has no Photos access by design).
+- ⬜ Not possible with PhotoKit: telling iCloud Shared Library photos apart (no public API); the system's confirmation and
+  the iCloud Photos sentence cover it. Real device: PhotoKit sizes, Recently Deleted and iCloud Photos behaviour —
+  DEVICE-TEST-PLAN item for Frank.
 
 ### §22.2 Handoff, Apple TV set-up from the iPhone, three-step first run
 - ⬜ Round 12.
