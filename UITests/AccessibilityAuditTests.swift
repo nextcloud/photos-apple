@@ -308,15 +308,6 @@ import XCTest
 
     /// Which audit findings are accepted, and why. Everything else is a bug to fix.
     @MainActor enum AccessibilityAuditPolicy {
-        /// "localhost:8089" of the test login (`PHOTOS_UITEST_LOGIN`).
-        static var serverHost: String {
-            let login = ProcessInfo.processInfo.environment["PHOTOS_UITEST_LOGIN"] ?? ""
-            guard let range = login.range(of: "server:") else { return "" }
-            let server = login[range.upperBound...].prefix { $0 != "&" }
-            guard let url = URL(string: String(server)), let host = url.host() else { return "" }
-            return url.port.map { "\(host):\($0)" } ?? host
-        }
-
         struct Finding {
             var type: XCUIAccessibilityAuditType
             var description: String
@@ -382,8 +373,9 @@ import XCTest
                 return "no element named by the audit"
             }
             // "Nearly passed": 3:1 or more, the system's secondary text colours (section headers, footers, subtitles)
-            // as Apple's own apps use them. AA for large text; the app follows Increase Contrast for more.
-            if finding.type == .contrast && finding.description.contains("nearly passed") {
+            // as Apple's own apps use them. AA for large text; the app follows Increase Contrast for more. Not memory
+            // captions: they are white on a shade of their own (`CaptionScrim`) and must pass.
+            if finding.type == .contrast && finding.description.contains("nearly passed") && finding.identifier != "memory-caption" {
                 return "system secondary colour, at least 3:1"
             }
             if let frame = finding.frame {
@@ -391,7 +383,11 @@ import XCTest
                 if finding.type == .contrast, let tabBar = bars.tabBar, frame.intersects(tabBar), !tabBar.contains(frame) {
                     return "under the tab bar's glass"
                 }
-                if finding.type == .textClipped, bars.scrollAreas.contains(where: { $0.intersects(frame) && !$0.contains(frame) }) {
+                // A row at the edge of a scroll area (a sheet's last row at the largest size) is cut off until it is
+                // scrolled into view: the audit measures its hidden part against what is outside the scroll area.
+                if finding.type == .textClipped || finding.type == .contrast,
+                    bars.scrollAreas.contains(where: { $0.intersects(frame) && !$0.contains(frame) })
+                {
                     return "at the edge of its scroll area"
                 }
                 // Partly off the screen: the audit measures what is not drawn yet.
@@ -401,6 +397,10 @@ import XCTest
                 // Behind the sidebar that overlays it (iPad portrait), the Library is dimmed on purpose.
                 if finding.type == .contrast, let edge = bars.sidebarEdge, frame.minX > edge + 8 {
                     return "dimmed behind the sidebar"
+                }
+                // The Library's memory captions under the sidebar itself (portrait), covered by its glass.
+                if finding.type == .contrast, finding.identifier == "memory-caption", let edge = bars.sidebarEdge, frame.minX < edge {
+                    return "under the sidebar that overlays the Library"
                 }
                 let inBar = ([bars.tabBar].compactMap { $0 } + bars.navigationBars).contains(where: {
                     $0.insetBy(dx: -4, dy: -4).contains(frame)
@@ -416,21 +416,25 @@ import XCTest
                     return "bar item on the system's glass"
                 }
             }
-            // Memory captions on photos (story cards, memory cards): white with a shadow on a dark scrim, measured against
-            // the photo; in a card of fixed height their size stops at xxLarge, the full text is in the card's VoiceOver
-            // label. Open item (STATUS §20.3): a stronger scrim and a caption below the card at accessibility sizes.
+            // Memory captions on photos (story cards, memory cards, `memory-caption`) are not excused: they stand on an
+            // even shade dark enough for 4.5:1 on any photo (`CaptionScrim`), and below the picture at accessibility sizes.
             // Text on a caption plate's glass: the audit measures it against the cover behind the glass (black on the
             // plate measured 15.7:1 in the iPad's screenshot).
             if finding.identifier == "caption-plate", finding.type == .contrast {
                 return "on a caption plate's glass, measured in the screenshot"
             }
-            // The sidebar's account line (server name) in the secondary colour on the sidebar's glass: 3.5:1. Open item
-            // for the sidebar's rendering (STATUS §20.3).
-            if finding.type == .contrast, !serverHost.isEmpty, finding.label == serverHost {
-                return "the sidebar's account line (open item)"
-            }
-            if finding.identifier == "memory-caption", [.contrast, .dynamicType, .textClipped].contains(finding.type) {
-                return "memory caption on a photo (open item)"
+            // The account row in the sidebar's bottom bar (iPad, Vision Pro; `sidebar-account`). Its name and server are in
+            // the text colour and must pass; the badge's initials are white on the accent (6.1:1, AccentPaletteTests), which
+            // the audit measures against the glass around the circle, and keep the circle's size (hidden from VoiceOver, the
+            // row's label says whose account it is). The system's bottom bar lets its text grow only a little (the rows above
+            // reach the largest size): the full name and server are in the row's label and in its menu.
+            if finding.identifier == "sidebar-account" {
+                if finding.label.count <= 2, finding.type == .contrast || finding.type == .dynamicType {
+                    return "the account badge's initials, white on the accent"
+                }
+                if finding.type == .dynamicType {
+                    return "the sidebar's bottom bar, whose text size the system caps"
+                }
             }
             // At the default size the audit only guesses what larger sizes would do ("partially unsupported", "may be
             // clipped"); every screen is audited again at the largest size (testLargestTextSize…), where it counts.

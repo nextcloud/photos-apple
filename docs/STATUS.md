@@ -1585,19 +1585,33 @@ For the other surfaces (file:line on `feat/r7-base`; the owner fixes them in par
 - ✅ Accessibility audits (`UITests/AccessibilityAuditTests`, 13 tests): every main screen at the default size and at
   AX5, iPhone 17 simulator (iOS 27.2) against the 8089 test library: all pass with the policy of SPEC §20.3; the
   findings per screen (accepted ones with their reason) are in `ios-fix-shots/r10-a11y/run3/*-audit.txt`. iPad: see
-  below.
+  below. Again on 2026-11-27 without the memory-caption and account-line exceptions: 13/13 on iPhone 17 and 13/13 on
+  iPad Pro 13-inch (M5), iOS 27.2, plus the iPad's sidebar tests in dark mode (2/2)
+  (`ios-fix-shots/a11y-erase/iphone-3/`, `ipad-3/`, `ipad-dark-3/`). Two findings that a fresh simulator showed were
+  fixed on the way: Clean up's "Nothing to clean up" headline at AX5 (a Label the audit took for clipped; now text
+  beside a hidden symbol) and a Settings sheet's last row cut by the sheet's edge at AX5 on iPad (the policy's "at the
+  edge of its scroll area" now covers contrast as well as clipping).
 - ✅ Fixed from the findings: accent colour #00679e in light mode (#00507a with Increase Contrast; `AccentPaletteTests`;
   kept by the owner's decision of 2026-11-27),
   text on glass in the text colour (caption plates, viewer pill), the viewer's action bar targets (44 points), account
   avatar, Settings' current-account check mark, the iPad's info inspector (thick material behind the info, prominent
   section headers), the year in review cards' year (scales with the text size), the close crosses of the weekly prompt and family suggestion cards.
-- ⬜ Memory captions on photos (story cards in the Library, memory cards): the audit measures the white caption against
-  the photo where the scrim is thin, and the story card's text stops at xxLarge (fixed card height; the full text is in
-  its VoiceOver label). Plan: a scrim that reaches higher under the title, and at accessibility sizes the caption below
-  the card as album cards do (SPEC §17.4). Accepted in the test as an open item until then.
-- ⬜ The iPad sidebar's account line (server name) is secondary text on the sidebar's glass, 3.5:1 over the photos
-  behind it. Plan: the text colour at a smaller size, as done for the caption plates (`SidebarViews.swift`, left to the
-  sidebar's rendering work of §20.1 to avoid a conflict). Accepted in the test as an open item.
+- ✅ Memory captions on photos (2026-11-27): story cards in the Library, memory cards (Memories), the small cards of the
+  Collections shelf and the Library's strip, and the Mac's menu bar panel put their white titles on an even shade from
+  the first line down (`CaptionScrim`: black or the cover's deep tone at 65 %, 75 % with Increase Contrast or Reduce
+  Transparency), fading in above with an eased curve — more than 5:1 even on a white photo (`CaptionScrimTests`). At
+  accessibility text sizes the titles go below the picture and wrap (story cards, small cards; the large memory cards
+  did already), and the strips grow to the tallest card. Measured in the audit's screenshots (iPhone 17, test library;
+  white against the brightest 5 % of the photo beside the text): before 2.2–2.4:1 for the titles and 3.2–5.4:1 for the
+  date lines on the bright covers, after 6.9–11.8:1 and 6.7–14.0:1 (`ios-fix-shots/a11y-erase/before/`, `iphone-2/`). The audit's
+  exception for `memory-caption` is gone (also from "nearly passed"); only captions covered by the iPad's overlaying
+  sidebar or dimmed behind it are excused.
+- ✅ The sidebar's account row (iPad, Vision Pro; now in the sidebar's bottom bar): the server line was `.secondary`,
+  2.8:1 (default size) and 2.4:1 (largest) on the sidebar's glass over the photos in light mode; now in the text colour at
+  caption size, as on the caption plates: 10.0:1 / 14.0:1 in light, 13.5:1 / 13.2:1 in dark (screenshots of the iPad
+  audits, `ipad-2/`, `ipad-dark/`); badge, name and server keep their places. The audit names the row
+  (`sidebar-account`) and excuses only the badge's initials (white on the accent, measured against the glass around the
+  circle) and the text size, which the system's bottom bar lets grow only a little.
 - 🟡 VoiceOver walk: element order and labels read from the accessibility trees of every audited screen (tiles "Photo,
   date, place…", story cards with adjustable action, viewer: close, date pill (header), previous/next, action bar);
   rotor actions (tile custom actions, viewer's favourite/info/delete) checked in code, not with VoiceOver itself, which
@@ -1856,9 +1870,18 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
   (VoiceOver action on the picture, via AX) removed the man behind the speaker, Done saved the recipe with its `retouch`
   stroke to `.nextcloud-photos/edits/<id>.json`, the viewer showed the photo without him. Shots
   `ios-fix-shots/r11-erase/mac-2-editor.png` … `mac-7-viewer-after-done.png`.
-- 🟡 **Fill quality**: the before/after pictures in `ios-fix-shots/r11-erase/` were made with LaMa and no longer show
-  what the app does. The basic fill is right for spots and small things on even backgrounds and leaves a soft patch on
-  large objects; new evidence with `TEST_RUNNER_PHOTOS_INPAINTING_EVAL` (now the basic fill) is open.
+- ✅ **Fill quality of the basic fill, for spots and small things** (2026-11-27, iPhone 17 simulator, iOS 27.2, against
+  8089; the LaMa pictures in `ios-fix-shots/r11-erase/` are history): `EraseTourTests.testEraseEvidence` (opt-in,
+  TESTING.md) uploaded three copies of test-library photos without EXIF to `/Photos/erase-evidence-<time>`, brushed them
+  in the Erase tool, took the editor before and after, left with Cancel (nothing saved) and removed the folder and its
+  trash entries. In `ios-fix-shots/a11y-erase/erase/` (`<name>-picture-before-after.png`, zoomed
+  `<name>-crop<n>-before-after.png`): **dust** — three soft spots (24–40 px, added to Lake Tenaya's sky as sensor dust),
+  2 % brush: gone without a trace; **floes** — two small ice floes on Jökulsárlón (~70 × 40 px on calm water, ~75 × 50 px on
+  the orange cloud reflection), 2.5 % brush: removed, each leaves a smooth patch a little calmer in tone than the
+  rippled water around it, visible when zoomed in; **walkers** — two people with their shadows on Porto Covo's sand
+  (~120 × 135 px), 6.5 % brush: removed, but a clearly visible blurred oval without the sand's grain. So: right for spots
+  and small things on even backgrounds; on texture, and for anything person-sized, a soft patch (⬜ "Large fills look
+  soft" below). The pictures show the editor's proxy at screen size; saving fills the original the same way.
 - ✅ **Recipe, geometry, cache, basic fill**: `InpaintingTests` (14 tests: JSON round trip and leniency, run lengths,
   brushed points through every geometry vs. `PhotoEditor.apply`, only the stroke changes, fills reused across undo and
   colour changes, windows, basic fill, `EditRendering` applies strokes, background-people rule).

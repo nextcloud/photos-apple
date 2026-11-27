@@ -113,6 +113,8 @@ public enum MenuBarExtraSettings {
         @Environment(AppModel.self) private var app
         @Environment(SessionModel.self) private var session
         @Environment(\.openWindow) private var openWindow
+        @Environment(\.colorSchemeContrast) private var contrast
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         @AppStorage(MenuBarExtraSettings.destinationKey) private var destination = ""
         @State private var albums: [Album] = []
         @State private var memory: Memory?
@@ -168,18 +170,19 @@ public enum MenuBarExtraSettings {
                 ZStack(alignment: .bottomLeading) {
                     PreviewImage(item: cover, bucket: 1024)
                         .frame(height: 150)
-                        .clipShape(.rect(cornerRadius: 10))
-                    LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .center, endPoint: .bottom)
-                        .clipShape(.rect(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Today's Memory", bundle: .module, comment: "Menu bar panel: the On this day memory.")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text(memory.title).font(.headline).foregroundStyle(.white)
+                        Text(memory.title).font(.headline)
                     }
+                    .foregroundStyle(.white)
                     .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Even behind the caption: 4.5:1 on any photo, as on the memory cards (SPEC §20.3).
+                    .background { CaptionScrim(increased: contrast == .increased || reduceTransparency, fade: 30) }
                 }
                 .frame(height: 150)
+                .clipShape(.rect(cornerRadius: 10))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
