@@ -70,8 +70,12 @@ public struct AppDataFiles: Sendable {
     }
 
     public static func etag(_ response: HTTPResponse) -> String {
-        let raw = response.header("OC-ETag") ?? response.header("ETag") ?? ""
-        return raw.replacingOccurrences(of: "W/", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+        unquoted(response.header("OC-ETag") ?? response.header("ETag") ?? "")
+    }
+
+    /// An ETag without `W/` and quotes.
+    public static func unquoted(_ etag: String) -> String {
+        etag.replacingOccurrences(of: "W/", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
     }
 }
 
