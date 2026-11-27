@@ -201,6 +201,11 @@ import Testing
         CIImage(color: CIColor(red: value, green: value, blue: value)).cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
     }
 
+    /// Two RGBA pixels that differ by at most one level per channel.
+    static func alike(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { abs(Int($0) - Int($1)) <= 1 }
+    }
+
     static func pixel(_ image: CIImage, x: CGFloat, y: CGFloat) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: 4)
         PhotoEditor.context.render(
@@ -219,10 +224,11 @@ import Testing
         let inside = Self.pixel(output, x: 500, y: 300)
         #expect(inside[0] > 240 && inside[1] < 15)
         let grey = Self.pixel(input, x: 0, y: 0)
+        // Untouched, up to one level of rounding in the compositing (CI's GPU gave 127 for 128).
         let outside = Self.pixel(output, x: 100, y: 300)
-        #expect(outside == grey, "\(outside) vs \(grey)")
+        #expect(Self.alike(outside, grey), "\(outside) vs \(grey)")
         let below = Self.pixel(output, x: 500, y: 200)
-        #expect(below == grey, "\(below) vs \(grey)")
+        #expect(Self.alike(below, grey), "\(below) vs \(grey)")
     }
 
     /// Adjusting colours, undo and the next rendition reuse the filled areas; another picture fills again.
