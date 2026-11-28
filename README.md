@@ -5,210 +5,244 @@
 <h1 align="center">Nextcloud Photos</h1>
 
 <p align="center">
-  <b>All your photos and videos, on the Nextcloud you trust, in a fast native app for every Apple device.</b><br>
+  <b>Your photos on your own server, in a native app for every Apple device.</b><br>
   iPhone · iPad · Mac · Apple Vision Pro · Apple TV · Apple Watch
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/iphone-library.jpg" height="380" alt="The Library on iPhone at the Days level: each day as a mosaic of its photos">
-  &nbsp;
-  <img src="docs/screenshots/ipad-library.jpg" height="380" alt="The Library on iPad with the sidebar and the account at its bottom, zoomed out to years, each year a card with its best photo">
-  &nbsp;
-  <img src="docs/screenshots/iphone-viewer.jpg" height="380" alt="A photo of a seagull on Lake Wakatipu in the viewer on iPhone, with the info card showing date, camera and exposure">
+  <img src="docs/screenshots/hero.webp" width="860" alt="Nextcloud Photos on iPad and iPhone: on iPad the Library with its sidebar at the Months level of 2025, each month a card with its key photo — a seagull on Lake Wakatipu, a white tulip, a cistern in Istanbul, a temple gate; on iPhone the Memories with “1 year ago” over Moraine Lake">
 </p>
 
-Nextcloud Photos brings your Nextcloud's photo library to iPhone, iPad, Mac, Apple Vision Pro, Apple TV and Apple Watch.
-It is built with SwiftUI for each platform (no web views, no Catalyst), works with the Photos app that comes with your
-Nextcloud, and needs no changes on your server. Your photos stay where they are: on your server, under your control.
+Nextcloud Photos gives the photos on your Nextcloud a fast, native home on every Apple device: a library that scrolls
+through 100 000 photos at once, memories that play like films, editing that never loses the original, and a backup you
+can see. It is built with SwiftUI for each platform (no web views, no Catalyst) and works with the Photos app your
+Nextcloud already has — there is nothing to install on the server.
 
-The screenshots show the real app, signed in to a test server with sample photos from Wikimedia Commons.
+## Why Nextcloud Photos
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><b>Your photos, your server</b><br>Everything stays on the Nextcloud you run or trust. No analytics, no ads, no trackers, no other cloud.</td>
+    <td width="33%" valign="top"><b>Native on every Apple device</b><br>One library on iPhone, iPad, Mac, Vision Pro, Apple TV and Apple Watch, each with the controls of its platform.</td>
+    <td width="33%" valign="top"><b>Fast with 100 000 photos</b><br>The library is indexed on the device and scrolls without waiting for the server, also offline.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Backup you can trust</b><br>Full-quality backup that shows what is not safe yet, checks checksums before it frees space on the phone, and never uploads a photo twice.</td>
+    <td valign="top"><b>Private intelligence</b><br>Faces, labels, text on signs and the best shot are found on your device by Apple's own frameworks. No AI models of its own, no photo sent away.</td>
+    <td valign="top"><b>Edits that keep the original</b><br>Presets, curves, colour, masks and Erase are saved as a recipe next to the photo, so the original is never lost.</td>
+  </tr>
+</table>
 
 ## Your whole library, instantly
 
-The library is indexed on your device, so even a large library opens and scrolls without waiting for the server, also
-offline. Pinch from years to months to days to every photo, or jump through time with the date scroller. Days that
-belong together get a name ("Weekend in Lisbon"), copies of one shot (RAW + JPEG, HEIC + JPEG) and bursts stack into one
-tile, and the photos you are likely to open next are already on the device.
-
 <table>
   <tr>
-    <td><img src="docs/screenshots/iphone-years.jpg" width="250" alt="The Library at the Years level on iPhone: one card per year with a key photo and the number of photos"></td>
-    <td><img src="docs/screenshots/iphone-memory.jpg" width="250" alt="A memory on iPhone: “2 years ago” with the photos of those days in Amsterdam"></td>
-  </tr>
-  <tr>
-    <td align="center">Years, months, days or every photo</td>
-    <td align="center">A memory from two years ago</td>
+    <td width="55%" valign="top">
+      The library is indexed on your device, so it opens and scrolls at once — with 100 000 photos, and also offline.
+      Recent months are kept as ready-made tiles, so the first screen is there before the server has answered.
+      <br><br>
+      <b>Pinch</b> from years to months to days to every photo, or jump through time with the date scroller. Days that
+      belong together get a name ("Weekend in Lisbon"), copies of one shot (RAW + JPEG, HEIC + JPEG) and bursts stack
+      into one tile behind the best frame, and the photos you are likely to open next are already on the device.
+      <br><br>
+      <a href="docs/media/library-zoom.mp4">Watch as video</a>
+    </td>
+    <td width="45%" align="center">
+      <img src="docs/media/library-zoom.webp" width="300" alt="Video: on iPhone the Library at the Years level; a tap on 2025 opens its months, and a pinch in on November 2025 shows its days, each a mosaic of flowers and landscapes">
+    </td>
   </tr>
 </table>
+
+<p align="center">
+  <img src="docs/screenshots/iphone-levels.webp" width="860" alt="Three iPhones: the Library as years (2025, 2024, 2023), each a card with its key photo; the months of 2025 as cards; and the days of November 2025, each a mosaic of its photos">
+</p>
 
 ## Memories that tell a story
 
-On this day and your trips come together as memories at the top of the Library. Play one and it becomes a film: a
-title card, slow moves towards the faces in each photo, cross-fades between days and map flights between the stops of a
-trip. Pick a style (Cinematic, Upbeat, Black & White, Super 8, Calm) and export it as a video to share.
-
-## Every photo, full screen
-
-The viewer puts the photo first: pinch or double-tap to zoom, swipe between photos, swipe down to close and the photo
-lands back in its tile. Swipe up for the details — date, place on a map, camera and exposure, file and folder.
-Copies of one shot sit side by side in a strip, and a slideshow starts from any photo or grid.
-
-<p align="center">
-  <img src="docs/screenshots/ipad-viewer.jpg" width="760" alt="The viewer on iPad with the info inspector beside the photo: name, date, camera, exposure, file size, folder and a map of Queenstown">
-</p>
-
-## Everywhere you've been
-
-Places shows your photos on a map, grouped as you zoom, with a time range to see one summer or one decade. "Then and
-now" finds the spots you have photographed over the years, and the travel globe draws your trips. People and faces
-appear when your server runs [Recognize](https://apps.nextcloud.com/apps/recognize).
-
 <table>
   <tr>
-    <td><img src="docs/screenshots/iphone-map.jpg" width="250" alt="The map on iPhone with clusters of photos over Europe and Africa, each with a count"></td>
-    <td><img src="docs/screenshots/iphone-albums.jpg" width="250" alt="Albums on iPhone: Barcelona 2014, Berlin 2014, Lisbon 2025, Prague 2019 and others as cards with their cover"></td>
-    <td><img src="docs/screenshots/iphone-search.jpg" width="250" alt="Search on iPhone: “Lisbon 2025” understood as a place chip and a date chip, with 11 photos from January 2025"></td>
-  </tr>
-  <tr>
-    <td align="center">Places on a map</td>
-    <td align="center">Albums</td>
-    <td align="center">Search in your own words</td>
+    <td width="45%" align="center">
+      <img src="docs/media/memory-film.webp" width="300" alt="Video: on iPhone the memory “1 year ago” opens from Memories with a grid of its photos, then plays as a film: a title over Moraine Lake, a slow move across the mountains, a cross-fade to a seagull on Lake Wakatipu">
+    </td>
+    <td width="55%" valign="top">
+      On this day, your trips and the people you love come together as memories at the top of the Library. Play one and
+      it becomes a film: a title card, slow moves towards the faces in each photo, cross-fades between days and map
+      flights between the stops of a trip. Pick a style (Cinematic, Upbeat, Black & White, Super 8, Calm) and export it
+      as a video to share.
+      <br><br>
+      Birthdays from your Nextcloud's contacts become memories too: "Anna turns 30 today", with her photos.
+      <br><br>
+      <a href="docs/media/memory-film.mp4">Watch as video</a>
+    </td>
   </tr>
 </table>
 
-## Albums and sharing
+## Every photo, full screen
 
-Create albums, add photos from the library's grid, open the albums others share with you, and share an album with
-anyone through a public link. Share photos and folders the Nextcloud way — with users, groups, Talk conversations or a
-link with a password and an expiry date. Smart albums fill themselves from rules (people, places, dates, cameras,
-ratings…) and are the same on all your devices. Send a photo as a postcard, find the photos in a family member's shared
-folder that belong with yours, or hand your phone to someone with Guest Mode, which shows one album and nothing else.
+<table>
+  <tr>
+    <td width="55%" valign="top">
+      The viewer puts the photo first: swipe between photos, double-tap or pinch to zoom, swipe down and the photo lands
+      back in its tile. Swipe up for the details — date, place on a map, camera and exposure, file and folder. Copies
+      of one shot sit side by side in a strip, and a slideshow starts from any photo or album.
+      <br><br>
+      <a href="docs/media/viewer.mp4">Watch as video</a>
+    </td>
+    <td width="45%" align="center">
+      <img src="docs/media/viewer.webp" width="300" alt="Video: in the album Lisbon 2025 on iPhone a photo opens full screen, three swipes go through the album, a double tap zooms in and out, and a swipe down puts the photo back into the album's grid">
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/ipad-viewer.webp" width="760" alt="The viewer on iPad: Moraine Lake below snowy mountains, with the info inspector beside it showing name, date, camera, exposure, dimensions, size, type and folder">
+</p>
 
 ## Find any photo
 
 Type the way you think: "Lisbon 2025" or "favourite photos from Lisbon" become chips for a place, a date and your
-favourites, and each chip can be changed with a tap. Search looks at places, dates, file names, albums, tags and people —
-and, once you turn it on, at what is in your photos: labels, short descriptions and the text on signs, which Apple's
-Vision framework finds on your device. On devices with Apple Intelligence, its on-device language model helps to
-understand what you type. Quick Actions (⌘K) jump to any album, place, year or command.
+favourites, and each chip can be changed with a tap. Type a camera — "x100v" — and it becomes a camera chip.
+Search looks at places, dates, file names, albums, tags, people and cameras, and, once you turn it on, at what is in
+your photos: labels, short descriptions and the text on signs, which Apple's Vision framework finds on your device.
+On devices with Apple Intelligence, its on-device language model can help to understand what you type. Quick Actions
+(⌘K) jump to any album, place, year or command.
+
+<p align="center">
+  <img src="docs/screenshots/iphone-search.webp" width="860" alt="Search on iPhone: “Lisbon 2025” is understood as a place chip and a date chip; the result, 11 photos from January 2025 in Lisbon; and a camera chip “Nikon D50” with the 8 flower photos taken with it">
+</p>
+
+## Places and people
+
+Places shows your photos on a map, grouped as you zoom, with a time range to see one summer or one decade. "Then and
+now" finds the spots you have photographed over the years, and the travel globe draws your trips.
+
+**People** come from [Recognize](https://apps.nextcloud.com/apps/recognize) when your server runs it. Without it, the
+app finds the faces itself, on your device, with Apple's Vision framework, and groups them into people you can name.
+Nothing is sent anywhere for it.
+
+<p align="center">
+  <img src="docs/screenshots/places-people.webp" width="860" alt="Left: Places on iPhone, a map of Europe and Africa with photos grouped into clusters, each with a count. Right: a detail of People in the Mac app on a server without Recognize: faces found on the Mac by Apple's Vision, each with “Add name”">
+</p>
+
+## Albums and sharing
+
+Create albums, add photos from the grid, open the albums others share with you, and share an album through a public
+link. Share photos and folders the Nextcloud way — with users, groups, Talk conversations or a link with a password and
+an expiry date. Smart albums fill themselves from rules (people, places, dates, cameras, ratings…) and are the same on
+all your devices. Send a photo as a postcard, find the photos in a family member's shared folder that belong with
+yours, or hand your phone to someone with Guest Mode, which shows one album and nothing else.
 
 ## Edit without losing the original
 
-Edits are saved as a small recipe next to your photo on your Nextcloud, never in the photo itself, so they can be changed
-or undone at any time and show up on all your devices. Besides light, colour, crop and filters there are curves, a colour
-mixer for each hue, masks for the sky, the subject or the people in a photo, noise reduction and presets. Copy the edits
-of one photo and paste them onto others. When you want the result in the file itself, Apply Edits to the File writes it
-and keeps the original as a version on your Nextcloud.
-
-**Erase** removes dust, spots and small distractions: tap them or brush over them, and the area is filled from what is
-around it. It works best on spots and small things on even backgrounds.
-
 <table>
   <tr>
-    <td><img src="docs/screenshots/iphone-editor-presets.jpg" width="250" alt="The editor on iPhone with the Warm preset applied to a sunset over a glacier lagoon, and previews of other presets"></td>
-    <td><img src="docs/screenshots/iphone-editor-curves.jpg" width="250" alt="The Curves tool on iPhone with an S curve that deepens shadows and brightens highlights"></td>
-    <td><img src="docs/screenshots/iphone-erase.jpg" width="250" alt="The Erase tool on iPhone with a brush size slider and the note “Works best on spots and small things”"></td>
-  </tr>
-  <tr>
-    <td align="center">Presets</td>
-    <td align="center">Curves</td>
-    <td align="center">Erase</td>
+    <td width="45%" align="center">
+      <img src="docs/media/editor.webp" width="300" alt="Video: the editor on iPhone with a glacier lagoon at sunset: the presets Vivid, Warm, Cool, Black &amp; White and Matte are tried one after another, then an S curve deepens the shadows and brightens the highlights">
+    </td>
+    <td width="55%" valign="top">
+      Edits are saved as a small recipe next to your photo on your Nextcloud, never in the photo itself, so they can be
+      changed or undone at any time and show up on all your devices. Besides light, colour, crop and filters there are
+      curves, a colour mixer for each hue, masks for the sky, the subject or the people in a photo, noise reduction and
+      presets. Copy the edits of one photo and paste them onto others. When you want the result in the file itself,
+      Apply Edits to the File writes it and keeps the original as a version on your Nextcloud.
+      <br><br>
+      <b>Erase</b> removes dust, spots and small distractions: tap them or brush over them, and the area is filled from
+      what is around it.
+      <br><br>
+      <a href="docs/media/editor.mp4">Watch as video</a>
+    </td>
   </tr>
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/ipad-editor.jpg" width="760" alt="The editor on iPad in landscape: a glacier lagoon at sunset with the Warm preset, and previews of all presets below it">
+  <img src="docs/screenshots/iphone-editor.webp" width="860" alt="Three iPhones with the editor on a glacier lagoon at sunset: the presets Vivid, Warm, Cool and Matte; the Curves tool with an S curve; the colour mixer with the oranges selected and their hue, saturation and luminance">
 </p>
 
-## The best shot, and room to spare
+## Backup you can trust
 
-When you take ten photos of the same moment, the app picks the best one — sharp, well exposed, eyes open — and tells you
-why. Bursts and quick series stack behind their best frame in the Library. **Clean up** gathers duplicates, similar
-shots, large videos and screenshots in one place, says how much space each would free, and lets you keep what you like.
+Backup is the second of three steps when you sign in: one tap, and your new photos and videos go to your Nextcloud — in
+full quality, Live Photos with their motion. Photos that are on your phone but not on your server yet stand in the
+Library with a small badge, so you always know what is safe; the account menu counts them, and "Back Up Now" sends any
+photo at once. Large videos resume where they stopped after a lost connection or a restart. If you have used the
+Nextcloud Files app's auto upload, the app sees what is already there and never uploads a photo twice.
 
-## Backup you can see
+**Free up space on this iPhone.** Once photos are safely on your Nextcloud, the app offers to remove them from the
+phone. It keeps your recent photos, favourites and anything not fully backed up, lets you review every photo, and
+compares checksums with the server right before anything is removed. The photos go to the phone's Recently Deleted,
+never anywhere on the server.
 
-Turn on backup and your new photos and videos go to your Nextcloud — in full quality, Live Photos with their motion.
-Photos that are on your phone but not on your server yet stand in the Library with a small badge, so you always know
-what is safe; the account menu counts them, and "Back Up Now" sends any photo at once. Large videos resume
-where they stopped after a lost connection or a restart. If you have used the Nextcloud Files app's auto upload, the app
-sees what is already there and never uploads a photo twice.
+<p align="center">
+  <img src="docs/screenshots/iphone-backup.webp" width="860" alt="Three iPhone screens: the first run asks “Back up the photos of this iPhone?” with a Turn on backup button; the Backup screen says Up to date with 6 uploaded and offers Free up space on this iPhone, 12.5 MB; the free-up screen shows 12.5 MB in 4 photos that are safely on the Nextcloud, a review of the photos and what to keep on the iPhone">
+</p>
+
+Moving from another service? **Import** reads a Google Takeout, Apple's iCloud Photos export, or a Facebook or Instagram
+download, keeps dates, albums and favourites, and skips what is already on your Nextcloud. **Clean up** gathers
+duplicates, similar shots, large videos and screenshots, says how much space each would free on the server, and picks
+the best shot of a series — sharp, well exposed, eyes open — and tells you why.
+
+## Widgets and controls
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/iphone-backup.jpg" width="250" alt="The account menu on iPhone says “11 not backed up”; below it, today's photos in the Library carry a crossed-out cloud badge"></td>
-    <td>
-      Moving from another service? <b>Import</b> reads a Google Takeout, Apple's iCloud Photos export, or a Facebook or
-      Instagram download, keeps dates, albums and favourites, and skips what is already on your Nextcloud.
+    <td width="55%" valign="top">
+      Your photos on the Home Screen: a <b>photo frame</b> that changes during the day (made for StandBy), <b>On this
+      day</b>, your <b>favourites</b> and the state of the <b>backup</b>. They show what the app has synced,
+      and no photo at all while app lock is on.
       <br><br>
-      While a backup runs, a Live Activity shows its progress on the Lock Screen and in the Dynamic Island, and Control
-      Center has switches for it.
+      Control Center gets a switch for the backup and a Back Up Now button, and while a large backup runs, a Live
+      Activity shows its progress on the Lock Screen and in the Dynamic Island.
+    </td>
+    <td width="45%" align="center">
+      <img src="docs/screenshots/iphone-widgets.webp" width="300" alt="The iPhone Home Screen with four Nextcloud Photos widgets: a photo frame with a café in Queenstown, On this day with Moraine Lake “1 year ago”, the backup widget saying Backed up, last backup 1 minute ago, and Favorites with a seagull on Lake Wakatipu">
     </td>
   </tr>
 </table>
 
 ## Made for every Apple device
 
-**iPhone and iPad** — Liquid Glass, a sidebar on iPad with your account at the bottom, several windows with drag and
-drop between them, keyboard shortcuts, Home Screen widgets, Controls and the backup Live Activity.
+**iPhone and iPad** — Liquid Glass, a sidebar on iPad with your account at the bottom, several windows with drag and drop
+between them, keyboard shortcuts, widgets, Controls and the backup Live Activity.
 
-**iPhone Duo** — the same app on the wider screen, with the tab bar at the side:
-
-<table>
-  <tr>
-    <td><img src="docs/screenshots/duo-library.jpg" width="190" alt="iPhone Duo: the Library at the Days level, each day a mosaic of its photos, with the tab bar at the right side"></td>
-    <td><img src="docs/screenshots/duo-viewer.jpg" width="190" alt="iPhone Duo: a seagull on Lake Wakatipu in the viewer, with the info card showing name, date, camera and exposure"></td>
-    <td><img src="docs/screenshots/duo-editor.jpg" width="190" alt="iPhone Duo: the editor with the presets Vivid, Warm, Cool, Matte and Black &amp; White under a glacier lagoon at sunset"></td>
-    <td><img src="docs/screenshots/duo-albums.jpg" width="190" alt="iPhone Duo: the albums Barcelona, Berlin, Lisbon, Prague, Rome and Vienna as cards"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/ipad-editor.webp" width="760" alt="The editor on iPad in landscape: a glacier lagoon at sunset with the presets Vivid, Warm, Cool, Matte, Black &amp; White, Dramatic Sky, Portrait Pop and Clean Night below it">
+</p>
 
 **Mac** — a real Mac app: a full menu bar and keyboard control, smooth trackpad zoom, and tools for photographers —
 ratings and flags with one key, compare two or four photos side by side, and Insights into your cameras, lenses and
 settings.
 
 <p align="center">
-  <img src="docs/screenshots/mac-library.jpg" width="760" alt="The Mac app: a sidebar with Library, Favorites, Memories, Places and the albums; the Library with Years, Months, Days and All Photos in the toolbar, the memories as cards and November's photos">
+  <img src="docs/screenshots/mac-library.webp" width="860" alt="The Mac app: a sidebar with Library, Favorites, Memories, Places and the albums; the Library with Years, Months, Days and All Photos in the toolbar, the memories as cards and November's photos">
 </p>
-<table>
-  <tr>
-    <td><img src="docs/screenshots/mac-map.jpg" width="420" alt="The Mac app's Places map with photo clusters over Europe, Africa, the Middle East and Asia"></td>
-    <td><img src="docs/screenshots/mac-albums.jpg" width="420" alt="The Mac app's albums: Lisbon 2025, Rome 2021, Vienna 2019, Prague 2019, Barcelona 2014 and Berlin 2014 as cards"></td>
-  </tr>
-</table>
 
 **Apple Vision Pro** — the app in a window of glass, with its controls in ornaments below it. Open a memory in the
 Memory Room and its photos hang framed all around you.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/vision-albums.jpg" width="420" alt="Apple Vision Pro: the albums Barcelona, Berlin, Lisbon, Prague, Rome and Vienna in a window with a sidebar, floating in a living room"></td>
-    <td><img src="docs/screenshots/vision-map.jpg" width="420" alt="Apple Vision Pro: the Places map in a window with a sidebar, floating in a living room"></td>
-  </tr>
-</table>
-
 **Apple TV** — memories, favourites and albums on the big screen, slideshows that drift and dissolve, a family slideshow
-that keeps going, and your newest memories in the Top Shelf. Sign in by scanning a QR code with your phone.
+that keeps going, and your newest memories in the Top Shelf. Set it up from your iPhone: the TV finds the phone, you
+confirm there, and the TV signs in with an app password of its own. Scanning a QR code works too.
 
 **Apple Watch** — a photo of the day and the photos from this day in earlier years on your wrist, sent by the iPhone app.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/tv-home.jpg" height="290" alt="Apple TV: the Home screen of the app with rows of memories and favourites"></td>
-    <td><img src="docs/screenshots/watch-photo-of-the-day.jpg" height="190" alt="Apple Watch: the photo of the day, a station in Dubai from 13 years ago"></td>
-    <td><img src="docs/screenshots/watch-on-this-day.jpg" height="190" alt="Apple Watch: a grid of photos titled On This Day"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/vision-tv.webp" width="860" alt="Left: Apple Vision Pro with the albums Barcelona, Berlin, Lisbon, Prague, Rome and Vienna in a window with a sidebar, floating in a living room. Right: Apple TV with rows of memories and favourites">
+</p>
+<p align="center">
+  <img src="docs/screenshots/watch.webp" width="420" alt="Two Apple Watch screens: the photo of the day, a station in Dubai from 13 years ago, and a grid of photos titled On This Day">
+</p>
+
+The devices work together: with Handoff, the photo, album or place you are looking at on one device can be continued on
+the next.
 
 ## Private by design
 
 - **Your photos stay on your Nextcloud.** They go to your server and nowhere else. The app has no analytics, no ads and
   no third-party trackers.
-- **Intelligence on your device, from Apple.** Labels, descriptions, faces in films, the best shot and the masks come
-  from Apple's own frameworks — Vision, VisionKit, Core Image and, where available, Apple Intelligence — running on your
-  device. The app never ships or downloads AI models of its own, and no photo is sent anywhere else to be analysed.
+- **Intelligence on your device, from Apple.** Faces, labels, descriptions, the best shot and the masks come from Apple's
+  own frameworks — Vision, VisionKit, Core Image and, where available, Apple Intelligence — running on your device. The
+  app never ships or downloads AI models of its own, and no photo is sent anywhere else to be analysed.
 - **Locked when you want it.** App lock with Face ID, Touch ID or Optic ID; archived photos and Recently Deleted always
-  ask first.
+  ask first. Widgets show no photo while app lock is on.
 - **Nothing to install on the server.** The app works with the Photos app that comes with Nextcloud and finds out by
   itself what your server offers.
 
@@ -223,10 +257,14 @@ translation ([docs/LOCALIZATION.md](docs/LOCALIZATION.md)).
 
 - **Server:** Nextcloud 33 or later with its [Photos](https://github.com/nextcloud/photos) app (included with
   Nextcloud). Newer Photos versions add features, which the app switches on by itself.
-- **Optional server apps:** [Recognize](https://apps.nextcloud.com/apps/recognize) for People and faces; the Tags,
-  Trash bin and Talk apps for tags, Recently Deleted and sharing to conversations.
+- **Optional server apps:** [Recognize](https://apps.nextcloud.com/apps/recognize) for People found on the server
+  (without it, the app finds people on your device); Contacts for birthdays; [notify_push](https://apps.nextcloud.com/apps/notify_push)
+  for changes made elsewhere to arrive at once; the Tags, Trash bin and Talk apps for tags, Recently Deleted and sharing
+  to conversations.
 - **Devices:** iOS 27, iPadOS 27, macOS 27, visionOS 27, tvOS 27 or watchOS 27 (the watch app comes with the iPhone
   app).
+
+The screenshots and videos show the real app, signed in to a test server with sample photos from Wikimedia Commons.
 
 ---
 
@@ -235,8 +273,9 @@ translation ([docs/LOCALIZATION.md](docs/LOCALIZATION.md)).
 The product and technical specification (the target) is in [docs/SPEC.md](docs/SPEC.md), what is built so far in
 [docs/STATUS.md](docs/STATUS.md), a map of the code in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Optional server
 additions are in [docs/SERVER-COMPANION.md](docs/SERVER-COMPANION.md), wire-format research notes in
-[docs/reference](docs/reference). The screenshots above come from `scripts/readme-screenshots.sh`, which also notes how
-the Mac and Apple Watch shots are made.
+[docs/reference](docs/reference). The screenshots above come from `scripts/readme-screenshots.sh` (and
+`scripts/readme-screenshots-mac.sh` for the Mac), the videos from `scripts/readme-videos.sh`, and both are framed by
+`scripts/frame-screenshots.swift` ([docs/TESTING.md](docs/TESTING.md)).
 
 ### Build
 

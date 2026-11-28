@@ -62,10 +62,40 @@ could answer — waits, captures the window of exactly that process (`screencapt
 small `CGWindowListCopyWindowInfo` helper filtered by PID) and quits that PID. Light mode comes from the launch argument
 `-NSRequiresAquaSystemAppearance YES`. Shots: library (the first launch signs in with `PHOTOS_DEBUG_LOGIN` and waits for
 the first sync), viewer with its info (`PHOTOS_DEBUG_VIEWER=<index>`, `PHOTOS_DEBUG_VIEWER_INFO=1`), map and albums
-(`PHOTOS_DEBUG_DESTINATION`), compare (`PHOTOS_DEBUG_COMPARE=2`). The app comes to the front while it runs; nothing is
+(`PHOTOS_DEBUG_DESTINATION`), compare (`PHOTOS_DEBUG_COMPARE=2`), people (`PHOTOS_DEBUG_FACES_NOW=1`: Vision looks at the
+library on the Mac, which shows People on a server without Recognize). The app comes to the front while it runs; nothing is
 clicked or typed. `README_SHOTS_ONLY="viewer compare"` takes some of them again, `README_SHOTS_SKIP_BUILD=1` keeps the
 build. The debug launch settings that open a screen wait a moment after the Library's grid has its photos: on the Mac
 the first grid is replaced right after launch, and a request made by it was lost.
+
+The README shows the screenshots framed and its interactions as short videos:
+
+- `swift scripts/frame-screenshots.swift [options] <output.png> <shot>[:phone|tablet|window|plain[:height]] …` draws
+  each screenshot with rounded, device-like corners (a thin dark edge for iPhone and iPad), a soft shadow and a light
+  (or `--background dark`) card behind them, several side by side; no device artwork from anyone else. A portrait
+  iPhone screen gets its Dynamic Island drawn (XCUITest's screenshots leave it out, `simctl io screenshot` and the
+  recordings have it), so all phones look alike. Convert the PNG with `cwebp -q 82 -alpha_q 90` (WebP keeps the card's
+  rounded corners transparent).
+- `scripts/readme-videos.sh record <output> <simulator udid> [test …]` runs `UITests/ReadmeVideos` (Library zoom
+  levels, a memory film, the viewer, the editor) and records the simulator's screen (`simctl io recordVideo`) while each
+  test plays its part; the test and the script hand over through files in the output folder (`<name>.start`,
+  `.recording`, `.stop`, `.done`). `scripts/readme-videos.sh encode <recording> <basename> [kind] [width] [start] [end]
+  [speed]` cuts, frames and encodes it as `<basename>.mp4` and an animated `<basename>.webp` (GitHub plays no video
+  file from the repository in a README, but it shows animated WebP); keep each WebP under 2.5 MB.
+- `UITests/ReadmeWidgets` adds the app's widgets to the iPhone simulator's Home Screen through the system's own widget
+  gallery (long press, Edit, Add Widget, search, the size) and takes the Home Screen; the widgets show what the app has
+  synced into the App Group, so it needs a build with `PHOTOS_DEBUG_ENTITLEMENTS=YES` and a simulator whose region
+  matches the README (`xcrun simctl spawn <udid> defaults write -g AppleLocale en_US`). The widgets pick their photos by
+  the hour and the day; the README's set came from photos of the test library copied into a folder of their own,
+  dated a year ago and marked as favourites (removed afterwards).
+- `UITests/ReadmeScreenshots` `testFirstRun` needs a fresh install (`xcrun simctl uninstall` first); `testCameraChip`
+  types a camera of the test library (`PHOTOS_UITEST_SHOT_CAMERA`, default "nikon d50"); `testLibraryYear` takes the
+  years, one year's months and one month's days away from the newest photos; `testFreeUp` with
+  `PHOTOS_UITEST_BACKUP_FOLDER` backs up the photos of the last 90 days first (add them with `simctl addmedia`).
+- Look at every frame before a video goes into the README (`ffmpeg -i <video> -vf "fps=8,tile=…"`): while the Library
+  morphs between levels, the grid of every photo shows through at the bottom edge for a moment, at its own position —
+  with the test library that is the newest photos, among them portraits of politicians. The README's Library video is
+  therefore cut above the tab bar.
 
 ## Integration tests
 

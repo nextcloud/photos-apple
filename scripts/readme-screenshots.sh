@@ -10,9 +10,9 @@
 # uninstalled again after the backup shots. The PNGs land in <output>/<platform>/; pick the best ones, then scale them
 # for the README (iPhone 600 px wide, the others at most 1400 px, JPEG quality about 80, each under 400 KB).
 #
-# - iphone, ipad: `UITests/ReadmeScreenshots` (Library and its zoom levels, viewer and info, editor tools, memories,
-#   search, map, albums, backup). The iPad is turned to landscape; XCUITest stores landscape shots rotated, so turn
-#   them by 90° before use. Backup shows the device's photos that are not on the server: set README_DEVICE_PHOTOS to
+# - iphone, ipad: `UITests/ReadmeScreenshots` (first run, Library and its zoom levels, viewer and info, editor tools,
+#   memories, search and the camera chip, map, albums, backup) and on iPhone `UITests/ReadmeWidgets` (Home Screen).
+#   The iPad is turned to landscape; XCUITest stores landscape shots rotated, so turn them by 90° before use. Backup shows the device's photos that are not on the server: set README_DEVICE_PHOTOS to
 #   a folder of photos without EXIF dates (they are added to the simulator, dated now); without it the app adds four
 #   plain coloured ones. Nothing is uploaded during the shots; the app is uninstalled afterwards, because the backup
 #   it turned on would upload at the next launch.
@@ -28,7 +28,11 @@
 # Environment: README_SHOTS_LOGIN (default the local test server on 8089), README_SHOTS_BUNDLE_ID (default
 # com.nextcloud.photos.shots), README_SHOTS_DERIVED_DATA (default /tmp/photos-ios-dd-readme-<platform>),
 # PHOTOS_UITEST_SHOT_PHOTO / PHOTOS_UITEST_SHOT_EDIT_PHOTO (file ids of the photos for the viewer and the editor;
-# default 3039 and 2806 of the test library), PHOTOS_UITEST_SHOT_SEARCH (default "Lisbon 2025").
+# default 3039 and 2806 of the test library), PHOTOS_UITEST_SHOT_SEARCH (default "Lisbon 2025"), README_SHOTS_JOBS
+# (xcodebuild -jobs, default 4).
+#
+# The README shows the PNGs framed (scripts/frame-screenshots.swift); its videos come from scripts/readme-videos.sh and
+# its widgets from `UITests/ReadmeWidgets` (the app's widgets added to the Home Screen through the system's gallery).
 
 set -u
 OUT=${1:?usage: $0 <output directory> <iphone|ipad|vision|tv|watch> <simulator udid>}
@@ -51,7 +55,7 @@ xcrun simctl ui "$UDID" appearance light 2>/dev/null
 
 # The app alone, for a simctl launch.
 build_app() {
-    xcodebuild build -scheme "$1" -destination "id=$UDID" -derivedDataPath "$DD" -jobs 6 PHOTOS_DEBUG_ENTITLEMENTS=YES \
+    xcodebuild build -scheme "$1" -destination "id=$UDID" -derivedDataPath "$DD" -jobs "${README_SHOTS_JOBS:-4}" PHOTOS_DEBUG_ENTITLEMENTS=YES \
         CODE_SIGN_IDENTITY=- PHOTOS_BUNDLE_ID="$BUNDLE" >"$DIR/build.log" 2>&1 || { echo "build failed: $DIR/build.log"; exit 1; }
     APP=$(ls -d "$DD"/Build/Products/Debug-*/*.app | grep -v Runner | head -1)
     xcrun simctl install "$UDID" "$APP"
@@ -71,7 +75,10 @@ launch_and_shoot() { # <bundle id> <name> <seconds> [VAR=value ...]
 
 ui_tests() { # <tests…>
     local only=()
-    for test in "$@"; do only+=(-only-testing:NextcloudPhotosUITests/ReadmeScreenshots/$test); done
+    for test in "$@"; do
+        [[ $test == */* ]] || test=ReadmeScreenshots/$test
+        only+=(-only-testing:NextcloudPhotosUITests/$test)
+    done
     TEST_RUNNER_PHOTOS_UITEST_LOGIN=$LOGIN TEST_RUNNER_PHOTOS_UITEST_SHOTS=$DIR TEST_RUNNER_PHOTOS_UITEST_SHOT_PREFIX="$PLATFORM-" \
         TEST_RUNNER_PHOTOS_UITEST_SHOT_PHOTO=${PHOTOS_UITEST_SHOT_PHOTO:-3039} \
         TEST_RUNNER_PHOTOS_UITEST_SHOT_EDIT_PHOTO=${PHOTOS_UITEST_SHOT_EDIT_PHOTO:-2806} \
@@ -85,10 +92,15 @@ ui_tests() { # <tests…>
 
 case $PLATFORM in
 iphone | ipad)
-    xcodebuild build-for-testing -scheme NextcloudPhotosUITests -destination "id=$UDID" -derivedDataPath "$DD" -jobs 6 \
+    xcodebuild build-for-testing -scheme NextcloudPhotosUITests -destination "id=$UDID" -derivedDataPath "$DD" -jobs "${README_SHOTS_JOBS:-4}" \
         PHOTOS_DEBUG_ENTITLEMENTS=YES CODE_SIGN_IDENTITY=- PHOTOS_BUNDLE_ID="$BUNDLE" >"$DIR/build.log" 2>&1 ||
         { echo "build failed: $DIR/build.log"; exit 1; }
-    ui_tests testLibrary testViewer testEditor testMemories testSearch testDestinations
+    # First: the first run's backup step needs a fresh install.
+    xcrun simctl uninstall "$UDID" "$BUNDLE" 2>/dev/null
+    ui_tests testFirstRun
+    ui_tests testLibrary testViewer testEditor testMemories testSearch testCameraChip testDestinations
+    # The widgets on the Home Screen (iPhone; set the simulator's region first, the widgets use the system's).
+    [[ $PLATFORM == iphone ]] && ui_tests ReadmeWidgets/testHomeScreen
     # Last: backup stays on in the app's settings, so the app goes afterwards.
     [[ -n ${README_DEVICE_PHOTOS:-} ]] && xcrun simctl addmedia "$UDID" "$README_DEVICE_PHOTOS"/*(.)
     xcrun simctl privacy "$UDID" grant photos "$BUNDLE" 2>/dev/null
@@ -102,7 +114,7 @@ vision)
     launch_and_shoot "$BUNDLE" vision-map 30 PHOTOS_DEBUG_DESTINATION=map
     ;;
 tv)
-    xcodebuild build-for-testing -scheme NextcloudPhotosTV -destination "id=$UDID" -derivedDataPath "$DD" -jobs 6 \
+    xcodebuild build-for-testing -scheme NextcloudPhotosTV -destination "id=$UDID" -derivedDataPath "$DD" -jobs "${README_SHOTS_JOBS:-4}" \
         CODE_SIGN_IDENTITY=- PHOTOS_BUNDLE_ID="$BUNDLE" >"$DIR/build.log" 2>&1 || { echo "build failed: $DIR/build.log"; exit 1; }
     TEST_RUNNER_PHOTOS_UITEST_LOGIN=$LOGIN TEST_RUNNER_PHOTOS_SHOTS_DIR=$DIR \
         xcodebuild test-without-building -scheme NextcloudPhotosTV -destination "id=$UDID" -derivedDataPath "$DD" \

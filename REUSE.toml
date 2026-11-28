@@ -17,9 +17,10 @@ precedence = "override"
 SPDX-FileCopyrightText = "2026 Nextcloud GmbH"
 SPDX-License-Identifier = "LicenseRef-NextcloudTrademarks"
 
-# Screenshots: the app's UI (MIT) showing sample photos from Wikimedia Commons, each under its own licence, and Apple Maps data.
+# Screenshots and screen recordings: the app's UI (MIT) showing sample photos from Wikimedia Commons, each under its own
+# licence, and Apple Maps data.
 [[annotations]]
-path = ["docs/screenshots/**"]
+path = ["docs/screenshots/**", "docs/media/**"]
 precedence = "override"
 SPDX-FileCopyrightText = ["2026 Nextcloud GmbH and Nextcloud contributors", "Wikimedia Commons contributors", "Apple Inc. and its map data providers"]
 SPDX-License-Identifier = "LicenseRef-Screenshots"
