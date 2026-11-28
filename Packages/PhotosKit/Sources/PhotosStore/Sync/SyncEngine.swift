@@ -58,6 +58,8 @@ public actor SyncEngine {
     private var lastStatus: SyncStatus = .idle(lastSync: nil)
     /// Says whether a reconciliation nobody asked for should wait (a backup is uploading).
     private var reconcileDeferral: (@Sendable () async -> Bool)?
+    /// Runs after every completed FULL walk, never a targeted one (`OrphanRecipeCleanup`, OrphanRecipes.swift).
+    var afterFullReconcile: (@Sendable () async -> Void)?
 
     /// The shortest time between two full reconciliations that nobody asked for (seconds); 0 reconciles on every sync.
     ///
@@ -600,6 +602,7 @@ public actor SyncEngine {
             try Self.finishFullWalk(walk: walk, now: finishedAt, db: db)
         }
         logger.info("reconciled: \(checked) items, \(applied) of \(removed.count) missing removed, \(refreshed) refreshed")
+        OrphanRecipeCleanup.afterFullWalk(afterFullReconcile)
     }
 
     /// The stored comparison keys of some rows.

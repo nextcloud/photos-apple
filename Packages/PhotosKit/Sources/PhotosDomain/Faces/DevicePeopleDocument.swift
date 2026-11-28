@@ -205,9 +205,9 @@ public struct DevicePeopleDocument: Codable, Equatable, Sendable {
 
 /// Where the names and assignments of People on this device are kept and shared (SPEC §22.3, §22.5).
 ///
-/// The `.nextcloud-photos/` settings files belong to the settings code (tidy's package, SPEC §22.5): it reads, merges
-/// (`DevicePeopleDocument.merged`) and writes `people.json` ETag-safely. Until that is wired, People keeps the document
-/// on this device (`LocalDevicePeopleNames` in PhotosCore).
+/// The app shares them through `.nextcloud-photos/people.json`, one record per person merged with
+/// `DevicePeopleDocument.merged` (`SyncedDevicePeopleNames` in PhotosCore, SPEC §22.5); `LocalDevicePeopleNames` keeps
+/// them on this device only.
 public protocol DevicePeopleNames: Sendable {
     /// The current document (the shared one merged with this device's changes).
     func load() async throws -> DevicePeopleDocument

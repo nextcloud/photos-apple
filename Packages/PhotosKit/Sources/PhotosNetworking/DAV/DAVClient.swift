@@ -43,10 +43,16 @@ public struct DAVClient: Sendable {
         return response
     }
 
+    /// `depth` for a PROPFIND of the whole tree below (`Depth: infinity`; the trash bin allows it, the files tree not).
+    public static let infiniteDepth = -1
+
     public func propfind(_ url: URL, depth: Int, properties: [QName]) async throws -> [DAVResource] {
         let response = try await send(
             "PROPFIND", url,
-            headers: ["Depth": depth == 0 ? "0" : "1", "Content-Type": "application/xml; charset=utf-8"],
+            headers: [
+                "Depth": depth == 0 ? "0" : depth == Self.infiniteDepth ? "infinity" : "1",
+                "Content-Type": "application/xml; charset=utf-8",
+            ],
             body: DAVBody.propfind(properties)
         )
         return try MultiStatus.parse(response.data)

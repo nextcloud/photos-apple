@@ -5,6 +5,7 @@ import Foundation
 import OSLog
 import PhotosModel
 import PhotosNetworking
+import PhotosStore
 import Synchronization
 
 /// The edit recipes of one account (SPEC §16.3.1): kept on the device, synced with the user's Nextcloud.
@@ -17,7 +18,7 @@ import Synchronization
 ///   original (`IMG_1.edit.json`) they would show up in every folder and break with every move.
 /// - A photo shared with the user is edited in the user's own folder: the edit is the user's view of it, nobody else's.
 /// - Deleting a photo leaves its recipe: restoring the photo from the trash bin brings its edit back. Recipes of photos
-///   that are gone are a few hundred bytes each.
+///   deleted for good are removed after a full reconcile, after a grace period (`removeOrphans`, SPEC §22.5.3).
 ///
 /// Writes are ETag-safe: a recipe is replaced only with `If-Match` of the version this device knows (`If-None-Match: *`
 /// for a new one). When another device changed it in the meantime (412), the newer of the two edits — by the time the
@@ -46,6 +47,10 @@ public actor EditLibrary {
         var entries: [FileID: Entry] = [:]
         /// ETag of the server's folder at the last pull; an unchanged folder needs no listing.
         var folderEtag: String?
+        /// Recipes whose photo was found gone for good, since when (SPEC §22.5.3).
+        var orphans: [FileID: Date]?
+        /// The last look for orphaned recipes that got an answer.
+        var orphansCheckedAt: Date?
     }
 
     private let dav: DAVClient
@@ -358,6 +363,80 @@ public actor EditLibrary {
 
     private func remoteEtag(_ fileId: FileID) async throws -> String? {
         try await dav.propfind(url(fileId), depth: 0, properties: [DAVProp.etag]).first?.string(DAVProp.etag).map(Self.unquoted)
+    }
+
+    // MARK: Orphaned recipes (SPEC §22.5.3)
+
+    /// What a look for orphaned recipes did.
+    public struct OrphanReport: Sendable, Equatable {
+        /// Not looked: the last look is less than a day ago.
+        public var skipped = false
+        /// Recipes whose photo is not in the index (asked about).
+        public var candidates = 0
+        /// Recipes seen orphaned, waiting out the grace period.
+        public var waiting = 0
+        /// Recipes removed.
+        public var removed: Set<FileID> = []
+    }
+
+    /// Removes the recipes of photos deleted for good (`OrphanRecipes` has the rules): called after a completed full
+    /// reconcile; `indexed` tells which of the recipes' photos the index has. Recipes with changes that have not reached
+    /// the server are never touched; a recipe is deleted on the server with `If-Match`, so one another device changed in
+    /// the meantime stays. Errors remove nothing and leave the marks as they were.
+    @discardableResult
+    public func removeOrphans(
+        probe: any OrphanRecipeProbe, indexed: @Sendable (Set<FileID>) throws -> Set<FileID>, now: Date = Date(),
+        interval: TimeInterval = OrphanRecipes.interval, grace: TimeInterval = OrphanRecipes.grace
+    ) async -> OrphanReport {
+        if let checked = state.orphansCheckedAt, now.timeIntervalSince(checked) < interval, now >= checked {
+            return OrphanReport(skipped: true)
+        }
+        await running?.value
+        var report = OrphanReport()
+        do {
+            let settled = Set(state.entries.filter { $0.value.pending == nil && $0.value.serverEtag != nil }.keys)
+            let candidates = settled.subtracting(try indexed(settled))
+            report.candidates = candidates.count
+            var plan = OrphanRecipes.Plan()
+            if !candidates.isEmpty {
+                let existing = try await probe.existing(candidates.sorted())
+                let gone = candidates.subtracting(existing)
+                let trashed = gone.isEmpty ? [] : try await probe.trashed()
+                plan = OrphanRecipes.plan(
+                    candidates: candidates, existing: existing, trashed: trashed, marks: state.orphans ?? [:], now: now, grace: grace)
+            }
+            var removed: Set<FileID> = []
+            for fileId in plan.remove.sorted() {
+                guard let entry = state.entries[fileId], entry.pending == nil, let etag = entry.serverEtag else { continue }
+                do {
+                    try await dav.delete(url(fileId), ifMatch: etag)
+                } catch NetworkError.notFound {
+                    // Removed already (by another device's look).
+                } catch NetworkError.preconditionFailed {
+                    // Changed on another device since: kept, and looked at again from the start.
+                    continue
+                }
+                if state.entries[fileId]?.pending == nil {
+                    state.entries[fileId] = nil
+                    removed.insert(fileId)
+                }
+            }
+            state.orphans = plan.marks.isEmpty ? nil : plan.marks
+            state.orphansCheckedAt = now
+            report.waiting = plan.marks.count
+            report.removed = removed
+            if !removed.isEmpty {
+                // The folder changed: the next pull lists it again.
+                state.folderEtag = nil
+                changed(removed)
+                logger.notice("removed \(removed.count) edit recipes of photos deleted for good")
+            } else {
+                persist()
+            }
+        } catch {
+            logger.error("orphaned edits not looked at: \(error.localizedDescription, privacy: .public)")
+        }
+        return report
     }
 
     // MARK: Helpers

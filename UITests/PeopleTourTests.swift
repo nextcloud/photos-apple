@@ -6,7 +6,7 @@ import XCTest
 /// A tour of the camera in search and of People on a server without Recognize (SPEC §22.3), on iPhone and iPad.
 ///
 /// Like `SmokeTests` it needs `PHOTOS_UITEST_LOGIN`. The camera chip needs photos taken with a Fujifilm X100V on the
-/// server (`PHOTOS_UITEST_CAMERA`, default "x100v"; round 12 put three in `/Photos/r12-people-test` on 8089). Vision
+/// server (`PHOTOS_UITEST_CAMERA`, default "x100v"): `scripts/uitest-camera-photos.swift` makes three to upload. Vision
 /// does not run in the simulator: People shows what it shows before any face is found. With `PHOTOS_UITEST_SHOTS` set to
 /// a folder, it saves a screenshot of every step there as well as attaching it to the test.
 @MainActor

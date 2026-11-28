@@ -58,6 +58,26 @@ public struct FamilyStore: Sendable {
         try database.writer.write { db in try db.execute(sql: "DELETE FROM familyDecision") }
     }
 
+    /// Every decision, by photo (synced between the user's devices, SPEC §22.5.1).
+    public func decisions() throws -> [FileID: Decision] {
+        try database.writer.read { db in
+            var result: [FileID: Decision] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT fileId, decision FROM familyDecision") {
+                if let decision = Decision(rawValue: row[1]) { result[row[0]] = decision }
+            }
+            return result
+        }
+    }
+
+    /// Forgets the decisions about some photos (forgotten on another device).
+    public func forget(_ fileIds: [FileID]) throws {
+        try database.writer.write { db in
+            for chunk in fileIds.chunked(500) {
+                try db.execute(sql: "DELETE FROM familyDecision WHERE fileId IN (\(chunk.map { String($0) }.joined(separator: ",")))")
+            }
+        }
+    }
+
     public func decisionCount(_ decision: Decision) throws -> Int {
         try database.writer.read { db in
             try Int.fetchOne(db, sql: "SELECT count(*) FROM familyDecision WHERE decision = ?", arguments: [decision.rawValue]) ?? 0
