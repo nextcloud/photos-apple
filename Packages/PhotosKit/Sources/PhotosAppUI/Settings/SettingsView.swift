@@ -230,6 +230,8 @@ public struct SettingsView: View {
         PartnerSharingSection()
         FamilyLibrarySettingsSection()
         LockScreenAlbumSettingsSection()
+        // Settings › Show Tips (SPEC §22.2).
+        TipsSettingsSection()
     }
 
     @ViewBuilder var notificationsSections: some View {
@@ -334,6 +336,7 @@ public struct SettingsView: View {
     /// The niche features, the tools that change the server's files, and what helps when something goes wrong.
     @ViewBuilder var advancedSections: some View {
         AdvancedFeaturesSection()
+        SyncedSettingsSection()
         // Folder rules, smart albums, GPS track (SPEC §16.4).
         OrganizeSettingsSection()
         #if os(macOS)

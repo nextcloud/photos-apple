@@ -300,7 +300,8 @@ Triggered at launch, on foreground, pull-to-refresh, every 5 min while the app i
    1. `PROPFIND Depth:0` on each source root for `d:getetag` (it changes when files below are added, changed, moved or deleted — but **not** when a favourite is set or the server fills in place/caption). Read it once, before anything is fetched, and store that value only after the sync is through, so a change made while syncing is seen by the next sync. Unchanged → only the favourites check: one SEARCH for the file ids with `oc:favorite = 1`, compared with the store.
    2. Changed → SEARCH for items with `d:getlastmodified > lastDeltaSync − 10 min` **or** `nc:upload_time > lastDeltaSync − 10 min` (covers new uploads with old mtimes) → upsert.
    3. Metadata that the server fills asynchronously (place, caption, EXIF for files on external storage) arrives later without an mtime change: re-fetch props for items uploaded in the last 48 h whose place is still unknown when they reach a checkpoint (10 min, 1 h, 6 h, 24 h, 47 h after the upload; looked at no more than every 10 minutes), and run a full **reconciliation** (step 4) after a root ETag changed (the delta SEARCH cannot see deletes and moves) but at most every 10 minutes (longer for large libraries: about one request per thousand items, so 150 000 items once an hour) and not while a backup pass uploads; **at once, without that interval, in the first sync after a launch or after a return to the app (at most every 5 minutes) and on pull-to-refresh when a root ETag changed since the last one** — a file or folder deleted elsewhere is gone after one sync when the app is opened, also when the app ran a few minutes before (the interval alone kept it for up to 10 minutes through any number of launches); on pull-to-refresh also without a change when the last one is 10 minutes old, at once on "Sync now", and otherwise once a day.
-   4. **Reconciliation**: page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due, and it is resumable: the rows it has not met yet are kept in a table and its cursor in the sync state, so the next sync goes on from the page it reached; only one page and its stored rows are in memory. A listing that lacks more than half of an index of more than 20 items, or items on mounted storage (external storage, shares, group folders), is not applied at once (a storage that is not mounted looks the same as a mass delete): those items are kept as suspects, and a later listing removes only the suspects it lacks too, at least an hour after the first, and only when a sample of them answers 404 by path. Smaller removals are checked by file id first.
+   4. **Reconciliation** (since M13 the one a change owes walks only the folders whose ETag changed, §22.4.2; this full
+      walk remains for "Sync now", once a day and where the server has no folder tree): page through all items with props `oc:fileid`, `d:getetag`, `oc:favorite`, `nc:metadata-photos-place`, href (cheap), (and the caption where the server has it) and compare with the store: delete what is gone, fix moved paths, re-fetch full props of items whose etag, favourite flag, place or caption differ. A reconciliation that was requested but interrupted (offline, cancelled, requested during a running sync) stays due, and it is resumable: the rows it has not met yet are kept in a table and its cursor in the sync state, so the next sync goes on from the page it reached; only one page and its stored rows are in memory. A listing that lacks more than half of an index of more than 20 items, or items on mounted storage (external storage, shares, group folders), is not applied at once (a storage that is not mounted looks the same as a mass delete): those items are kept as suspects, and a later listing removes only the suspects it lacks too, at least an hour after the first, and only when a sample of them answers 404 by path. Smaller removals are checked by file id first.
 3. **Collections**: album list PROPFIND is expensive on the server (every album resolves all its files). Refresh the album list when the Albums view appears if older than 10 min, after own album writes, and in background daily; refresh one album's content when it is opened. Places/tags/people: when their view appears if older than 30 min. If the companion album change tag (`SERVER-COMPANION.md` §S7) exists, use it to skip unchanged albums.
 
 #### 5.4.5 Conflict rules
@@ -370,7 +371,7 @@ Every view has: first-load skeleton, empty state with a single helpful action (e
 
 ### 6.4 Photo grid
 
-- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting is per device (Settings › On this device › Square tiles, View ▸ Square Tiles ⌥⌘S) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
+- Square tiles by default; "Aspect ratio" mode shows each photo whole. *Decided (round 4):* as Apple Photos' "Aspect Ratio Grid" the photo is fitted into its square cell (letterboxed), not laid out in the web's justified rows — the grid keeps one layout, its performance budgets, scrubber and keyboard navigation. The setting follows the user to their other devices since round 12 (Settings › Library display › Square tiles, View ▸ Square Tiles ⌥⌘S; §22.5.2) and neither follows nor writes the web's `croppedLayout`: the web defaults to `false` (its justified layout), a client cannot tell that default from a choice, and following it would turn most grids away from square tiles.
 - Pinch to change column count (iPhone 3–9 columns, iPad/Mac more); Mac: ⌘+/⌘− and View ▸ Zoom In/Out (the toolbar slider was removed in M10, §19.2). Map the density to the server config `gridDensity` (small/medium/large) where available.
 - Section headers: **month** (sticky) and **day** headers (local calendar day of the capture time, "Today", "Yesterday", weekday names within the last week), each with a select-all checkbox while selecting.
 - **Date scrubber** on the trailing edge with year labels, covering the whole library (from the local index; skeleton from `timelineDays` during the initial sync). *Decided (simulator pass):* on iPhone, iPad and Vision Pro it is not UIKit's section index (which lists every year in a column over the photos, into the tab bar) but the Mac's scrubber: it runs between the bars, appears while the grid scrolls and fades out like Photos' scroll indicator, can be grabbed at the edge only while shown, leaves out year labels that do not fit (the newest and oldest stay), draws each label on a background of its own, and stays for VoiceOver as an adjustable element (a year per swipe).
@@ -644,6 +645,8 @@ _Changed in round 11 (§21.1):_ this section first said a grid badge for device 
 #### 7.18.8 Free up device space (M5)
 
 "Remove backed-up photos from this device": only assets whose every resource is `uploaded` or `matched` with a verified server file (re-check existence and size right before: the server lists the file with exactly the device's size, and the same file id when known; converted or name-only matches never qualify; RAW, edited version and Live Photo motion are required), deletion via `PHAssetChangeRequest.deleteAssets` (system confirmation), never for assets newer than 30 days unless the user chooses.
+
+_Extended in round 12 (§22.1):_ keep options (recent period, favourites, hidden), edited photos stay unless their edit is backed up, shared-album items always stay, checksums right before the removal, a review, the Mac, and offers in the account menu, on the Backup screen and in Clean up.
 
 #### 7.18.9 Mirror device albums (iOS, iPadOS)
 
@@ -1452,7 +1455,7 @@ Zermatt"), computed on the device from the local index (`LibraryMoments`, Photos
 - *Cost.* Built after each sync (and when the day or the excluded folders change) off the main actor from five columns
   of every visible item plus the named people and the label rows that contain an activity word: 100 000 items in
   0.22 s in a debug build (unit test budget 3 s). Titles appear in place without a relayout.
-- Settings › On this device › "Name moments" (on by default).
+- Settings › Library display › "Name moments" (on by default).
 
 **Scrub to peek.** Videos, Live Photos and stacks can be looked into without opening them.
 - iPhone, iPad, Vision Pro: hold a finger on the tile for 0.2 s, then slide sideways: the tile shows frames of the
@@ -1481,7 +1484,7 @@ is room; a fixed band of 184 pt on iPhone, 220 pt on iPad, 210 pt on the Mac (no
 on the leading third back (mirrored right to left); after the last photo the next card comes to the front. The title
 opens the memory, the play button its film; with the pointer, chevrons appear. VoiceOver: one element per card (title,
 dates, count, "Photo 2 of 6"), swipe up/down steps through the photos, double-tap opens; no auto-advance while
-VoiceOver runs. The card's context menu: Play Slideshow, Show as Strip, Hide Memories. Settings › On this device ›
+VoiceOver runs. The card's context menu: Play Slideshow, Show as Strip, Hide Memories. Settings › Library display ›
 Memories: Stories or Strip (the strip's context menu has Show as Stories).
 
 ### 16.2 Search: command palette, natural-language search with chips, photo descriptions [search]
@@ -1595,7 +1598,8 @@ top of the original. The original file is never changed by Done.
   Files app hides hidden files by default, the desktop client does not sync hidden files by default, and the Photos web
   app lists only pictures and videos (other clients show the original). A photo **shared with the user** is edited in the
   user's own folder: the edit is that user's view of it. **Deleting** a photo leaves its recipe (a few hundred bytes), so a
-  photo restored from the trash bin comes back with its edit.
+  photo restored from the trash bin comes back with its edit; recipes of photos deleted for good are removed after a
+  full reconcile (§22.5.3).
 - **Format** (`EditRecipe`): `{"format": "nextcloud-photos-edit", "version": 1, "updatedAt": …, "original": {name, etag,
   width, height}, "geometry": {rotation, straighten, flipped, aspect, aspectLocked, crop{x,y,width,height}},
   "adjustments": {…}, "filter": …, "raw": {…}, "live": {effect, keyFrameTime}}`. Only values that differ from
@@ -2698,8 +2702,8 @@ at 39.3 dB, better than the server's JPEGs. Rules (`PreviewTranscoding`):
   removed. A JPEG file is looked at once per launch (its first bytes) and left alone.
 - The thumbnail filler and the preparation store lossless previews as HEIC too (in the `.jpg`-named cache files; the
   cache reads by content). The pipeline's own 1024 px downloads are not converted: that is the load path, and on the
-  test library it would save nothing (all JPEG). Converting PNG previews of the 1024/4096 pools in the background is
-  possible later (⬜).
+  test library it would save nothing (all JPEG). PNG previews of the 1024/4096 pools are converted in the background
+  since M13 (§22.4.4).
 
 ## 19. M10 — Simpler navigation: sidebar and toolbars
 
@@ -2815,7 +2819,8 @@ utility rows Duplicates and Free up server space with one entry point; their scr
   5. *Free up space on this iPhone/iPad* (iPhone and iPad only, under "On this iPhone/iPad") — the device's available
      storage (`volumeAvailableCapacityForImportantUsage`) → the Backup screen's "Free up space on this iPhone" (§7.18.8);
      without access to the photo library it opens Backup instead. Not offered on the Mac and Vision Pro (no
-     backed-up device library to thin out).
+     backed-up device library to thin out). _Round 12 (§22.1):_ also on the Mac ("On this Mac"), with the free-up
+     estimate as the row's size and the available storage as its second line; still not on Vision Pro.
 - **Headline**: "Up to X can be freed" over rows 1–4, each file counted once (`CleanUpTotals`: a large video can also
   be a duplicate copy or a similar shot); "Nothing to clean up" when all are empty. The footer says that nothing is
   deleted until the user confirms and that deleting deletes on the server and so everywhere. Every delete goes through
@@ -3745,6 +3750,442 @@ web apps render recipes (EDIT-FORMAT.md), nobody needs it.
   original and says "edited with a newer version" instead of half the edit.
 - Readers ignore unknown keys, unknown mask targets (the others apply) and broken values, clamp ranges, and cut masks at
   8. Retouching (§21.5) adds its optional field and needs version 2 as well.
+
+## 22. M13 — Easier, faster, more useful
+
+After a fresh look at the app (2026-11-27) the owner chose twelve improvements: free up space on the device after
+backup, Handoff, setting up Apple TV from the iPhone, a three-step first run, the camera in search, a pre-rendered tile
+cache, a targeted sync (and `notify_push` where the server has it), a smaller preview cache, People without Recognize,
+birthdays from Nextcloud Contacts, settings synced through `.nextcloud-photos/`, and cleaning up orphaned edit recipes.
+The principles of §2 and §21 hold: only Apple's frameworks for analysis on the device, no server changes (an existing
+optional server app such as `notify_push` may be used when present).
+
+### 22.1 Free up space on this device [space]
+
+Builds on §7.18.8 (one flow, `PhotosBackup/DeviceFreeUp.swift`, `PhotosCore/BackupModel+FreeUp.swift`,
+`PhotosAppUI/Backup/FreeUpSpaceViews.swift`). After the backup the app offers to remove from the device the photos and
+videos that are proven to be on the server, like Google Photos' "Free up space", with the rules below and Apple's own
+confirmation.
+
+**Where.** iPhone, iPad and the Mac (the Mac's backup reads its Photos library through PhotoKit, so the same flow removes
+from that library; with "Optimize Mac Storage" it frees less, which the size shows). Not on Vision Pro, Apple TV and the
+Watch (no backup of a photo library there). Only with access to the whole library (with selected photos only, the
+counts would mislead and the system would refuse the others). Entry points:
+- the account menu's backup summary: "All backed up · Free up 3.2 GB" (only when everything is backed up and the estimate
+  is at least 100 MB); it opens the Backup screen, which pushes the free-up screen;
+- the Backup screen: a card "Free up 3.2 GB on this iPhone · 1,234 photos and videos are safely on your Nextcloud" while
+  the backup is up to date, and the row "Free up space on this iPhone/iPad/Mac" (with the estimate) in the device section;
+- Clean up › "On this iPhone/iPad/Mac" (§19.3, now also on the Mac): the estimate as the row's size, the available
+  storage below.
+
+**Which photos may go.** An asset is offered only when all of these hold (`DeviceCleanup.keepReason` + `isVerified`):
+1. it is part of the user's own library (`sourceType` user library) — items of iCloud shared albums and photos synced
+   from a computer always stay;
+2. the keep options let it go: *Recent photos* (none / last 7 days / **last 30 days** / 3 months / 6 months / year, by
+   capture date; an asset without a date counts as recent unless "None"), *Favorites* (kept by default), *Hidden photos*
+   (kept by default);
+3. if the user edited it (`adjustmentsState == .userAdjusted`), its edited version is in the ledger as uploaded or
+   matched, recorded at or after `adjustmentTimestamp` — an edit made after the backup, an edit not rendered by
+   PhotoKit, or a backup set to "originals only" keeps the photo ("Edit not backed up");
+4. every file the backup keeps of it (original, edited version, RAW, Live Photo motion — whatever the backup options
+   say) is in the ledger as `uploaded`/`matched` with a server path, and it has nothing the backup never uploads (a Live
+   Photo's edited motion) — otherwise "Not completely backed up";
+5. the server lists each of those files right now (one `PROPFIND` depth 1 per folder, only for the folders still needed)
+   with exactly the device's size and the recorded file id — otherwise "Not verified on your Nextcloud" (a JPEG
+   conversion, a match by name only, a file replaced or removed on the server);
+6. right before the removal everything is checked again (options, ledger, listing), and where the server keeps a
+   checksum of a file (`oc:checksums`: SHA-256 from the backup's own `OC-Checksum`, or SHA-1/MD5 from other clients) the
+   device's data is hashed (`PHAssetResourceManager`, no iCloud download) and must match. A file whose data is only in
+   iCloud is checked by size and id. Photos that fail now are left out and counted ("3 stayed because they changed since
+   the first check").
+
+Each photo that stays is counted once, under the first rule that keeps it, in "Staying on this iPhone" with count and
+size. Nothing is ever deleted on the server.
+
+**The screen.** The size in large type ("3.2 GB") and "1,234 photos and videos are safely on your Nextcloud and can be
+removed from this iPhone"; a strip of the newest of them that opens the review (a grid; a tap keeps a photo on the
+device, "Select All"/"Deselect All"); "Free Up 3.2 GB" → the app's confirmation ("Remove 1,234 photos and videos from this
+iPhone?" with the size, Recently Deleted and the iCloud Photos warning) → the second check with progress ("Comparing
+checksums: 120 of 1,234") → the system's own confirmation (`PHAssetChangeRequest.deleteAssets`) → "1,230 photos and
+videos (3.1 GB) moved to Recently Deleted. The space comes free when Recently Deleted is emptied: in the Photos app, or by
+itself after 30 days." The keep options ("Keep on this iPhone") are a preference of this device (app defaults
+`backup.freeUpOptions`, not synced: what to keep depends on the device's storage); a change checks again at once.
+
+**Estimate.** After each pass that leaves everything backed up (and when the Backup screen or Clean up opens without
+one), `DeviceCleanup.estimate` applies rules 1–4 to the ledger's complete assets with PhotoKit's flags and the sizes the
+ledger recorded — no server, no file reads — off the main actor. The free-up screen's real check replaces it.
+
+**Not possible / decided.** PhotoKit does not say which photos are in the iCloud Shared Photo Library (deleting one
+removes it for all participants); the system's confirmation and the iCloud Photos sentence cover it. Photos in Recently
+Deleted still take space until it is emptied: the app says so instead of claiming the space at once. No automatic
+removal and no reminder notification: the user always starts it.
+
+### 22.2 Handoff, Apple TV set-up from the iPhone, a three-step first run [continuity]
+
+#### 22.2.1 Handoff (iPhone, iPad, Mac, Vision Pro)
+
+- **What continues.** The photo in the viewer, an album (own or shared), a memory, a place, a person, a tag, a folder,
+  a destination (Albums, Memories, Map, Clean up …) and the Library's position (the photo at the top of the grid). Search,
+  Settings, Backup and the iPhone's Collections list are of the device and are not handed off. Archived photos and the
+  video half of a Live Photo are never advertised (`DeepLink.mayOpen`); nothing is advertised while the app is locked
+  or in Guest Mode, and album windows, the loupe window and Guest Mode have no activity.
+- **One activity type, the link as payload.** `com.nextcloud.photos.viewing` (`NSUserActivityTypes`). The user info is
+  `{"link": "nextcloudphotos://<user>@<host>[/<path>]/<route>", "version": 1}` — the same account link Spotlight items,
+  widgets and App Intents carry (§4.8, `DeepLink.url(for:)`); nothing else (no names, no secrets). Not eligible for
+  search, prediction or public indexing: Spotlight has its own index (`SpotlightIndexer`), and a photo the user looked at
+  is not a Siri suggestion. Spotlight already used `CSSearchableItemActionType` continuation with the same links; Handoff
+  reuses that path. Two routes were added for it: `memories/<id>` (a memory by `Memory.id`, the form the TV's Top Shelf
+  already used; memories are made on each device from the same library, so the same day gives the same ids — one that is
+  not there says "Memory not found") and `library/<fileId>` (the Library scrolled to that photo, as "Show in Library" does).
+- **Which window advertises what.** Each main window has a `HandoffRegistry`: a screen registers its content when it
+  appears and takes it back when it goes; the newest wins (the viewer over the album under it, an album over the list).
+  SwiftUI's `userActivity(_:element:)` makes the active window's activity current. The Library's grid has no scroll
+  callback that reaches SwiftUI: its top photo (`gridTopItem`) is read every 2 s while the window is active.
+- **On the other device** (`HandoffCenter`): the link goes through `AppModel.open` like every link — the same account opens
+  at once (after the unlock when locked); another account that is logged in there asks "Open the link in another
+  account?" (§4.8); an account that is not logged in there (or no account at all, the login screen) asks "Continue in
+  Another Account?" with **Open in Browser**: the activity's `webpageURL` is the same place in the server's web app
+  (`/index.php/apps/photos/albums/<name>`, `…/sharedalbums/…`, `…/places/…`, `…/faces/…`, `…/thisday` for On this day,
+  `/index.php/f/<fileId>` for a photo, the start page for screens the web app lacks). A device without the app opens that
+  page directly (the system does it).
+- Handoff needs both devices on the same Apple Account with Handoff on, and builds of the same team; it cannot be shown in
+  the simulator (DEVICE-TEST-PLAN D18).
+
+#### 22.2.2 Setting up Apple TV from the iPhone
+
+- **The TV** (`TVLoginView`): "Set Up with iPhone" above the address form opens Apple's device picker (DeviceDiscoveryUI
+  `DevicePicker`, application service `NextcloudPhotos-TVSetup`, `NSApplicationServices` › Browses, iOS and iPadOS). The
+  picker lists the iPhones and iPads of the TV's iCloud account or family that have the app; the system asks on the phone
+  and starts the app there. The QR code login (§15.3 TV-1) stays: typing the address, and the code for a phone without
+  the app.
+- **The phone** (`TVSetupListener`, started at launch on iPhone and iPad; `NSApplicationServices` › Advertises) takes the
+  connection and shows "Set Up Apple TV": the TV's name, the account to use (a picker when there are several), "Apple TV
+  gets its own access to your Nextcloud, which you allow on your server's page in the browser. No password is sent to Apple
+  TV." Continue. The sheet is behind the app lock. Without an account the TV hears "Log in to Nextcloud Photos on your
+  iPhone first"; a second TV while one is set up hears that the phone is busy.
+- **Protocol** (`TVSetup`, length-prefixed JSON frames over the system's connection): TV → `hello(version, device)`; phone →
+  `account(serverURL, loginName)`; the TV runs the same checks as a typed address (managed server, "Connect without
+  encryption?" for http://, certificate trust), starts **Login Flow v2** and sends `login(url)`; the phone opens that page
+  in the browser (`ASWebAuthenticationSession`, shared browser session, so a browser that is already logged in to the
+  server only needs "Grant access"; the login name is proposed with `?user=`); the TV polls the flow as with the QR code
+  and receives **its own app password** from the server; TV → `done(name)`; the phone closes the browser and says "Apple TV
+  is set up". `failed(reason)`/`cancel` either way end it on both sides (Cancel on the phone, the browser closed, an
+  expired flow, a lost connection).
+- **Security.** The connection is the system's application-service connection: end-to-end encrypted and limited to the
+  TV's iCloud account or family. Nothing secret crosses it: an address, a login name and a login page; the credentials go
+  from the server to the TV over its own HTTPS poll. The phone opens only a Login Flow page of the server it chose
+  (`TVSetup.isLoginPage`: same host, port and path below the server, https for an https server, no user info, exactly
+  `…/login/v2/flow/<token>`); anything else is refused and the TV is told. Frames over 64 KB are refused.
+- **Why the browser.** The TV needs a dedicated app password (revoking the TV must not sign out the phone), and stock
+  Nextcloud refuses to make one from another app password: `ocs/v2.php/core/getapppassword` and the Login Flow's grant
+  both answer 403 to a client authenticated with an app password (checked on NC 36, round 12). A grant without the page
+  would need a server change, which §2 rules out.
+- Simulators: DeviceDiscoveryUI's picker shows no devices there. Debug builds with `PHOTOS_DEBUG_TV_SETUP=bonjour` on both
+  apps use plain Bonjour (`_ncphotos-setup._tcp`) and a list instead (not encrypted, never in release builds);
+  `PHOTOS_DEBUG_TV_SETUP_SHEET=<name>` shows the phone's sheet for screenshots.
+
+#### 22.2.3 The first run in three steps
+
+1. **Sign in** — the login screen (§17.6.2) with "1 · 2 · 3" above the headline (iPhone and iPad; two dots on the Mac and
+   Vision Pro, where there is no backup step).
+2. **Turn backup on** (iPhone, iPad) — "Back up the photos of this iPhone?", what backup does, **Turn on backup** and **Not
+   now**. One tap asks the system for photo access and, once given (full or limited), turns backup on at once
+   (`BackupModel.enable`); only when the Nextcloud Files app is there does the existing set-up with its Files question
+   come first (`BackupSetupSteps`). Denied: the explanation and "Allow full access in Settings". The step lies over the
+   Library, which loads behind it (no sheet animation, VoiceOver does not reach the Library under it).
+3. **Done** — the welcome into the Library (§17.6.3) plays after the backup step, with "Backup is on. Your photos are on
+   their way to your Nextcloud." under "Welcome, <name>" (held 1.4 s longer, announced to VoiceOver).
+
+The notification question is no longer part of the first run: it is a tip. Taps from launch to the Library on a new
+iPhone install: the login is unchanged (the address, Log in, and on the server's page the user's login and Grant access);
+after it, **2** taps — Turn on backup, Allow (the system's photo question) — where there were **4** (Turn on backup, Allow,
+Start backup, Allow for notifications); with "Not now" 1 where there were 2. Measured by `ContinuityTourTests`
+(`testFirstRunInThreeSteps` counts its taps). The Mac: the login and the welcome, and no notification prompt.
+
+#### 22.2.4 Contextual tips
+
+Apple's TipKit (`AppTips`), one tip at a time at the top of the Library (above the memories; on the Mac above its memories
+band), at most one new tip a day (`displayFrequency(.daily)`), none on the first launch, each shown until it is closed or
+its button is used, then never again. Settings › Library (Mac: Settings › General) › **Show Tips** turns them off. In order (`TipPlan`):
+
+| Tip | When | Button | Where |
+|---|---|---|---|
+| Back up this device's / this Mac's photos | backup offered but not on, from the 2nd launch | Set Up Backup | iPhone, iPad, Mac |
+| Know when there's something new | notification permission not asked yet, from the 2nd launch | Turn On Notifications | all |
+| Keep Photos in the menu bar | menu bar extra off, from the 3rd launch | Show in Menu Bar | Mac |
+| Bring your photos home (Import Library) | from the 3rd launch | Import Library… | all |
+| Make room on your Nextcloud (Clean up) | 500 or more photos, from the 4th launch | Open Clean Up | all |
+| More tools when you want them (Advanced features) | Advanced features off, from the 6th launch | Open Settings | all |
+
+Debug builds signed in by `PHOTOS_DEBUG_LOGIN` (UI tests) show no tips; `PHOTOS_DEBUG_TIPS=show` shows them all.
+
+### 22.3 Camera in search, People without Recognize, birthdays from Contacts [people]
+
+**Camera in search (idea 5).** The search knows the camera and the lens a photo was taken with: chips `Camera` and
+`Lens` (`SearchFilter.camera/.lens`), typed in words ("Fujifilm X100V", the model alone "x100v", "Anna in Lisbon 2024
+shot on x100v" → Anna · Lisbon · 2024 · Fujifilm X100V), offered as suggestions (by make and by model prefix), changed in
+the chip's menu (Other Camera / Other Lens, the library's cameras most used first), remembered in recent searches, and
+combined with names, dates, places like every chip (OR within cameras, AND with the rest). Names as Insights writes them
+(`ExifFacts.cameraName`: "Nikon D700", "iPhone 15 Pro"). Camera data is **read once**: the one table is `photoExif` and
+the one reader `ExifIndexing` (`nc:metadata-photos-exif`/`-ifd0` by SEARCH, 500 photos a request, newest first), now
+started after every sync — for Insights (§16.5.1), the search and the organising rules (§16.4), which read their camera
+details from it (`OrganizeStore`); their own table `cameraDetails` is dropped (migration `v_r12_people_camera_once`).
+Photos only known from shared albums have no camera data: a camera chip does not find them.
+
+**People without Recognize (idea 10).** On a server without Recognize the app finds the people itself, with Apple's
+Vision only (no model of the app's own, §2/§21):
+- *Faces* (`PhotosMedia/Faces/FaceAnalysis`): Vision face rectangles and face capture quality on the 1024 px preview;
+  for each face that is clear enough (quality ≥ 0.25, ≥ 40 px wide) a Vision feature print of the face's crop, turned
+  upright (roll taken out) and widened to head and shoulders (1.8 × the box, 160 px). The small cached tile (256) says
+  first whether a photo shows anyone; the 1024 preview is the cached one, else fetched for the analysis (not stored) only
+  on a network that is neither expensive nor constrained. Stored per photo version (`DeviceFaceStore`: `deviceFaceScan`,
+  `deviceFace`, `devicePerson`, `deviceFaceRejection`, migration `v_r12_people_device_faces`); rows go with their photos.
+- *Grouping* (`PhotosDomain/Faces/FaceClustering`): a feature print describes a picture in general, not identity, so
+  prints are compared after taking away the library's mean print (what all faces share): centered cosine. A face joins the
+  person whose centre is nearest at ≥ 0.75, never a person with a face in the same photo, never one the user said it is
+  not; else it starts a person. Grouping waits for 100 faces (or the whole library) so the mean means something, then
+  takes faces in the order their photos were taken; afterwards people whose centres are ≥ 0.80 alike are merged (never
+  two different names, never two with faces in one photo). In memory: everyone with two faces or a name, and the 4 000
+  most recent one-face people (≈ 3 KB each). The thresholds come from the test library (STATUS §22.3).
+- *Shown like Recognize's* (`PeopleDirectory`: `RecognizePeopleDirectory` / `DevicePeopleDirectory`): the People screen
+  (people with faces in ≥ 2 photos, or named; unnamed ones "Add name"), a person's photos, Rename, Merge with…, Not this
+  person, Move to another person…, Unassigned faces with Assign to person…, New person…, Remove person, Hide; search
+  (people chips and vocabulary), Through the years, sticker packs, the info panel's faces and VoiceOver's "with Anna".
+  Named people are written into `person`/`personItem` (detection ids < 0), where smart albums, moments, family
+  suggestions, the year in review, Spotlight and the command palette find people. When the server has Recognize,
+  Recognize's people are used and the device's are hidden (taken out of `person`/`personItem`; nothing is analysed).
+- *When*: while the Library or People is on screen (not in Low Power Mode, thermal state nominal/fair, on battery above a
+  third), and in a `BGProcessingTask` that needs external power (`com.nextcloud.photos.faces`) / an
+  `NSBackgroundActivityScheduler` activity on the Mac. Resumable (per photo version), incremental. Vision does not run in
+  the simulator. Settings › Privacy & security › *Find people on this device* (only without Recognize; default on; off
+  deletes faces and people found). The People screen says how far the device has looked and that it happens on the device.
+- *Shared between the user's devices* (contract with §22.5): names and assignments live in `.nextcloud-photos/people.json`
+  (`DevicePeopleDocument`, one JSON file per kind): `{"version":1,"people":{"<uuid>":{"name","updatedAt","deleted",
+  "mergedInto","faces":[{"fileId","box":{x,y,width,height},"at"}],"rejected":[…]}}}`. A face is its photo and its box
+  (normalized, top-left, rounded to 1/1000); every device finds it again on the same preview (boxes overlapping > ½).
+  A named person carries up to 24 of their clearest faces, so another device can find the same person among its own
+  groups (the group with most of them takes the name); faces assigned or rejected are added with their time. Merge
+  rule: per person the newer name/deletion/merge wins (`updatedAt`), faces and rejections of both are kept, a face said
+  both ways keeps the newer word; a name is never lost. People goes through the protocol `DevicePeopleNames`, which the app
+  answers with `SyncedDevicePeopleNames` on §22.5's store: one record per person (`person/<id>`), versions that lost a
+  race folded back with this merge. Names kept on the device before sharing existed (`device-people.json`) are taken
+  in once. A sync that brings changed people applies them at once (not only at the next run).
+
+**Birthdays from Contacts (idea 11).** Read-only over CardDAV, once a day after a sync: the address books under
+`remote.php/dav/addressbooks/users/<user>/` (not the generated "Accounts" and "Recently contacted" books), one
+`addressbook-query` per book for cards with `BDAY`, with UID, FN, N, NICKNAME, BDAY only (no photos). vCard 3 and 4
+dates (`19850412`, `1985-04-12`, `--0412`, Apple's year 1604 / `X-APPLE-OMIT-YEAR`), folded lines, grouped properties.
+Stored in `contactBirthday` (migration `v_r12_people_contact_birthdays`), replaced at each read. Matched with the named
+people (Recognize's or the device's) by full name or nickname, else by a first name that only one contact and one
+person have; a person matching two contacts is not guessed. Memories gets a *Birthdays* section: "Anna's birthday" —
+her photos within three days of the day over the years (≥ 3 photos), the next birthday first; on the day a card
+"Today is Anna's birthday" / "Anna turns 8 today" opens it, and a notification at 9:00 says so (only where
+notifications are allowed already; with app lock "A birthday today"; a tap opens the person). Through the years takes
+the date of birth from Contacts when the user set none. Works without the Contacts app or birthdays: nothing is shown.
+Settings › Privacy & security › *Birthdays from Contacts* (default on; off deletes the birthdays read and the reminders).
+
+### 22.4 Faster: tile cache, targeted sync and notify_push, smaller preview cache [speed]
+
+Three ideas (6, 7, 8), each measured before and after (numbers in [PERFORMANCE.md](PERFORMANCE.md), round 12).
+
+#### 22.4.1 Pre-rendered tiles of the Library (`TileCache`, `TileCacheBuilder`)
+
+- *What* — every photo's picture at 128 px on the short edge (the long edge follows the photo, at most 256 px), JPEG at
+  quality 0.7 (about 9 KB for the test library's photos), all tiles of a month (the timeline date in UTC, `2024-05`) in
+  one file `tiles/2024-05.tiles` of the account's preview cache: `NCT1`, the count, an index (file id, FNV-1a hash of the
+  ETag the tile was made for, offset, length; 24 bytes a tile), then the JPEG data. The file is memory-mapped
+  (`Data(contentsOf:options: .alwaysMapped)`) on first use and its index kept as a dictionary: 100 000 photos are 250
+  files and an index of 2.4 MB.
+- *Use* — `GridTilePicture.Source`: a cell whose photo has nothing decoded in memory takes its tile synchronously
+  (`PreviewCache.tileImage`: index lookup, decode of the mapped JPEG on the calling thread, remembered in the memory cache
+  as the 128 px picture, so `bestMemoryImage` finds it too). The cell shows it at once (no BlurHash), counts it as its
+  first picture (`CacheMetrics`, `LaunchMetrics`), and loads the preview as before when the tile is smaller than the cell
+  needs; at the small zoom steps (Months, Years: cells up to 128 px) the tile is the picture and nothing is loaded.
+  No file is opened per photo and nothing waits for the image pipeline: pictures in the first frame of a launch and
+  while flinging through a large library. A tile is valid for the ETag the grid shows (an edited photo's own,
+  `ImagePipeline.displayedEtag`); a changed photo just has none until the next build.
+- *Build* — `TileCacheBuilder` (PhotosMedia, background priority) goes through the timeline newest first in pages of 1000
+  (the cache fillers' query, `CacheFillStore.libraryPage`), month by month. A tile is made from the 256, else 1024, else
+  4096 px preview in the disk cache (nothing is downloaded: a photo without a cached preview gets its tile in a later
+  build). A month's file is written again (atomically; a reader keeps its mapping of the old file) only when a tile was
+  made or more than a tenth of its tiles belong to photos that are gone; tiles that are still right are copied over.
+  Runs after a sync (`SessionModel+TileCache.swift`: the first 20 s after the launch's sync, then at most every 10
+  minutes), not in Low Power Mode, stops at once when the session ends; a stopped pass leaves each month as it was.
+- *Budget* — an eighth of the preview cache's limit, at least 64 MB (about 7 000 photos): 256 MB with the default 2 GB,
+  newest months first; months beyond it and months without photos lose their files. The preview cache's trim leaves the
+  `tiles` folder alone and takes its bytes off the limit; clearing the cache removes it.
+- *Not done* — raw (undecoded) pixels: 64–87 KB a tile at this size instead of 9 KB (6–9 GB for 100 000 photos); a JPEG
+  decode of a tile takes 0.14–0.18 ms on an M-class Mac, small enough for the main thread. Decoding the tiles of the
+  rows the grid prefetches off the main thread is a possible next step if devices show hitches (D20).
+- *Debug* — `PHOTOS_DEBUG_NO_TILES=1` (Debug builds) turns the lookups off for before/after measurements.
+
+#### 22.4.2 Targeted sync (`SyncEngine+Targeted.swift`)
+
+Since §5.4.4's round-11 change a launch after any change walked the whole library (one SEARCH per 2000 items). Now the
+reconciliation a change owes walks only the folders whose ETag changed:
+
+- *Folder tree* — table `syncFolder` (path → recursive ETag as the index last agreed with it). When a **full walk**
+  begins, one SEARCH (`<d:is-collection/>`, limit 50 000) reads every folder below the roots with its ETag into
+  `syncFolderSnapshot`; when that walk is through, the snapshot becomes the tree (`folderTree` = the roots it belongs
+  to). A change made while the walk runs shows up as a different ETag later instead of being missed. A server that
+  does not answer that SEARCH gets no tree: every walk stays a full one, as before.
+- *Targeted walk* — the roots whose ETag (read before anything else, §5.4.4) differs from the tree are queued
+  (`syncFolderQueue`); each queued folder is listed with `PROPFIND Depth: 1` (resource type, ETag, file id, content
+  type) and, in one transaction: files that are new or whose ETag or path differ are read by id (all index properties);
+  rows of files directly in the folder that it no longer lists, and rows below subfolders that are gone, are noted as
+  missing (`syncFolderMissing`); a file listed anywhere in this walk is struck from that list (a move lists it in its new
+  folder); subfolders that are new or whose ETag differs from the tree are queued; unchanged subfolders, and everything
+  below them, are not looked at; the folder's own ETag from this listing is stored. When the queue is empty, the missing
+  rows go through the mass-delete guard (`applyRemovals`; suspects it did not meet stay suspects for the full walk to
+  confirm). Nextcloud changes a folder's ETag for every add, delete, edit, rename or move below it, and a listing's ETag
+  of a folder includes storages mounted below it (shares, external storage), so deletes, moves, renames, folders removed
+  or renamed are all found.
+- *Resumable* — the queue and the missing list are tables; a walk cut off goes on from its queue at the next sync.
+- *Failures* — a folder that cannot be listed (503: an external storage that is not there) counts nothing below it as
+  missing; it and every folder above it lose their stored ETag and the walk owes another one (`reconcileOwed`), which
+  lists it again even when its parents did not change since. A 404 (gone since its parent was listed) counts everything
+  below it as missing.
+- *Which walk* — targeted for the walks a change owes (`opened`, `ifDue`, `refresh` after a change, a notify_push
+  event). Full: "Sync now", pull to refresh without a changed ETag (the user suspects something), the confirming walk of
+  a suspected mass delete once its delay is over, no tree for these roots, and at least once a day
+  (`fullWalkInterval`): what changes no ETag (a place or caption filled in later for an older photo, a storage that does
+  not tell its parents) still arrives. Favourites change no ETag either: after a targeted walk the favourites SEARCH
+  runs as after a sync without a walk. A periodic sync (`ifDue`) waits the plain `reconcileInterval` (10 minutes)
+  before a targeted walk, not the size-scaled one of full walks (a targeted walk costs what changed).
+- *Measured* — 20 160 photos in 261 folders on Nextcloud 36 (8093): a launch after one delete took 1.3 s (4 folders
+  listed, 83 files) where a full walk took 6.3–6.4 s; a launch without a change 0.43 s (unchanged). The work a
+  full walk does grows with the library (about one SEARCH of 2000 items per 0.6 s); the targeted walk's with the change.
+- *Contract with tidy* — orphaned-recipe clean-up belongs at the end of a completed **full** walk (`reconcile(folders:
+  roots:)`, after `finishFullWalk`): a targeted walk does not see the whole library.
+
+#### 22.4.3 notify_push (`NotifyPush.swift`, `SessionModel+NotifyPush.swift`)
+
+- When the capabilities announce `notify_push` (`capabilities.notify_push.endpoints.websocket`), the session opens that
+  WebSocket on the account's `URLSession` (its certificate trust), sends the login name and the app password, waits for
+  `authenticated` and sends `listen notify_file_id`. `notify_file` / `notify_file_id [ids]` start a sync 2 s later (more
+  messages in that time make one sync), at most every 15 s, as `.opened` (a targeted walk at once) unless this device's
+  own backup is uploading (then `.ifDue`, which waits for it as usual); only while a window can be seen (otherwise the
+  return to the app syncs). Activity and notification messages are ignored.
+- Reconnects after 5 s, 30 s, 2 min, then every 10 min when the connection drops; at once when the app comes back to
+  the front (iPhone and iPad close sockets in the background). A refused login (`err: …`) is not tried again in that
+  session. Servers without the app: one capabilities request at session start, nothing else.
+- The file ids are not used to fetch single files: the targeted walk finds what changed, deletes included, in a few
+  requests.
+
+#### 22.4.4 Lossless previews of 1024 px and up as HEIC (`PreviewCompactor`)
+
+§18.3.3's ⬜: the pipeline's own 1024/4096 px downloads were stored as they came, PNG previews of screenshots and
+graphics included (0.1–5 MB each). Now `PreviewCache.store` hands a lossless (PNG, TIFF, BMP: first bytes) preview of
+1024 px or more to the compactor, which converts it a few seconds later, one file at a time at background priority and
+only while the pipeline downloads nothing from the server (not on the scrolling path), to HEIC at quality 0.7 (§18.3.3:
+39.3 dB from the PNG). The file keeps its name (the cache reads by content) and its modification date (the cache's "last
+used"); it is replaced only when the HEIC is smaller; transparency is kept (HEIC with alpha; a PNG whose alpha is opaque
+everywhere may lose the channel; one that is not opaque is left alone if the HEIC lacks alpha). Previews cached before
+are found by one scan of the cache per device (`UserDefaults` marker). Measured on 24 server previews of PNG
+screenshots: 35.3 MB → 3.2 MB (9 %); decoding at 1024 px takes 3–9 ms for a 1024 px PNG and 8–12 ms as HEIC, 17–51 ms
+for a 4096 px PNG and 27–53 ms as HEIC (in total 403 → 551 ms for the 24): a few milliseconds more where the viewer's
+budget is 150 ms.
+
+#### 22.4.5 Found on the way: Nextcloud's SEARCH answers 100 results without a limit
+
+`FileSearchBackend` (Nextcloud 36) returns at most 100 results when the request has no `<d:limit>`. That cut the
+folder SEARCH above (99 of 261 folders), and three searches of the sync engine: the favourites SEARCH (with more than
+100 favourites the others lost their flag at the next sync without a walk), the delta (more than 100 changes waited for
+a walk) and the completion of an index page's boundary second (more than 100 files sharing a second were skipped by
+the initial sync and by walks). They ask for 20 000 / 50 000 now; a full answer counts as possibly incomplete (no
+favourite is taken away, the delta owes a walk). The backup's candidate SEARCH (`BackupDependencies.candidates`) has
+the same cap (space's area; reported).
+
+### 22.5 Settings synced between devices, orphaned edit recipes cleaned up [tidy]
+
+#### 22.5.1 Synced settings files (`.nextcloud-photos/<kind>.json`)
+
+What the user sets once should be the same on all their devices, without a server change: small JSON files in the
+user's own Nextcloud, in the hidden folder `/.nextcloud-photos/` (§16.4), **one file per kind**.
+
+- **Format** (`SyncedSettingsDocument`, PhotosNetworking): `{"format": "nextcloud-photos-settings", "version": 1,
+  "kind": "people", "entries": {"<key>": {"value": <any JSON>, "modifiedAt": "2026-11-27T10:00:00.123Z", "base": …,
+  "replaced": [<JSON>…]}, "<removed key>": {"deleted": true, "modifiedAt": …}}}`. Keys are free strings; a kind's
+  users group them with prefixes (`person/…`, `decision/…`). Readers skip entries they cannot read, keep unknown keys
+  and never write over a file of a newer `version`.
+- **Merge: last writer wins per key** by `modifiedAt` (milliseconds, the time the user made the change; a change is
+  always stamped after the version it replaces, also when the device clock is behind). Same time: the value that sorts
+  first by its JSON, so every device picks the same. Removals are tombstones (dropped after 90 days), so an offline
+  device does not bring a removed key back. Merging is commutative and idempotent.
+- **Never lose a name**: `base` is the stamp of the version a change replaced. When two devices changed a key without
+  having seen each other's change (a race), the losing value is kept in the winner's `replaced` list (newest first, at
+  most five), so "Anna" typed on the Mac and "Anne" typed on the iPhone at the same time both survive; the UI may offer
+  the replaced values. A later rename over a seen version is no race and keeps nothing extra.
+- **Store** (`SyncedSettingsStore`, one per account and kind, from `AccountServices.syncedSettings.store(.people)`):
+  values readable at once without waiting (`value`, `value(_:as:)`, `values(prefix:)`, `replacedValues`), changes with
+  `set(_:for:)`, `set(encoding:for:)` or several keys at once (`set([key: value?])`, nil removes); a change is kept on
+  the device at once (`<account>/SyncedSettings/<kind>.json`) and sent about 2 s later as one write, offline changes
+  wait. Every write names the version it replaces (`If-Match`, `If-None-Match: *` for a new file); when another device
+  wrote in between, the store reads again, merges and retries (`AppDataFiles.update`). Observers hear the keys that
+  changed (here or from another device).
+- **When**: after every library sync (`SyncedSettingsFiles.syncAll()`): one `PROPFIND` (depth 1) of the folder tells
+  which files changed, so an unchanged set costs one request; a file is read only when its ETag changed.
+- **Kinds**:
+  - `settings.json` — the app settings that follow the user (§22.5.2).
+  - `people.json` — on-device People (§22.3, written by the people feature through the store): `person/<id>` →
+    `{"name": …}` (`id` made by the device that found the person), plus assignments and corrections with their own
+    prefixes as §22.3 defines them (`face/<face key>` → person id, `merged/<id>` → id, `not/<face key>` → ids). The
+    value schemas are §22.3's; the merge rules are the ones above, so a name given on any device is never lost.
+    People's records merge in their own way (both devices' faces of a person are kept): `SyncedRecords` keeps one key
+    per person (`person/<id>` → §22.3's person record) and folds the versions that lost a race back in with the
+    feature's merge; §22.3's `DevicePeopleNames` sits on it (`SyncedDevicePeopleNames`, wired at the merge).
+  - `family.json` — the family library (§16.7.2): `settings` → the folder, members and copy option;
+    `decision/<fileId>` → `"dismissed"`, `"moved"` or `"copied"` (a union of all devices' decisions; "Show dismissed
+    again" and choosing another folder remove them as tombstones).
+  - Earlier files keep their own formats: `smart-albums.json`, `folder-rules.json` (§16.4, `SyncedList`),
+    `edit-presets.json` (§21.6.5), `album-covers.json` (§16.8), `edits/<fileId>.json` (§16.3.1).
+
+#### 22.5.2 Which settings follow the user
+
+Settings › Advanced › Everywhere › **Sync settings through Nextcloud** (on by default; a setting of each device) syncs
+these through `settings.json` (`SyncedDefaults`: the device's settings are compared with what was last synced, changes
+are stamped when noticed, at once while the app runs; on the first sync of a device its existing settings count as
+old, so the account's settings win and only fill in; a setting given as a launch argument is neither sent nor
+replaced). The section "On this device" of Settings › Library is now "Library display":
+
+| Synced (follow the user) | Stay on the device (and why) |
+|---|---|
+| Library display: show memories, memories as stories/strip, name moments, square tiles, stack copies | Grid columns and zoom level, sidebar layout (screen size) |
+| Appearance: viewer background, tinted headers, Live Photo covers | Cache sizes, library thumbnails, smart offline, offline on Wi-Fi (storage of this device) |
+| Slideshow interval and repeat; Through the Years speed | Backup, album mirror, Lock Screen album, desktop pictures, menu bar (this device's library and system) |
+| Memory films: style and music per memory (`films/<memory>`) | App lock and its timeout, guest mode (security of this device) |
+| Birthdays given in Through the Years (`birthdays/<person>`) | Notifications: photo of the day, shared albums, weekly prompt reminders (per device, as in Apple's apps) |
+| Culling: auto-advance, loupe peaking/clipping/histogram | On-device analysis: content labels, similar photos, descriptions (battery, Vision on this device) |
+| Editing: Apply Edits to the File | Advanced features switch (a simpler phone and a full Mac are both reasonable) |
+| Batch rename and card import name patterns; album sort orders | Own music for films (a file on this device), diagnostics, debug and UI-test switches |
+
+Edit presets, smart albums, folder rules and album covers were synced already (own files); the family library and
+dismissed suggestions are now (`family.json`); People names with §22.3 (`people.json`).
+
+#### 22.5.3 Orphaned edit recipes
+
+A recipe stays when its photo is deleted, so a photo restored from the trash bin comes back with its edit (§16.3.1).
+Recipes of photos that are **gone for good** are removed (`EditLibrary.removeOrphans`, rules in `OrphanRecipes`):
+
+- **When**: at the end of a completed **full** walk through the library, never after a targeted walk (§22.4), which
+  does not see the whole library: one call, `OrphanRecipeCleanup.afterFullWalk`, starts the hook `AccountServices`
+  set, in the background, not holding the sync up; at most once a day.
+- **Which**: only recipes the server has and this device has nothing pending for, whose photo is
+  1. not in the library's index nor in an album the app knows (photos of albums shared with the user are not in the
+     user's files, so the SEARCH below cannot see them; their recipes stay), and
+  2. not a file anywhere in the user's files: one SEARCH by file id over the whole tree (`/files/<user>`, at most 89
+     ids each) — a photo **moved** out of the timeline folders, into a shared, group or external folder keeps its file id
+     and its recipe, and
+  3. not in the **trash bin**, also not inside a trashed folder (`PROPFIND Depth: infinity` of the trash bin; folder by
+     folder, at most 300, where a server refuses that), and
+  4. found so at two looks at least **30 days** apart (the first look marks it; a photo restored or found in between
+     loses the mark and starts over).
+- **Proof that the server can see**: every SEARCH also asks for a file the index has (the canary); when the answer
+  lacks it, or any request fails, or the trash bin is too large to read, nothing is removed and the marks stay.
+- **Removing**: `DELETE` with `If-Match` of the version this device knows, so a recipe another device changed in the
+  meantime stays; then the recipe is dropped on the device, the edited tiles show the original (nothing to show).
+- *Decision*: no shorter path through Nextcloud's trash retention setting (not readable by the user): the trash bin
+  check plus the 30 days cover `trashbin_retention_obligation` "auto" (30 days) and longer retention alike.
 
 ## 14. Prerequisites and open items (need Nextcloud GmbH)
 

@@ -35,6 +35,9 @@ public struct LibrarySearch: Hashable, Sendable {
     /// At least this many stars (SPEC §15.2 ratings, §16.2).
     public var minimumRating: Int?
     public var albumIds: [String]
+    /// Taken with one of these cameras / lenses (names as `ExifFacts` writes them into `photoExif`; SPEC §22.3).
+    public var cameras: [String] = []
+    public var lenses: [String] = []
     /// Memberships that come from the server (tags, people): results must be in every set.
     public var memberships: [Set<FileID>]
 
@@ -75,6 +78,8 @@ extension LibrarySearch {
             // Something the photo shows is looked for in all the indexed text (labels, descriptions, tags…).
             case .label(let word): texts.append(word)
             case .rating(let stars): minimumRating = max(minimumRating ?? 0, stars)
+            case .camera(let name): cameras.append(name)
+            case .lens(let name): lenses.append(name)
             case .tag, .person: break
             }
         }

@@ -16,8 +16,23 @@ public struct RootView: View {
     @State private var guest = GuestMode.shared
     /// `PHOTOS_DEBUG_WELCOME=transition`: the welcome plays at launch although no login happened (screenshots).
     @State private var debugWelcome = WelcomeDebug.playsTransition
+    @State private var lock = AppLock.shared
 
     public init() {}
+
+    /// iPhone and iPad after the first login: the backup step of the first run (`AppModel.offersBackup`).
+    var showsFirstRunBackup: Bool {
+        #if os(iOS)
+            app.offersBackup
+        #else
+            false
+        #endif
+    }
+
+    /// "Backup is on" in the welcome when the first run turned it on.
+    var firstRunDoneLine: String? {
+        FirstRunState.shared.backupTurnedOn || app.backup.settings.isEnabled ? FirstLaunchWelcome.backupOnLine : nil
+    }
 
     public var body: some View {
         // Before the first screen is built: the Library's first items, off the main thread (`LibraryLaunchPrefetch`).
@@ -34,38 +49,45 @@ public struct RootView: View {
                         MainView(storedNavigation: $storedNavigation)
                             // Films shared over SharePlay (SPEC §16.6), behind the app lock.
                             .watchTogether()
+                            #if os(iOS)
+                                // An Apple TV asks this iPhone or iPad to set it up (SPEC §22.2), behind the app lock.
+                                .tvSetupSheet()
+                            #endif
                             .environment(session)
                             .id(session.account.id)
                     }
                 }
                 // A normal launch: the app comes up with a quick fade (SPEC §17.6.3).
                 .modifier(LaunchReveal())
-                // After the first login: the short welcome into the Library, over it (SPEC §17.6.3).
+                // The first run's backup step covers the Library, which loads behind it (SPEC §22.2). Modal: VoiceOver stays
+                // on the step. (Not `accessibilityHidden(false)` on the content: that made the whole window one element
+                // without a description in the accessibility audits.)
                 .overlay {
-                    if app.welcomesFirstLogin || debugWelcome {
-                        FirstLaunchWelcome(name: session.account.displayName) {
+                    if showsFirstRunBackup {
+                        FirstRunBackupStep().environment(session)
+                            .accessibilityAddTraits(.isModal)
+                            .transition(.opacity)
+                    }
+                }
+                // The first run's last step: the short welcome into the Library, over it (SPEC §17.6.3, §22.2), after the
+                // backup step.
+                .overlay {
+                    if (app.welcomesFirstLogin || debugWelcome) && !showsFirstRunBackup {
+                        FirstLaunchWelcome(name: session.account.displayName, doneLine: firstRunDoneLine) {
                             debugWelcome = false
+                            FirstRunState.shared.backupTurnedOn = false
                             app.finishWelcome()
                         }
                         .transition(.identity)
                     }
                 }
-                #if os(iOS)
-                    // After the first login: backup is offered before anything else is asked (round-3 item 33), once the
-                    // welcome has played.
-                    .fullScreenCover(
-                        isPresented: Binding(
-                            get: { app.offersBackup && !app.welcomesFirstLogin && !debugWelcome },
-                            set: { if !$0 { app.finishBackupOffer() } })
-                    ) {
-                        BackupOfferSheet().environment(session).environment(app)
-                    }
-                #endif
             } else {
                 DelayedSpinner()
             }
         }
         .tint(Design.accent)
+        // Handoff of an account that is not logged in here (SPEC §22.2); also on the login screen.
+        .handoffPrompts(isLocked: lock.requiresUnlock)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { app.session?.didBecomeActive() }
             if phase == .background {

@@ -124,7 +124,7 @@ struct PersonPickerSheet: View {
                 }
                 Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
             }
-            .task { people = (try? await session.services?.api.people(key: await session.recognizeKey())) ?? [] }
+            .task { people = (try? await session.peopleDirectory?.people()) ?? [] }
         }
         .frame(minWidth: 360, minHeight: 420)
     }
@@ -152,7 +152,7 @@ struct PersonPickerSheet: View {
         Task {
             defer { working = false }
             do {
-                try await session.services?.api.createPerson(name, key: await session.recognizeKey())
+                try await session.peopleDirectory?.create(name)
                 try await pick(name)
                 dismiss()
             } catch {
@@ -186,8 +186,8 @@ struct UnassignedFacesScreen: View {
                     }
                 ]
             },
-            load: { services in
-                faces = try await services.api.personPhotos(nil, key: await session.recognizeKey())
+            load: { _ in
+                faces = try await session.peopleDirectory?.photos(of: nil) ?? []
                 return faces.map(\.item)
             }
         )
@@ -198,7 +198,7 @@ struct UnassignedFacesScreen: View {
             PersonPickerSheet(title: Self.assignTitle) { name in
                 let ids = Set((assigning ?? []).map(\.fileId))
                 let children: [String] = faces.filter { ids.contains($0.item.fileId) }.map(\.childName)
-                try await session.services?.api.moveFaces(children, from: nil, to: name, key: await session.recognizeKey())
+                try await session.peopleDirectory?.move(children, from: nil, to: name)
                 reloads += 1
             }
         }

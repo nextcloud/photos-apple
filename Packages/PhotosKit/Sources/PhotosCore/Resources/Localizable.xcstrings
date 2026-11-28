@@ -7,6 +7,9 @@
     "%@ shared the album with you." : {
       "comment" : "Notification body; the title is the album's title. %@ is the display name of the owner."
     },
+    "%@'s birthday" : {
+      "comment" : "Title of the birthday reminder notification."
+    },
     "%lld items were backed up, %lld are still waiting." : {
       "comment" : "Result of a backup run that ended before everything was uploaded, spoken or shown by the \"Back up now\" shortcut. Both numbers have plural forms.",
       "localizations" : {
@@ -175,6 +178,9 @@
         }
       }
     },
+    "A birthday today" : {
+      "comment" : "Birthday reminder while app lock is on."
+    },
     "A photo from your library is waiting for you." : {
       "comment" : "Body of the daily photo notification while app lock is on: no photo, date or place is shown."
     },
@@ -192,6 +198,9 @@
     },
     "Another file in the folder already has this name." : {
       "comment" : "Batch rename: why a photo was not renamed."
+    },
+    "Apple TV asked to log in to another server than the one chosen. Nothing was opened." : {
+      "comment" : "TV set-up: the TV sent a login page of another server; the phone refused it."
     },
     "Archive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Archive\"): photos were moved to the archive. A verb."
@@ -322,6 +331,12 @@
     "From your favorites · %@" : {
       "comment" : "Daily photo notification when the photo is a favourite: the argument is its month and year, e.g. June 2019."
     },
+    "It's %@'s birthday today. Look back at their birthdays and send a photo?" : {
+      "comment" : "Body of the birthday reminder notification, on the day."
+    },
+    "Log in to Nextcloud Photos on your iPhone first." : {
+      "comment" : "TV set-up: the phone the user picked has no account in the app."
+    },
     "Log in to back up your photos." : {
       "comment" : "Result of the \"Back up now\" shortcut when no account is logged in."
     },
@@ -402,14 +417,29 @@
     "Shared with you without permission to change it." : {
       "comment" : "Batch fixes: why a photo was not changed."
     },
+    "The connection to Apple TV was lost. Try again from Apple TV." : {
+      "comment" : "TV set-up: the local connection between the devices ended."
+    },
     "The desktop pictures change while the account they come from is shown in Nextcloud Photos." : {
       "comment" : "Settings › Desktop Picture: the rotation waits because another account is active."
+    },
+    "The iPhone is already setting up another Apple TV." : {
+      "comment" : "TV set-up: a second Apple TV asked while one is being set up."
     },
     "The photo could not be loaded from your Nextcloud." : {
       "comment" : "Use as Desktop Picture: the photo could not be downloaded."
     },
+    "The set-up was cancelled on Apple TV." : {
+      "comment" : "TV set-up: the TV went back."
+    },
+    "The set-up was cancelled." : {
+      "comment" : "TV set-up: the user cancelled it."
+    },
     "There are no photos to show. Open the album once, so that its photos are on this Mac." : {
       "comment" : "Settings › Desktop Picture: the rotation's album or source has no photos (yet)."
+    },
+    "This person is no longer there." : {
+      "comment" : "People on this device: a person that was merged or removed meanwhile."
     },
     "This server can't change the date or place of this kind of file. Nextcloud 35 or later can." : {
       "comment" : "Batch fixes: why a video or other file was skipped on servers older than Nextcloud 35."
@@ -450,6 +480,9 @@
     },
     "Unarchive" : {
       "comment" : "Name of an action in Edit › Undo / Redo (shown as \"Undo Unarchive\"): photos were taken out of the archive and are shown in the library again. A verb."
+    },
+    "Update Nextcloud Photos on both devices, then try again." : {
+      "comment" : "TV set-up: the TV and the phone run versions of the app that do not understand each other."
     },
     "Uploading %lld of %lld" : {
       "comment" : "Subtitle of the system's backup progress panel: the number of the file being uploaded, of all files."

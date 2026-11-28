@@ -141,8 +141,8 @@ enum CollectionsOverview {
 
         /// The people with the most photos, named ones first. Nil when the server could not be asked.
         static func people(session: SessionModel) async -> [Person]? {
-            guard let services = session.services else { return nil }
-            guard let all = try? await services.api.people(key: await session.recognizeKey()) else { return nil }
+            guard let directory = session.peopleDirectory else { return nil }
+            guard let all = try? await directory.people() else { return nil }
             return CollectionsOverview.shelfPeople(all)
         }
 

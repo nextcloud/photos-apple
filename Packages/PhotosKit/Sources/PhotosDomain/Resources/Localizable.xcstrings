@@ -51,6 +51,9 @@
         }
       }
     },
+    "%@'s birthday" : {
+      "comment" : "Title of a memory: a person's photos around their birthdays."
+    },
     "%@’s birthday" : {
       "comment" : "Title of a moment of the library: a birthday, with the name of the person seen most, e.g. Anna’s birthday."
     },

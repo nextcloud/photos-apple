@@ -377,9 +377,12 @@ final class GridTilePicture {
         init(services: AccountServices) {
             let images = services.images
             self.init(
-                cached: {
-                    images.cache.bestMemoryImage(
-                        fileId: $0.fileId, etag: images.displayedEtag(fileId: $0.fileId, etag: $0.etag), upTo: 4096)
+                cached: { (item: GridMedia) -> CGImage? in
+                    let etag = images.displayedEtag(fileId: item.fileId, etag: item.etag)
+                    // Else the pre-rendered tile (SPEC §22.4.1): a picture in the first frame and while flinging, with no
+                    // file read and no wait for the pipeline; the preview replaces it when it is sharper.
+                    return images.cache.bestMemoryImage(fileId: item.fileId, etag: etag, upTo: 4096)
+                        ?? images.cache.tileImage(fileId: item.fileId, etag: etag, timestamp: item.timestamp.timeIntervalSince1970)
                 },
                 blur: { BlurHashCache.image($0.blurhash) },
                 load: { await images.preview($0) },

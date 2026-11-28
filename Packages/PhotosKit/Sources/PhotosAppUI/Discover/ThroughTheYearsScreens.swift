@@ -153,13 +153,13 @@ struct YearsFrame: Sendable {
 
     func load(session: SessionModel) async {
         guard let services = session.services else { return }
-        guard session.features.has(.recognize) else {
+        guard let directory = session.peopleDirectory else {
             phase = .noRecognize
             return
         }
         let photos: [PersonPhoto]
         do {
-            photos = try await services.api.personPhotos(person, key: await session.recognizeKey())
+            photos = try await directory.photos(of: person)
         } catch {
             phase = .failed(error.localizedDescription)
             return
@@ -543,7 +543,10 @@ struct ThroughTheYearsPlayer: View {
             lastInteraction = Date()
         }
         .task {
-            model.birthday = BirthdayStore.birthday(of: person, account: session.account.id.rawValue)
+            // The one the user set here, else the one in their Nextcloud Contacts (SPEC §22.3).
+            model.birthday =
+                BirthdayStore.birthday(of: person, account: session.account.id.rawValue)
+                ?? BirthdaysRow.dateOfBirth(of: person, session: session)
             await model.load(session: session)
             if model.phase == .ready && Slideshow.startsPlaying(voiceOver: voiceOver) { model.play() }
         }
@@ -840,7 +843,7 @@ struct ThroughTheYearsRow: View {
         VStack(alignment: .leading, spacing: 12) {
             if loaded {
                 Text(YearsText.title).font(Typography.sectionTitle).accessibilityAddTraits(.isHeader)
-                if !session.features.has(.recognize) {
+                if !session.offersPeople {
                     note(
                         String(
                             localized:
@@ -883,9 +886,9 @@ struct ThroughTheYearsRow: View {
         .throughTheYears($playing)
         .task {
             defer { loaded = true }
-            guard session.features.has(.recognize), let services = session.services else { return }
+            guard let directory = session.peopleDirectory else { return }
             let hidden = session.hiddenPeopleFile.map { HiddenPeople.load(from: $0) } ?? HiddenPeople()
-            let all = (try? await services.api.people(key: await session.recognizeKey())) ?? []
+            let all = (try? await directory.people()) ?? []
             // Named people with enough photos to change over time, most photographed first.
             people = Array(all.filter { !$0.isUnnamed && !hidden.names.contains($0.name) && $0.itemCount >= 6 }.prefix(12))
         }

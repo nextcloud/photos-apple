@@ -83,8 +83,8 @@ final class CacheEvictTourTests: XCTestCase {
 
     /// Settings › Storage: "<size>, up to <limit>".
     func testStorageRow() {
-        // Settings is a sheet from the account button (SPEC §19.2).
-        app.openSettings()
+        // Settings is a sheet from the account button (SPEC §19.2); the row is on its Storage page (SPEC §20.4).
+        app.openSettings(page: "storage")
         pause(1)
         // The row reads "Preview cache" with "<size>, up to <limit>" (one element or two, depending on the system).
         let value = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS ', up to '")).firstMatch

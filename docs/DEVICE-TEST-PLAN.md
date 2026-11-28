@@ -215,6 +215,67 @@ them. Each is marked "⬜ device D16.n" in STATUS.md.
 
 **Expected:** each does what its STATUS line says; note any difference in the issue.
 
+## D17 Free up space on this device (P, T, M) — STATUS §22.1
+
+Use a library you can afford to thin out (a test iPhone, or a Mac test user's own Photos library — never the owner's).
+
+1. Back up everything (D1). The account menu says "All backed up · Free up …" (from 100 MB); the Backup screen shows the
+   card. Note the size.
+2. Open it. Compare "Staying on this iPhone" with what you know: favourites, hidden photos, the last 30 days, a photo you
+   edited *after* it was backed up ("Edit not backed up"), an iCloud shared album item (never listed as offered).
+3. Change the options (Recent photos: None; Favorites off) and see the size change. In the review keep two photos.
+4. Free Up: watch "Comparing checksums: n of m", answer the system's question with Delete.
+5. In Apple's Photos app: Recently Deleted has exactly the removed photos; the two kept ones and every favourite are still
+   in the library. On the web: every removed photo is there, full size. Empty Recently Deleted and compare the free
+   storage in Settings › General › Storage with the size the app showed.
+6. With iCloud Photos on: the removed photos are gone from the other devices too (the confirmation said so).
+
+**Expected:** nothing is removed that is not on the server with the same size/checksum; the freed storage matches the
+size within a few per cent; on the Mac the same with "Optimize Mac Storage" off.
+
+## D20 Faster: tiles, targeted sync, notify_push (P, M; round 12, SPEC §22.4)
+
+1. With a large library (10 000+ photos), use the app for a while (scroll the Library), wait a minute, kill it and launch
+   it again: the first screen shows photos at once (no BlurHash squares); fling hard through years of photos and pinch
+   out to Months and Years. Instruments › **Animation Hitches** while flinging.
+2. On another device or in the web interface, delete a photo and move another one to another folder; launch the app (or
+   bring it to the front): both changes show after the first sync. Console.app (subsystem `com.nextcloud.photos`,
+   category `sync`, info messages on) shows "targeted walk: N folders listed".
+3. A server with the **notify_push** app set up (`occ notify_push:self-test` passes): with the app open, delete a photo
+   in the web interface: it disappears within about 5 s without pulling to refresh. Lock and unlock the iPhone, repeat.
+
+**Expected:** 1: pictures in the first frame, flinging without stutter (hitch time under 5 ms/s); the tile cache in the
+app's caches (`Previews/<account>/tiles`) at most an eighth of the preview cache limit. 2: one sync, a few hundred
+milliseconds more than a sync without changes. 3: the change arrives within seconds, also after the lock; without
+notify_push nothing is different from before.
+
+## D18 Continuity: Handoff and Apple TV set-up (P, T, M, V, TV) — STATUS §22.2
+
+Needs signed builds of one team (Handoff and DeviceDiscoveryUI do not work between ad-hoc builds), devices on the same
+Apple Account with Handoff on (System Settings › General › AirPlay & Continuity / Handoff), Bluetooth and Wi-Fi on.
+
+1. **Handoff (P → M, M → P, P → T, T → V):** on one device open a photo in the viewer, then an album, a memory (On this
+   day), a place, a person, the Map and the Library scrolled into an older year; each time pick the app up on the other
+   device (Mac: the Handoff icon at the end of the Dock; iPhone and iPad: the app switcher's banner). Also: lock the app
+   on the first device (app lock) — nothing is offered; open an archived photo — nothing is offered for it.
+2. **Other account:** log in to a second account on device A, keep device B on the first; hand off from A. Then remove
+   the account from B and hand off again.
+3. **Without the app:** uninstall the app from the Mac (or use a Mac without it) and hand off an album from the iPhone.
+4. **Set Up with iPhone (TV + P):** a TV app without an account; Set Up with iPhone; pick the iPhone in Apple's picker;
+   allow on the iPhone; choose the account (with two accounts: the second); Continue; in the browser log in if asked and
+   allow access. Repeat with the iPhone app not running (force-quit) and with the iPhone locked; then once more pressing
+   Cancel on the iPhone, and once closing the browser.
+5. On the web: Settings › Security › Devices & sessions lists the TV as its own session; revoke it — the TV asks to log
+   in again, the iPhone stays logged in.
+
+**Expected:** 1: the same photo, album, memory, place, person, Map, and the Library at the same photo open on the other
+device, with Back to where it came from; nothing while locked or for the archived photo. 2: "Open the link in another
+account?" and, after the account was removed, "Continue in Another Account?" with Open in Browser, which opens the same
+place on the web. 3: the Mac opens the server's web page of the album in the browser. 4: the iPhone's app starts by
+itself, the sheet names the TV, the TV shows "Continue on your iPhone", the page in the browser proposes the user name,
+after "Grant access" the TV shows its Home within a few seconds and the iPhone says "Apple TV is set up". Cancel and a
+closed browser bring the TV back to its start with a message. 5: as described. Note the taps and seconds for step 4.
+
 ## Results table (copy into the issue)
 
 ```
@@ -236,5 +297,8 @@ Build:            Server (version / Photos):         Date / tester:
 | D13 Backup you can see, 2 GB video |   |   | – | – | – | – | % before/after kill, offline, restart: |
 | D15 Erase tool            |   |   |   | – | – | – | s per object / peak MB / quality: |
 | D16 Simulator gaps        |   |   |   | – | – | – | |
+| D17 Free up space         |   |   |   | – | – | – | size shown / freed: |
+| D20 Tiles, targeted sync, notify_push |   | – |   | – | – | – | hitch ms/s, s until a change shows: |
+| D18 Handoff, TV set-up    |   |   |   |   | – |   | taps / s for the TV set-up: |
 ```
 Mark each cell ✓, ✗ (with an issue link) or "not tested".

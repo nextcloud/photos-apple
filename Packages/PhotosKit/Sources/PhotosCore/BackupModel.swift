@@ -197,6 +197,19 @@ public final class BackupModel {
         }
     }
     static let keepScreenOnKey = "backup.keepScreenOn"
+    /// What free up keeps on this device (SPEC §22.1): a preference of this device, kept in the app's defaults.
+    public var freeUpOptions = FreeUpOptions() {
+        didSet {
+            guard freeUpOptions != oldValue else { return }
+            app?.defaults.set(try? JSONEncoder().encode(freeUpOptions), forKey: Self.freeUpOptionsKey)
+            Task { await refreshFreeUpEstimate() }
+        }
+    }
+    static let freeUpOptionsKey = "backup.freeUpOptions"
+    /// What free up would offer, estimated from the ledger after a pass (`BackupModel+FreeUp.swift`); nil until known.
+    public internal(set) var freeUpEstimate: FreeUpEstimate?
+    /// The account menu asked for the free-up screen: the Backup screen opens it (SPEC §22.1).
+    public var freeUpRequested = false
     #if os(iOS)
         /// The idle timer is off because of the backup (and only then is it turned on again here).
         @ObservationIgnored var holdsIdleTimer = false
@@ -230,6 +243,11 @@ public final class BackupModel {
         if let id = settings.accountId, !app.accounts.contains(where: { $0.id == id }) { forgetSettings() }
         updateUploadJobExtension()
         keepScreenOn = app.defaults.bool(forKey: Self.keepScreenOnKey)
+        if let data = app.defaults.data(forKey: Self.freeUpOptionsKey),
+            let options = try? JSONDecoder().decode(FreeUpOptions.self, from: data)
+        {
+            freeUpOptions = options
+        }
         #if os(iOS)
             observeIdleTimer()
         #endif
@@ -425,6 +443,9 @@ public final class BackupModel {
         if self.engine === engine { status = final }
         let outcome = BackupOutcome(status: final)
         logger.info("backup: pass returned \(outcome.logName, privacy: .public)")
+        // What free up can offer now (the account menu's "All backed up · Free up 3.2 GB"), after the pass has returned:
+        // a background task's time goes to the backup.
+        if settings.isEnabled, outcome.isComplete || freeUpEstimate == nil { Task { await refreshFreeUpEstimate() } }
         return outcome
     }
 

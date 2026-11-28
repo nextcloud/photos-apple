@@ -451,7 +451,7 @@ Settings, PhotoKit source, Files-app ledger, reconciliation (✅ SEARCH against 
   background task or when the app becomes active ✅ unit-tested (engine), 🟡 on a device.
 - Background tasks, silent pushes and the "Back up now" intent find the app model after a launch without a window
   (`AppHost`) 🟡 compiled for iOS, not run on a device.
-- 🟡 §7.18.8 "Free up space on this iPhone/iPad" (Backup screen, iOS/iPadOS only): offers only assets whose every file the
+- 🟡 §7.18.8 "Free up space on this iPhone/iPad" (_round 12: extended and also on the Mac, see M13 §22.1_) (Backup screen, iOS/iPadOS only): offers only assets whose every file the
   backup keeps (original, edited version, RAW, Live Photo motion) is uploaded or matched in the ledger with a server path and
   is listed by the server right now (one `PROPFIND` per folder) with exactly the device's size and, when both are known, the
   same file id; nothing converted to JPEG, matched by name only, recorded by the Files app without a path, or with an
@@ -948,8 +948,7 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   Loop/Bounce playback and video/GIF export built, not run (AVFoundation is not exercised by the unit tests).
 - 🟡 Undo history (§16.3.4): history, undo of an older entry, edits replaced later, bounded size unit-tested
   (`UndoHistoryTests`); panel, Edit ▸ Undo History… (⌥⌘Z) and the More menu items built, not run in the app.
-- ⬜ Orphaned recipes of photos deleted for good are not cleaned up (plan: on a full reconcile, remove recipes whose file
-  id is neither in the files nor in the trash bin, after the trash retention).
+- 🟡 Orphaned recipes of photos deleted for good are removed after a full reconcile (round 12, §22.5.3; see M13).
 - ⬜ Aspect-ratio grid tiles keep the original's shape for cropped photos (plan: store the rendition's aspect with the
   recipe and let `GridMedia` use it).
 
@@ -1033,7 +1032,8 @@ Round 6 (2026-11-25): all 30 ideas built in eight packages (subsections below), 
   (`27-shareplay-without-call`). ⬜ device D16.5: not run with real participants: needs two devices in a FaceTime call and the Group
   Activities capability in the provisioning profiles (entitlement `com.apple.developer.group-session` added for the app
   and the TV app).
-- ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`), syncing styles/birthdays between devices (`.nextcloud-photos/`),
+- 🟡 Film styles per memory and the birthdays given in Through the Years follow the user (round 12, §22.5.2).
+- ⬜ Birthdays from Nextcloud Contacts (CardDAV `BDAY`),
   inline clips on Apple TV, a spatial SharePlay template on Vision Pro.
 
 ### §16.7 Sharing and family: postcards, family library, weekly prompts, Lock Screen shuffle album
@@ -1061,8 +1061,8 @@ Shots: `~/aloha-work/photos-tools/ios-fix-shots/r6-family/` (iPhone 17, iOS 27.2
   "N removed photos are still on this device"). Plan, hidden
   people, edits, declined/confirmed deletion and turning off unit-tested with a fake library. ⬜ device D16.6: Photo Shuffle on a real
   Lock Screen needs a device.
-- ⬜ Family settings and dismissed suggestions are per device; syncing them through `.nextcloud-photos/` is left for
-  later (plan: a `family.json` with the folder, members and dismissed file ids, merged as a union).
+- 🟡 Family settings and decisions (dismissed, moved, copied) are shared by the user's devices through
+  `.nextcloud-photos/family.json` (round 12, §22.5.1; see M13).
 - ⬜ The Lock Screen album syncs only while the app runs (after syncs); a background refresh task would keep it current
   while the app is closed.
 
@@ -1938,6 +1938,166 @@ Pro, iPad Pro 13-inch) against 8089; shots and accessibility trees in `~/aloha-w
 - ✅ "Overwrite Original…" (§16.3.1) now goes through the same path: the original is kept as a labelled version, never
   overwritten without versions (proven by the same integration test). Corrects §16.3.1's "previous version stays in the
   file versions": an unlabelled version could expire; a labelled one does not.
+
+## M13 Easier, faster, more useful (SPEC §22) — ⬜
+
+### §22.1 Free up space on this device
+- ✅ Rules (`PhotosBackup/DeviceFreeUp.swift`), unit-tested (`FreeUpTests`, 13 tests, + `BackupDeviceTests`): keep options
+  (recent period none/7 d/30 d/3/6/12 months, favourites, hidden), shared-album and synced items always stay, user-edited
+  photos stay unless their current edit is in the ledger (recorded at or after `adjustmentTimestamp`), every file the
+  backup keeps must be uploaded/matched with a path, the server lists it now with the same size and file id; one reason
+  per photo that stays, with count and size; only folders still needed are listed.
+- ✅ Checksums right before the removal: `oc:checksums` read (SHA-256/SHA-1/MD5, Adler-32 ignored), the device's data
+  hashed through PhotoKit without iCloud downloads (`PhotoKitResourceDigester`), mismatch → stays; checked on 8089 that the
+  server keeps the backup's `OC-Checksum: SHA256:…` (curl PUT + PROPFIND). Digest and parsing unit-tested; the PhotoKit
+  stream itself 🟡 (simulator run below).
+- ✅ Estimate from the ledger (no server, no file reads) after a complete pass, for the account menu ("All backed up ·
+  Free up 129 MB", from 100 MB), the Backup screen's card and row, Clean up's device row (now also on the Mac). Seen on the
+  iPhone simulator: Backup screen card "Free up 129 MB on this iPhone · 4 photos and videos are safely on your Nextcloud"
+  (`ios-fix-shots/r12-space/`).
+- ✅ Seen working on the iPhone simulator (`FreeUpTourTests`, passed in 48 s; shots `ios-fix-shots/r12-space/freeup3-*`):
+  six photos added with `simctl addmedia` (four of 32 MB from two months ago, two small ones of this week; backup limited
+  to the last 90 days by `PHOTOS_DEBUG_BACKUP_SINCE`, so the simulator's own photos were never candidates) are backed up
+  to `/r12-space-freeup` on 8089; the account menu says "All backed up · Free up 129 MB"; it opens the free-up screen
+  (129 MB, 4 photos; "Recent 2 · 90 KB" stays); the review keeps one; "Free Up" → app confirmation → "Comparing
+  checksums: 3 of 3" (the PhotoKit stream's SHA-256 matched the server's for all three) → the system's "Allow “Nextcloud
+  Photos” to delete 3 photos?" → "3 photos and videos (96.8 MB) moved to Recently Deleted", the kept one offered again.
+  Also seen: a stale ledger whose server folder was deleted still gives the ledger estimate on the Backup card, and the
+  real check then offers nothing (the estimate is replaced by the check).
+- ✅ Accessibility: the tour audits the free-up screen and the review with `AccessibilityAuditTests`' policy — only
+  accepted findings (system secondary colour, bar glass, checked at the largest size); review tiles are buttons with
+  date and size, value "Will be removed"/"Stays" and the selected trait; the headline and progress are one element each.
+  `SmokeTests` 7/7 and `AccessibilityAuditTests` 13/13 pass on the branch (fresh install).
+- ✅ Mac: Clean up shows "On this Mac › Free up space on this Mac" with the available storage (shot
+  `ios-fix-shots/r12-space/mac-cleanup.png`).
+- 🟡 iPad (same views, iPad wording) not run separately.
+- 🟡 Mac free-up flow itself: compiled; it reads the Mac's Photos library through PhotoKit like the backup, but it was not
+  run against a library (the only one on the test Mac is the owner's, and the test build has no Photos access by design).
+- ⬜ Not possible with PhotoKit: telling iCloud Shared Library photos apart (no public API); the system's confirmation and
+  the iCloud Photos sentence cover it. Real device: PhotoKit sizes, Recently Deleted and iCloud Photos behaviour —
+  DEVICE-TEST-PLAN item for Frank.
+
+### §22.2 Handoff, Apple TV set-up from the iPhone, three-step first run
+- 🟡 **Handoff** (§22.2.1): viewer photo, album, memory, place, person, tag, folder, destinations and the Library's
+  position advertised per window (`HandoffRegistry`, `userActivity(_:element:)`), continued through `AppModel.open`; web
+  page fallback and "Continue in Another Account?". Unit tests: payload, link parsing, the account rules, web pages, which
+  screen wins (`HandoffTests` 9, `ContinuityLinkTests` 3). Built for iPhone, iPad, Mac and Vision Pro; the Mac build's
+  Info.plist lists the type. *Not seen working:* Handoff needs two devices on one Apple Account and signed builds of one
+  team — DEVICE-TEST-PLAN D18.1–3.
+- ✅ **Set up Apple TV from the iPhone, protocol and Login Flow** (§22.2.2): `TVSetupIntegrationTests` against the test
+  server (8093): the TV's side starts Login Flow v2 for the account the phone sends, the phone gets the page (refuses
+  another server's), "the browser" grants, the TV receives its own app password (works, differs from the phone's; revoked
+  by the test). `TVSetupTests` 8 over a real loopback connection: frames, hello/account/login/done, wrong server refused,
+  Cancel reaches the TV.
+- ✅ **Both apps' screens, end to end in the simulators** (Bonjour instead of Apple's picker, `PHOTOS_DEBUG_TV_SETUP`):
+  `TVSetupTourTests` on the `r12-continuity-tv` simulator — Set Up with iPhone, the iPhone simulator's app found, the
+  http question, "Continue on your iPhone" with the page, then Home with the account; the iPhone simulator's sheet went
+  from the account to the system's browser question to "Apple TV is set up" (a script stood in for the browser's Grant
+  access). Shots `ios-fix-shots/r12-continuity/tv-setup-*.png`, `continuity-tv-setup-01-phone-sheet.png`.
+- 🟡 **Apple's device picker and the system's connection** (DeviceDiscoveryUI, `NSApplicationServices`), the app started
+  by the system for the TV, and the real browser grant: need a TV and an iPhone of one iCloud account — D18.4–5.
+- ✅ **First run in three steps** (§22.2.3): `ContinuityTourTests.testFirstRunInThreeSteps` on a fresh install of the
+  iPhone simulator: the backup step with "1 · 2 · 3", Turn on backup → the system's photo question → the welcome with
+  "Backup is on…" → the Library, backing up (6 sample photos into `/r12-continuity-backup`, removed). **2 taps** after the
+  login (were 4: Turn on backup, Allow, Start backup, Allow notifications). Shots `continuity-first-run-*.png`.
+  `FirstRunTests` (afterAccess, step count).
+- ✅ **Contextual tips** (§22.2.4): `testTipsInTheLibrary` (all tips shown): the backup tip at the top of the Library above
+  the memories, closing it shows the notifications tip (`continuity-tips-*.png`); on the Mac the tip is in the window's
+  accessibility tree above the memories band (AX query; the window was behind others, its screenshot stale). `TipPlan`
+  tests: no tip on the first launch, platform sets, order. 🟡 the once-a-day rhythm and launch counts are TipKit's and
+  were not watched over days.
+- ✅ Regression: `SmokeTests` 7 of 7 and `AccessibilityAuditTests` 13 of 13 on the `r12-continuity` iPhone 17 Pro
+  simulator. (The first version hid the Library under the backup step with `accessibilityHidden(false)` the rest of the
+  time, which made the whole window one undescribed element in every audit; the step is now a modal overlay instead.)
+- ⬜ Handoff of a photo opens it alone in the viewer (no neighbours to swipe to): the receiving device does not know the
+  list it was opened from. Plan: carry the album or the Library position with the photo and open the viewer over it.
+
+### §22.3 Camera in search, People without Recognize, birthdays from Contacts
+- ✅ **Camera chip**: `Camera`/`Lens` chips typed ("x100v", "Anna in Lisbon 2024 shot on x100v"), suggested, changed in
+  the chip menu, in recent searches; answered by `photoExif` (unit tests `CameraSearchTests`, `CameraSearchStoreTests`).
+  ✅ Camera data read once: rules read `photoExif`, `cameraDetails` dropped (`OrganizeStoreTests`); seen on the Mac
+  against 8089: after the first sync all 451 photos had their row (Canon PowerShot SX120 IS 21, Sony ILCE-7RM3 16, …,
+  the three X100V test photos). ✅ In the iOS 27.2 simulator (`PeopleTourTests.testCameraChip`): "x100v" is suggested
+  as Camera "Fujifilm X100V", the chip finds the 3 photos (shots `ios-fix-shots/r12-people/sim/p1–p2`). 🟡 Mac and iPad
+  not run; lens chips not seen (the test library has no `LensModel`).
+- ✅ **People without Recognize** (Mac, 8089, which has no Recognize; shots `ios-fix-shots/r12-people/mac-01…03`): 443
+  photos looked at in 26 s with the app's own background run (≈ 59 ms a photo including fetching the 1024 previews of
+  photos with faces; analysis alone 29 ms a photo in `DevicePeopleVisionTests`), 86 usable faces, People shows 8 people
+  with faces in ≥ 2 photos ("Add name", covers, the on-device note). **Quality on the test library** (pairs of photos
+  put together): with the app's previews 6 right (Obama, Signorelli ×1, van Dyck ×2, Red River ×2) and 2 wrong (two
+  Guadeloupe carnival women, 0.76; a child of the Russian imperial family with one of de Vos's painted children, 0.74);
+  with full-size-derived 1024 px pictures (`DevicePeopleVisionTests`, `PHOTOS_FACES_FOLDER`) 6 right, 1 wrong, 1 missed
+  (a baby's face below the quality bar). The test library has few people in more than one photo (mostly one photo per
+  person), so this measures separation far better than recall; centered cosine of the same person in different photos
+  0.78–0.95, different people ≤ 0.76 and mostly < 0.65. A name given on another device (written into the shared
+  document) reached the person at the next sync and went into search/memories (`person`/`personItem`). Grouping,
+  constraints, merges, the shared document and two devices exchanging names, rejections, merges and removals
+  unit-tested (`FaceClusteringTests`, `DevicePeopleDocumentTests`, `DevicePeopleTests`). 🟡 Rename/Merge/Not this
+  person/Move through the Mac's menus not clicked (no real input; the same calls are unit-tested); iPhone/iPad: Vision
+  does not run in the simulator (People shows its note: tour `testPeopleWithoutRecognize` and the new audit
+  `AccessibilityAuditTests.testPeople` pass; `SmokeTests` and `AccessibilityAuditTests` pass on iPhone, 28 tests). 🟡 Sharing through
+  `.nextcloud-photos/people.json` (`SyncedDevicePeopleNames` on §22.5's store, one record per person): two devices
+  exchanging names and a race on one person's faces, and the one-time take-over of `device-people.json`, unit-tested
+  (`SyncedDevicePeopleNamesTests`); not yet seen across two real devices. ⬜ Recall on a library with many photos per person (a real
+  family library) not measured; ⬜ device D22.3: time per photo and battery on an iPhone.
+- ✅ **Birthdays from Contacts**: CardDAV reading against 8089 (`ContactBirthdaysIntegrationTests`: own contact
+  `r12-people-…` added, read, removed; 8089 has no Contacts app — the core address book is enough); vCard forms, matching,
+  memories, store unit-tested (`VCardBirthdayTests`, `BirthdaysTests`, `ContactBirthdayStoreTests`). Seen on the Mac:
+  a test contact "Barack Obama" (birthday 27 Nov) and three copies of his portrait dated 27 Nov 2023, 26 Nov 2024 and
+  28 Nov 2025 in `/Photos/r12-people-test` → Memories shows "Barack Obama turns 65 today", which opens "Barack Obama's
+  birthday" with the three photos (shot `mac-03-birthday-memory.png`); test data and contact removed afterwards.
+  🟡 the 9:00 reminder notification not seen (the Mac test build has no notification permission); Through the years
+  with the Contacts date of birth not opened.
+
+### §22.4 Tile cache, targeted sync and notify_push, smaller preview cache
+- ✅ **Pre-rendered tiles** (§22.4.1): 128 px tiles, one memory-mapped file per month, built in the background from the
+  cached previews; the grid takes them synchronously. Mac against 8089 (alternating `PHOTOS_DEBUG_NO_TILES=1`, n=8 each):
+  the first screen (24 pictures) median 1552 ms after the process start instead of 1958 ms, 50 ms after the first
+  picture instead of 463 ms (PERFORMANCE.md, round 12). Per tile 0.18 ms instead of 0.61 ms for the disk cache's file
+  (100 000 photos, `TileCacheTests.measureLookups`). Seen in the running Mac app: `tiles/2026-11.tiles` and five other
+  months written 20 s after the first sync. `TileCacheTests` (format, months, shapes, builder, budget, trim).
+  iPhone 17 Pro Max simulator (n=6/5): first picture median 2671 ms instead of 4067 ms, first screen 2712 instead of
+  4069 ms; `TileCacheTourTests` passed (shots `ios-fix-shots/r12-speed/tiles-*.png`).
+- ⬜ Tiles of the rows the grid prefetches decoded off the main thread, if devices show hitches while flinging (D20);
+  the first picture of a launch still comes about 0.7 s after the grid has its items (the window's first layout, not
+  the pictures; round 10's open question).
+- ✅ **Targeted sync** (§22.4.2): the walk a change owes lists only folders whose ETag changed; resumable, a folder that
+  cannot be listed is listed again, mass-delete guard as before; full walks for "Sync now", pull to refresh without a
+  change, confirmations and once a day. 20 160 photos on 8093: a launch after one delete 1.29 s (4 folders listed)
+  instead of 6.3–6.4 s for a full walk. `TargetedSyncTests` (9, among them 40 random rounds that must end equal to the
+  server), `TargetedSyncIntegrationTests` against 8089 (delete, move, renamed folder, new folder: targeted, no full
+  walk), round-11 sync tests green (assertions that a walk happened now accept a targeted one). In the running Mac app:
+  the folder tree (40 folders) stored after the first full walk.
+- ✅ **SEARCH limit** (§22.4.5): Nextcloud answers 100 results without a limit; favourites (more than 100 lost their
+  flag), the delta and the boundary completion of index pages ask for more now. `SearchLimitTests` fail without the fix.
+- 🟡 **notify_push** (§22.4.3): client, reconnection and the session's debounced sync; `NotifyPushTests` against a local
+  WebSocket server speaking the protocol (login, `listen notify_file_id`, events, refused login, reconnection). Not
+  seen against a real notify_push (it needs its Rust daemon and Redis; none of the test servers has it): D20.
+- iPhone 17 Pro Max simulator on this branch: `SmokeTests` 7 of 7, `AccessibilityAuditTests` 13 of 13,
+  `TileCacheTourTests` 1 of 1 (8089).
+- ✅ **HEIC for lossless 1024/4096 px previews** (§22.4.4): converted in the background after storing, name, date and
+  transparency kept; 24 server previews of PNG screenshots 35.3 MB → 3.2 MB (9 %), decode at 1024 px +3–8 ms for 1024 px
+  files. `PreviewCompactionTests`.
+
+### §22.5 Settings synced between devices, orphaned edit recipes
+- 🟡 **Synced settings files** (§22.5.1): `SyncedSettingsDocument`/`SyncedSettingsStore`, one JSON file per kind in
+  `/.nextcloud-photos/`, last writer wins per key, tombstones, values lost in a race kept in `replaced` ("never lose a
+  name"), ETag-safe writes with merge on 412, one PROPFIND of the folder per sync. Merge rules, two devices through an
+  in-memory WebDAV server, offline persistence and the one-request sync unit-tested (`SyncedSettingsDocumentTests`,
+  `SyncedSettingsStoreTests`). `people.json` is the store the people feature (§22.3) writes into.
+- ✅ **App settings follow the user** (§22.5.2): `SyncedDefaults` with the catalogue of 22 settings (library display,
+  appearance, slideshow, film choices per memory, Through the Years birthdays per account, culling, Apply Edits to the
+  File, naming patterns, album sort orders), first sync lets the account win, per-entry merge of film choices and
+  birthdays, removals, launch arguments kept local, the switch Settings › Advanced › Sync settings through Nextcloud:
+  unit-tested (`SyncedDefaultsTests`, `SyncedSettingsCatalogTests` keeps the catalogue on the screens' keys). ✅ Run in
+  the iOS 27.2 simulator against 8089 (`UITests/SyncedSettingsTourTests`): "Strip" written into `settings.json` by
+  "another device" was shown in Settings › Library display, Square tiles turned off in the app reached the file within
+  seconds, both put back from the app (`ios-fix-shots/r12-tidy/01…03`, `settings-json-after-tour.json`).
+- 🟡 **Family library** (§16.7.2) options and decisions through `family.json` (`FamilySettingsSyncTests`).
+- 🟡 **Orphaned edit recipes** (§22.5.3): rules (index, SEARCH over the whole tree, trash bin also inside trashed folders,
+  two looks 30 days apart, canary, If-Match) unit-tested (`OrphanRecipesTests`, `OrphanRecipesStoreTests` incl. the
+  hook after a full reconcile, photos of albums shared with the user kept); the server probe ✅ against 8089 (`OrphanProbeIntegrationTests`: a moved file found, a
+  trashed file and a file in a trashed folder found in the trash bin, a missing canary refused).
 
 ## Prerequisites from SPEC §14 still open
 App Group / keychain group provisioning and the Push Notifications capability (table in the README), Apple's notification

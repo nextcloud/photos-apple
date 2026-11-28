@@ -87,7 +87,10 @@ public struct PhotosAPI: Sendable {
             condition: .and([
                 Self.mimeCondition(mimeTypes), .gte(order.property, order.literal(boundary)),
                 .lt(order.property, order.literal(boundary + 1)),
-            ])
+            ]),
+            // Without a limit Nextcloud answers 100: the rest of a second shared by more (a folder unpacked or copied at
+            // once) was skipped, and a walk took those files for deleted.
+            limit: Self.boundaryLimit
         )
         let known = Set(items.map(\.fileId))
         items += try await dav.search(rest, timeout: 300).compactMap { MediaParser.mediaItem(from: $0, connection: connection) }
@@ -95,10 +98,15 @@ public struct PhotosAPI: Sendable {
         return (items, boundary)
     }
 
+    /// The most files that can share the boundary second of an index page.
+    static let boundaryLimit = 50_000
+
     /// Items modified or uploaded after a date (incremental sync).
-    public func changedItems(since date: Date, sourceFolders: [String], mimeTypes: [String], properties: [QName]) async throws
-        -> [MediaItem]
-    {
+    /// `limit`: Nextcloud answers a SEARCH without one with 100 results (FileSearchBackend), so a caller that wants all
+    /// changes passes one and treats a full answer as possibly incomplete.
+    public func changedItems(
+        since date: Date, sourceFolders: [String], mimeTypes: [String], properties: [QName], limit: Int? = nil
+    ) async throws -> [MediaItem] {
         let seconds = date.timeIntervalSince1970
         let search = DAVSearch(
             select: properties,
@@ -107,7 +115,8 @@ public struct PhotosAPI: Sendable {
                 Self.mimeCondition(mimeTypes),
                 .or([.gt(DAVProp.lastModified, Self.isoDate(seconds)), .gt(DAVProp.uploadTime, Self.number(seconds))]),
             ]),
-            orderBy: [DAVSearch.Order(DAVProp.lastModified)]
+            orderBy: [DAVSearch.Order(DAVProp.lastModified)],
+            limit: limit
         )
         return try await dav.search(search, timeout: 300).compactMap { MediaParser.mediaItem(from: $0, connection: connection) }
     }

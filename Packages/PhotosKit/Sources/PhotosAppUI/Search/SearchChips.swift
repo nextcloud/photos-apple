@@ -147,6 +147,10 @@ struct SearchChipBar: View {
                 editedText = text
                 editing = EditedChip(filter: filter)
             }
+        case .camera(let name):
+            alternatives(vocabulary.cameras.filter { $0 != name }, make: { .camera($0) }, replacing: filter)
+        case .lens(let name):
+            alternatives(vocabulary.lenses.filter { $0 != name }, make: { .lens($0) }, replacing: filter)
         case .favorites:
             EmptyView()
         }
@@ -240,10 +244,23 @@ enum SearchChipWording {
     }
 
     static func other(_ filter: SearchFilter) -> String {
-        if case .person = filter {
-            return PaletteWording.platform("Other Person", "Other person")
+        switch filter {
+        case .person: PaletteWording.platform("Other Person", "Other person")
+        case .camera:
+            PlatformWording.title(
+                mac: LocalizedStringResource(
+                    "Other Camera", bundle: .module,
+                    comment: "Search chip menu (Mac): replaces the camera of a camera chip with another one."),
+                other: LocalizedStringResource(
+                    "Other camera", bundle: .module, comment: "Search chip menu: replaces the camera of a camera chip with another one."))
+        case .lens:
+            PlatformWording.title(
+                mac: LocalizedStringResource(
+                    "Other Lens", bundle: .module, comment: "Search chip menu (Mac): replaces the lens of a lens chip with another one."),
+                other: LocalizedStringResource(
+                    "Other lens", bundle: .module, comment: "Search chip menu: replaces the lens of a lens chip with another one."))
+        default: PaletteWording.platform("Other Place", "Other place")
         }
-        return PaletteWording.platform("Other Place", "Other place")
     }
 
     /// What kind of filter a chip is, for VoiceOver ("Person, Anna").
@@ -260,6 +277,9 @@ enum SearchChipWording {
         case .favorites, .videos, .photos:
             String(localized: "Filter", bundle: .module, comment: "Kind of a search filter chip for VoiceOver.")
         case .rating: String(localized: "Rating", bundle: .module, comment: "Kind of a search filter: the least star rating.")
+        case .camera:
+            String(localized: "Camera", bundle: .module, comment: "Kind of a search filter: the camera photos were taken with.")
+        case .lens: String(localized: "Lens", bundle: .module, comment: "Kind of a search filter: the lens photos were taken with.")
         }
     }
 }

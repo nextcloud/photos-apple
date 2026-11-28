@@ -18,8 +18,9 @@ import Testing
         #expect(Set(categories) == Set(Cleanup.Category.allCases), "every category of Free up space has a section")
     }
 
-    @Test func theDeviceSectionIsOnlyOnIPhoneAndIPad() {
-        #if os(iOS)
+    /// Round 12 (SPEC §22.1): free up exists on the Mac too, where the backup reads the Photos library.
+    @Test func theDeviceSectionIsOnIPhoneIPadAndTheMac() {
+        #if os(iOS) || os(macOS)
             #expect(CleanUpSection.available.contains(.device))
         #else
             #expect(!CleanUpSection.available.contains(.device))

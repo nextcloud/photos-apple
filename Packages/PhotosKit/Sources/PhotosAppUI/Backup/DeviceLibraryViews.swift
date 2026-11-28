@@ -466,15 +466,28 @@ struct BackupSummaryMenuSection: View {
     #endif
 
     var body: some View {
-        let summary = session.backup.summary
-        if let text = DeviceBackupWording.summary(summary), session.backup.account?.id == session.account.id {
+        let backup = session.backup
+        let summary = backup.summary
+        if let text = DeviceBackupWording.summary(summary), backup.account?.id == session.account.id {
             Section {
-                Button {
-                    BackupSummaryNavigation.openBackup(app: app, openSettings: settingsOpener)
-                } label: {
-                    Label(text, systemImage: DeviceBackupWording.symbol(summary))
+                // Everything is on the server and enough can be freed: "All backed up · Free up 3.2 GB" opens free up
+                // (SPEC §22.1).
+                if case .allBackedUp = summary, let estimate = backup.freeUpEstimate, estimate.isWorthOffering, backup.canFreeUp {
+                    Button {
+                        backup.freeUpRequested = true
+                        BackupSummaryNavigation.openBackup(app: app, openSettings: settingsOpener)
+                    } label: {
+                        Label(FreeUpWording.summary(bytes: estimate.bytes), systemImage: DeviceBackupWording.symbol(summary))
+                    }
+                    .accessibilityIdentifier("backup-summary")
+                } else {
+                    Button {
+                        BackupSummaryNavigation.openBackup(app: app, openSettings: settingsOpener)
+                    } label: {
+                        Label(text, systemImage: DeviceBackupWording.symbol(summary))
+                    }
+                    .accessibilityIdentifier("backup-summary")
                 }
-                .accessibilityIdentifier("backup-summary")
             }
         }
     }

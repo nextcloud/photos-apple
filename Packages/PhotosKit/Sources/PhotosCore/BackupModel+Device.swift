@@ -99,36 +99,6 @@ extension BackupModel {
         return await Task.detached(priority: .userInitiated) { BackupDeviceState.notBackedUp(settings: settings, ledger: ledger) }.value
     }
 
-    // MARK: Free up space (SPEC §7.18.8)
-
-    /// Photos and videos that may be removed from this device: each of their files is on the server with the same size,
-    /// checked now. `progress` gets the server folders checked and their total.
-    public func freeUpCandidates(includeRecent: Bool, progress: @escaping @Sendable (Int, Int) -> Void) async throws
-        -> [FreeUpCandidate]
-    {
-        guard authorization == .authorized, let engine = prepareEngine(), let services = backupServices() else { return [] }
-        let ledger = try await engine.ledgerByAsset()
-        let settings = settings
-        let listing = DAVServerFileListing(api: services.api)
-        return try await Task.detached(priority: .userInitiated) {
-            try await DeviceCleanup.candidates(
-                ledger: ledger, settings: settings, listing: listing, includeRecent: includeRecent, progress: progress)
-        }.value
-    }
-
-    /// Checks the candidates against the server once more and removes those that are still on it from the device. The
-    /// system asks the user to confirm. Returns how many were removed.
-    public func removeFromDevice(_ candidates: [FreeUpCandidate]) async throws -> Int {
-        guard let engine = prepareEngine(), let services = backupServices() else { return 0 }
-        let ledger = try await engine.ledgerByAsset()
-        let settings = settings
-        let listing = DAVServerFileListing(api: services.api)
-        let verified = try await Task.detached(priority: .userInitiated) {
-            try await DeviceCleanup.recheck(candidates, ledger: ledger, settings: settings, listing: listing)
-        }.value
-        return try await DeviceCleanup.remove(verified)
-    }
-
     // MARK: User-started backup (round-3 item 35)
 
     /// A backup the user started ("Back up", "Back up now"). On iPhone and iPad a first or large one runs as a continued

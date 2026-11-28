@@ -106,6 +106,8 @@
             SimilarIndexing.register { AppHost.model }
             // Descriptions of photos for VoiceOver and search, while charging and idle (SPEC §16.2).
             PhotoDescriptions.register { AppHost.model }
+            // People on this device where the server has no Recognize, while charging and idle (SPEC §22.3).
+            DevicePeopleIndexing.register { AppHost.model }
             // Smart offline fills up while charging on Wi-Fi (SPEC §15.8.1).
             SmartOfflineScheduling.register { AppHost.model }
             // A backup pass that is running when the app leaves the screen gets the time to hand its next files to the system.
@@ -115,6 +117,10 @@
                 }
             }
             PushNotifications.install(delegate: NotificationRouter.shared) { UIApplication.shared.registerForRemoteNotifications() }
+            // Apple TV can be set up from here (SPEC §22.2): the system starts the app for the TV's request, and the listener
+            // has to be there at once.
+            TVSetupListener.shared.hasAccount = { !AppHost.model.needsLogin }
+            TVSetupListener.shared.start()
             return true
         }
 

@@ -6,14 +6,13 @@ import PhotosDomain
 import PhotosModel
 
 extension SessionModel {
-    /// After a sync: the shared lists, then the folder rules, then a share of the camera details when a rule needs them.
+    /// After a sync: the shared lists, then the folder rules. Camera details are read after every sync for the search
+    /// (`afterSyncPeople`), for rules too.
     func afterSyncOrganize() async {
         guard let organize, !isStopped else { return }
         organize.invalidateRuleInputs()
         await organize.sync()
         await organize.runRules()
-        // About 4 500 photos per sync, in the background, only while some rule asks about cameras.
-        if organize.rulesNeedCameraDetails { organize.readCameraDetails(batches: 50) }
     }
 
     /// Saves a search as a smart album shared by all the user's devices (`.nextcloud-photos/smart-albums.json`). Used
